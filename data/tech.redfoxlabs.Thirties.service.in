@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=tech.redfoxlabs.Thirties
+Exec=@bindir@/thirties --gapplication-service

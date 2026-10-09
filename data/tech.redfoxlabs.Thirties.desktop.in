@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Thirties
+Exec=thirties
+Icon=tech.redfoxlabs.Thirties
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=GTK;
+StartupNotify=true
+DBusActivatable=true

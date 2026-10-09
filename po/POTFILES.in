@@ -1,0 +1,8 @@
+# List of source files containing translatable strings.
+# Please keep this file sorted alphabetically.
+data/tech.redfoxlabs.Thirties.desktop.in
+data/tech.redfoxlabs.Thirties.metainfo.xml.in
+data/tech.redfoxlabs.Thirties.gschema.xml
+src/main.py
+src/window.py
+src/window.ui
