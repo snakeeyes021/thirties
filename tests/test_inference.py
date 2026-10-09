@@ -55,5 +55,78 @@ class TestInference(unittest.TestCase):
                 self.assertEqual(res["tool_calls"][0]["arguments"]["block_index"], 38)
                 self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Dorico Compose")
 
+    def test_multi_block_directive_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+ALLOCATE_BLOCKS: 28-31 | Composing Session
+Allocated 2 hours of composing.
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Let's go block 28, I'll probably want to go for at least two hours"}])
+                self.assertEqual(res["content"], "Allocated 2 hours of composing.")
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 28)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["end_block"], 31)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Composing Session")
+
+    def test_clear_work_blocks_directive_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+CLEAR_WORK_BLOCKS
+I have deallocated all your work blocks for today.
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "I don't actually have work today. Can you deallocate all my work blocks from work?"}])
+                self.assertEqual(res["content"], "I have deallocated all your work blocks for today.")
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "clear_blocks")
+                self.assertTrue(res["tool_calls"][0]["arguments"]["clear_all_work"])
+
+    def test_duration_user_intent_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                # Model returns generic conversational reply without directives
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+Sounds like a solid plan!
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Let's go block 28, I'll probably want to go for at least two hours"}])
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 28)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["end_block"], 31)
+
+    def test_day_off_user_intent_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+Enjoy your day off!
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "I don't actually have work today. Can you deallocate all my work blocks from work?"}])
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "clear_blocks")
+                self.assertTrue(res["tool_calls"][0]["arguments"]["clear_all_work"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -616,13 +616,25 @@ BEHAVIOR RULES:
 ---
 
 
-### 6.3 Temporal Awareness & Suggestion Protocol
+### 6.3 Temporal Awareness, Duration Arithmetic & Schedule Mutators
 
-To prevent hallucinated past allocations and over-eager scheduling, the conversational prompt enforces strict temporal boundaries:
-* **Current Clock Time & Active Block**: The prompt explicitly identifies the current local time and the active block.
+To prevent hallucinated past allocations, incorrect duration math, and over-eager scheduling, the conversational prompt and parser enforce strict boundaries:
+* **Current Clock Time & Active Block**: The prompt explicitly identifies current local time and the active block.
+* **Thirty Arithmetic & Multi-Block Allocation**:
+  * 1 block = 30 minutes, 2 blocks = 1 hour, 4 blocks = 2 hours ($N$ hours $= 	ext{round}(N 	imes 2)$ blocks).
+  * When a duration or span is requested (e.g. "Block 28 for at least two hours"):
+    * Start block: 28, Span: 4 blocks $ightarrow$ Blocks 28 through 31 (e.g. 08:30 PM to 10:30 PM).
+    * Model outputs multi-block directive: `ALLOCATE_BLOCKS: 28-31 | Composing`.
+    * Engine assigns all 4 blocks simultaneously and updates the daily plan and state store.
+* **Schedule Deallocation & Days Off**:
+  * When the user takes a day off ("I don't have work today", "clear my work blocks"):
+    * Model outputs `CLEAR_WORK_BLOCKS` (or engine detects user intent).
+    * All 15 work blocks are unlocked and converted to open discretionary daylight/dark blocks, immediately increasing available discretionary tallies.
+  * When clearing specific blocks ("clear blocks 4-18", "unassign block 28"):
+    * Model outputs `CLEAR_BLOCKS: <start>-<end>`.
 * **Separation of Suggestions vs. Allocations**:
-  * *Suggestion Requests* ("Where would you suggest I compose?", "What should I do next?"): The assistant proposes 1–2 upcoming blocks with concise reasoning based on daylight/energy affinity and asks for user confirmation. It **must not** emit `ALLOCATE_BLOCK`.
-  * *Direct Commands & Confirmations* ("Allocate block 20 to Dorico", "Yes, let's do that"): The assistant emits `ALLOCATE_BLOCK: <block_number> | <label>`.
+  * *Suggestion Requests* ("Where would you suggest I compose?", "What should I do next?"): Proposes 1–2 upcoming open blocks with concise reasoning based on energy affinity and asks for confirmation. **Must not** emit `ALLOCATE_BLOCK`.
+  * *Direct Commands & Confirmations* ("Allocate block 20 to Dorico", "Yes, let's do that"): Emits `ALLOCATE_BLOCK(S): ...`.
 * **Forward Planning vs. Retrospective Logging**: Forward suggestions are strictly limited to upcoming open blocks. The assistant only references or schedules past blocks when the user explicitly requests retroactive logging of completed work ("Earlier this morning at 8:00 AM I finished X").
 
 ### 6.4 Vault-Backed Cross-Device State Sync ("Hidden Joplin Sync Note")
@@ -642,6 +654,50 @@ Thirties implements a zero-infrastructure cross-device sync mechanism by leverag
    * **On Startup / Refresh**: Thirties inspects the sync note via the Joplin Local Data API or read-only SQLite database. If the remote revision timestamp is newer than the local `state.sqlite`, deltas are merged into the local SQLite database.
    * **On Day Finalization / Plan Mutation**: When the user finalizes a day plan or allocates blocks, Thirties generates a delta update and writes it to the sync note via Joplin's Local Data API (`PUT /notes/{sync_note_id}`).
    * **Joplin Native Transport**: Joplin's background sync automatically propagates the note to all other laptops and workstations without Thirties needing any external server.
+
+
+### 6.5 Multi-Session Chat Threads, Context Economy & Hierarchical Memory
+
+#### Thread Management & Context Economy
+Small on-device SLMs (such as Gemma-4 E4B with ~32k context) incur quadratic KV cache latency and memory penalties as conversations grow long. To keep inference snappy:
+1. **Multiple Daily Threads**: The UI provides a chat session list allowing multiple planning conversations per day.
+2. **Scope Filter**: Users can toggle between "Today's Chats" and "All Chats".
+3. **Fresh Thread Steering**: When a planning topic concludes, users are steered toward a clean thread rather than carrying monolithic context.
+
+#### Hierarchical Memory Architecture (Agent Memory vs. User Profile)
+To support cross-conversation recall ("Remember a few days ago we talked about squeezing in exercise? Can we prioritize that today?"), Thirties implements a two-tier memory architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             Active Planning Turn                            │
+│           (Slim System Prompt + Astronomical State + Top 10 Tasks)           │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                ┌──────────────────────┴──────────────────────┐
+                ▼                                             ▼
+┌──────────────────────────────┐              ┌──────────────────────────────┐
+│        Agent Memory          │              │     User Profile Memory      │
+│  (Episodic Chat Summaries)   │              │   (Multi-Horizon Profile)    │
+├──────────────────────────────┤              ├──────────────────────────────┤
+│ • "Oct 06: User allocated    │              │ Tier 1: Daily Habits         │
+│   Block 20 to exercise"      │              │   • Morning routine Block 1  │
+│ • "Oct 08: User took day     │              │ Tier 2: Short-Term Focus     │
+│   off from work blocks"      │              │   • "Prioritize health/doc"  │
+│ • "Oct 08: Dorico composing  │              │ Tier 3: Long-Term Vision     │
+│   took 4 blocks (2 hours)"   │              │   • "[Oct 08, 2025] Release  │
+│                              │              │     creative infrastructure" │
+└──────────────────────────────┘              └──────────────────────────────┘
+```
+
+1. **Agent Memory (Episodic Summarizer)**:
+   * When a thread concludes, a background SLM pass generates a 1–2 sentence factual summary of decisions made and task completions.
+   * Stored in `state.sqlite` with topic tags for vector or keyword retrieval.
+2. **User Profile Memory (Hierarchical Horizons)**:
+   * **Daily / Immediate**: Operating habits, wake/sleep targets, recurring rhythms.
+   * **Short-Term Horizon (Monthly / Seasonal)**: Current areas of focus (e.g., medical checkups, sprint on album demo).
+   * **Long-Term Vision (Multi-Year)**: Big aspirations with origin date stamps (e.g., "[First noted Oct 8, 2025]: Establish creative release infrastructure and publishing website").
+3. **Cross-Thread Recall Protocol**:
+   * When a user prompt references past conversations or long-term goals, the system retrieves relevant profile memory facts into prompt context rather than loading hundreds of previous chat turns.
 
 ## 7. GNOME HIG Desktop Application (`thirties_gtk`)
 
@@ -683,6 +739,23 @@ The app prioritizes big time, broad brushstrokes, and low cognitive noise:
 
 
 
+
+---
+
+
+### 7.3 Nocturnal Lunar Arc & Nighttime Continuity
+
+When viewing the schedule during nighttime (after sunset or before sunrise), the Solar Arc transforms into the **Nocturnal Lunar Arc**:
+* **Cairo Styling**:
+  * Daylight parabolic arc: Golden amber `rgba(0.95, 0.72, 0.20, 0.80)`.
+  * Nocturnal parabolic arc: Cool twilight blue / indigo `rgba(0.40, 0.62, 0.95, 0.85)`.
+* **Luminous Moon Disc**:
+  * Moon marker rendered at the current position along the nocturnal trajectory with a cool cyan/indigo halo (`rgba(0.40, 0.65, 1.0, 0.35)`) and silver core disc (`rgba(0.90, 0.95, 1.0, 0.95)`).
+* **Astronomical Lunar Phase**:
+  * The center label displays the real-time calculated synodic lunar phase glyph and name (e.g. `🌑 New Moon`, `🌓 First Quarter`, `🌕 Full Moon`, `🌘 Waning Crescent`).
+* **Temporal Continuity Across Midnight**:
+  * The nocturnal thirties (Blocks 24 to 48) logically belong to the preceding day's waking cycle.
+  * Past midnight but before sunrise, the active day remains anchored to the logical day, presenting clear nocturnal context (e.g. "Tonight — Friday, Oct 09 into Saturday, Oct 10") preserving 48-block continuity until sunrise.
 
 ---
 

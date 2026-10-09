@@ -242,38 +242,109 @@ class LiteRTInferenceEngine:
         # Parse potential intent/tool calls from user prompt or model text
         tool_calls: List[Dict[str, Any]] = []
 
-        # Structured directive from model output: ALLOCATE_BLOCK: <idx> | <label>
-        alloc_dir = re.search(r"ALLOCATE_BLOCK:\s*(\d{1,2})\s*\|\s*(.+)", raw_reply, re.IGNORECASE)
-        if alloc_dir:
-            b_idx = int(alloc_dir.group(1))
-            lbl = alloc_dir.group(2).strip()
+        # 1. Directive: CLEAR_WORK_BLOCKS / DEALLOCATE_WORK_BLOCKS
+        if re.search(r"\b(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
             tool_calls.append({
-                "id": "alloc_call",
-                "name": "allocate_thirty_block",
-                "arguments": {"block_index": b_idx, "custom_label": lbl},
+                "id": "clear_work_call",
+                "name": "clear_blocks",
+                "arguments": {"clear_all_work": True},
             })
-            raw_reply = re.sub(r"ALLOCATE_BLOCK:\s*\d{1,2}\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-        # Intent: allocate block index (e.g. "allocate 32 to Dorico" or "put Dorico at 32")
-        alloc_match = re.search(r"(?:allocate|put|assign|schedule|set)\s+(?:block\s+)?(\d{1,2})\s+(?:to|for|with)\s+(.+)", last_user_msg, re.IGNORECASE)
-        if not alloc_match:
-            alloc_match = re.search(r"(?:allocate|put|assign|schedule|set)\s+(.+?)\s+(?:to|at|in|for)\s+(?:block\s+)?(\d{1,2})", last_user_msg, re.IGNORECASE)
-            if alloc_match:
+        # 2. Directive: CLEAR_BLOCKS: <start>[-<end>]
+        clear_dir = re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE)
+        if clear_dir:
+            s_idx = int(clear_dir.group(1))
+            e_idx = int(clear_dir.group(2)) if clear_dir.group(2) else s_idx
+            tool_calls.append({
+                "id": "clear_blocks_call",
+                "name": "clear_blocks",
+                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
+            })
+            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+
+        # 3. Directive: ALLOCATE_BLOCK(S)?: <start>[-<end>] | <label>
+        alloc_matches = list(re.finditer(r"ALLOCATE_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*\|\s*([^\n]+)", raw_reply, re.IGNORECASE))
+        for match in alloc_matches:
+            s_idx = int(match.group(1))
+            e_idx = int(match.group(2)) if match.group(2) else s_idx
+            lbl = match.group(3).strip()
+            tool_calls.append({
+                "id": f"alloc_call_{s_idx}",
+                "name": "allocate_thirty_block",
+                "arguments": {
+                    "block_index": s_idx,
+                    "start_block": s_idx,
+                    "end_block": e_idx,
+                    "custom_label": lbl,
+                },
+            })
+        if alloc_matches:
+            raw_reply = re.sub(r"ALLOCATE_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+
+        # Fallback to User Intent Extraction if model did not emit directives:
+        if not tool_calls:
+            # Intent: Day off / Clear all work blocks
+            # Intent: Day off / Clear all work blocks
+            if re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
+                tool_calls.append({
+                    "id": "clear_work_call",
+                    "name": "clear_blocks",
+                    "arguments": {"clear_all_work": True},
+                })
+            # Intent: Clear specific blocks (e.g. "clear blocks 4-18" or "deallocate block 28")
+            elif clear_user_match := re.search(r"(?:clear|deallocate|remove|unassign)\s+(?:blocks?\s+)?(\d{1,2})(?:\s*-\s*(\d{1,2}))?", last_user_msg, re.IGNORECASE):
+                s_idx = int(clear_user_match.group(1))
+                e_idx = int(clear_user_match.group(2)) if clear_user_match.group(2) else s_idx
+                tool_calls.append({
+                    "id": "clear_blocks_call",
+                    "name": "clear_blocks",
+                    "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
+                })
+            # Intent: Block with duration (e.g. "Let's go block 28, I'll probably want to go for at least two hours")
+            # Intent: Block with duration (e.g. "Let's go block 28, I'll probably want to go for at least two hours")
+            elif (block_user := re.search(r"\bblock\s+(\d{1,2})\b", last_user_msg, re.IGNORECASE)) and (dur_user := re.search(r"(\d+(?:\.\d+)?|half|one|two|three|four|five|an?)\s*(?:hours?|hrs?)", last_user_msg, re.IGNORECASE)):
+                s_idx = int(block_user.group(1))
+                dur_str = dur_user.group(1).lower()
+                word_map = {'a': 1.0, 'an': 1.0, 'half': 0.5, 'one': 1.0, 'two': 2.0, 'three': 3.0, 'four': 4.0, 'five': 5.0}
+                hrs = float(dur_str) if dur_str.replace('.', '', 1).isdigit() else word_map.get(dur_str, 1.0)
+                num_blocks = max(1, int(round(hrs * 2)))
+                e_idx = min(48, s_idx + num_blocks - 1)
+                
+                # Activity extraction
+                lbl = "Focus Session"
+                for word in ["composing", "writing", "coding", "reading", "study", "exercise", "dev"]:
+                    if word in last_user_msg.lower():
+                        lbl = word.capitalize()
+                        break
+
+                tool_calls.append({
+                    "id": f"alloc_call_{s_idx}",
+                    "name": "allocate_thirty_block",
+                    "arguments": {
+                        "block_index": s_idx,
+                        "start_block": s_idx,
+                        "end_block": e_idx,
+                        "custom_label": lbl,
+                    },
+                })
+            # Intent: Standard block allocation
+            elif alloc_match := re.search(r"(?:allocate|put|assign|schedule|set)\s+(?:block\s+)?(\d{1,2})\s+(?:to|for|with)\s+(.+)", last_user_msg, re.IGNORECASE):
+                block_idx = int(alloc_match.group(1))
+                label_text = alloc_match.group(2).strip()
+                tool_calls.append({
+                    "id": "alloc_call",
+                    "name": "allocate_thirty_block",
+                    "arguments": {"block_index": block_idx, "start_block": block_idx, "end_block": block_idx, "custom_label": label_text},
+                })
+            elif alloc_match := re.search(r"(?:allocate|put|assign|schedule|set)\s+(.+?)\s+(?:to|at|in|for)\s+(?:block\s+)?(\d{1,2})", last_user_msg, re.IGNORECASE):
                 label_text = alloc_match.group(1).strip()
                 block_idx = int(alloc_match.group(2))
                 tool_calls.append({
                     "id": "alloc_call",
                     "name": "allocate_thirty_block",
-                    "arguments": {"block_index": block_idx, "custom_label": label_text},
+                    "arguments": {"block_index": block_idx, "start_block": block_idx, "end_block": block_idx, "custom_label": label_text},
                 })
-        else:
-            block_idx = int(alloc_match.group(1))
-            label_text = alloc_match.group(2).strip()
-            tool_calls.append({
-                "id": "alloc_call",
-                "name": "allocate_thirty_block",
-                "arguments": {"block_index": block_idx, "custom_label": label_text},
-            })
 
         # Intent: confirm attendance
         if re.search(r"\b(yes|attending|confirm)\b", last_user_msg, re.IGNORECASE):

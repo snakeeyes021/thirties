@@ -138,5 +138,50 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(b19.label, "Dorico Compose")
 
 
+    def test_allocate_multiple_thirty_blocks_tool(self) -> None:
+        out = self.manager.execute_tool(
+            "allocate_thirty_block",
+            {"start_block": 28, "end_block": 31, "custom_label": "Composing in Dorico"},
+        )
+        self.assertIn("Allocated blocks 28 through 31", out)
+        for idx in range(28, 32):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.kind, BlockKind.ASSIGNED)
+            self.assertEqual(b.label, "Composing in Dorico")
+
+    def test_clear_work_blocks_tool(self) -> None:
+        initial_daylight = self.plan.daylight_available_count
+        # Clear all work blocks
+        out = self.manager.execute_tool(
+            "clear_blocks",
+            {"clear_all_work": True},
+        )
+        self.assertIn("Cleared and opened", out)
+        # Verify no WORK blocks remain
+        work_remaining = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
+        self.assertEqual(len(work_remaining), 0)
+        # Daylight available count should have increased significantly
+        self.assertGreater(self.plan.daylight_available_count, initial_daylight)
+
+    def test_clear_specific_blocks_tool(self) -> None:
+        # First assign blocks 28-30
+        self.manager.execute_tool(
+            "allocate_thirty_block",
+            {"start_block": 28, "end_block": 30, "custom_label": "Composing"},
+        )
+        self.assertEqual(self.plan.get_logical_block(28).kind, BlockKind.ASSIGNED)
+
+        # Now clear blocks 28-30
+        out = self.manager.execute_tool(
+            "clear_blocks",
+            {"start_block": 28, "end_block": 30},
+        )
+        self.assertIn("Cleared and opened 3 blocks", out)
+        for idx in range(28, 31):
+            b = self.plan.get_logical_block(idx)
+            self.assertIn(b.kind, (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY))
+            self.assertEqual(b.label, "")
+
+
 if __name__ == "__main__":
     unittest.main()

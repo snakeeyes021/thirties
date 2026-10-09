@@ -39,15 +39,31 @@ PLANNING_TOOLS = [
         "type": "function",
         "function": {
             "name": "allocate_thirty_block",
-            "description": "Assign a task or label to a specific Thirty index (0 to 47).",
+            "description": "Assign a task or label to a Thirty block or range of blocks (1 to 48).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "block_index": {"type": "integer", "minimum": 0, "maximum": 47},
+                    "block_index": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
                     "task_id": {"type": "string", "description": "Joplin task ID if assigning a task"},
                     "custom_label": {"type": "string", "description": "Display label for this block"}
-                },
-                "required": ["block_index"]
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_blocks",
+            "description": "Clear or deallocate blocks (e.g. opening work blocks for a day off, or unassigning scheduled tasks), returning them to open discretionary time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "clear_all_work": {"type": "boolean", "description": "True to clear all work blocks for today"}
+                }
             }
         }
     },
@@ -227,16 +243,35 @@ BEHAVIOR RULES:
    - When the user asks for advice or a suggestion (e.g. "Where would you suggest I compose?", "What should I do next?", "Any ideas?"):
      Suggest 1 or 2 UPCOMING open blocks suitable for the task, explain briefly why, and ask if they would like you to schedule it.
      DO NOT output ALLOCATE_BLOCK when merely suggesting!
-   - When the user instructs you to allocate/schedule (e.g. "allocate block 12 to Dorico", "put composing in block 12"), OR confirms a suggestion (e.g. "yes", "sure", "let's do that", "sounds good"):
-     Output the allocation directive on its own line:
+   - When the user instructs you to allocate/schedule (e.g. "allocate block 12 to Dorico", "put composing in block 12", "let's go block 28 for two hours"), OR confirms a suggestion (e.g. "yes", "sure", "let's do that", "sounds good"):
+     For a single block:
        ALLOCATE_BLOCK: <block_number> | <label>
-     And provide a 1-sentence confirmation stating the block number, start time, and activity.
-3. TEMPORAL AWARENESS:
+     For a multi-block span or duration:
+       ALLOCATE_BLOCKS: <start_block>-<end_block> | <label>
+     And provide a 1-sentence confirmation stating the block number(s), start and end times, and activity.
+3. DURATION & THIRTY ARITHMETIC:
+   - 1 block = 30 minutes (0.5 hr).
+   - 2 blocks = 1 hour.
+   - 3 blocks = 1.5 hours.
+   - 4 blocks = 2 hours.
+   - N hours = round(N * 2) blocks.
+   - When a duration is requested (e.g. "at least 2 hours starting at block 28"):
+     2 hours = 4 blocks -> Block 28 through Block 31 (28 + 4 - 1 = 31).
+     Directive: ALLOCATE_BLOCKS: 28-31 | <label>
+4. DEALLOCATIONS & DAYS OFF:
+   - When the user indicates they do not have work today (e.g. "I don't have work today", "day off", "open my work blocks"):
+     Output directive:
+       CLEAR_WORK_BLOCKS
+     And confirm that all work blocks are now open discretionary time for planning.
+   - When the user asks to deallocate or clear specific blocks (e.g. "clear blocks 4-18", "deallocate block 28"):
+     Output directive:
+       CLEAR_BLOCKS: <start_block>-<end_block>
+5. TEMPORAL AWARENESS:
    - For forward planning and recommendations, ONLY pick from UPCOMING open blocks. Never recommend or schedule into past elapsed blocks unless the user explicitly asks to retroactively log past work (e.g. "Earlier this morning at 8:00 AM I worked on X").
-4. ENERGY ALIGNMENT:
+6. ENERGY ALIGNMENT:
    - Daylight Thirties are for high-focus, creative composition, writing, and deep problem-solving.
    - Dark Thirties are for administrative tasks, reading, light dev chores, and calm wind-down.
-5. When the user confirms attendance ("yes", "attending"), confirm the event.
+7. When the user confirms attendance ("yes", "attending"), confirm the event.
 """
 
     def _init_conversation(self) -> None:
@@ -266,28 +301,73 @@ BEHAVIOR RULES:
             action_desc = "locked as busy calendar block" if attending else "ignored and opened as discretionary"
             return f"Event {event_id} resolved: {action_desc}."
 
-        elif name == "allocate_thirty_block":
-            raw_idx = arguments["block_index"]
+        elif name in ("allocate_thirty_block", "allocate_thirty_blocks"):
+            start_idx = arguments.get("start_block", arguments.get("block_index"))
+            end_idx = arguments.get("end_block", start_idx)
             task_id = arguments.get("task_id")
             label = arguments.get("custom_label") or ""
 
-            if 1 <= raw_idx <= 48:
-                block = self.day_plan.get_logical_block(raw_idx)
-                logical_idx = raw_idx
-            else:
-                block = self.day_plan.get_block(raw_idx % 48)
-                logical_idx = self.day_plan.get_logical_index(block)
+            if start_idx is None:
+                start_idx = 1
+            if end_idx is None:
+                end_idx = start_idx
 
-            block.kind = BlockKind.ASSIGNED
-            block.assigned_task_id = task_id
-            block.label = label
+            assigned_indices: list[int] = []
+            for b_idx in range(start_idx, end_idx + 1):
+                if 1 <= b_idx <= 48:
+                    block = self.day_plan.get_logical_block(b_idx)
+                    log_idx = b_idx
+                else:
+                    block = self.day_plan.get_block(b_idx % 48)
+                    log_idx = self.day_plan.get_logical_index(block)
+
+                block.kind = BlockKind.ASSIGNED
+                block.assigned_task_id = task_id
+                block.label = label
+                block.is_locked = False
+                assigned_indices.append(log_idx)
+
             self.day_plan.recalculate_counts()
 
             # Persist to database so allocations survive calendar navigation!
             if self.scheduler and self.scheduler.state_db:
                 self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
-            return f"Allocated block {logical_idx} to '{label}'."
+            if len(assigned_indices) == 1:
+                return f"Allocated block {assigned_indices[0]} to '{label}'."
+            else:
+                return f"Allocated blocks {start_idx} through {end_idx} ({len(assigned_indices)} blocks) to '{label}'."
+
+        elif name in ("clear_blocks", "deallocate_blocks"):
+            clear_all_work = arguments.get("clear_all_work", False)
+            start_idx = arguments.get("start_block")
+            end_idx = arguments.get("end_block", start_idx)
+
+            target_blocks = []
+            if clear_all_work:
+                target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.WORK]
+            elif start_idx is not None:
+                if end_idx is None:
+                    end_idx = start_idx
+                for b_idx in range(start_idx, end_idx + 1):
+                    if 1 <= b_idx <= 48:
+                        target_blocks.append(self.day_plan.get_logical_block(b_idx))
+                    else:
+                        target_blocks.append(self.day_plan.get_block(b_idx % 48))
+
+            for b in target_blocks:
+                b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                b.is_locked = False
+                b.label = ""
+                b.assigned_task_id = None
+                b.source_event_id = None
+
+            self.day_plan.recalculate_counts()
+
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+            return f"Cleared and opened {len(target_blocks)} blocks as discretionary time."
 
         elif name == "decompose_task":
             parent_id = arguments["parent_task_id"]
