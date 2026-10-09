@@ -161,5 +161,40 @@ No problem at all!
                 self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
 
 
+    def test_sleep_intent_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+I will adjust your sleep window.
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Ok, actually I'm going to bed at 10pm and I'll wake up tomorrow at 5am."}])
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "set_sleep_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_time"], "10pm")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["end_time"], "5am")
+
+    def test_work_hours_normal_intent_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+Work hours updated.
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Oh shoot, work hours are normal today. 8:30-4"}])
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_time"], "8:30")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["end_time"], "4")
+
+
 if __name__ == "__main__":
     unittest.main()

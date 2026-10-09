@@ -145,7 +145,9 @@ class ChatPanel(Gtk.Box):
 
         self.set_hexpand(True)
         self.set_vexpand(True)
+        self.chat_history: list[tuple[str, str]] = []
 
+        self._build_header()
         self._build_stream()
         self._build_input_bar()
         self._send_initial_greeting()
@@ -158,10 +160,56 @@ class ChatPanel(Gtk.Box):
         self.conversation_manager = manager
         self.on_plan_updated = on_plan_updated
 
+        self.chat_history.clear()
         while child := self.messages_box.get_first_child():
             self.messages_box.remove(child)
 
         self._send_initial_greeting()
+
+    def _build_header(self) -> None:
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(700)
+        clamp.set_tightening_threshold(500)
+
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header_box.set_margin_start(16)
+        header_box.set_margin_end(16)
+        header_box.set_margin_top(8)
+        header_box.set_margin_bottom(4)
+
+        title_lbl = Gtk.Label(label="Planning Assistant")
+        title_lbl.add_css_class("heading")
+        title_lbl.set_xalign(0.0)
+        title_lbl.set_hexpand(True)
+        header_box.append(title_lbl)
+
+        self.copy_all_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+        self.copy_all_btn.add_css_class("flat")
+        self.copy_all_btn.set_tooltip_text("Copy entire chat transcript")
+        self.copy_all_btn.connect("clicked", self._on_copy_all_clicked)
+        header_box.append(self.copy_all_btn)
+
+        clamp.set_child(header_box)
+        self.append(clamp)
+
+    def _on_copy_all_clicked(self, btn: Gtk.Button) -> None:
+        lines = []
+        for role, text in self.chat_history:
+            speaker = "User" if role == "user" else "Assistant"
+            lines.append(f"{speaker}:\n{text}\n")
+        transcript = "\n".join(lines).strip()
+        display = Gdk.Display.get_default()
+        if display and transcript:
+            clipboard = display.get_clipboard()
+            clipboard.set(transcript)
+        btn.set_icon_name("object-select-symbolic")
+        btn.set_tooltip_text("Transcript copied!")
+        GLib.timeout_add(1500, self._reset_copy_all_btn, btn)
+
+    def _reset_copy_all_btn(self, btn: Gtk.Button) -> bool:
+        btn.set_icon_name("edit-copy-symbolic")
+        btn.set_tooltip_text("Copy entire chat transcript")
+        return False
 
     def _build_stream(self) -> None:
         self.scrolled = Gtk.ScrolledWindow()
@@ -281,6 +329,7 @@ class ChatPanel(Gtk.Box):
         self.add_message("assistant", greeting)
 
     def add_message(self, role: str, text: str) -> None:
+        self.chat_history.append((role, text))
         msg_widget = ChatMessageWidget(
             role=role,
             text=text,

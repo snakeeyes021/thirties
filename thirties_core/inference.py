@@ -328,8 +328,29 @@ class LiteRTInferenceEngine:
         # Fallback to User Intent Extraction if model did not emit directives:
         if not tool_calls:
             # Intent: Day off / Clear all work blocks
+            # Intent: Adjust sleep window / bedtime (e.g. going to bed at 10pm and wake up tomorrow at 5am)
+            bed_match = re.search(r"(?:going to bed|go to bed|bedtime|sleep)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
+            wake_match = re.search(r"(?:wake(?:\s+up)?|waking(?:\s+up)?)\s+(?:at\s+|tomorrow\s+at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
+            if (bed_match or wake_match) and not any(k in last_user_msg.lower() for k in ("work", "composing", "game night")):
+                sleep_args: dict[str, Any] = {}
+                if bed_match:
+                    sleep_args["start_time"] = bed_match.group(1).strip()
+                if wake_match:
+                    sleep_args["end_time"] = wake_match.group(1).strip()
+                tool_calls.append({
+                    "id": "set_sleep_call",
+                    "name": "set_sleep_blocks",
+                    "arguments": sleep_args,
+                })
+            # Intent: Day off / Clear all work blocks
+            if re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
+                tool_calls.append({
+                    "id": "clear_work_call",
+                    "name": "clear_blocks",
+                    "arguments": {"clear_all_work": True},
+                })
             # Intent: Reinstate or set work blocks (supporting custom work hours like 7am to 3pm)
-            if re.search(r"(?:work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|do have work)", last_user_msg, re.IGNORECASE):
+            elif re.search(r"(?:work\s+hours\s+are|work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|(?:^|\s)do have work)", last_user_msg, re.IGNORECASE):
                 reinstate_args: dict[str, Any] = {}
                 # Check for explicit start and end times
                 time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
@@ -341,13 +362,6 @@ class LiteRTInferenceEngine:
                     "id": "reinstate_work_call",
                     "name": "reinstate_work_blocks",
                     "arguments": reinstate_args,
-                })
-            # Intent: Day off / Clear all work blocks
-            elif re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
-                tool_calls.append({
-                    "id": "clear_work_call",
-                    "name": "clear_blocks",
-                    "arguments": {"clear_all_work": True},
                 })
             # Intent: Clear specific blocks (e.g. "clear blocks 4-18" or "deallocate block 28")
             elif clear_user_match := re.search(r"(?:clear|deallocate|remove|unassign)\s+(?:blocks?\s+)?(\d{1,2})(?:\s*-\s*(\d{1,2}))?", last_user_msg, re.IGNORECASE):

@@ -27,3 +27,4 @@ _flatpak_build/
 
 .venv/
 venv/
+docs/eval_reports/

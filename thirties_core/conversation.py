@@ -495,6 +495,73 @@ BEHAVIOR RULES:
                 return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."
             return f"Work is now scheduled {span_str} for {count_str}."
 
+        elif name in ("set_sleep_blocks", "adjust_sleep_window", "set_bedtime"):
+            start_block = arguments.get("start_block")
+            end_block = arguments.get("end_block")
+            start_time = arguments.get("start_time")
+            end_time = arguments.get("end_time")
+
+            if start_time and not start_block:
+                start_block = self.day_plan.time_str_to_logical_block(str(start_time))
+            if end_time and not end_block:
+                end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
+
+            target_indices: set[int] = set()
+            target_blocks: list[ThirtyBlock] = []
+
+            if start_block is not None and end_block is not None:
+                if end_block >= start_block:
+                    indices_range = list(range(start_block, end_block + 1))
+                else:
+                    indices_range = list(range(start_block, 49)) + list(range(1, end_block + 1))
+                for idx in indices_range:
+                    if 1 <= idx <= 48:
+                        target_indices.add(idx)
+                        target_blocks.append(self.day_plan.get_logical_block(idx))
+            elif start_block is not None:
+                # If only start_block (bedtime) is given, default to 16 blocks (8 hours) of sleep
+                for i in range(16):
+                    idx = (start_block + i - 1) % 48 + 1
+                    target_indices.add(idx)
+                    target_blocks.append(self.day_plan.get_logical_block(idx))
+            else:
+                for b in self.day_plan.blocks:
+                    if b.kind == BlockKind.SLEEP:
+                        target_indices.add(self.day_plan.get_logical_index(b))
+                        target_blocks.append(b)
+
+            # Clear old sleep blocks outside new window
+            for b in self.day_plan.blocks:
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.kind == BlockKind.SLEEP and log_idx not in target_indices:
+                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                    b.label = ""
+                    b.is_locked = False
+                    b.assigned_task_id = None
+
+            # Reassign target window to SLEEP with is_locked = True
+            for b in target_blocks:
+                b.kind = BlockKind.SLEEP
+                b.label = "Sleep"
+                b.is_locked = True
+                b.assigned_task_id = None
+
+            self.day_plan.recalculate_counts()
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+            reinstated_count = len(target_blocks)
+            chunk_word = "chunk" if reinstated_count == 1 else "chunks"
+            if target_blocks:
+                first_log = self.day_plan.get_logical_index(target_blocks[0])
+                last_log = self.day_plan.get_logical_index(target_blocks[-1])
+                start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
+                end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
+                span_str = f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
+            else:
+                span_str = "sleep window"
+            return f"Sleep window is now scheduled {span_str} for {reinstated_count} {chunk_word}."
+
         elif name in ("clear_blocks", "deallocate_blocks"):
             clear_all_work = arguments.get("clear_all_work", False)
             start_idx = arguments.get("start_block")
@@ -627,6 +694,6 @@ BEHAVIOR RULES:
         # If schedule mutations were executed, ensure the reply accurately reflects the verified action.
         if executed_tools:
             for fn_name, tool_output in executed_tools:
-                if fn_name in ("reinstate_work_blocks", "clear_blocks"):
+                if fn_name in ("reinstate_work_blocks", "clear_blocks", "set_sleep_blocks"):
                     reply_content = tool_output
         return reply_content
