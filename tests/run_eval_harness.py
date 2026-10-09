@@ -99,18 +99,27 @@ class PersistentGemmaEngine:
             "-c",
             inline_code,
         ]
+        if hasattr(self, "stderr_log") and self.stderr_log:
+            try:
+                self.stderr_log.close()
+            except Exception:
+                pass
+        self.stderr_log_path = REPO_ROOT / "docs" / "eval_reports" / "daemon_stderr.log"
+        self.stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.stderr_log = open(self.stderr_log_path, "w+")
         self.proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=self.stderr_log,
             text=True,
             bufsize=1,
         )
         while True:
             line = self.proc.stdout.readline()
             if not line:
-                err = self.proc.stderr.read() if self.proc.stderr else ""
+                self.stderr_log.seek(0)
+                err = self.stderr_log.read()[-1000:]
                 raise RuntimeError(f"Failed to start persistent Gemma daemon: process died (stderr: {err})")
             if "===READY===" in line:
                 break
@@ -142,7 +151,13 @@ class PersistentGemmaEngine:
             while True:
                 line = self.proc.stdout.readline()
                 if not line:
-                    err = self.proc.stderr.read() if self.proc.stderr else ""
+                    err = ""
+                    if hasattr(self, "stderr_log") and self.stderr_log:
+                        try:
+                            self.stderr_log.seek(0)
+                            err = self.stderr_log.read()[-500:]
+                        except Exception:
+                            pass
                     logger.warning("Persistent GPU daemon died during turn (%s). Restarting daemon cleanly...", err.strip()[:100])
                     self._start_server()
                     return f"Inference error: daemon restarted ({err.strip()[:100]})"
@@ -158,6 +173,11 @@ class PersistentGemmaEngine:
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             self.proc.wait()
+        if hasattr(self, "stderr_log") and self.stderr_log:
+            try:
+                self.stderr_log.close()
+            except Exception:
+                pass
 
 
 class FastHybridInferenceEngine:
@@ -1174,7 +1194,7 @@ class ReportWriter:
 
 def main():
     parser = argparse.ArgumentParser(description="Large-Scale Autonomous Stress-Testing Harness for Thirties.")
-    parser.add_argument("--scenarios", type=int, default=500, help="Number of scenarios to simulate (default: 500).")
+    parser.add_argument("--scenarios", type=int, default=1000, help="Number of scenarios to simulate (default: 1000).")
     parser.add_argument("--output", type=str, default="", help="Custom output path for markdown report.")
     parser.add_argument("--no-gpu", action="store_true", help="Disable persistent GPU daemon and use mock engine.")
     args = parser.parse_args()
