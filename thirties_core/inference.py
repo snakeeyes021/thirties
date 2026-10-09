@@ -325,6 +325,10 @@ class LiteRTInferenceEngine:
         if alloc_matches:
             raw_reply = re.sub(r"ALLOCATE_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
+        if tool_calls:
+            logger.info("[Inference] Extracted tool directives from model: %s", [c["name"] for c in tool_calls])
+        else:
+            logger.debug("[Inference] No explicit tool directives emitted by model; checking intent extraction fallbacks")
         # Fallback to User Intent Extraction if model did not emit directives:
         if not tool_calls:
             # Intent: Day off / Clear all work blocks

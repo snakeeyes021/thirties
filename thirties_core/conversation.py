@@ -643,6 +643,7 @@ BEHAVIOR RULES:
             self.messages.append({"role": "assistant", "content": reply})
             return reply
 
+        logger.info("[Conversation] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
 
         response = self.inference_engine.chat(
@@ -652,6 +653,7 @@ BEHAVIOR RULES:
 
         reply_content = response.get("content", "")
         tool_calls = response.get("tool_calls", [])
+        logger.debug("[Conversation] Model output: %r (tool_calls=%r)", reply_content, tool_calls)
 
         self.messages.append(response)
 
@@ -661,7 +663,9 @@ BEHAVIOR RULES:
             for call in tool_calls:
                 fn_name = call.get("name")
                 fn_args = call.get("arguments", {})
+                logger.info("[Conversation] Executing tool: %s with args: %s", fn_name, fn_args)
                 tool_output = self.execute_tool(fn_name, fn_args)
+                logger.info("[Conversation] Tool %s result: %s", fn_name, tool_output)
                 executed_tools.append((fn_name, tool_output))
                 self.messages.append({
                     "role": "tool",
@@ -695,5 +699,7 @@ BEHAVIOR RULES:
         if executed_tools:
             for fn_name, tool_output in executed_tools:
                 if fn_name in ("reinstate_work_blocks", "clear_blocks", "set_sleep_blocks"):
+                    logger.debug("[Conversation] Grounding sync override from %s: %s", fn_name, tool_output)
                     reply_content = tool_output
+        logger.info("[Conversation] Final assistant reply: %r", reply_content)
         return reply_content
