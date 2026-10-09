@@ -143,7 +143,10 @@ class SolarArcWidget(Gtk.DrawingArea):
                 phase_glyph, _ = get_moon_phase(now)
                 cr.set_font_size(16.0)
                 m_ext = cr.text_extents(phase_glyph)
-                cr.move_to(moon_x - m_ext.width / 2.0, moon_y + m_ext.height / 2.0)
+                cr.move_to(
+                    moon_x - (m_ext.x_bearing + m_ext.width / 2.0),
+                    moon_y - (m_ext.y_bearing + m_ext.height / 2.0)
+                )
                 cr.show_text(phase_glyph)
 
         # 4. Labels for Horizon bounds and Apex (Midday / Midnight)
@@ -157,13 +160,17 @@ class SolarArcWidget(Gtk.DrawingArea):
             else:
                 left_time = sunset - timedelta(days=1)
                 right_time = sunrise
+            night_duration = (right_time - left_time).total_seconds()
+            solar_mid = left_time + timedelta(seconds=night_duration / 2.0)
             left_text = f"☾ {left_time.strftime('%I:%M %p').lstrip('0')}"
             right_text = f"☼ {right_time.strftime('%I:%M %p').lstrip('0')}"
-            center_text = "Midnight"
+            center_text = f"Solar Midnight {solar_mid.strftime('%I:%M %p').lstrip('0')}"
         else:
+            day_duration = (sunset - sunrise).total_seconds()
+            solar_mid = sunrise + timedelta(seconds=day_duration / 2.0)
             left_text = f"☼ {sunrise.strftime('%I:%M %p').lstrip('0')}"
             right_text = f"☾ {sunset.strftime('%I:%M %p').lstrip('0')}"
-            center_text = "Midday"
+            center_text = f"Solar Midday {solar_mid.strftime('%I:%M %p').lstrip('0')}"
 
         # Left label
         cr.move_to(margin_x, horizon_y + 18)

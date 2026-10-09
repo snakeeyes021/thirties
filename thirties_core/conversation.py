@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.astronomy import get_current_time, set_debug_time
@@ -286,7 +286,7 @@ BEHAVIOR RULES:
    - Always communicate using clear clock times and chunk counts first, with block numbers as secondary reference.
      Good: "You have 4 chunks (2 hours) scheduled for Game Night from 6:30 PM to 8:30 PM (Blocks 24–27)."
      Bad: "Game Night is in Blocks 24 through 27."
-   - The user does not memorize block numbers: always anchor your statements with start/end clock times (e.g. "from 06:30 PM to 08:30 PM") and duration in chunks/hours.
+   - The user does not memorize block numbers: always anchor your statements with start/end clock times (e.g. "from 06:30 PM to 08:30 PM") and discrete chunk/thirty counts. Never translate chunks into hours (e.g. say "4 chunks", never "2 hours").
    - Keep answers concise, structured, and action-oriented (1-3 sentences).
 2. DISTINGUISH SUGGESTIONS FROM DIRECT ALLOCATIONS:
    - When the user asks for advice or a suggestion (e.g. "Where would you suggest I compose?", "What should I do next?", "Any ideas?"):
@@ -449,9 +449,8 @@ BEHAVIOR RULES:
             else:
                 span_str = "work blocks"
 
-            hours = reinstated_count * 0.5
-            hours_str = f"{hours:g} hours" if hours != 1 else "1 hour"
-            count_str = f"{reinstated_count} chunks ({hours_str})"
+            chunk_word = "chunk" if reinstated_count == 1 else "chunks"
+            count_str = f"{reinstated_count} {chunk_word}"
 
             if preserved_tasks:
                 return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."

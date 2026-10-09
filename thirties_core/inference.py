@@ -102,77 +102,76 @@ class LiteRTInferenceEngine:
         """Find host python interpreter and runner script for host GPU execution."""
         host_home = get_host_home()
         repo_root = Path(__file__).resolve().parent.parent
+        is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
 
-        python_candidates = [
-            str(repo_root / ".venv" / "bin" / "python"),
-            str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
-            str(Path.home() / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
-            str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
-        ]
-        script_candidates = [
-            str(repo_root / "thirties_core" / "runner.py"),
-            str(host_home / ".local" / "share" / "thirties" / "runner.py"),
-            str(Path.home() / ".local" / "share" / "thirties" / "runner.py"),
-            str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
-        ]
-        for h in (Path.home(), host_home):
-            if str(h).startswith("/home/"):
-                alt = Path("/var") / h.relative_to("/")
-            elif str(h).startswith("/var/home/"):
-                alt = Path("/home") / h.relative_to("/var/home")
-            else:
-                alt = None
-            if alt:
-                python_candidates.append(str(alt / "dev" / "Thirties" / ".venv" / "bin" / "python"))
-                script_candidates.append(str(alt / "dev" / "Thirties" / "thirties_core" / "runner.py"))
+        if is_flatpak:
+            # Ensure host-accessible copy of runner.py exists in shared XDG data dir
+            xdg_share = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "thirties"
+            xdg_share.mkdir(parents=True, exist_ok=True)
+            shared_runner = xdg_share / "runner.py"
+            bundled_runner = Path(__file__).resolve().parent / "runner.py"
+            if bundled_runner.is_file():
+                try:
+                    shutil.copy2(bundled_runner, shared_runner)
+                except Exception as e:
+                    logger.debug("Failed to copy bundled runner: %s", e)
 
-        found_python: Optional[str] = None
-        for py in python_candidates:
-            if Path(py).is_file():
-                found_python = py
-                break
+            python_candidates = [
+                str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
+                str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
+            ]
+            script_candidates = [
+                str(host_home / ".local" / "share" / "thirties" / "runner.py"),
+                str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
+            ]
+            for h in (host_home,):
+                if str(h).startswith("/home/"):
+                    alt = Path("/var") / h.relative_to("/")
+                elif str(h).startswith("/var/home/"):
+                    alt = Path("/home") / h.relative_to("/var/home")
+                else:
+                    alt = None
+                if alt:
+                    python_candidates.append(str(alt / "dev" / "Thirties" / ".venv" / "bin" / "python"))
+                    script_candidates.append(str(alt / ".local" / "share" / "thirties" / "runner.py"))
+                    script_candidates.append(str(alt / "dev" / "Thirties" / "thirties_core" / "runner.py"))
 
-        # Inside Flatpak, test host existence via flatpak-spawn
-        if not found_python and shutil.which("flatpak-spawn"):
-            for py in python_candidates:
+            def _test_host(path_str: str) -> bool:
                 try:
                     res = subprocess.run(
-                        ["flatpak-spawn", "--host", "test", "-f", py],
+                        ["flatpak-spawn", "--host", "test", "-f", path_str],
                         capture_output=True,
                         timeout=2,
                     )
-                    if res.returncode == 0:
-                        found_python = py
-                        break
+                    return res.returncode == 0
                 except Exception:
-                    pass
+                    return False
 
-        if not found_python:
+            found_python = next((py for py in python_candidates if _test_host(py)), None)
+            if not found_python:
+                return None
+            found_script = next((sc for sc in script_candidates if _test_host(sc)), None)
+            if found_python and found_script:
+                return {"python": found_python, "script": found_script}
             return None
-
-        found_script: Optional[str] = None
-        for sc in script_candidates:
-            if Path(sc).is_file():
-                found_script = sc
-                break
-
-        if not found_script and shutil.which("flatpak-spawn"):
-            for sc in script_candidates:
-                try:
-                    res = subprocess.run(
-                        ["flatpak-spawn", "--host", "test", "-f", sc],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    if res.returncode == 0:
-                        found_script = sc
-                        break
-                except Exception:
-                    pass
-
-        if found_python and found_script:
-            return {"python": found_python, "script": found_script}
-        return None
+        else:
+            python_candidates = [
+                str(repo_root / ".venv" / "bin" / "python"),
+                str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
+                str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
+            ]
+            script_candidates = [
+                str(repo_root / "thirties_core" / "runner.py"),
+                str(host_home / ".local" / "share" / "thirties" / "runner.py"),
+                str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
+            ]
+            found_python = next((py for py in python_candidates if Path(py).is_file()), None)
+            if not found_python:
+                return None
+            found_script = next((sc for sc in script_candidates if Path(sc).is_file()), None)
+            if found_python and found_script:
+                return {"python": found_python, "script": found_script}
+            return None
 
     def is_available(self) -> bool:
         """Return True if in-process LiteRT-LM or host runner is available."""
