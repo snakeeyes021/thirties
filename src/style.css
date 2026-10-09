@@ -73,14 +73,14 @@
     background-color: alpha(@accent_bg_color, 0.2);
     border-radius: 14px;
     padding: 8px 14px;
-    margin-start: 32px;
+    margin-left: 32px;
 }
 
 .chat-bubble-agent {
     background-color: alpha(@headerbar_backdrop_color, 0.5);
     border-radius: 14px;
     padding: 8px 14px;
-    margin-end: 32px;
+    margin-right: 32px;
 }
 
 .chat-entry-box {

@@ -294,7 +294,13 @@ class ChatPanel(Gtk.Box):
             last = self.messages_box.get_last_child()
             vp = self.scrolled.get_child()
             if vp and hasattr(vp, "scroll_to") and last:
-                vp.scroll_to(last, 0, None)
+                try:
+                    vp.scroll_to(last)
+                except Exception:
+                    adj = self.scrolled.get_vadjustment()
+                    target = adj.get_upper() - adj.get_page_size()
+                    if target > 0:
+                        adj.set_value(target)
             else:
                 adj = self.scrolled.get_vadjustment()
                 target = adj.get_upper() - adj.get_page_size()
@@ -302,7 +308,7 @@ class ChatPanel(Gtk.Box):
                     adj.set_value(target)
             return False
         GLib.idle_add(do_scroll)
-        GLib.timeout_add(100, do_scroll)
+        GLib.timeout_add(80, do_scroll)
 
     def _on_send_clicked(self, _widget) -> None:
         start, end = self.text_buffer.get_bounds()
