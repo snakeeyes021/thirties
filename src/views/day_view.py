@@ -1,22 +1,21 @@
-"""Diurnal Day View displaying the Solar Arc and the 48-block matrix."""
+"""Daily schedule view displaying the Solar Arc and consolidated big-time blocks."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from gi.repository import Gtk, Adw
 
-from thirties_core.models import DayPlan
-from thirties.widgets.block_widget import BlockWidget
+from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget
 from thirties.widgets.solar_arc import SolarArcWidget
 
 
 class DayView(Gtk.Box):
-    """Container for the diurnal timeline and the 48 Thirty pills."""
+    """Container for the daily schedule timeline with collapsed locked chunks."""
 
     def __init__(self, day_plan: DayPlan | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.day_plan = day_plan
-        self.block_widgets: list[BlockWidget] = []
 
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -29,11 +28,18 @@ class DayView(Gtk.Box):
 
     def _build_header(self) -> None:
         header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        header_card.set_margin_start(12)
-        header_card.set_margin_end(12)
-        header_card.set_margin_top(8)
-        header_card.set_margin_bottom(4)
+        header_card.set_margin_start(16)
+        header_card.set_margin_end(16)
+        header_card.set_margin_top(10)
+        header_card.set_margin_bottom(6)
         header_card.add_css_class("card")
+
+        # Date title placed cleanly at top of schedule
+        self.date_title = Gtk.Label(label="Today")
+        self.date_title.add_css_class("title-3")
+        self.date_title.set_margin_top(8)
+        self.date_title.set_halign(Gtk.Align.CENTER)
+        header_card.append(self.date_title)
 
         # Solar Arc drawing
         self.solar_arc = SolarArcWidget(self.day_plan)
@@ -63,12 +69,12 @@ class DayView(Gtk.Box):
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         clamp = Adw.Clamp()
-        clamp.set_maximum_size(700)
-        clamp.set_tightening_threshold(500)
+        clamp.set_maximum_size(750)
+        clamp.set_tightening_threshold(550)
 
         self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.list_box.set_margin_top(6)
-        self.list_box.set_margin_bottom(18)
+        self.list_box.set_margin_bottom(24)
         self.list_box.set_margin_start(12)
         self.list_box.set_margin_end(12)
 
@@ -80,20 +86,69 @@ class DayView(Gtk.Box):
         self.day_plan = day_plan
         self.solar_arc.set_day_plan(day_plan)
 
-        # Update badges
+        # Update date title
+        today = date.today()
+        target = day_plan.target_date
+        if target == today:
+            date_str = f"Today — {target.strftime('%A, %B %d')}"
+        elif target == today - timedelta(days=1):
+            date_str = f"Yesterday — {target.strftime('%A, %B %d')}"
+        elif target == today + timedelta(days=1):
+            date_str = f"Tomorrow — {target.strftime('%A, %B %d')}"
+        else:
+            date_str = target.strftime("%A, %B %d, %Y")
+        self.date_title.set_text(date_str)
+
+        # Update tallies badges
         self.daylight_pill.set_text(f"☼ Daylight: {day_plan.daylight_available_count} Thirties")
         self.dark_pill.set_text(f"☾ Dark: {day_plan.dark_available_count} Thirties")
 
         # Clear existing list items
         while child := self.list_box.get_first_child():
             self.list_box.remove(child)
-        self.block_widgets.clear()
 
         now = datetime.now(day_plan.sunrise.tzinfo)
+        now_idx = -1
+        for b in day_plan.blocks:
+            if b.start_dt <= now < b.end_dt:
+                now_idx = b.index
+                break
 
-        # Populate 48 blocks
-        for block in day_plan.blocks:
-            is_current = (block.start_dt <= now < block.end_dt)
-            widget = BlockWidget(block, is_current=is_current)
-            self.block_widgets.append(widget)
-            self.list_box.append(widget)
+        # Natural Day Flow: Start day at sunrise
+        sunrise_idx = next((b.index for b in day_plan.blocks if b.is_sunlight), 14)
+
+        ordered_blocks: list[ThirtyBlock] = [
+            day_plan.get_block((sunrise_idx + i) % 48) for i in range(48)
+        ]
+
+        # Group contiguous locked Sleep and Work blocks
+        current_run: list[ThirtyBlock] = []
+        current_kind: BlockKind | None = None
+
+        def flush_run():
+            nonlocal current_run, current_kind
+            if not current_run:
+                return
+            if current_kind in (BlockKind.SLEEP, BlockKind.WORK) and len(current_run) > 1:
+                self.list_box.append(GroupedBlockWidget(current_run, now_block_idx=now_idx))
+            else:
+                for b in current_run:
+                    self.list_box.append(BlockWidget(b, is_current=(b.index == now_idx)))
+            current_run = []
+            current_kind = None
+
+        for block in ordered_blocks:
+            is_collapsible = block.is_locked and block.kind in (BlockKind.SLEEP, BlockKind.WORK)
+
+            if is_collapsible:
+                if current_kind == block.kind:
+                    current_run.append(block)
+                else:
+                    flush_run()
+                    current_kind = block.kind
+                    current_run = [block]
+            else:
+                flush_run()
+                self.list_box.append(BlockWidget(block, is_current=(block.index == now_idx)))
+
+        flush_run()

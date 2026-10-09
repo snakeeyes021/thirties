@@ -1,8 +1,7 @@
-"""Block widget representing a discrete 30-minute Thirty block in GTK 4."""
+"""Block widgets representing discrete and collapsed Thirty blocks in GTK 4."""
 
 from __future__ import annotations
 
-from datetime import datetime
 from gi.repository import Gtk, Adw, Pango
 
 from thirties_core.models import BlockKind, ThirtyBlock
@@ -108,9 +107,9 @@ class BlockWidget(Gtk.Box):
         elif kind == BlockKind.WORK:
             return "Work"
         elif kind == BlockKind.DAYLIGHT_DISCRETIONARY:
-            return "Daylight Discretionary"
+            return "Open Daylight Thirty"
         elif kind == BlockKind.DARK_DISCRETIONARY:
-            return "Dark Discretionary"
+            return "Open Dark Thirty"
         elif kind == BlockKind.ASSIGNED:
             return "Assigned Task"
         elif kind == BlockKind.AMBIGUOUS_CALENDAR:
@@ -146,3 +145,97 @@ class BlockWidget(Gtk.Box):
 
         if self.is_current:
             self.add_css_class("block-current")
+
+
+class GroupedBlockWidget(Gtk.Box):
+    """Consolidated card for contiguous locked blocks (Sleep or Work) with optional drilldown."""
+
+    def __init__(self, blocks: list[ThirtyBlock], now_block_idx: int = -1) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.blocks = blocks
+        self.kind = blocks[0].kind
+        self.now_block_idx = now_block_idx
+
+        self.set_margin_start(8)
+        self.set_margin_end(8)
+        self.set_margin_top(4)
+        self.set_margin_bottom(4)
+
+        self.add_css_class("card")
+        self.add_css_class("block-grouped")
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        # Header Row
+        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        header_row.set_margin_start(12)
+        header_row.set_margin_end(12)
+        header_row.set_margin_top(10)
+        header_row.set_margin_bottom(10)
+
+        # 1. Block Count Pill
+        count_pill = Gtk.Label(label=f"{len(self.blocks)} Thirties")
+        count_pill.add_css_class("caption")
+        count_pill.add_css_class("dim-label")
+        count_pill.set_size_request(80, -1)
+        count_pill.set_xalign(0.0)
+        header_row.append(count_pill)
+
+        # 2. Icon
+        icon_name = "night-light-symbolic" if self.kind == BlockKind.SLEEP else "view-grid-symbolic"
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_pixel_size(20)
+        header_row.append(icon)
+
+        # 3. Title & Range Description
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title_box.set_hexpand(True)
+
+        title_text = "Sleep Window" if self.kind == BlockKind.SLEEP else "Work Schedule"
+        title_lbl = Gtk.Label(label=title_text)
+        title_lbl.add_css_class("heading")
+        title_lbl.set_xalign(0.0)
+
+        start_str = self.blocks[0].start_dt.strftime("%I:%M %p").lstrip("0")
+        end_str = self.blocks[-1].end_dt.strftime("%I:%M %p").lstrip("0")
+        total_hours = len(self.blocks) * 0.5
+        range_lbl = Gtk.Label(label=f"{start_str} – {end_str} ({total_hours:.1f} hours)")
+        range_lbl.add_css_class("caption")
+        range_lbl.add_css_class("dim-label")
+        range_lbl.set_xalign(0.0)
+
+        title_box.append(title_lbl)
+        title_box.append(range_lbl)
+        header_row.append(title_box)
+
+        # 4. Expand / Collapse Button
+        self.toggle_btn = Gtk.Button(icon_name="pan-down-symbolic")
+        self.toggle_btn.add_css_class("flat")
+        self.toggle_btn.set_tooltip_text("Expand individual thirties")
+        self.toggle_btn.connect("clicked", self._on_toggle)
+        header_row.append(self.toggle_btn)
+
+        self.append(header_row)
+
+        # 5. Collapsible Revealer containing individual pills
+        self.revealer = Gtk.Revealer()
+        self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.revealer.set_reveal_child(False)
+
+        sub_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        sub_list.set_margin_start(16)
+        sub_list.set_margin_end(8)
+        sub_list.set_margin_bottom(8)
+
+        for b in self.blocks:
+            is_cur = (b.index == self.now_block_idx)
+            sub_list.append(BlockWidget(b, is_current=is_cur))
+
+        self.revealer.set_child(sub_list)
+        self.append(self.revealer)
+
+    def _on_toggle(self, _btn: Gtk.Button) -> None:
+        is_revealed = self.revealer.get_reveal_child()
+        self.revealer.set_reveal_child(not is_revealed)
+        self.toggle_btn.set_icon_name("pan-up-symbolic" if not is_revealed else "pan-down-symbolic")

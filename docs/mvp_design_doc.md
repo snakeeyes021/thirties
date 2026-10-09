@@ -1,10 +1,10 @@
-# Software Design Document: `30s` (Diurnal Natural Time Scheduler)
+# Software Design Document: `30s` (Natural Time Scheduler)
 
 ---
 
 ## 1. System Overview & Core Philosophy
 
-**`30s`** is a personal scheduling and time-awareness application engineered around diurnal cycles and discrete half-hour human cognitive intervals ("Thirties"). Modern time management frequently suffers from false precision: minute-by-minute calendar tetris increases cognitive friction and fails as soon as a single task slips.
+**`30s`** is a personal scheduling and time-awareness application engineered around natural solar cycles and discrete half-hour human cognitive intervals ("Thirties"). Modern time management frequently suffers from false precision: minute-by-minute calendar tetris increases cognitive friction and fails as soon as a single task slips.
 
 `30s` organizes the day into **48 discrete Thirty-Minute blocks (0 to 47)** anchored against local astronomical solar events (sunrise, sunset, twilight). The system differentiates between:
 
@@ -502,7 +502,7 @@ When engaging the user, the model has access to explicit tools:
 ### 6.3 System Prompt Blueprint
 
 ```text
-You are the 30s Diurnal Planning Agent. You organize the user's day into 48 discrete 30-minute intervals (0-47).
+You are the 30s Planning Agent. You organize the user's day into 48 discrete 30-minute intervals (0-47).
 You do not speak in granular minutes or seconds. You speak exclusively in units of "Thirties", Daylight Thirties, and Dark Thirties.
 
 CURRENT ASTRONOMICAL CONTEXT:
@@ -534,58 +534,40 @@ BEHAVIOR RULES:
 
 ## 7. GNOME HIG Desktop Application (`thirties_gtk`)
 
-The UI is built with **PyGObject** targeting **GTK 4** and **Libadwaita 1.5+**.
+The UI is built with **PyGObject** targeting **GTK 4** and **Libadwaita 1.5+**, adhering closely to GNOME Human Interface Guidelines (HIG).
 
-### 7.1 Visual Layout & Components
+### 7.1 Core Layout: View Switcher Architecture (Pattern A)
+
+Rather than cluttering the screen with a persistent, cramped right sidebar, Thirties employs an `AdwViewSwitcher` in the header bar with two focused, distraction-free views:
+1. **Schedule View**: A spacious, uncluttered presentation of the Solar Arc and daily blocks.
+2. **Assistant View**: A dedicated, full-height conversational stream for negotiating the day.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 30s                                                        —  □  ✕          │
-├─────────────────────────────────────┬───────────────────────────────────────┤
-│          Diurnal Arc & Timeline     │         Agent Planning Chat           │
-├─────────────────────────────────────┼───────────────────────────────────────┤
-│                                     │                                       │
-│        ☼ Daylight (14 Thirties)     │  Agent: Good morning! You finish work │
-│  ┌────────────────────────────────┐ │  at block 31 (3:30 PM). That leaves   │
-│  │ 22 [11:00 AM] Work             │ │  2 Daylight Thirties and 8 Dark       │
-│  │ 23 [11:30 AM] Work             │ │  Thirties before sleep.               │
-│  │ 24 [12:00 PM] Lunch Break      │ │                                       │
-│  │ ...                            │ │  Rachel has "Doctor Appointment" at   │
-│  │ 31 [03:30 PM] Work Ends        │ │  11:30 AM. Are you attending?        │
-│  │ 32 [04:00 PM] [Dorico Compose] │ │                                       │
-│  │ 33 [04:30 PM] [Dorico Compose] │ │  User: No, skipping that. Let's make  │
-│  └────────────────────────────────┘ │  tonight light, focusing on creative. │
-│                                     │                                       │
-│        ☾ Dark (10 Thirties)         │  Agent: Done. I allocated blocks 32-33│
-│  ┌────────────────────────────────┐ │  to Dorico, and left evening dark     │
-│  │ 34 [05:00 PM] Free / Dinner    │ │  thirties open for reading.           │
-│  │ 35 [05:30 PM] Free             │ │                                       │
-│  │ ...                            │ │                                       │
-│  │ 46 [11:00 PM] Sleep            │ │                                       │
-│  └────────────────────────────────┘ │                                       │
-│                                     │                                       │
-├─────────────────────────────────────┴───────────────────────────────────────┤
-│ [ Input message...                                                ] [ Send ]│
+│ [<] Today (Oct 08) [>]       [  Schedule  |  Assistant  ]                ⚙  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│                        ☼ Solar Arc & Trajectory                             │
+│                  ☼ Sunrise: 7:10 AM  •  ☾ Sunset: 6:41 PM                   │
+│                    [ Daylight: 14 ]   [ Dark: 10 ]                          │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ [16 Thirties] 11:00 PM – 07:00 AM • Sleep (8.0 hrs) [▼ Collapsed]     │  │
+│  │ 14 [07:00 AM] Open Daylight Thirty                                    │  │
+│  │ ...                                                                   │  │
+│  │ [15 Thirties] 08:30 AM – 03:30 PM • Work (7.5 hrs)  [▼ Collapsed]     │  │
+│  │ 32 [04:00 PM] Dorico Compose                                          │  │
+│  │ ...                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-
 ```
 
-1. **Header Bar**: Standard `AdwHeaderBar` with view switchers and date navigation.
-2. **Main View (`AdwNavigationSplitView`)**:
-* **Left Panel (Content Area)**:
-* **Solar Arc (`solar_arc.py`)**: Custom Cairo-drawn or CSS-styled arc displaying the sun's trajectory with current time position.
-* **Block Matrix (`day_view.py`)**: Scrollable list of 48 discrete pills (`block_widget.py`).
-* Golden/Amber accent for Daylight blocks.
-* Deep Indigo/Slate accent for Dark blocks.
-* Striated fill for Work/Sleep locked blocks.
-* Clear label displaying assigned task.
-
-
-
-
-* **Right Panel (Sidebar)**:
-* Interactive conversational stream (`chat_panel.py`).
-* Renders message bubbles, quick confirmation pills (e.g., `[Yes, Attending]`, `[Decline]`), and plan finalization triggers.
+### 7.2 Broad Brushstrokes & Collapsed Locked Chunks
+The app prioritizes big time, broad brushstrokes, and low cognitive noise:
+* Contiguous locked blocks (e.g., 16 sleep blocks from 11 PM to 7 AM, or 15 work blocks from 8:30 AM to 3:30 PM) are automatically grouped into single consolidated overview cards displaying total duration and interval ranges.
+* Clicking a grouped card expands/collapses the underlying discrete 30-minute intervals.
+* Discretionary blocks and active tasks stand out prominently as individual units of opportunity.
 
 
 

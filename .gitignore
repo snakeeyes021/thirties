@@ -24,3 +24,6 @@ _build/
 subprojects/
 .flatpak-builder/
 _flatpak_build/
+
+.venv/
+venv/
