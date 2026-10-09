@@ -271,8 +271,8 @@ class ChatPanel(Gtk.Box):
 
         greeting = (
             f"Good day! You are planning {day_prefix}.\n"
-            f"You have {plan.daylight_available_count} Daylight Thirties "
-            f"and {plan.dark_available_count} Dark Thirties available.\n\n"
+            f"You have {plan.daylight_available_count}/{plan.daylight_discretionary_total} Daylight Thirties "
+            f"and {plan.dark_available_count}/{plan.dark_discretionary_total} Dark Thirties available.\n\n"
         )
         if ambiguous:
             ev = ambiguous[0]

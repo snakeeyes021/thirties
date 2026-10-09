@@ -190,7 +190,7 @@ class TestConversation(unittest.TestCase):
 
         # Now reinstate work blocks
         out = self.manager.execute_tool("reinstate_work_blocks", {})
-        self.assertIn("Reinstated", out)
+        self.assertIn("Work is now scheduled", out)
         work_restored = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
         self.assertGreater(len(work_restored), 0)
         self.assertEqual(work_restored[0].label, "Work")
@@ -231,7 +231,7 @@ class TestConversation(unittest.TestCase):
         self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
         # Set custom work hours from 7am to 3pm
         out = self.manager.execute_tool("reinstate_work_blocks", {"start_time": "7am", "end_time": "3pm"})
-        self.assertIn("blocks 1 through 16", out)
+        self.assertIn("Blocks 1–16", out)
         for idx in range(1, 17):
             b = self.plan.get_logical_block(idx)
             self.assertEqual(b.kind, BlockKind.WORK)
@@ -250,3 +250,17 @@ class TestConversation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_user_message_sets_custom_work_hours(self) -> None:
+        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
+        reply = self.manager.send_user_message("Oh shoot, turns out work today is from 7am to 3pm.")
+        self.assertIn("Blocks 1–16", reply)
+        self.assertIn("7:00 AM", reply)
+        self.assertIn("3:00 PM", reply)
+        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
+        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
+
+    def test_discretionary_totals(self) -> None:
+        # Check discretionary totals
+        self.assertGreater(self.plan.daylight_discretionary_total, 0)
+        self.assertGreater(self.plan.dark_discretionary_total, 0)

@@ -21,6 +21,23 @@ from thirties_core.config import InferenceConfig, ThirtiesConfig
 logger = logging.getLogger(__name__)
 
 
+def get_host_home() -> Path:
+    """Discover host home directory, working inside or outside Flatpak sandbox."""
+    if shutil.which("flatpak-spawn"):
+        try:
+            res = subprocess.run(
+                ["flatpak-spawn", "--host", "printenv", "HOME"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                return Path(res.stdout.strip())
+        except Exception:
+            pass
+    return Path.home()
+
+
 class InferenceEngine(Protocol):
     """Protocol for LLM inference backends."""
 
@@ -54,14 +71,20 @@ class LiteRTInferenceEngine:
 
     def _find_model_path(self) -> Optional[Path]:
         """Check standard paths for available Gemma .litertlm models."""
-        username = os.environ.get("USER", "matt")
+        host_home = get_host_home()
         base_dirs = [
             Path.home() / ".local" / "share" / "thirties" / "models",
-            Path(f"/var/home/{username}/.local/share/thirties/models"),
-            Path(f"/home/{username}/.local/share/thirties/models"),
-            Path("/var/home/matt/.local/share/thirties/models"),
-            Path("/home/matt/.local/share/thirties/models"),
+            host_home / ".local" / "share" / "thirties" / "models",
         ]
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            base_dirs.insert(0, Path(xdg_data) / "thirties" / "models")
+        for h in (Path.home(), host_home):
+            if str(h).startswith("/home/"):
+                base_dirs.append(Path("/var") / h.relative_to("/") / ".local" / "share" / "thirties" / "models")
+            elif str(h).startswith("/var/home/"):
+                base_dirs.append(Path("/home") / h.relative_to("/var/home") / ".local" / "share" / "thirties" / "models")
+
         candidates = [Path(os.path.expanduser(self.inf_cfg.litert_model_path))]
         for b in base_dirs:
             candidates.extend([
@@ -77,19 +100,31 @@ class LiteRTInferenceEngine:
 
     def _find_host_runner(self) -> Optional[Dict[str, str]]:
         """Find host python interpreter and runner script for host GPU execution."""
-        username = os.environ.get("USER", "matt")
+        host_home = get_host_home()
+        repo_root = Path(__file__).resolve().parent.parent
+
         python_candidates = [
-            f"/var/home/{username}/dev/Thirties/.venv/bin/python",
-            f"/home/{username}/dev/Thirties/.venv/bin/python",
-            "/var/home/matt/dev/Thirties/.venv/bin/python",
-            "/home/matt/dev/Thirties/.venv/bin/python",
+            str(repo_root / ".venv" / "bin" / "python"),
+            str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
+            str(Path.home() / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
+            str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
         ]
         script_candidates = [
-            f"/var/home/{username}/dev/Thirties/thirties_core/runner.py",
-            f"/home/{username}/dev/Thirties/thirties_core/runner.py",
-            "/var/home/matt/dev/Thirties/thirties_core/runner.py",
-            "/home/matt/dev/Thirties/thirties_core/runner.py",
+            str(repo_root / "thirties_core" / "runner.py"),
+            str(host_home / ".local" / "share" / "thirties" / "runner.py"),
+            str(Path.home() / ".local" / "share" / "thirties" / "runner.py"),
+            str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
         ]
+        for h in (Path.home(), host_home):
+            if str(h).startswith("/home/"):
+                alt = Path("/var") / h.relative_to("/")
+            elif str(h).startswith("/var/home/"):
+                alt = Path("/home") / h.relative_to("/var/home")
+            else:
+                alt = None
+            if alt:
+                python_candidates.append(str(alt / "dev" / "Thirties" / ".venv" / "bin" / "python"))
+                script_candidates.append(str(alt / "dev" / "Thirties" / "thirties_core" / "runner.py"))
 
         found_python: Optional[str] = None
         for py in python_candidates:
@@ -294,11 +329,11 @@ class LiteRTInferenceEngine:
         # Fallback to User Intent Extraction if model did not emit directives:
         if not tool_calls:
             # Intent: Day off / Clear all work blocks
-            # Intent: Reinstate work blocks (supporting custom work hours like 7am to 3pm)
-            if re.search(r"(?:reinstate|restore|put (?:them )?back|add back|turns out I (?:do )?have work|do have work)", last_user_msg, re.IGNORECASE):
+            # Intent: Reinstate or set work blocks (supporting custom work hours like 7am to 3pm)
+            if re.search(r"(?:work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|do have work)", last_user_msg, re.IGNORECASE):
                 reinstate_args: dict[str, Any] = {}
                 # Check for explicit start and end times
-                time_range_match = re.search(r"(?:started at|from|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
+                time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
                 if time_range_match:
                     reinstate_args["start_time"] = time_range_match.group(1).strip()
                     reinstate_args["end_time"] = time_range_match.group(2).strip()

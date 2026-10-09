@@ -167,6 +167,16 @@ class DayPlan:
                     return self.get_logical_index(b)
         return None
 
+    @property
+    def daylight_discretionary_total(self) -> int:
+        """Total daylight blocks not occupied by work or sleep."""
+        return sum(1 for b in self.blocks if b.is_sunlight and b.kind not in (BlockKind.WORK, BlockKind.SLEEP))
+
+    @property
+    def dark_discretionary_total(self) -> int:
+        """Total dark blocks not occupied by work or sleep."""
+        return sum(1 for b in self.blocks if not b.is_sunlight and b.kind not in (BlockKind.WORK, BlockKind.SLEEP))
+
     def recalculate_counts(self) -> None:
         """Deterministically tally available discretionary blocks."""
         daylight = 0

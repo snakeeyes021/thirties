@@ -8,16 +8,23 @@ from pathlib import Path
 
 
 def find_model() -> str:
-    username = os.environ.get("USER", "matt")
-    candidates = [
-        Path(f"/var/home/{username}/.local/share/thirties/models/gemma-4-E4B-it-gpu.litertlm"),
-        Path(f"/var/home/{username}/.local/share/thirties/models/gemma-4-e4b.litertlm"),
-        Path.home() / ".local" / "share" / "thirties" / "models" / "gemma-4-E4B-it-gpu.litertlm",
-        Path.home() / ".local" / "share" / "thirties" / "models" / "gemma-4-e4b.litertlm",
+    home = Path.home()
+    base_dirs = [
+        home / ".local" / "share" / "thirties" / "models",
     ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    if xdg_data:
+        base_dirs.insert(0, Path(xdg_data) / "thirties" / "models")
+    if str(home).startswith("/home/"):
+        base_dirs.append(Path("/var") / home.relative_to("/") / ".local" / "share" / "thirties" / "models")
+    elif str(home).startswith("/var/home/"):
+        base_dirs.append(Path("/home") / home.relative_to("/var/home") / ".local" / "share" / "thirties" / "models")
+
+    for b in base_dirs:
+        for name in ("gemma-4-E4B-it-gpu.litertlm", "gemma-4-e4b.litertlm", "gemma-4-e2b.litertlm", "gemma-4-E4B-it.litertlm"):
+            candidate = b / name
+            if candidate.is_file():
+                return str(candidate)
     return ""
 
 

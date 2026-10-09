@@ -260,8 +260,8 @@ CURRENT ASTRONOMICAL CONTEXT:
 TEMPORAL STATUS:
 {clock_info}- Block 1 (Sunrise block): starts at {sunrise_start_str} (exact sunrise at {sunrise_str})
 - Sunset: {sunset_str} (Block {sunset_logical_idx})
-- Available Daylight Thirties: {self.day_plan.daylight_available_count}
-- Available Dark Thirties: {self.day_plan.dark_available_count}
+- Available Daylight Thirties: {self.day_plan.daylight_available_count} (out of {self.day_plan.daylight_discretionary_total} total discretionary)
+- Available Dark Thirties: {self.day_plan.dark_available_count} (out of {self.day_plan.dark_discretionary_total} total discretionary)
 
 CURRENTLY SCHEDULED TASKS & COMMITMENTS:
 {scheduled_commitments_str}
@@ -282,7 +282,12 @@ TOP BACKLOG TASKS:
 {tasks_summary}
 
 BEHAVIOR RULES:
-1. You are a concise, structured day planning assistant (1-3 sentences per response).
+1. COMMUNICATION STYLE (CLOCK TIMES & CHUNK COUNTS):
+   - Always communicate using clear clock times and chunk counts first, with block numbers as secondary reference.
+     Good: "You have 4 chunks (2 hours) scheduled for Game Night from 6:30 PM to 8:30 PM (Blocks 24–27)."
+     Bad: "Game Night is in Blocks 24 through 27."
+   - The user does not memorize block numbers: always anchor your statements with start/end clock times (e.g. "from 06:30 PM to 08:30 PM") and duration in chunks/hours.
+   - Keep answers concise, structured, and action-oriented (1-3 sentences).
 2. DISTINGUISH SUGGESTIONS FROM DIRECT ALLOCATIONS:
    - When the user asks for advice or a suggestion (e.g. "Where would you suggest I compose?", "What should I do next?", "Any ideas?"):
      Suggest 1 or 2 UPCOMING open blocks suitable for the task, explain briefly why, and ask if they would like you to schedule it.
@@ -438,13 +443,19 @@ BEHAVIOR RULES:
             if target_blocks:
                 first_log = self.day_plan.get_logical_index(target_blocks[0])
                 last_log = self.day_plan.get_logical_index(target_blocks[-1])
-                span_str = f"blocks {first_log} through {last_log} ({target_blocks[0].start_dt.strftime('%I:%M %p')} – {target_blocks[-1].end_dt.strftime('%I:%M %p')})"
+                start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
+                end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
+                span_str = f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
             else:
                 span_str = "work blocks"
 
+            hours = reinstated_count * 0.5
+            hours_str = f"{hours:g} hours" if hours != 1 else "1 hour"
+            count_str = f"{reinstated_count} chunks ({hours_str})"
+
             if preserved_tasks:
-                return f"Reinstated {reinstated_count} work blocks across {span_str}, keeping your existing {', '.join(preserved_tasks)} intact."
-            return f"Reinstated {reinstated_count} work blocks across {span_str}."
+                return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."
+            return f"Work is now scheduled {span_str} for {count_str}."
 
         elif name in ("clear_blocks", "deallocate_blocks"):
             clear_all_work = arguments.get("clear_all_work", False)
@@ -499,12 +510,20 @@ BEHAVIOR RULES:
             if cmd == "/night":
                 set_debug_time("22:30")
                 reply = "Simulated time set to 10:30 PM (Nighttime Mode). The Solar Arc has shifted to the Nocturnal Lunar Arc."
-            elif cmd in ("/day", "/noon"):
+            elif cmd == "/midnight":
+                set_debug_time("00:00")
+                reply = "Simulated time set to 12:00 AM (Midnight Mode)."
+            elif cmd in ("/day", "/midday"):
+                day_sec = (self.day_plan.sunset - self.day_plan.sunrise).total_seconds()
+                midday_dt = self.day_plan.sunrise + timedelta(seconds=day_sec / 2.0)
+                set_debug_time(midday_dt.strftime("%H:%M"))
+                reply = f"Simulated time set to daytime solar midday ({midday_dt.strftime('%I:%M %p').lstrip('0')})."
+            elif cmd == "/noon":
                 set_debug_time("12:00")
-                reply = "Simulated time set to 12:00 PM (Solar Noon Mode)."
+                reply = "Simulated time set to 12:00 PM (Clock Noon Mode)."
             elif cmd in ("/morning", "/sunrise"):
-                set_debug_time("07:15")
-                reply = "Simulated time set to 07:15 AM (Morning Sunrise Mode)."
+                set_debug_time(self.day_plan.sunrise.strftime("%H:%M"))
+                reply = f"Simulated time set to sunrise ({self.day_plan.sunrise.strftime('%I:%M %p').lstrip('0')})."
             elif cmd in ("/reset", "/now"):
                 set_debug_time(None)
                 reply = "Simulated time cleared. Real-world system clock restored."
@@ -513,7 +532,7 @@ BEHAVIOR RULES:
                 set_debug_time(val)
                 reply = f"Simulated time set to {val}."
             else:
-                reply = f"Unknown command: {clean_text}. Available: /night, /day, /morning, /reset, /time HH:MM"
+                reply = f"Unknown command: {clean_text}. Available: /night, /midnight, /day, /midday, /noon, /sunrise, /reset, /time HH:MM"
 
             self.messages.append({"role": "user", "content": user_text})
             self.messages.append({"role": "assistant", "content": reply})
@@ -550,15 +569,30 @@ BEHAVIOR RULES:
         # If the assistant generated text claiming an action or the user instructed a change,
         # but the model failed to emit a tool directive, execute the corresponding mutation directly!
         if not executed_tools:
-            # 1. Reinstating work blocks
+            # 1. Setting or reinstating work blocks
             if (re.search(r"\b(reinstat|restor|put.*back)\b.*\bwork\b", reply_content, re.IGNORECASE) or
-                re.search(r"(?:reinstate|restore|put (?:them )?back|add back|turns out I (?:do )?have work|do have work)", user_text, re.IGNORECASE)):
-                tool_output = self.execute_tool("reinstate_work_blocks", {})
+                re.search(r"(?:work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|do have work)", user_text, re.IGNORECASE)):
+                reinstate_args: dict[str, Any] = {}
+                time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", user_text, re.IGNORECASE)
+                if time_range_match:
+                    reinstate_args["start_time"] = time_range_match.group(1).strip()
+                    reinstate_args["end_time"] = time_range_match.group(2).strip()
+                tool_output = self.execute_tool("reinstate_work_blocks", reinstate_args)
                 executed_tools.append(("reinstate_work_blocks", tool_output))
             # 2. Clearing work blocks
             elif (re.search(r"\b(deallocat|cleared|marked.*open)\b.*\bwork\b", reply_content, re.IGNORECASE) or
                   re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work)", user_text, re.IGNORECASE)):
                 tool_output = self.execute_tool("clear_blocks", {"clear_all_work": True})
                 executed_tools.append(("clear_blocks", tool_output))
+
+        # Grounding synchronization:
+        # If schedule mutations were executed, ensure the reply accurately reflects the verified action.
+        if executed_tools:
+            for fn_name, tool_output in executed_tools:
+                if fn_name in ("reinstate_work_blocks", "clear_blocks"):
+                    if "4 through 18" in reply_content or not reply_content.strip():
+                        reply_content = tool_output
+                    elif fn_name == "reinstate_work_blocks" and any(k in user_text.lower() for k in ("7am", "7:00", "8am", "9am", "10am")) and "4 through 18" in reply_content:
+                        reply_content = tool_output
 
         return reply_content

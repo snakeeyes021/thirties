@@ -38,8 +38,8 @@
             "buildsystem" : "meson",
             "sources" : [
                 {
-                    "type" : "git",
-                    "url" : "file:///home/matt/dev"
+                    "type" : "dir",
+                    "path" : "."
                 }
             ]
         }

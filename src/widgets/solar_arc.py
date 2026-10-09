@@ -139,30 +139,42 @@ class SolarArcWidget(Gtk.DrawingArea):
                 cr.arc(moon_x, moon_y, 14.0, 0, 2 * math.pi)
                 cr.fill()
 
-                # Core moon disc
-                cr.set_source_rgba(0.90, 0.95, 1.0, 0.95)
-                cr.arc(moon_x, moon_y, 7.0, 0, 2 * math.pi)
-                cr.fill()
+                # Single Moon Phase Glyph centered directly on the trajectory!
+                phase_glyph, _ = get_moon_phase(now)
+                cr.set_font_size(16.0)
+                m_ext = cr.text_extents(phase_glyph)
+                cr.move_to(moon_x - m_ext.width / 2.0, moon_y + m_ext.height / 2.0)
+                cr.show_text(phase_glyph)
 
-        # 4. Labels for Sunrise, Sunset, and Midday/Midnight
-        cr.set_source_rgba(0.7, 0.7, 0.7, 0.9)
-
-        sunrise_text = f"☼ {sunrise.strftime('%I:%M %p').lstrip('0')}"
+        # 4. Labels for Horizon bounds and Apex (Midday / Midnight)
+        cr.set_source_rgba(0.75, 0.75, 0.75, 0.9)
         cr.set_font_size(11.0)
-        cr.move_to(margin_x, horizon_y + 18)
-        cr.show_text(sunrise_text)
-
-        sunset_text = f"☾ {sunset.strftime('%I:%M %p').lstrip('0')}"
-        cr.move_to(width - margin_x - 65, horizon_y + 18)
-        cr.show_text(sunset_text)
 
         if is_night:
-            phase_glyph, _ = get_moon_phase(now)
-            cr.set_font_size(15.0)
-            cr.move_to(center_x - 8, peak_y - 8)
-            cr.show_text(phase_glyph)
+            if now > sunset:
+                left_time = sunset
+                right_time = sunrise + timedelta(days=1)
+            else:
+                left_time = sunset - timedelta(days=1)
+                right_time = sunrise
+            left_text = f"☾ {left_time.strftime('%I:%M %p').lstrip('0')}"
+            right_text = f"☼ {right_time.strftime('%I:%M %p').lstrip('0')}"
+            center_text = "Midnight"
         else:
-            cr.set_font_size(11.0)
-            noon_text = "Noon"
-            cr.move_to(center_x - 14, peak_y - 8)
-            cr.show_text(noon_text)
+            left_text = f"☼ {sunrise.strftime('%I:%M %p').lstrip('0')}"
+            right_text = f"☾ {sunset.strftime('%I:%M %p').lstrip('0')}"
+            center_text = "Midday"
+
+        # Left label
+        cr.move_to(margin_x, horizon_y + 18)
+        cr.show_text(left_text)
+
+        # Right label (dynamically right-aligned)
+        r_ext = cr.text_extents(right_text)
+        cr.move_to(width - margin_x - r_ext.width, horizon_y + 18)
+        cr.show_text(right_text)
+
+        # Apex label (dynamically centered at top)
+        c_ext = cr.text_extents(center_text)
+        cr.move_to(center_x - c_ext.width / 2.0, peak_y - 8)
+        cr.show_text(center_text)

@@ -100,12 +100,9 @@ class DayView(Gtk.Box):
             date_str = target.strftime("%A, %B %d, %Y")
         self.date_title.set_text(date_str)
 
-        total_daylight = sum(1 for b in day_plan.blocks if b.is_sunlight)
-        total_dark = sum(1 for b in day_plan.blocks if not b.is_sunlight)
-
-        # Update tallies badges (Available / Total)
-        self.daylight_pill.set_text(f"☼ Daylight: {day_plan.daylight_available_count}/{total_daylight} Available")
-        self.dark_pill.set_text(f"☾ Dark: {day_plan.dark_available_count}/{total_dark} Available")
+        # Update tallies badges (Available / Total Discretionary)
+        self.daylight_pill.set_text(f"☼ Daylight: {day_plan.daylight_available_count}/{day_plan.daylight_discretionary_total} Available")
+        self.dark_pill.set_text(f"☾ Dark: {day_plan.dark_available_count}/{day_plan.dark_discretionary_total} Available")
 
         # Clear existing list items
         while child := self.list_box.get_first_child():
