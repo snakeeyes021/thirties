@@ -218,10 +218,11 @@ class LiteRTInferenceEngine:
                 return {"role": "assistant", "content": f"Inference notice: {e}", "tool_calls": []}
         elif host_runner:
             cmd: List[str] = []
+            msg_json = json.dumps(messages)
             if shutil.which("flatpak-spawn") and (os.environ.get("FLATPAK_ID") or not os.path.exists(host_runner["python"])):
-                cmd = ["flatpak-spawn", "--host", host_runner["python"], host_runner["script"], "--prompt", last_user_msg]
+                cmd = ["flatpak-spawn", "--host", host_runner["python"], host_runner["script"], "--messages", msg_json]
             else:
-                cmd = [host_runner["python"], host_runner["script"], "--prompt", last_user_msg]
+                cmd = [host_runner["python"], host_runner["script"], "--messages", msg_json]
 
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -240,6 +241,18 @@ class LiteRTInferenceEngine:
 
         # Parse potential intent/tool calls from user prompt or model text
         tool_calls: List[Dict[str, Any]] = []
+
+        # Structured directive from model output: ALLOCATE_BLOCK: <idx> | <label>
+        alloc_dir = re.search(r"ALLOCATE_BLOCK:\s*(\d{1,2})\s*\|\s*(.+)", raw_reply, re.IGNORECASE)
+        if alloc_dir:
+            b_idx = int(alloc_dir.group(1))
+            lbl = alloc_dir.group(2).strip()
+            tool_calls.append({
+                "id": "alloc_call",
+                "name": "allocate_thirty_block",
+                "arguments": {"block_index": b_idx, "custom_label": lbl},
+            })
+            raw_reply = re.sub(r"ALLOCATE_BLOCK:\s*\d{1,2}\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
         # Intent: allocate block index (e.g. "allocate 32 to Dorico" or "put Dorico at 32")
         alloc_match = re.search(r"(?:allocate|put|assign|schedule|set)\s+(?:block\s+)?(\d{1,2})\s+(?:to|for|with)\s+(.+)", last_user_msg, re.IGNORECASE)

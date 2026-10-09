@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 import threading
-from gi.repository import Gtk, Adw, Pango, GLib
+from gi.repository import Gtk, Adw, Pango, GLib, Gdk
 
 from thirties_core.conversation import ConversationManager
 from thirties_core.models import DayPlan
@@ -31,13 +31,31 @@ class ChatMessageWidget(Gtk.Box):
 
         if self.role == "user":
             bubble_box.set_halign(Gtk.Align.END)
+            user_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            user_col.set_halign(Gtk.Align.END)
+
             label = Gtk.Label(label=self.text)
+            label.set_selectable(True)
             label.set_wrap(True)
             label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(40)
+            label.set_max_width_chars(44)
             label.set_xalign(1.0)
             label.add_css_class("chat-bubble-user")
-            bubble_box.append(label)
+            user_col.append(label)
+
+            action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            action_row.set_halign(Gtk.Align.END)
+            action_row.set_margin_top(2)
+
+            copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+            copy_btn.add_css_class("flat")
+            copy_btn.add_css_class("circular")
+            copy_btn.set_tooltip_text("Copy message")
+            copy_btn.connect("clicked", self._on_copy_clicked)
+            action_row.append(copy_btn)
+
+            user_col.append(action_row)
+            bubble_box.append(user_col)
         else:
             bubble_box.set_halign(Gtk.Align.START)
 
@@ -47,39 +65,62 @@ class ChatMessageWidget(Gtk.Box):
             avatar.set_margin_top(4)
             bubble_box.append(avatar)
 
-            text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            text_col.set_halign(Gtk.Align.START)
 
             label = Gtk.Label(label=self.text)
+            label.set_selectable(True)
             label.set_wrap(True)
             label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(44)
+            label.set_max_width_chars(48)
             label.set_xalign(0.0)
             label.add_css_class("chat-bubble-agent")
             text_col.append(label)
+
+            action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            action_row.set_halign(Gtk.Align.START)
+            action_row.set_margin_top(2)
+
+            copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
+            copy_btn.add_css_class("flat")
+            copy_btn.add_css_class("circular")
+            copy_btn.set_tooltip_text("Copy response")
+            copy_btn.connect("clicked", self._on_copy_clicked)
+            action_row.append(copy_btn)
 
             # Suggest quick confirmation pills if text mentions ambiguous event or actions
             if self.on_action_click:
                 lower = self.text.lower()
                 if "attending" in lower or "appointment" in lower or "unconfirmed" in lower:
-                    pills_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                    pills_box.set_margin_top(4)
-
                     yes_btn = Gtk.Button(label="Yes, Attending")
                     yes_btn.add_css_class("suggested-action")
                     yes_btn.add_css_class("pill")
                     yes_btn.connect("clicked", lambda _: self.on_action_click("Yes, attending"))
-                    pills_box.append(yes_btn)
+                    action_row.append(yes_btn)
 
                     no_btn = Gtk.Button(label="Decline")
                     no_btn.add_css_class("pill")
                     no_btn.connect("clicked", lambda _: self.on_action_click("Decline"))
-                    pills_box.append(no_btn)
+                    action_row.append(no_btn)
 
-                    text_col.append(pills_box)
-
+            text_col.append(action_row)
             bubble_box.append(text_col)
 
         self.append(bubble_box)
+
+    def _on_copy_clicked(self, btn: Gtk.Button) -> None:
+        display = Gdk.Display.get_default()
+        if display:
+            clipboard = display.get_clipboard()
+            clipboard.set(self.text)
+        btn.set_icon_name("object-select-symbolic")
+        btn.set_tooltip_text("Copied!")
+        GLib.timeout_add(1500, self._reset_copy_btn, btn)
+
+    def _reset_copy_btn(self, btn: Gtk.Button) -> bool:
+        btn.set_icon_name("edit-copy-symbolic")
+        btn.set_tooltip_text("Copy message")
+        return False
 
 
 class ChatPanel(Gtk.Box):

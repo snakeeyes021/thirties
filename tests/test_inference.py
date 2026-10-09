@@ -39,5 +39,21 @@ class TestInference(unittest.TestCase):
                 self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Writing Session")
 
 
+    def test_litert_directive_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="---THIRTIES_RESPONSE_START---\nALLOCATE_BLOCK: 38 | Dorico Compose\nI scheduled Dorico in Dark Block 38.\n---THIRTIES_RESPONSE_END---",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Let's throw some composing in an open dark block"}])
+                self.assertEqual(res["content"], "I scheduled Dorico in Dark Block 38.")
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["block_index"], 38)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Dorico Compose")
+
 if __name__ == "__main__":
     unittest.main()
