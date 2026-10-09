@@ -82,3 +82,14 @@
     padding: 8px 14px;
     margin-end: 32px;
 }
+
+.chat-entry-box {
+    background-color: alpha(@card_bg_color, 0.6);
+    border: 1px solid alpha(@borders, 0.6);
+    border-radius: 12px;
+}
+
+.chat-entry-box:focus-within {
+    border-color: @accent_color;
+    box-shadow: 0 0 0 1px @accent_color;
+}

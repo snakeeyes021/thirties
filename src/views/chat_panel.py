@@ -88,20 +88,28 @@ class ChatMessageWidget(Gtk.Box):
             copy_btn.connect("clicked", self._on_copy_clicked)
             action_row.append(copy_btn)
 
-            # Suggest quick confirmation pills if text mentions ambiguous event or actions
+            # Suggest quick confirmation pills ONLY for unconfirmed calendar events
             if self.on_action_click:
                 lower = self.text.lower()
-                if "attending" in lower or "appointment" in lower or "unconfirmed" in lower:
+                if "unconfirmed event" in lower or ("are you attending" in lower and "event" in lower):
+                    pills_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+                    def on_pill(choice: str) -> None:
+                        action_row.remove(pills_box)
+                        self.on_action_click(choice)
+
                     yes_btn = Gtk.Button(label="Yes, Attending")
                     yes_btn.add_css_class("suggested-action")
                     yes_btn.add_css_class("pill")
-                    yes_btn.connect("clicked", lambda _: self.on_action_click("Yes, attending"))
-                    action_row.append(yes_btn)
+                    yes_btn.connect("clicked", lambda _: on_pill("Yes, attending"))
+                    pills_box.append(yes_btn)
 
                     no_btn = Gtk.Button(label="Decline")
                     no_btn.add_css_class("pill")
-                    no_btn.connect("clicked", lambda _: self.on_action_click("Decline"))
-                    action_row.append(no_btn)
+                    no_btn.connect("clicked", lambda _: on_pill("Decline"))
+                    pills_box.append(no_btn)
+
+                    action_row.append(pills_box)
 
             text_col.append(action_row)
             bubble_box.append(text_col)
@@ -186,19 +194,67 @@ class ChatPanel(Gtk.Box):
         input_container.set_margin_top(8)
         input_container.set_margin_bottom(16)
 
-        self.entry = Gtk.Entry()
-        self.entry.set_placeholder_text("Ask or plan your day...")
-        self.entry.set_hexpand(True)
-        self.entry.connect("activate", self._on_send_clicked)
+        # Multi-line word-wrapping text view in scrolled container
+        overlay = Gtk.Overlay()
+        overlay.set_hexpand(True)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_hexpand(True)
+        scrolled.set_min_content_height(38)
+        scrolled.set_max_content_height(130)
+        scrolled.set_propagate_natural_height(True)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.add_css_class("chat-entry-box")
+
+        self.text_view = Gtk.TextView()
+        self.text_view.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.text_view.set_hexpand(True)
+        self.text_view.set_top_margin(6)
+        self.text_view.set_bottom_margin(6)
+        self.text_view.set_left_margin(8)
+        self.text_view.set_right_margin(8)
+
+        # Key controller for Enter (send) vs Shift+Enter (newline)
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect("key-pressed", self._on_key_pressed)
+        self.text_view.add_controller(key_ctrl)
+
+        scrolled.set_child(self.text_view)
+        overlay.set_child(scrolled)
+
+        # Dim placeholder label
+        self.placeholder = Gtk.Label(label="Ask or plan your day...")
+        self.placeholder.add_css_class("dim-label")
+        self.placeholder.set_halign(Gtk.Align.START)
+        self.placeholder.set_valign(Gtk.Align.START)
+        self.placeholder.set_margin_start(10)
+        self.placeholder.set_margin_top(8)
+        self.placeholder.set_can_target(False)
+        overlay.add_overlay(self.placeholder)
+
+        self.text_buffer = self.text_view.get_buffer()
+        self.text_buffer.connect("changed", self._on_buffer_changed)
 
         self.send_btn = Gtk.Button(icon_name="mail-send-symbolic")
         self.send_btn.add_css_class("suggested-action")
+        self.send_btn.set_valign(Gtk.Align.END)
+        self.send_btn.set_margin_bottom(2)
         self.send_btn.connect("clicked", self._on_send_clicked)
 
-        input_container.append(self.entry)
+        input_container.append(overlay)
         input_container.append(self.send_btn)
         clamp.set_child(input_container)
         self.append(clamp)
+
+    def _on_buffer_changed(self, buf: Gtk.TextBuffer) -> None:
+        self.placeholder.set_visible(buf.get_char_count() == 0)
+
+    def _on_key_pressed(self, controller, keyval, keycode, state) -> bool:
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if not (state & Gdk.ModifierType.SHIFT_MASK):
+                self._on_send_clicked(None)
+                return True
+        return False
 
     def _send_initial_greeting(self) -> None:
         from datetime import date
@@ -238,15 +294,16 @@ class ChatPanel(Gtk.Box):
         GLib.idle_add(do_scroll)
 
     def _on_send_clicked(self, _widget) -> None:
-        text = self.entry.get_text().strip()
+        start, end = self.text_buffer.get_bounds()
+        text = self.text_buffer.get_text(start, end, True).strip()
         if not text:
             return
-        self.entry.set_text("")
+        self.text_buffer.set_text("")
         self.send_user_text(text)
 
     def send_user_text(self, text: str) -> None:
         self.add_message("user", text)
-        self.entry.set_sensitive(False)
+        self.text_view.set_sensitive(False)
         self.send_btn.set_sensitive(False)
 
         def worker():
@@ -254,9 +311,9 @@ class ChatPanel(Gtk.Box):
 
             def update_ui():
                 self.add_message("assistant", reply)
-                self.entry.set_sensitive(True)
+                self.text_view.set_sensitive(True)
                 self.send_btn.set_sensitive(True)
-                self.entry.grab_focus()
+                self.text_view.grab_focus()
                 if self.on_plan_updated:
                     self.on_plan_updated(self.conversation_manager.day_plan)
                 return False

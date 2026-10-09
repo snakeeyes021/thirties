@@ -197,5 +197,22 @@ class TestConversation(unittest.TestCase):
         self.assertTrue(work_restored[0].is_locked)
 
 
+    def test_reinstate_work_blocks_preserves_assigned_tasks(self) -> None:
+        # Clear all work blocks
+        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
+        # Schedule an appointment in Block 17 (e.g. 3:00 PM)
+        self.manager.execute_tool("allocate_thirty_block", {"block_index": 17, "custom_label": "Doctor Appointment"})
+        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.ASSIGNED)
+
+        # Reinstate work blocks
+        out = self.manager.execute_tool("reinstate_work_blocks", {})
+        self.assertIn("keeping your existing Block 17 ('Doctor Appointment') intact", out)
+
+        # Block 17 remains ASSIGNED, other blocks restored to WORK
+        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.ASSIGNED)
+        self.assertEqual(self.plan.get_logical_block(17).label, "Doctor Appointment")
+        self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
+
+
 if __name__ == "__main__":
     unittest.main()

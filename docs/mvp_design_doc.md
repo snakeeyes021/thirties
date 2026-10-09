@@ -623,7 +623,8 @@ To prevent hallucinated past allocations, incorrect duration math, and over-eage
 * **Thirty Arithmetic & Multi-Block Allocation**:
   * 1 block = 30 minutes, 2 blocks = 1 hour, 4 blocks = 2 hours ($N$ hours $= 	ext{round}(N 	imes 2)$ blocks).
   * When a duration or span is requested (e.g. "Block 28 for at least two hours"):
-    * Start block: 28, Span: 4 blocks $ightarrow$ Blocks 28 through 31 (e.g. 08:30 PM to 10:30 PM).
+    * Start block: 28, Span: 4 blocks $
+ightarrow$ Blocks 28 through 31 (e.g. 08:30 PM to 10:30 PM).
     * Model outputs multi-block directive: `ALLOCATE_BLOCKS: 28-31 | Composing`.
     * Engine assigns all 4 blocks simultaneously and updates the daily plan and state store.
 * **Schedule Deallocation & Days Off**:
@@ -698,6 +699,47 @@ To support cross-conversation recall ("Remember a few days ago we talked about s
    * **Long-Term Vision (Multi-Year)**: Big aspirations with origin date stamps (e.g., "[First noted Oct 8, 2025]: Establish creative release infrastructure and publishing website").
 3. **Cross-Thread Recall Protocol**:
    * When a user prompt references past conversations or long-term goals, the system retrieves relevant profile memory facts into prompt context rather than loading hundreds of previous chat turns.
+
+
+### 6.6 Unified Block Mutation Primitive & Post-Condition State Verification
+
+Rather than maintaining boutique single-purpose tools for every permutation of scheduling mutation (`clear_blocks`, `reinstate_work_blocks`, `allocate_thirty_block`), Thirties establishes a unified, general block mutation primitive:
+
+```python
+@dataclass
+class MutationResult:
+    success: bool
+    modified_blocks: list[int]
+    preserved_blocks: list[tuple[int, str]]
+    conflicts: list[str]
+    message: str
+
+def mutate_blocks(
+    plan: DayPlan,
+    start_block: int,
+    end_block: int,
+    target_kind: BlockKind,
+    label: str = "",
+    preserve_assigned: bool = False,
+) -> MutationResult:
+    ...
+```
+
+#### Collision Policies & Task Preservation
+* When applying broad group operations (such as reinstating work blocks after a day off):
+  * Setting `preserve_assigned=True` guarantees that user engagements scheduled earlier (e.g., an afternoon appointment in Block 17) are **not blindly overwritten**.
+  * Reinstating work blocks re-locks the standard work envelope while leaving existing custom tasks intact.
+* **Post-Condition State Verification**:
+  * Instead of accepting conversational assertions from the SLM at face value, the system inspects the actual `MutationResult` returned by the data model.
+  * If an operation fails due to hard calendar blocks or invalid ranges, the assistant is provided with the verified conflict rather than generating false confirmations.
+
+### 6.7 Backward Scheduling & Buffer Architecture
+
+When accommodating fixed commitments (e.g., a doctor appointment at 3:00 PM), scheduling engines often fail by placing buffers after the start time. Thirties enforces a backward-chaining heuristic:
+1. **Anchor Block**: Locate the 30-minute block containing the event start time $T$ (e.g., 3:00 PM $ightarrow$ Block 17).
+2. **Transit Buffer Precedence**: Transit/traffic buffers must be placed in the block immediately preceding $T$ (e.g., Block 16: 02:30 PM – 03:00 PM).
+3. **Preparation Precedence**: Getting ready / showering must precede the transit buffer (e.g., Block 15: 02:00 PM – 02:30 PM).
+4. **Routine Decoupling**: Morning routines (habits, breakfast) belong in the earliest upcoming open block of the day, completely decoupled from afternoon travel buffers.
 
 ## 7. GNOME HIG Desktop Application (`thirties_gtk`)
 

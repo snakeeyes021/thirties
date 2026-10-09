@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -282,12 +283,19 @@ BEHAVIOR RULES:
    - When the user asks to deallocate or clear specific blocks (e.g. "clear blocks 4-18", "deallocate block 28"):
      Output directive:
        CLEAR_BLOCKS: <start_block>-<end_block>
-5. TEMPORAL AWARENESS:
+5. BACKWARD SCHEDULING (APPOINTMENTS, BUFFERS & ROUTINES):
+   - When the user has an appointment or event at Time T (e.g. 03:00 PM, Block 17):
+     1. Transit / travel buffer MUST be placed in the block immediately BEFORE the appointment (e.g. Block 16: 02:30 PM – 03:00 PM).
+     2. Preparation (shower, getting ready) MUST precede the travel buffer (e.g. Block 15: 02:00 PM – 02:30 PM).
+     3. NEVER schedule preparation or travel buffer in or after the appointment block!
+   - When the user mentions uncompleted morning routines:
+     Schedule the morning routine in the EARLIEST upcoming open block today, NOT right before an afternoon appointment!
+6. TEMPORAL AWARENESS:
    - For forward planning and recommendations, ONLY pick from UPCOMING open blocks. Never recommend or schedule into past elapsed blocks unless the user explicitly asks to retroactively log past work (e.g. "Earlier this morning at 8:00 AM I worked on X").
-6. ENERGY ALIGNMENT:
+7. ENERGY ALIGNMENT:
    - Daylight Thirties are for high-focus, creative composition, writing, and deep problem-solving.
    - Dark Thirties are for administrative tasks, reading, light dev chores, and calm wind-down.
-7. When the user confirms attendance ("yes", "attending"), confirm the event.
+8. When the user confirms attendance ("yes", "attending"), confirm the event.
 """
 
     def _init_conversation(self) -> None:
@@ -358,8 +366,14 @@ BEHAVIOR RULES:
             work_start = self.scheduler.config.general.work_start_thirty
             work_end = self.scheduler.config.general.work_end_thirty
             reinstated_count = 0
+            preserved_tasks: list[str] = []
             for b in self.day_plan.blocks:
                 if work_start <= b.index <= work_end:
+                    if b.kind == BlockKind.ASSIGNED:
+                        log_idx = self.day_plan.get_logical_index(b)
+                        lbl = b.label or "scheduled task"
+                        preserved_tasks.append(f"Block {log_idx} ('{lbl}')")
+                        continue
                     b.kind = BlockKind.WORK
                     b.label = "Work"
                     b.is_locked = True
@@ -371,6 +385,8 @@ BEHAVIOR RULES:
             if self.scheduler and self.scheduler.state_db:
                 self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
+            if preserved_tasks:
+                return f"Reinstated {reinstated_count} work blocks, keeping your existing {', '.join(preserved_tasks)} intact."
             return f"Reinstated {reinstated_count} work blocks on today's schedule."
 
         elif name in ("clear_blocks", "deallocate_blocks"):
