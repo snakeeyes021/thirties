@@ -56,13 +56,24 @@ class PersistentGemmaEngine:
         self._start_server()
 
     def _start_server(self) -> None:
+        if self.proc:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self.proc.kill()
+                    self.proc.wait(timeout=2)
+                except Exception:
+                    pass
+            self.proc = None
         inline_code = (
             "import litert_lm, sys, json\n"
+            f"model_path = {repr(self.model_path)}\n"
             "try:\n"
-            f"    engine = litert_lm.Engine('{self.model_path}', backend=litert_lm.Backend.GPU())\n"
+            "    engine = litert_lm.Engine(model_path, backend=litert_lm.Backend.GPU())\n"
             "except Exception:\n"
-            f"    engine = litert_lm.Engine('{self.model_path}', backend=litert_lm.Backend.CPU())\n"
-            "conv = engine.create_conversation()\n"
+            "    engine = litert_lm.Engine(model_path, backend=litert_lm.Backend.CPU())\n"
             "print('===READY===', flush=True)\n"
             "for line in sys.stdin:\n"
             "    line = line.strip()\n"
@@ -70,17 +81,15 @@ class PersistentGemmaEngine:
             "        continue\n"
             "    req = json.loads(line)\n"
             "    if req.get('cmd') == 'reset':\n"
-            "        conv = engine.create_conversation()\n"
-            "        out = json.dumps({'status': 'reset'})\n"
-            "        print(f'===RESPONSE==={out}', flush=True)\n"
+            "        print('===RESPONSE==={\"status\": \"reset\"}', flush=True)\n"
             "        continue\n"
             "    prompt = req['prompt']\n"
             "    try:\n"
+            "        conv = engine.create_conversation()\n"
             "        res = conv.send_message(prompt)\n"
             "        reply = str(res)\n"
             "    except Exception as e:\n"
             "        reply = f'Inference error: {e}'\n"
-            "        conv = engine.create_conversation()\n"
             "    out = json.dumps({'reply': reply})\n"
             "    print(f'===RESPONSE==={out}', flush=True)\n"
         )
