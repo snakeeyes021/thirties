@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from thirties_core.astronomy import get_current_time
+from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.inference import InferenceEngine, MockInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
@@ -222,6 +222,34 @@ class ConversationManager:
 
         elapsed_info = f"\n- Elapsed (Past) Open Blocks Earlier Today: {', '.join(elapsed_open)}" if elapsed_open else ""
 
+        # Group currently scheduled tasks / custom commitments (e.g. Game Night, Composing, Appointments)
+        scheduled_commitments = []
+        i = 0
+        while i < len(logical_blocks):
+            b, log_idx = logical_blocks[i]
+            if b.kind == BlockKind.ASSIGNED or (b.label and b.kind not in (BlockKind.SLEEP, BlockKind.WORK, BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY)):
+                lbl = b.label or "Scheduled Task"
+                start_log = log_idx
+                start_time = b.start_dt.strftime('%I:%M %p')
+                end_time = b.end_dt.strftime('%I:%M %p')
+                j = i + 1
+                while j < len(logical_blocks):
+                    next_b, next_log = logical_blocks[j]
+                    if (next_b.kind == b.kind or next_b.label == b.label) and next_b.label == lbl:
+                        end_time = next_b.end_dt.strftime('%I:%M %p')
+                        j += 1
+                    else:
+                        break
+                end_log = logical_blocks[j - 1][1]
+                if start_log == end_log:
+                    scheduled_commitments.append(f"- Block {start_log} ({start_time} – {end_time}): {lbl}")
+                else:
+                    scheduled_commitments.append(f"- Blocks {start_log} through {end_log} ({start_time} – {end_time}): {lbl}")
+                i = j
+            else:
+                i += 1
+        scheduled_commitments_str = "\n".join(scheduled_commitments) or "None scheduled yet"
+
         return f"""You are the Thirties Planning Assistant. You schedule the user's day in 48 discrete thirty-minute blocks numbered 1 to 48.
 The day begins at Block 1 (the thirty containing sunrise). Each subsequent block is exactly 30 minutes long.
 Keep all answers concise, structured, and action-oriented (1-3 sentences). Never write creative essays or long conversational rambles.
@@ -234,6 +262,9 @@ TEMPORAL STATUS:
 - Sunset: {sunset_str} (Block {sunset_logical_idx})
 - Available Daylight Thirties: {self.day_plan.daylight_available_count}
 - Available Dark Thirties: {self.day_plan.dark_available_count}
+
+CURRENTLY SCHEDULED TASKS & COMMITMENTS:
+{scheduled_commitments_str}
 
 AVAILABLE OPEN TIME:
 - Upcoming Daylight Thirties: {', '.join(upcoming_daylight) or 'None remaining'}
@@ -362,32 +393,58 @@ BEHAVIOR RULES:
             else:
                 return f"Allocated blocks {start_idx} through {end_idx} ({len(assigned_indices)} blocks) to '{label}'."
 
-        elif name in ("reinstate_work_blocks", "restore_work_blocks"):
-            work_start = self.scheduler.config.general.work_start_thirty
-            work_end = self.scheduler.config.general.work_end_thirty
+        elif name in ("reinstate_work_blocks", "restore_work_blocks", "set_work_blocks"):
+            start_block = arguments.get("start_block")
+            end_block = arguments.get("end_block")
+            start_time = arguments.get("start_time")
+            end_time = arguments.get("end_time")
+
+            if start_time and not start_block:
+                start_block = self.day_plan.time_str_to_logical_block(str(start_time))
+            if end_time and not end_block:
+                end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
+
+            target_blocks: list[ThirtyBlock] = []
+            if start_block is not None and end_block is not None:
+                for idx in range(start_block, end_block + 1):
+                    if 1 <= idx <= 48:
+                        target_blocks.append(self.day_plan.get_logical_block(idx))
+            else:
+                work_start = self.scheduler.config.general.work_start_thirty
+                work_end = self.scheduler.config.general.work_end_thirty
+                for b in self.day_plan.blocks:
+                    if work_start <= b.index <= work_end:
+                        target_blocks.append(b)
+
             reinstated_count = 0
             preserved_tasks: list[str] = []
-            for b in self.day_plan.blocks:
-                if work_start <= b.index <= work_end:
-                    if b.kind == BlockKind.ASSIGNED:
-                        log_idx = self.day_plan.get_logical_index(b)
-                        lbl = b.label or "scheduled task"
-                        preserved_tasks.append(f"Block {log_idx} ('{lbl}')")
-                        continue
-                    b.kind = BlockKind.WORK
-                    b.label = "Work"
-                    b.is_locked = True
-                    b.assigned_task_id = None
-                    reinstated_count += 1
+            for b in target_blocks:
+                if b.kind == BlockKind.ASSIGNED:
+                    log_idx = self.day_plan.get_logical_index(b)
+                    lbl = b.label or "scheduled task"
+                    preserved_tasks.append(f"Block {log_idx} ('{lbl}')")
+                    continue
+                b.kind = BlockKind.WORK
+                b.label = "Work"
+                b.is_locked = True
+                b.assigned_task_id = None
+                reinstated_count += 1
 
             self.day_plan.recalculate_counts()
 
             if self.scheduler and self.scheduler.state_db:
                 self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
+            if target_blocks:
+                first_log = self.day_plan.get_logical_index(target_blocks[0])
+                last_log = self.day_plan.get_logical_index(target_blocks[-1])
+                span_str = f"blocks {first_log} through {last_log} ({target_blocks[0].start_dt.strftime('%I:%M %p')} – {target_blocks[-1].end_dt.strftime('%I:%M %p')})"
+            else:
+                span_str = "work blocks"
+
             if preserved_tasks:
-                return f"Reinstated {reinstated_count} work blocks, keeping your existing {', '.join(preserved_tasks)} intact."
-            return f"Reinstated {reinstated_count} work blocks on today's schedule."
+                return f"Reinstated {reinstated_count} work blocks across {span_str}, keeping your existing {', '.join(preserved_tasks)} intact."
+            return f"Reinstated {reinstated_count} work blocks across {span_str}."
 
         elif name in ("clear_blocks", "deallocate_blocks"):
             clear_all_work = arguments.get("clear_all_work", False)
@@ -435,6 +492,33 @@ BEHAVIOR RULES:
 
     def send_user_message(self, user_text: str) -> str:
         """Process user input turn, execute model tool calls, and return reply."""
+        # Developer / Runtime Simulation Slash Commands
+        clean_text = user_text.strip()
+        if clean_text.startswith("/"):
+            cmd = clean_text.lower()
+            if cmd == "/night":
+                set_debug_time("22:30")
+                reply = "Simulated time set to 10:30 PM (Nighttime Mode). The Solar Arc has shifted to the Nocturnal Lunar Arc."
+            elif cmd in ("/day", "/noon"):
+                set_debug_time("12:00")
+                reply = "Simulated time set to 12:00 PM (Solar Noon Mode)."
+            elif cmd in ("/morning", "/sunrise"):
+                set_debug_time("07:15")
+                reply = "Simulated time set to 07:15 AM (Morning Sunrise Mode)."
+            elif cmd in ("/reset", "/now"):
+                set_debug_time(None)
+                reply = "Simulated time cleared. Real-world system clock restored."
+            elif cmd.startswith("/time"):
+                val = clean_text[5:].strip()
+                set_debug_time(val)
+                reply = f"Simulated time set to {val}."
+            else:
+                reply = f"Unknown command: {clean_text}. Available: /night, /day, /morning, /reset, /time HH:MM"
+
+            self.messages.append({"role": "user", "content": user_text})
+            self.messages.append({"role": "assistant", "content": reply})
+            return reply
+
         self.messages.append({"role": "user", "content": user_text})
 
         response = self.inference_engine.chat(

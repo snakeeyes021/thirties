@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+import re
+from datetime import date, datetime, time
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -138,6 +139,33 @@ class DayPlan:
             if b.index == index:
                 return b
         raise IndexError(f"Block {index} not found in DayPlan")
+
+    def time_str_to_logical_block(self, time_str: str, is_end: bool = False) -> Optional[int]:
+        """Convert a natural time string (e.g. '7am', '07:00', '3pm', '15:30') to a 1-based logical block."""
+        clean = time_str.strip().lower()
+        m = re.match(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", clean)
+        if not m:
+            return None
+        h = int(m.group(1))
+        mins = int(m.group(2) or 0)
+        meridiem = m.group(3)
+
+        if meridiem == "pm" and h < 12:
+            h += 12
+        elif meridiem == "am" and h == 12:
+            h = 0
+        elif not meridiem and h < 7:  # heuristic: times like 3 without am/pm are usually afternoon
+            h += 12
+
+        target_dt = datetime.combine(self.target_date, time(h, mins), tzinfo=self.sunrise.tzinfo)
+        for b in self.blocks:
+            if is_end:
+                if b.start_dt < target_dt <= b.end_dt:
+                    return self.get_logical_index(b)
+            else:
+                if b.start_dt <= target_dt < b.end_dt:
+                    return self.get_logical_index(b)
+        return None
 
     def recalculate_counts(self) -> None:
         """Deterministically tally available discretionary blocks."""

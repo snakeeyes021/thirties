@@ -76,6 +76,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.next_day_btn.connect("clicked", self._on_next_day)
         self.today_btn.connect("clicked", self._on_today_clicked)
         self.date_calendar.connect("day-selected", self._on_calendar_day_selected)
+        self.view_stack.connect("notify::visible-child-name", self._on_view_changed)
 
         self._load_day(self.current_date)
 
@@ -107,6 +108,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             self.conv_manager,
             on_plan_updated=self._on_plan_updated,
         )
+
+    def _on_view_changed(self, stack: Adw.ViewStack, _param) -> None:
+        if stack.get_visible_child_name() == "chat":
+            GLib.idle_add(self.chat_panel.text_view.grab_focus)
 
     def _on_plan_updated(self, plan) -> None:
         """Triggered when tool calls (allocate block, resolve event) modify the plan."""

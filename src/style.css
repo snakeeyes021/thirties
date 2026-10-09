@@ -85,11 +85,17 @@
 
 .chat-entry-box {
     background-color: alpha(@card_bg_color, 0.6);
-    border: 1px solid alpha(@borders, 0.6);
-    border-radius: 12px;
+    border: 1px solid alpha(@borders, 0.7);
+    border-radius: 14px;
 }
 
 .chat-entry-box:focus-within {
     border-color: @accent_color;
     box-shadow: 0 0 0 1px @accent_color;
+}
+
+.chat-entry-box textview,
+.chat-entry-box textview text {
+    background-color: transparent;
+    border-radius: 12px;
 }

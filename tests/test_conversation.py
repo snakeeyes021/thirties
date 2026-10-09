@@ -214,5 +214,39 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
 
 
+    def test_system_prompt_contains_scheduled_commitments(self) -> None:
+        # Schedule Game Night in 24-27 and Composing in 28
+        self.manager.execute_tool("allocate_thirty_block", {"start_block": 24, "end_block": 27, "custom_label": "Game Night"})
+        self.manager.execute_tool("allocate_thirty_block", {"block_index": 28, "custom_label": "Composing"})
+
+        prompt = self.manager._build_system_prompt()
+        self.assertIn("CURRENTLY SCHEDULED TASKS & COMMITMENTS:", prompt)
+        self.assertIn("Game Night", prompt)
+        self.assertIn("Composing", prompt)
+        self.assertIn("Blocks 24 through 27", prompt)
+        self.assertIn("Block 28", prompt)
+
+    def test_reinstate_work_blocks_custom_time_range(self) -> None:
+        # Clear all blocks first
+        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
+        # Set custom work hours from 7am to 3pm
+        out = self.manager.execute_tool("reinstate_work_blocks", {"start_time": "7am", "end_time": "3pm"})
+        self.assertIn("blocks 1 through 16", out)
+        for idx in range(1, 17):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.kind, BlockKind.WORK)
+
+    def test_slash_command_night_and_reset(self) -> None:
+        from thirties_core.astronomy import get_current_time
+        reply_night = self.manager.send_user_message("/night")
+        self.assertIn("Simulated time set to 10:30 PM", reply_night)
+        sim_now = get_current_time(self.tz)
+        self.assertEqual(sim_now.hour, 22)
+        self.assertEqual(sim_now.minute, 30)
+
+        reply_reset = self.manager.send_user_message("/reset")
+        self.assertIn("Simulated time cleared", reply_reset)
+
+
 if __name__ == "__main__":
     unittest.main()

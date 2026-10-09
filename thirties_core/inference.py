@@ -294,12 +294,19 @@ class LiteRTInferenceEngine:
         # Fallback to User Intent Extraction if model did not emit directives:
         if not tool_calls:
             # Intent: Day off / Clear all work blocks
-            # Intent: Reinstate work blocks
+            # Intent: Reinstate work blocks (supporting custom work hours like 7am to 3pm)
             if re.search(r"(?:reinstate|restore|put (?:them )?back|add back|turns out I (?:do )?have work|do have work)", last_user_msg, re.IGNORECASE):
+                reinstate_args: dict[str, Any] = {}
+                # Check for explicit start and end times
+                time_range_match = re.search(r"(?:started at|from|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
+                if time_range_match:
+                    reinstate_args["start_time"] = time_range_match.group(1).strip()
+                    reinstate_args["end_time"] = time_range_match.group(2).strip()
+
                 tool_calls.append({
                     "id": "reinstate_work_call",
                     "name": "reinstate_work_blocks",
-                    "arguments": {},
+                    "arguments": reinstate_args,
                 })
             # Intent: Day off / Clear all work blocks
             elif re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):

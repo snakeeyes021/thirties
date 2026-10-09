@@ -16,15 +16,25 @@ from zoneinfo import ZoneInfo
 from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
 
 
-def get_current_time(tz: Optional[ZoneInfo] = None) -> datetime:
-    """Return the current time, supporting debug simulation via THIRTIES_DEBUG_TIME env var.
+_SIMULATED_DEBUG_TIME: Optional[str] = None
 
-    Format examples for THIRTIES_DEBUG_TIME:
+
+def set_debug_time(val: Optional[str]) -> None:
+    """Set or clear runtime simulated time (e.g. '22:30', '12:00', or None)."""
+    global _SIMULATED_DEBUG_TIME
+    _SIMULATED_DEBUG_TIME = val
+
+
+def get_current_time(tz: Optional[ZoneInfo] = None) -> datetime:
+    """Return the current time, supporting runtime or env var debug simulation.
+
+    Checks _SIMULATED_DEBUG_TIME first, then THIRTIES_DEBUG_TIME env var.
+    Format examples:
     - "22:30" (10:30 PM today)
     - "02:15" (2:15 AM today)
     - "2026-10-09T22:30:00" (explicit ISO timestamp)
     """
-    debug_val = os.environ.get("THIRTIES_DEBUG_TIME")
+    debug_val = _SIMULATED_DEBUG_TIME or os.environ.get("THIRTIES_DEBUG_TIME")
     if debug_val:
         try:
             if "T" in debug_val:
