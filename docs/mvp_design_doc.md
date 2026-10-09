@@ -299,6 +299,44 @@ The engine enumerates the user’s available calendars via `calendarList().list(
 
 ---
 
+
+### 4.3 Backlog Taxonomy & Flexible Note Classification
+
+Not all lists and tasks in a user's knowledge vault are created equal. Feeding an entire Joplin vault into a local on-device SLM (such as Gemma-4 E4B) would overwhelm context limits and produce unfocused, generic planning. To allow small local models to punch well above their weight, Thirties establishes a structured note and task taxonomy:
+
+1. **Batch Routine Checklists**:
+   * *Characteristics*: Recurring daily habits, morning routines, or wind-down rituals that reset daily.
+   * *Scheduling Behavior*: The entire checklist can be batched together and executed inside a single 30-minute block (e.g., Block 1 Sunrise routine). It does not roll over as an overdue project task.
+2. **Imminent Obligations**:
+   * *Characteristics*: Time-sensitive external commitments, bills, preparations, or hard deadlines with immediate target dates.
+   * *Scheduling Behavior*: High-priority candidate for immediate daylight or early dark block allocation. Proactively highlighted by the assistant.
+3. **Rolling Focus Tasks**:
+   * *Characteristics*: Core project and development tasks (e.g. from `1. Tasks` and `2. Dev`).
+   * *Scheduling Behavior*: If uncompleted by day's end, they roll over to the next day with their `deferred_count` incremented. After 3 deferrals, the assistant triggers a decomposition intervention.
+4. **Self-Fulfillment & Creative Menus**:
+   * *Characteristics*: High-value enriching endeavors (e.g. from `3. Creative` and `4. Media` — composition in Dorico, reading lists, writing).
+   * *Scheduling Behavior*: Not treated as nagging chores or strict obligations, but as an *inspiration menu* presented to the user to fill open Daylight Thirties or contemplative Dark Thirties.
+5. **Backburner / Scrape-Away Backlog**:
+   * *Characteristics*: Non-urgent, low-pressure tasks that can be chipped away at incrementally during buffer blocks.
+
+#### Taxonomy Mapping Configuration
+Users can configure their notebook and title mapping in `config.toml`:
+```toml
+[taxonomy.routines]
+notebooks = ["1. Tasks"]
+note_patterns = ["*Daily*", "*Routine*", "*Habits*"]
+batch_into_single_thirty = true
+
+[taxonomy.creative_menu]
+notebooks = ["3. Creative", "4. Media"]
+prompt_as_menu = true
+
+[taxonomy.rolling_tasks]
+notebooks = ["1. Tasks", "2. Dev"]
+track_deferrals = true
+```
+This enables the core engine to digest, partition, and rank candidate items into structured JSON or concise markdown tiers before presenting them to the model prompt.
+
 ## 5. Local State & Configuration
 
 All local data is isolated in XDG-compliant directories:
@@ -383,6 +421,51 @@ CREATE TABLE IF NOT EXISTS day_snapshots (
 
 
 ---
+
+
+### 5.3 Historical Analytics, Velocity & Behavioral Learning
+
+To enable the assistant to give intelligent, personalized suggestions (e.g., recommending realistic composing times rather than arbitrary morning blocks), `state.sqlite` accumulates historical completion metrics and exposes them via SQL views:
+
+```sql
+-- Completion history by logical block of the day
+CREATE TABLE IF NOT EXISTS block_execution_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_date TEXT NOT NULL,
+    logical_block INTEGER NOT NULL,
+    task_category TEXT NOT NULL, -- e.g., 'Creative', 'Dev', 'Admin'
+    task_id TEXT,
+    completed INTEGER DEFAULT 1,
+    duration_thirties INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Analytical view: Preferred block hours by task category
+CREATE VIEW IF NOT EXISTS v_category_block_affinity AS
+SELECT 
+    task_category,
+    logical_block,
+    COUNT(*) AS completions_count,
+    ROUND(AVG(completed), 2) AS completion_rate
+FROM block_execution_history
+GROUP BY task_category, logical_block
+ORDER BY task_category, completions_count DESC;
+
+-- Analytical view: Average thirties required by task type
+CREATE VIEW IF NOT EXISTS v_category_duration_stats AS
+SELECT
+    task_category,
+    ROUND(AVG(duration_thirties), 1) AS avg_thirties,
+    MAX(duration_thirties) AS max_thirties
+FROM block_execution_history
+GROUP BY task_category;
+```
+
+**Assistant Integration**:
+When the assistant prepares a suggestion for creative work, development, or admin, it queries these views to identify:
+1. Which logical blocks the user historically succeeds in completing that category of work.
+2. The user's historical pacing (whether composing typically takes 2 thirties rather than 1).
+This allows recommendations to be empirically justified rather than arbitrary.
 
 ## 6. On-Device SLM Inference & Tool Calling
 
@@ -532,6 +615,34 @@ BEHAVIOR RULES:
 
 ---
 
+
+### 6.3 Temporal Awareness & Suggestion Protocol
+
+To prevent hallucinated past allocations and over-eager scheduling, the conversational prompt enforces strict temporal boundaries:
+* **Current Clock Time & Active Block**: The prompt explicitly identifies the current local time and the active block.
+* **Separation of Suggestions vs. Allocations**:
+  * *Suggestion Requests* ("Where would you suggest I compose?", "What should I do next?"): The assistant proposes 1–2 upcoming blocks with concise reasoning based on daylight/energy affinity and asks for user confirmation. It **must not** emit `ALLOCATE_BLOCK`.
+  * *Direct Commands & Confirmations* ("Allocate block 20 to Dorico", "Yes, let's do that"): The assistant emits `ALLOCATE_BLOCK: <block_number> | <label>`.
+* **Forward Planning vs. Retrospective Logging**: Forward suggestions are strictly limited to upcoming open blocks. The assistant only references or schedules past blocks when the user explicitly requests retroactive logging of completed work ("Earlier this morning at 8:00 AM I finished X").
+
+### 6.4 Vault-Backed Cross-Device State Sync ("Hidden Joplin Sync Note")
+
+#### The Architecture Dilemma
+Joplin notes sync seamlessly across all user devices (via Dropbox, Nextcloud, Joplin Cloud, or WebDAV), and Google Calendar / Evolution Data Server syncs via standard CalDAV/Google protocols. However, the local assistant state (`state.sqlite` — containing conversation history, deferral counts, task execution history, and learned user statistics) is local to each machine.
+Requiring users to host an external Docker/NAS database or configuring a third-party cloud service introduces unwanted operational overhead.
+
+#### The Hidden Joplin Note Solution
+Thirties implements a zero-infrastructure cross-device sync mechanism by leveraging Joplin's existing multi-device sync engine:
+1. **Sync Storage Note**: Thirties creates and maintains a dedicated sync state note (e.g. title: `.thirties_state_vault`) located inside the excluded `Archive` notebook.
+2. **Data Payload**: The note body stores a structured, compressed JSON delta log (or base64-encoded SQLite snapshot/WAL transaction log) containing:
+   * Block allocation history and finalized day plans.
+   * Task deferral counters and rollover history.
+   * Learned category affinities and completion statistics.
+3. **Sync Lifecycle**:
+   * **On Startup / Refresh**: Thirties inspects the sync note via the Joplin Local Data API or read-only SQLite database. If the remote revision timestamp is newer than the local `state.sqlite`, deltas are merged into the local SQLite database.
+   * **On Day Finalization / Plan Mutation**: When the user finalizes a day plan or allocates blocks, Thirties generates a delta update and writes it to the sync note via Joplin's Local Data API (`PUT /notes/{sync_note_id}`).
+   * **Joplin Native Transport**: Joplin's background sync automatically propagates the note to all other laptops and workstations without Thirties needing any external server.
+
 ## 7. GNOME HIG Desktop Application (`thirties_gtk`)
 
 The UI is built with **PyGObject** targeting **GTK 4** and **Libadwaita 1.5+**, adhering closely to GNOME Human Interface Guidelines (HIG).
@@ -544,7 +655,7 @@ Rather than cluttering the screen with a persistent, cramped right sidebar, Thir
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ [<] Today (Oct 08) [>]       [  Schedule  |  Assistant  ]                ⚙  │
+│ [<] 📅 [>] [Today Icon]      [  Schedule  |  Assistant  ]                ⚙  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │                        ☼ Solar Arc & Trajectory                             │

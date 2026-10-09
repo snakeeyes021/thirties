@@ -81,7 +81,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     def _load_day(self, target_date: date) -> None:
         self.current_date = target_date
-        self.today_btn.set_visible(target_date != date.today())
+        self.today_btn.set_sensitive(target_date != date.today())
 
         # Sync GtkCalendar selected day
         try:

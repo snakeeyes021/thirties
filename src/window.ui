@@ -40,9 +40,9 @@
                 </child>
                 <child>
                   <object class="GtkButton" id="today_btn">
-                    <property name="label" translatable="yes">Today</property>
+                    <property name="icon-name">go-today-symbolic</property>
                     <property name="tooltip-text" translatable="yes">Jump to Today</property>
-                    <property name="visible">False</property>
+                    <property name="sensitive">False</property>
                   </object>
                 </child>
               </object>

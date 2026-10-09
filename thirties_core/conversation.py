@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.calendar_engine import CalendarEvent
@@ -131,21 +132,31 @@ class ConversationManager:
         sunset_clock_idx = next((b.index for b in reversed(self.day_plan.blocks) if b.is_sunlight), 37)
         sunset_logical_idx = (sunset_clock_idx - sunrise_idx) % 48 + 1
 
+        now = datetime.now(self.day_plan.sunrise.tzinfo)
+        is_today = (self.day_plan.target_date == now.date())
+
         # Logical 1-48 blocks starting at Sunrise
         logical_blocks: list[tuple[ThirtyBlock, int]] = [
             (self.day_plan.get_block((sunrise_idx + i) % 48), i + 1) for i in range(48)
         ]
 
-        open_daylight = [
-            f"Block {log_idx} ({b.start_dt.strftime('%I:%M %p')} – {b.end_dt.strftime('%I:%M %p')})"
-            for b, log_idx in logical_blocks
-            if b.kind == BlockKind.DAYLIGHT_DISCRETIONARY
-        ]
-        open_dark = [
-            f"Block {log_idx} ({b.start_dt.strftime('%I:%M %p')} – {b.end_dt.strftime('%I:%M %p')})"
-            for b, log_idx in logical_blocks
-            if b.kind == BlockKind.DARK_DISCRETIONARY
-        ]
+        current_block = next((b for b in self.day_plan.blocks if b.start_dt <= now < b.end_dt), None) if is_today else None
+        current_logical_idx = self.day_plan.get_logical_index(current_block) if current_block else None
+
+        upcoming_daylight = []
+        upcoming_dark = []
+        elapsed_open = []
+
+        for b, log_idx in logical_blocks:
+            range_str = f"Block {log_idx} ({b.start_dt.strftime('%I:%M %p')} – {b.end_dt.strftime('%I:%M %p')})"
+            if is_today and b.end_dt <= now:
+                if b.kind in (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY):
+                    elapsed_open.append(range_str)
+            else:
+                if b.kind == BlockKind.DAYLIGHT_DISCRETIONARY:
+                    upcoming_daylight.append(range_str)
+                elif b.kind == BlockKind.DARK_DISCRETIONARY:
+                    upcoming_dark.append(range_str)
 
         sleep_blocks = [
             str(log_idx)
@@ -175,6 +186,13 @@ class ConversationManager:
 
         sunrise_start_str = self.day_plan.get_block(sunrise_idx).start_dt.strftime("%I:%M %p")
 
+        clock_info = ""
+        if is_today:
+            curr_str = f"Block {current_logical_idx} ({current_block.start_dt.strftime('%I:%M %p')} – {current_block.end_dt.strftime('%I:%M %p')})" if current_block else "Outside day bounds"
+            clock_info = f"- Current Clock Time: {now.strftime('%I:%M %p')}\n- Current Active Block: {curr_str}\n"
+
+        elapsed_info = f"\n- Elapsed (Past) Open Blocks Earlier Today: {', '.join(elapsed_open)}" if elapsed_open else ""
+
         return f"""You are the Thirties Planning Assistant. You schedule the user's day in 48 discrete thirty-minute blocks numbered 1 to 48.
 The day begins at Block 1 (the thirty containing sunrise). Each subsequent block is exactly 30 minutes long.
 Keep all answers concise, structured, and action-oriented (1-3 sentences). Never write creative essays or long conversational rambles.
@@ -182,14 +200,15 @@ Keep all answers concise, structured, and action-oriented (1-3 sentences). Never
 PLANNING DATE: {self.day_plan.target_date.strftime('%A, %B %d, %Y')}
 
 CURRENT ASTRONOMICAL CONTEXT:
-- Block 1 (Sunrise block): starts at {sunrise_start_str} (exact sunrise at {sunrise_str})
+TEMPORAL STATUS:
+{clock_info}- Block 1 (Sunrise block): starts at {sunrise_start_str} (exact sunrise at {sunrise_str})
 - Sunset: {sunset_str} (Block {sunset_logical_idx})
 - Available Daylight Thirties: {self.day_plan.daylight_available_count}
 - Available Dark Thirties: {self.day_plan.dark_available_count}
 
 AVAILABLE OPEN TIME:
-- Open Daylight Thirties: {', '.join(open_daylight) or 'None'}
-- Open Dark Thirties: {', '.join(open_dark) or 'None'}
+- Upcoming Daylight Thirties: {', '.join(upcoming_daylight) or 'None remaining'}
+- Upcoming Dark Thirties: {', '.join(upcoming_dark) or 'None remaining'}{elapsed_info}
 
 DETERMINISTIC CONSTRAINTS:
 - Sleep Blocks: {', '.join(sleep_blocks) or 'None'}
@@ -203,14 +222,21 @@ TOP BACKLOG TASKS:
 {tasks_summary}
 
 BEHAVIOR RULES:
-1. You are a concise, structured day planning assistant.
-2. When the user asks to schedule, allocate, or put an activity or task in a block (e.g. "composing in Dorico in an open dark block", "put writing in block 2"):
-   - Choose a specific open block from the available open lists above using its block number (1 to 48).
-   - Output the directive line on its own:
-     ALLOCATE_BLOCK: <block_number> | <label>
-   - Provide a 1-sentence confirmation stating the block number, start time, and activity.
-3. When the user confirms attendance ("yes", "attending"), confirm the event.
-4. Respect daily energy: creative/deep work is best in Daylight Thirties; administrative, reading, or calm planning in Dark Thirties.
+1. You are a concise, structured day planning assistant (1-3 sentences per response).
+2. DISTINGUISH SUGGESTIONS FROM DIRECT ALLOCATIONS:
+   - When the user asks for advice or a suggestion (e.g. "Where would you suggest I compose?", "What should I do next?", "Any ideas?"):
+     Suggest 1 or 2 UPCOMING open blocks suitable for the task, explain briefly why, and ask if they would like you to schedule it.
+     DO NOT output ALLOCATE_BLOCK when merely suggesting!
+   - When the user instructs you to allocate/schedule (e.g. "allocate block 12 to Dorico", "put composing in block 12"), OR confirms a suggestion (e.g. "yes", "sure", "let's do that", "sounds good"):
+     Output the allocation directive on its own line:
+       ALLOCATE_BLOCK: <block_number> | <label>
+     And provide a 1-sentence confirmation stating the block number, start time, and activity.
+3. TEMPORAL AWARENESS:
+   - For forward planning and recommendations, ONLY pick from UPCOMING open blocks. Never recommend or schedule into past elapsed blocks unless the user explicitly asks to retroactively log past work (e.g. "Earlier this morning at 8:00 AM I worked on X").
+4. ENERGY ALIGNMENT:
+   - Daylight Thirties are for high-focus, creative composition, writing, and deep problem-solving.
+   - Dark Thirties are for administrative tasks, reading, light dev chores, and calm wind-down.
+5. When the user confirms attendance ("yes", "attending"), confirm the event.
 """
 
     def _init_conversation(self) -> None:
