@@ -4,12 +4,40 @@
   <requires lib="Adw" version="1.0"/>
   <template class="ThirtiesWindow" parent="AdwApplicationWindow">
     <property name="title" translatable="yes">Thirties</property>
-    <property name="default-width">800</property>
-    <property name="default-height">600</property>
+    <property name="default-width">1000</property>
+    <property name="default-height">750</property>
     <property name="content">
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar">
+            <child type="title">
+              <object class="GtkBox">
+                <property name="spacing">4</property>
+                <child>
+                  <object class="GtkButton" id="prev_day_btn">
+                    <property name="icon-name">go-previous-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Previous Day</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="date_label">
+                    <property name="label">Today</property>
+                    <property name="width-chars">20</property>
+                    <property name="xalign">0.5</property>
+                    <property name="justify">center</property>
+                    <style>
+                      <class name="heading"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="next_day_btn">
+                    <property name="icon-name">go-next-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Next Day</property>
+                  </object>
+                </child>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="primary">True</property>
@@ -21,11 +49,10 @@
           </object>
         </child>
         <property name="content">
-          <object class="GtkLabel" id="label">
-            <property name="label" translatable="yes">Hello, World!</property>
-            <style>
-              <class name="title-1"/>
-            </style>
+          <object class="GtkBox" id="main_content_box">
+            <property name="orientation">vertical</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
           </object>
         </property>
       </object>
