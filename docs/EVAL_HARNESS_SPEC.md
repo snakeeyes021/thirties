@@ -1,167 +1,186 @@
-# Thirties AI Planning Assistant: Agentic Dynamic Stress-Testing Specification
+# Thirties AI Planning Assistant: Massive-Scale Agentic Stress-Test Harness Specification
 
 **Document:** `docs/EVAL_HARNESS_SPEC.md`  
-**Purpose:** Instructions for a dedicated evaluation agent session to build and execute a large-scale, dynamic, multi-turn user simulation test harness against the Thirties Planning Assistant.
+**Target:** Thirties 0.1.0-alpha (GNOME Libadwaita / PyGObject Flatpak)  
+**Execution Target:** Fresh Antigravity Agent Session (or Agent Swarm)  
+**Output Directory:** `docs/eval_reports/eval_report_<timestamp>.md` (Gitignored)
 
 ---
 
-## 1. Vision & Core Philosophy
+## 1. Mission & Philosophy: Why We Are Doing This
 
-The Thirties Planning Assistant pairs a local on-device SLM with a deterministic scheduling engine (`DayPlan`, `DeterministicScheduler`). 
+The Thirties Planning Assistant pairs an on-device Small Language Model (SLM, e.g. Gemma-4 E4B via LiteRT-LM) with a deterministic diurnal scheduling engine (`thirties_core.models.DayPlan`, `DeterministicScheduler`).
 
-Traditional software testing relies on rigid unit test assertions. However, a personal scheduling assistant must handle **messy, chaotic, contradictory human beings**. Real users do not speak in clean tool-call syntax; they:
-- Ramble and change their minds mid-sentence.
-- Misread calendars and backtrack: *"Wait, shoot, I looked at the wrong day, I actually don't have that meeting."*
-- Give contradictory instructions: *"I need 2 hours of composing between 2:00 PM and 3:00 PM."* (An impossible request that requires clarifying feedback rather than blind compliance).
-- Use vague, idiomatic time: *"crack of dawn"*, *"after the kids go to bed"*, *"sometime before my 3pm call"*.
-- Chain multiple unrelated diurnal adjustments into a single breath: *"Going to sleep late tonight at 11, working normal 8:30-4, and can you find me a chunk for a walk in the daylight?"*
+### The Goal: Exposing Vulnerabilities to Drive Powerful Generic Primitives
+The current implementation contains temporary intent regexes and early heuristics. **Our goal is NOT to make a few happy-path unit tests pass.** 
 
-### The Anti-Pattern: Regex Whack-a-Mole
-We do **not** want an ever-expanding spiderweb of bespoke regexes matching specific English phrases (e.g., regex for "bedtime is X", regex for "going to sleep at X", regex for "wake up at Y"). 
-
-Instead, the Assistant must rely on a **small, powerful, orthogonal set of generic primitives**:
-1. `inspect_schedule`: Check current commitments, envelopes, available discretionary blocks, and solar anchors.
-2. `set_schedule_window`: Define or shift diurnal envelopes (`WORK`, `SLEEP`) with start/end time or block spans, automatically managing locked states and preserving contained tasks.
-3. `allocate_blocks`: Place tasks with specified labels into block ranges or search for best-fit open slots.
-4. `clear_blocks`: Deallocate tasks or clear entire envelopes back to open discretionary time.
-
-The evaluation harness evaluates how effectively the assistant understands natural messy human intent and maps it to these generic primitives.
+Our goal is to **hit the assistant with the widest, most brutal, most realistic, and most chaotic stress-testing imaginable** (500 to 1,000+ synthetic conversation rollouts). We want to break the system across thousands of turns so we can:
+1. Catalog every pattern of misunderstanding, duration distortion, chronological inversion, hallucination, and state drift.
+2. Eliminate all brittle "regex whack-a-mole" heuristics.
+3. Architect and refine a bulletproof set of **generic, powerful primitives** (`inspect_schedule`, `set_schedule_window`, `allocate_blocks`, `clear_blocks`, `resolve_conflicts`) that work universally regardless of how messy, unhinged, or contradictory the user is.
 
 ---
 
-## 2. Architecture of the Dynamic Evaluation Harness (`tests/run_eval_harness.py`)
+## 2. The Defensive Directive for the Evaluation Agent
 
-The new agent session will implement `tests/run_eval_harness.py` to run **hundreds of multi-turn simulated conversations**.
+> **CRITICAL DIRECTIVE FOR THE EXECUTING AGENT:**  
+> **DO NOT** write a static test suite that merely runs 5 or 10 hardcoded test functions.  
+> **DO NOT** test trivial string equality or isolate happy-path queries.  
+> You are being tasked with building a **generative, large-scale simulation harness** that executes **at least 500 to 1,000 dynamic conversational scenarios** across a vast combinatorial space.  
+> You must simulate everything from ultra-terse 1-message commands to **context-length-shattering 25-to-40-turn conversational marathons**.
 
-### 2.1 The Two-Agent Simulator Pattern
+---
+
+## 3. Combinatorial Stress-Testing Dimensions
+
+The harness must generate conversations by sampling across a multi-dimensional matrix. Every generated conversation is a unique permutation of these axes:
+
+### Dimension 1: Conversational Length & Pacing
+- **Micro (1–2 turns):** Ultra-brief commands, immediate queries, or rapid-fire corrections.
+- **Medium (3–8 turns):** Iterative daily planning sessions, back-and-forth negotiations, buffer calculations.
+- **Marathon (15–40+ turns):** Full-day active companion simulation. The user checks in at 8 AM, changes plans at 10 AM, reports a meeting cancellation at 11:30 AM, has an emergency at 1:15 PM, backtracks at 3:00 PM, asks "what if" questions at 5:00 PM, and sets an irregular bedtime at 9:30 PM. Pushes model context limits and tests state permanence.
+
+### Dimension 2: Human Cognitive & Linguistic Chaos
+- **The Stream-of-Consciousness Rambler:** Voice-to-text style messy run-on thoughts with self-interruptions (*"Hey so uh I think I need to get some Dorico done today maybe 2 chunks wait no make it 3 because the score is due Friday but also mom called and wants lunch around 12:30 or 1 so actually do Dorico after that"*).
+- **The Inconsistent Backtracker & Gaslighter:** Constantly changes their mind, contradicts earlier statements, and misremembers (*"Wait, why is block 18 set to shower? Didn't I tell you I showered this morning?"*).
+- **The Impossible / Physics-Defying Requestor:** Asks for 3 hours of gym time in a 90-minute window between meetings, or attempts to schedule high-focus daylight creative tasks during midnight sleep hours. Tests whether the assistant clarifies the physical impossibility rather than silently truncating or breaking the schedule.
+- **The Decision-Fatigued Minimalist:** Exhausted, terse, answers in 1–3 words (*"idk"*, *"you pick"*, *"whatever fits"*). Tests proactive scheduling initiative.
+- **The Multi-Tasking Juggler:** Injects non-scheduling noise, Joplin note references, weather chit-chat, and conditional "maybe" tasks (*"If it rains at 3, I'll write music, otherwise I want to go for a jog"*).
+- **The Shift Worker / Nocturnal Extreme:** Bizarre diurnal schedules—bedtime at 11:00 AM, waking at 7:00 PM, graveyard work shifts from 9:00 PM to 5:00 AM.
+- **The Fragmented Micro-Scheduler:** Tries to pack ten 10-minute tasks into a single 30-minute block or asks how micro-tasks map into Thirties chunks.
+- **The Aggressive Over-Committer:** Has 14 hours of work and 6 hours of appointments, then asks why there is no daylight creative time available.
+
+### Dimension 3: Diurnal Envelopes & Solar Dynamics
+- Default work (8:30 AM – 4:00 PM, Blocks 4–18) shifting to arbitrary custom spans (e.g. 6:00 AM – 2:00 PM, 1:00 PM – 9:00 PM, split shifts).
+- Day-off / full envelope clearing and mid-day work reinstatement.
+- Sleep schedule contractions (late nights, early alarms, split sleep).
+- Daylight vs. Dark discretionary availability recalculations based on changing envelopes.
+- Solar Midday and Solar Midnight boundary crossing.
+
+### Dimension 4: Task Envelopes, Preservations & Collapsible UI Stacking
+- Placing tasks *inside* work or sleep envelopes and moving the envelope without destroying the tasks.
+- Verifying that contiguous `BlockKind.WORK` and `BlockKind.SLEEP` blocks remain strictly `is_locked = True` so `GroupedBlockWidget` collapses them cleanly into unified cards.
+- Ensuring tasks moved out of an envelope revert cleanly to their natural discretionary state without orphan metadata.
+
+---
+
+## 4. Evaluator Architecture: The Four-Pillar Scoring Engine
+
+For every scenario executed by the harness, an independent automated evaluator analyzes the dialogue transcripts and the underlying SQLite database state (`day_plan.blocks`) across 4 rigorous pillars:
+
 ```
-                     +---------------------------------------+
-                     |         Synthetic User Agent          |
-                     |  (Personas: Busy, Scatterbrained,    |
-                     |   Contradictory, Vague, Demanding)   |
-                     +---------------------------------------+
-                                        |  (Messy Human Text)
-                                        v
-                     +---------------------------------------+
-                     |      Thirties Planning Assistant      |
-                     |  (ConversationManager + State DB)     |
-                     +---------------------------------------+
-                                        |  (Reply + DB Mutations)
-                                        v
-                     +---------------------------------------+
-                     |         Independent Evaluator         |
-                     |  (Scores Comprehension, Correctness,  |
-                     |   Truthfulness, Human Legibility)     |
-                     +---------------------------------------+
+               [Turn N Output + DB State Snapshot]
+                                |
+        +-----------------------+-----------------------+
+        |                       |                       |
+        v                       v                       v
+1. Comprehension        2. State Invariants     3. Anti-Hallucination   4. Human Legibility
+- Intent extracted?     - Exact block kinds?    - Did prose promise     - Concise?
+- Nuance respected?     - Locked flags set?       match actual DB?      - Pure 30m chunks?
+- Math physically sound? - Duration arithmetic?  - No phantom moves?    - No robotic jargon?
 ```
 
-1. **Synthetic User Generator**: Generates varied conversational turns across diverse personas (detailed in Section 3). It can simulate conversations ranging from a quick 2-turn clarification to a winding 15-turn scheduling marathon.
-2. **System Under Test**: `thirties_core.conversation.ConversationManager` running against an isolated `DeterministicScheduler` with a fresh temporary SQLite database for each scenario.
-3. **Turn-by-Turn & End-of-Dialogue Evaluator**:
-   Inspects both the conversational dialogue and the ground-truth database state (`day_plan.blocks`) after every turn.
+### Pillar 1: Intent Comprehension & Physical Soundness (0–100)
+- Did the assistant understand what the user actually wanted despite confusing phrasing?
+- Did it catch chronological constraints (e.g. $T_{\text{prep}} < T_{\text{transit}} < T_{\text{appt}}$)?
+- Did it reject or flag physically impossible durations?
+
+### Pillar 2: Database Invariant & Tool Execution Correctness (0–100)
+- Did the DB blocks change to the exact requested numbers?
+- Are diurnal envelope blocks locked (`is_locked = True`) to guarantee UI card stacking?
+- Was duration arithmetic exact? (1 hour = 2 blocks, 90 mins = 3 blocks, 2 hours = 4 blocks, 4 hours = 8 blocks).
+- Were canceled or moved blocks cleanly deallocated without phantom residue?
+
+### Pillar 3: Truthfulness & Anti-Hallucination Grounding (0–100)
+- **Zero-Tolerance Hallucination Check:** If the assistant says *"I have scheduled your walk from 2:00 PM to 2:30 PM (Block 15)"*, does Block 15 actually contain that task in the database?
+- If the model claimed it performed an action, did an underlying tool execute, or was it pure ungrounded model poetry?
+
+### Pillar 4: Human Streamlining & Legibility (0–100)
+- Is the response streamlined for quick human cognitive processing?
+- Does it adhere to pure half-hour language (prohibiting awkward hours translations like `"4 chunks (2 hours)"`)?
+- Does it avoid spewing unsolicited 48-block schedule dumps when the user only asked a focused question?
 
 ---
 
-## 3. Persona & Scenario Taxonomy
+## 5. Implementation Guide for `tests/run_eval_harness.py`
 
-The evaluation harness must sample across the following conversational archetypes:
+The new agent session should construct `tests/run_eval_harness.py` using this architectural skeleton:
 
-### Persona 1: The Scatterbrained Backtracker
-- **Behavior:** Starts with one plan, interrupts themselves, changes details, realizes errors.
-- **Example Flow:**
-  - Turn 1: *"Let's put 2 hours of Dorico writing at 1pm."*
-  - Turn 2: *"Oh wait, no, 1pm is right when my sister calls. Make it 3pm instead."*
-  - Turn 3: *"Shoot, actually work goes until 4 today. Can we just do it after dinner?"*
-- **Evaluation Criteria:** Did the assistant clean up previous allocations without leaving phantom orphan blocks in the database? Does the final schedule match the last agreed state?
+```python
+"""Large-Scale Autonomous Stress-Testing Harness for Thirties Planning Assistant."""
 
-### Persona 2: The Contradictory / Impossible Requestor
-- **Behavior:** Requests durations longer than available windows, or schedules conflicts over locked commitments.
-- **Example Flow:**
-  - Turn 1: *"I need 2 hours of gym time between 1:00 PM and 2:00 PM."*
-- **Evaluation Criteria:** Did the assistant politely explain the physical impossibility (2 hours = 4 chunks; the 1:00–2:00 PM window is only 2 chunks) and offer viable alternatives, rather than silently truncating or overflowing into 3:00 PM?
+import os
+import sys
+import json
+import logging
+import tempfile
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import List, Dict, Any, Generator
 
-### Persona 3: The Holistic Diurnal Shifter
-- **Behavior:** Simultaneously adjusts sleep, work, and personal commitments in conversational flow.
-- **Example Flow:**
-  - Turn 1: *"I'm feeling under the weather. Going to sleep early at 9pm tonight, waking up at 7am, working a half day from 9 to 1, and I just want the afternoon wide open to rest."*
-- **Evaluation Criteria:**
-  - Sleep blocks correctly set from 9:00 PM to 7:00 AM (`BlockKind.SLEEP`, locked, grouped).
-  - Work blocks set from 9:00 AM to 1:00 PM (`BlockKind.WORK`, locked, grouped).
-  - Afternoon blocks (1:00 PM to 9:00 PM) restored to open discretionary daylight/dark blocks.
-  - Available tally accurately reported based on the new baseline.
+from thirties_core.config import ThirtiesConfig
+from thirties_core.calendar_engine import MockCalendarEngine
+from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
+from thirties_core.scheduler import DeterministicScheduler, StateDatabase
+from thirties_core.conversation import ConversationManager
+from thirties_core.models import BlockKind, DayPlan
 
-### Persona 4: The Vague / Natural Language Planner
-- **Behavior:** Uses approximate colloquialisms rather than block numbers or clock times.
-- **Example Flow:**
-  - Turn 1: *"Where can I squeeze in a quick walk while the sun is still up?"*
-  - Turn 2: *"Let's do it right before sunset."*
-- **Evaluation Criteria:** Does the assistant inspect solar daylight blocks, identify open daylight blocks before sunset, and allocate accurately?
+class ScenarioGenerator:
+    """Generates a combinatorial matrix of 500-1000+ realistic, messy test dialogues."""
+    
+    @classmethod
+    def generate_scenarios(cls, count: int = 500) -> Generator[Dict[str, Any], None, None]:
+        # Generates scenarios systematically across:
+        # - Turn lengths (1 to 30 turns)
+        # - Chaos archetypes (Backtrackers, Impossibles, Ramblers, Minimalists, Graveyard shifts)
+        # - Diurnal envelope mutations
+        # - Backward buffer scheduling
+        ...
 
-### Persona 5: The Appointment & Backward Buffer Scheduler
-- **Behavior:** Mentions an external appointment and travel time, plus routine tasks.
-- **Example Flow:**
-  - Turn 1: *"Dentist appointment at 2:30 PM. It takes half an hour to drive there. I haven't showered yet today."*
-- **Evaluation Criteria:**
-  - Transit buffer placed in the block immediately preceding 2:30 PM (02:00 PM – 02:30 PM).
-  - Shower/prep placed before transit (01:30 PM – 02:00 PM).
-  - Transit/prep **never** placed during or after the appointment.
+class EvaluatorEngine:
+    """Evaluates conversation turns against DayPlan SQLite state."""
+    
+    def evaluate_turn(self, conversation_history, last_user_turn, assistant_reply, day_plan: DayPlan) -> Dict[str, Any]:
+        # Evaluates Comprehension, State Invariants, Truthfulness, and Legibility
+        ...
 
----
+class ReportWriter:
+    """Compiles aggregate metrics and failure diffs into docs/eval_reports/."""
+    ...
 
-## 4. Evaluator Scoring Dimensions
-
-For every conversation, the evaluator grades 4 core pillars on a 1–5 scale (and binary Pass/Fail on safety invariants):
-
-### 1. Intent Comprehension (Did the assistant get what the human meant?)
-- **5:** Flawlessly extracted core intents, respected nuance, handled corrections smoothly.
-- **3:** Understood the main task but missed a secondary constraint (e.g. forgot travel buffer).
-- **1:** Completely misunderstood or ignored the user's instruction.
-
-### 2. State & Tool Correctness (Did the database state mutate accurately?)
-- **Invariants Checked in SQLite/DayPlan:**
-  - Are work blocks set to `BlockKind.WORK` and `is_locked = True`?
-  - Are sleep blocks set to `BlockKind.SLEEP` and `is_locked = True`?
-  - Did consecutive work/sleep blocks qualify for UI card stacking?
-  - Was duration arithmetic exact (e.g. 2 hours = exactly 4 blocks, not 1, not 3)?
-  - Were orphan allocations cleaned up when tasks were moved or canceled?
-
-### 3. Truthfulness & Anti-Hallucination Grounding
-- **Check:** Does what the assistant *claims* in its prose match the *actual state* in `day_plan.blocks`?
-- **Failure:** Assistant says *"I have scheduled your walk from 4:00 PM to 4:30 PM"*, but Block 17 remains empty or was placed at 5:00 PM.
-
-### 4. Human Communication & Legibility
-- **Conciseness:** Avoids repeating the entire day plan unsolicited if the user asked a focused question.
-- **Natural Phrasing:** Speaks in natural half-hour blocks/chunks. Does **not** awkwardly append `(2 hours)` or verbose robotic math.
-- **Tone:** Constructive, proactive, streamlined for quick human decision-making.
+def main():
+    # 1. Parse arguments (e.g. --scenarios 500 --output docs/eval_reports/)
+    # 2. Iterate through generated scenarios
+    # 3. Spin up fresh isolated StateDatabase for each scenario
+    # 4. Execute multi-turn rollouts through ConversationManager
+    # 5. Evaluate state after each turn
+    # 6. Write comprehensive evaluation report
+```
 
 ---
 
-## 5. Execution & Reporting Requirements
+## 6. Structure of the Output Report (`docs/eval_reports/eval_report_<timestamp>.md`)
 
-The harness should output reports into `docs/eval_reports/eval_report_<timestamp>.md`.
+The final report generated by the test runner must include:
 
-### Report Sections:
-1. **Summary Scorecard**:
-   - Total Conversations & Turns Executed.
-   - Overall Pass Rate (%) & Mean Scores across Comprehension, State Correctness, Truthfulness, and Legibility.
-2. **Breakdown by Persona & Category**:
-   - Scatterbrained / Backtracking Pass Rate.
-   - Contradictory Constraints Handling Rate.
-   - Diurnal Envelope Adjustments (Work/Sleep).
-   - Backward Scheduling & Buffer Accuracy.
-3. **Detailed Failure Logs**:
-   - For every conversation with a score $< 4$ or an invariant violation:
-     - Transcript of the conversation.
-     - Internal tool calls and execution logs.
-     - Database state diff (Expected vs. Actual blocks).
-     - Specific failure reason (e.g., "Hallucinated confirmation without DB mutation", "Duration arithmetic off by 2 blocks", "Overwrote locked commitment").
-4. **Actionable Recommendations**:
-   - Insights on prompt vulnerabilities, missing generic tool primitives, or engine bugs discovered during the run.
+1. **Executive Scorecard Table**:
+   - Total Scenarios Run (e.g. 500 / 1,000).
+   - Total Conversational Turns Evaluated.
+   - Overall System Pass Rate (%).
+   - Mean Scores (0–100) for Comprehension, State Correctness, Anti-Hallucination, and Legibility.
+2. **Archetype Breakdown Matrix**:
+   - Pass rates and mean scores broken down by each behavioral archetype (Scatterbrained, Impossible, Rambling, Minimalist, Graveyard shift, etc.).
+3. **Catastrophic Failure Catalog**:
+   - Specific transcripts where the model failed worst (e.g. hallucinating state, inverting time, corrupting database blocks).
+   - Expected vs. Actual SQLite block diffs.
+4. **Architectural Weakness Analysis & Generic Primitives Blueprint**:
+   - Clear technical diagnosis of where the current heuristics/regexes break down.
+   - Recommended generic tool primitives to replace brittle pattern matching.
 
 ---
 
-## 6. How the New Agent Session Should Proceed
+## 7. Hand-Off Prompt for the New Session
 
-When starting the new agent session, the prompt to give it is:
+Copy and paste this prompt to start the execution session:
 
-> *"Please review `docs/EVAL_HARNESS_SPEC.md`. Your task is to build and run the dynamic evaluation harness in `tests/run_eval_harness.py`. Generate dozens to hundreds of varied, multi-turn, messy human conversations across all personas described in the spec, evaluate the assistant's responses and database mutations, and write the comprehensive evaluation report to `docs/eval_reports/eval_report_<timestamp>.md`. Finally, summarize the findings and key failure modes."*
+> *"Please read `docs/EVAL_HARNESS_SPEC.md`. Build the large-scale simulation harness in `tests/run_eval_harness.py`. Execute a comprehensive battery of 500+ diverse, multi-turn, messy scenarios across all defined combinatorial dimensions (ranging from 1-turn commands to 25+ turn marathons). Generate the full markdown evaluation report into `docs/eval_reports/eval_report_<timestamp>.md`. Finally, report back with an executive summary of the results, the most frequent failure modes, and architectural recommendations."*
