@@ -242,6 +242,15 @@ class LiteRTInferenceEngine:
         # Parse potential intent/tool calls from user prompt or model text
         tool_calls: List[Dict[str, Any]] = []
 
+        # 0. Directive: REINSTATE_WORK_BLOCKS / RESTORE_WORK_BLOCKS
+        if re.search(r"\b(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
+            tool_calls.append({
+                "id": "reinstate_work_call",
+                "name": "reinstate_work_blocks",
+                "arguments": {},
+            })
+            raw_reply = re.sub(r"(?:REINSTATE|RESTORE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+
         # 1. Directive: CLEAR_WORK_BLOCKS / DEALLOCATE_WORK_BLOCKS
         if re.search(r"\b(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
             tool_calls.append({
@@ -285,8 +294,15 @@ class LiteRTInferenceEngine:
         # Fallback to User Intent Extraction if model did not emit directives:
         if not tool_calls:
             # Intent: Day off / Clear all work blocks
+            # Intent: Reinstate work blocks
+            if re.search(r"(?:reinstate|restore|put (?:them )?back|add back|turns out I (?:do )?have work|do have work)", last_user_msg, re.IGNORECASE):
+                tool_calls.append({
+                    "id": "reinstate_work_call",
+                    "name": "reinstate_work_blocks",
+                    "arguments": {},
+                })
             # Intent: Day off / Clear all work blocks
-            if re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
+            elif re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
                 tool_calls.append({
                     "id": "clear_work_call",
                     "name": "clear_blocks",

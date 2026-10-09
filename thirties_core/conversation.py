@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from thirties_core.astronomy import get_current_time
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.inference import InferenceEngine, MockInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
@@ -49,6 +50,17 @@ PLANNING_TOOLS = [
                     "task_id": {"type": "string", "description": "Joplin task ID if assigning a task"},
                     "custom_label": {"type": "string", "description": "Display label for this block"}
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reinstate_work_blocks",
+            "description": "Reinstate or restore the configured work blocks for today (re-locking them as Work).",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         }
     },
@@ -148,7 +160,7 @@ class ConversationManager:
         sunset_clock_idx = next((b.index for b in reversed(self.day_plan.blocks) if b.is_sunlight), 37)
         sunset_logical_idx = (sunset_clock_idx - sunrise_idx) % 48 + 1
 
-        now = datetime.now(self.day_plan.sunrise.tzinfo)
+        now = get_current_time(self.day_plan.sunrise.tzinfo)
         is_today = (self.day_plan.target_date == now.date())
 
         # Logical 1-48 blocks starting at Sunrise
@@ -258,11 +270,15 @@ BEHAVIOR RULES:
    - When a duration is requested (e.g. "at least 2 hours starting at block 28"):
      2 hours = 4 blocks -> Block 28 through Block 31 (28 + 4 - 1 = 31).
      Directive: ALLOCATE_BLOCKS: 28-31 | <label>
-4. DEALLOCATIONS & DAYS OFF:
+4. SCHEDULE MUTATIONS & DAYS OFF:
    - When the user indicates they do not have work today (e.g. "I don't have work today", "day off", "open my work blocks"):
      Output directive:
        CLEAR_WORK_BLOCKS
      And confirm that all work blocks are now open discretionary time for planning.
+   - When the user asks to reinstate, restore, or put back work blocks (e.g. "turns out I do have work today", "put them back", "reinstate work blocks"):
+     Output directive:
+       REINSTATE_WORK_BLOCKS
+     And confirm that work blocks are reinstated on their schedule.
    - When the user asks to deallocate or clear specific blocks (e.g. "clear blocks 4-18", "deallocate block 28"):
      Output directive:
        CLEAR_BLOCKS: <start_block>-<end_block>
@@ -338,6 +354,25 @@ BEHAVIOR RULES:
             else:
                 return f"Allocated blocks {start_idx} through {end_idx} ({len(assigned_indices)} blocks) to '{label}'."
 
+        elif name in ("reinstate_work_blocks", "restore_work_blocks"):
+            work_start = self.scheduler.config.general.work_start_thirty
+            work_end = self.scheduler.config.general.work_end_thirty
+            reinstated_count = 0
+            for b in self.day_plan.blocks:
+                if work_start <= b.index <= work_end:
+                    b.kind = BlockKind.WORK
+                    b.label = "Work"
+                    b.is_locked = True
+                    b.assigned_task_id = None
+                    reinstated_count += 1
+
+            self.day_plan.recalculate_counts()
+
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+            return f"Reinstated {reinstated_count} work blocks on today's schedule."
+
         elif name in ("clear_blocks", "deallocate_blocks"):
             clear_all_work = arguments.get("clear_all_work", False)
             start_idx = arguments.get("start_block")
@@ -397,16 +432,33 @@ BEHAVIOR RULES:
         self.messages.append(response)
 
         # Execute returned tool calls
+        executed_tools: list[tuple[str, str]] = []
         if tool_calls:
             for call in tool_calls:
                 fn_name = call.get("name")
                 fn_args = call.get("arguments", {})
                 tool_output = self.execute_tool(fn_name, fn_args)
+                executed_tools.append((fn_name, tool_output))
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", "call"),
                     "name": fn_name,
                     "content": tool_output,
                 })
+
+        # Anti-hallucination grounding check:
+        # If the assistant generated text claiming an action or the user instructed a change,
+        # but the model failed to emit a tool directive, execute the corresponding mutation directly!
+        if not executed_tools:
+            # 1. Reinstating work blocks
+            if (re.search(r"\b(reinstat|restor|put.*back)\b.*\bwork\b", reply_content, re.IGNORECASE) or
+                re.search(r"(?:reinstate|restore|put (?:them )?back|add back|turns out I (?:do )?have work|do have work)", user_text, re.IGNORECASE)):
+                tool_output = self.execute_tool("reinstate_work_blocks", {})
+                executed_tools.append(("reinstate_work_blocks", tool_output))
+            # 2. Clearing work blocks
+            elif (re.search(r"\b(deallocat|cleared|marked.*open)\b.*\bwork\b", reply_content, re.IGNORECASE) or
+                  re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work)", user_text, re.IGNORECASE)):
+                tool_output = self.execute_tool("clear_blocks", {"clear_all_work": True})
+                executed_tools.append(("clear_blocks", tool_output))
 
         return reply_content

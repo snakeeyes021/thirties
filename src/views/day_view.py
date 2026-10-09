@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from gi.repository import Gtk, Adw
 
+from thirties_core.astronomy import get_current_time
 from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
 from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget
 from thirties.widgets.solar_arc import SolarArcWidget
@@ -107,7 +108,7 @@ class DayView(Gtk.Box):
         while child := self.list_box.get_first_child():
             self.list_box.remove(child)
 
-        now = datetime.now(day_plan.sunrise.tzinfo)
+        now = get_current_time(day_plan.sunrise.tzinfo)
         now_idx = -1
         for b in day_plan.blocks:
             if b.start_dt <= now < b.end_dt:

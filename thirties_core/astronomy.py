@@ -8,11 +8,37 @@ anchored against sunlight and twilight.
 from __future__ import annotations
 
 import math
+import os
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+
+
+def get_current_time(tz: Optional[ZoneInfo] = None) -> datetime:
+    """Return the current time, supporting debug simulation via THIRTIES_DEBUG_TIME env var.
+
+    Format examples for THIRTIES_DEBUG_TIME:
+    - "22:30" (10:30 PM today)
+    - "02:15" (2:15 AM today)
+    - "2026-10-09T22:30:00" (explicit ISO timestamp)
+    """
+    debug_val = os.environ.get("THIRTIES_DEBUG_TIME")
+    if debug_val:
+        try:
+            if "T" in debug_val:
+                dt = datetime.fromisoformat(debug_val)
+                return dt.astimezone(tz) if tz else dt
+            elif ":" in debug_val:
+                parts = debug_val.strip().split(":")
+                hour = int(parts[0])
+                minute = int(parts[1])
+                now_base = datetime.now(tz)
+                return now_base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        except Exception:
+            pass
+    return datetime.now(tz)
 
 
 def _get_zoneinfo(tz: str | ZoneInfo) -> ZoneInfo:

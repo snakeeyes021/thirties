@@ -6,6 +6,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from gi.repository import Gtk
 
+from thirties_core.astronomy import get_current_time
 from thirties_core.models import DayPlan
 
 
@@ -60,7 +61,7 @@ class SolarArcWidget(Gtk.DrawingArea):
         center_x = width / 2.0
         peak_y = 25.0
 
-        now = datetime.now(self.day_plan.sunrise.tzinfo)
+        now = get_current_time(self.day_plan.sunrise.tzinfo)
         sunrise = self.day_plan.sunrise
         sunset = self.day_plan.sunset
         is_today = (self.day_plan.target_date == now.date())
@@ -119,7 +120,6 @@ class SolarArcWidget(Gtk.DrawingArea):
                 cr.fill()
             elif is_night:
                 # Moon marker along nocturnal trajectory
-                # Calculate progress through the night (sunset to sunrise)
                 if now > sunset:
                     next_sunrise = sunrise + timedelta(days=1)
                     night_duration = (next_sunrise - sunset).total_seconds()
@@ -146,9 +146,9 @@ class SolarArcWidget(Gtk.DrawingArea):
 
         # 4. Labels for Sunrise, Sunset, and Midday/Midnight
         cr.set_source_rgba(0.7, 0.7, 0.7, 0.9)
-        cr.set_font_size(11.0)
 
         sunrise_text = f"☼ {sunrise.strftime('%I:%M %p').lstrip('0')}"
+        cr.set_font_size(11.0)
         cr.move_to(margin_x, horizon_y + 18)
         cr.show_text(sunrise_text)
 
@@ -157,11 +157,12 @@ class SolarArcWidget(Gtk.DrawingArea):
         cr.show_text(sunset_text)
 
         if is_night:
-            phase_glyph, phase_name = get_moon_phase(now)
-            center_text = f"{phase_glyph} {phase_name}"
-            cr.move_to(center_x - 45, peak_y - 8)
-            cr.show_text(center_text)
+            phase_glyph, _ = get_moon_phase(now)
+            cr.set_font_size(15.0)
+            cr.move_to(center_x - 8, peak_y - 8)
+            cr.show_text(phase_glyph)
         else:
+            cr.set_font_size(11.0)
             noon_text = "Noon"
             cr.move_to(center_x - 14, peak_y - 8)
             cr.show_text(noon_text)

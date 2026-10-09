@@ -183,5 +183,19 @@ class TestConversation(unittest.TestCase):
             self.assertEqual(b.label, "")
 
 
+    def test_reinstate_work_blocks_tool(self) -> None:
+        # First clear all work blocks
+        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
+        self.assertEqual(len([b for b in self.plan.blocks if b.kind == BlockKind.WORK]), 0)
+
+        # Now reinstate work blocks
+        out = self.manager.execute_tool("reinstate_work_blocks", {})
+        self.assertIn("Reinstated", out)
+        work_restored = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
+        self.assertGreater(len(work_restored), 0)
+        self.assertEqual(work_restored[0].label, "Work")
+        self.assertTrue(work_restored[0].is_locked)
+
+
 if __name__ == "__main__":
     unittest.main()

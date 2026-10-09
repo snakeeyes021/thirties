@@ -128,5 +128,38 @@ Enjoy your day off!
                 self.assertTrue(res["tool_calls"][0]["arguments"]["clear_all_work"])
 
 
+    def test_reinstate_work_directive_parsing(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+REINSTATE_WORK_BLOCKS
+I have reinstated your work blocks.
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Oh shoot, turns out I do have work today. Can you put them back?"}])
+                self.assertEqual(res["content"], "I have reinstated your work blocks.")
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+
+    def test_reinstate_work_intent_fallback(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, "_find_host_runner", return_value={"python": "mock_py", "script": "mock_sc"}):
+            with patch("subprocess.run") as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+No problem at all!
+---THIRTIES_RESPONSE_END---""",
+                    stderr="",
+                    returncode=0,
+                )
+                res = engine.chat([{"role": "user", "content": "Oh shoot, turns out I do have work today. Can you put them back?"}])
+                self.assertEqual(len(res["tool_calls"]), 1)
+                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+
+
 if __name__ == "__main__":
     unittest.main()
