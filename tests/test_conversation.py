@@ -209,7 +209,7 @@ class TestConversation(unittest.TestCase):
         self.assertIn("keeping your existing Block 17 ('Doctor Appointment') intact", out)
 
         # Block 17 remains ASSIGNED, other blocks restored to WORK
-        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.ASSIGNED)
+        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
         self.assertEqual(self.plan.get_logical_block(17).label, "Doctor Appointment")
         self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
 
@@ -264,3 +264,26 @@ if __name__ == "__main__":
         # Check discretionary totals
         self.assertGreater(self.plan.daylight_discretionary_total, 0)
         self.assertGreater(self.plan.dark_discretionary_total, 0)
+
+    def test_work_window_moves_clearing_old_work_blocks(self) -> None:
+        # Initial work blocks 4-18 are set
+        # Schedule composing in Block 3
+        self.manager.execute_tool("allocate_thirty_block", {"block_index": 3, "custom_label": "Composing"})
+        # Move work window to 7am to 3pm (Blocks 1-16)
+        out = self.manager.execute_tool("reinstate_work_blocks", {"start_time": "7am", "end_time": "3pm"})
+        self.assertIn("Blocks 1–16", out)
+        self.assertIn("Composing", out)
+
+        # Blocks 1-16 must all be WORK
+        for idx in range(1, 17):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.kind, BlockKind.WORK, f"Block {idx} should be WORK")
+
+        # Block 3 should retain label Composing
+        self.assertEqual(self.plan.get_logical_block(3).label, "Composing")
+
+        # Blocks 17 and 18 (old 3:00-4:00 PM work) must be cleared back to discretionary!
+        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
+        self.assertNotEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
+        self.assertTrue(self.plan.get_logical_block(17).is_discretionary)
+        self.assertTrue(self.plan.get_logical_block(18).is_discretionary)

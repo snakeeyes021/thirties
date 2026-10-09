@@ -182,9 +182,7 @@ class ChatPanel(Gtk.Box):
         clamp.set_child(self.messages_box)
         self.scrolled.set_child(clamp)
 
-        # Auto-scroll when adjustment size expands
-        vadj = self.scrolled.get_vadjustment()
-        vadj.connect("changed", self._on_vadjustment_changed)
+        # Auto-scroll managed after message insertion
 
         self.append(self.scrolled)
 
@@ -291,17 +289,17 @@ class ChatPanel(Gtk.Box):
         self.messages_box.append(msg_widget)
         self._scroll_to_bottom()
 
-    def _on_vadjustment_changed(self, adj: Gtk.Adjustment) -> None:
-        target = adj.get_upper() - adj.get_page_size()
-        if target > 0:
-            adj.set_value(target)
-
     def _scroll_to_bottom(self) -> None:
         def do_scroll():
-            adj = self.scrolled.get_vadjustment()
-            target = adj.get_upper() - adj.get_page_size()
-            if target > 0:
-                adj.set_value(target)
+            last = self.messages_box.get_last_child()
+            vp = self.scrolled.get_child()
+            if vp and hasattr(vp, "scroll_to") and last:
+                vp.scroll_to(last, 0, None)
+            else:
+                adj = self.scrolled.get_vadjustment()
+                target = adj.get_upper() - adj.get_page_size()
+                if target > 0:
+                    adj.set_value(target)
             return False
         GLib.idle_add(do_scroll)
         GLib.timeout_add(100, do_scroll)

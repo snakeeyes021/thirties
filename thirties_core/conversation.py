@@ -215,40 +215,66 @@ class ConversationManager:
 
         sunrise_start_str = self.day_plan.get_block(sunrise_idx).start_dt.strftime("%I:%M %p")
 
+        # Sleep Horizon: Find the first upcoming sleep block of tonight
+        sleep_blocks_logical = [log_idx for b, log_idx in logical_blocks if b.kind == BlockKind.SLEEP]
+        current_idx_val = current_logical_idx if current_logical_idx is not None else 1
+        upcoming_sleep = [idx for idx in sleep_blocks_logical if idx >= current_idx_val]
+        sleep_start_log = upcoming_sleep[0] if upcoming_sleep else (sleep_blocks_logical[0] if sleep_blocks_logical else 33)
+        sleep_start_block = self.day_plan.get_logical_block(sleep_start_log)
+        sleep_start_time = sleep_start_block.start_dt.strftime('%I:%M %p').lstrip('0')
+        blocks_until_sleep = max(0, sleep_start_log - current_idx_val)
+
         clock_info = ""
         if is_today:
             curr_str = f"Block {current_logical_idx} ({current_block.start_dt.strftime('%I:%M %p')} – {current_block.end_dt.strftime('%I:%M %p')})" if current_block else "Outside day bounds"
-            clock_info = f"- Current Clock Time: {now.strftime('%I:%M %p')}\n- Current Active Block: {curr_str}\n"
-
+            clock_info = (
+                f"- Current Clock Time: {now.strftime('%I:%M %p')}\n"
+                f"- Current Active Block: {curr_str}\n"
+                f"- Usable Time Remaining Until Sleep: {blocks_until_sleep} chunks until Sleep at {sleep_start_time} (Block {sleep_start_log})\n"
+            )
         elapsed_info = f"\n- Elapsed (Past) Open Blocks Earlier Today: {', '.join(elapsed_open)}" if elapsed_open else ""
 
-        # Group currently scheduled tasks / custom commitments (e.g. Game Night, Composing, Appointments)
-        scheduled_commitments = []
-        i = 0
-        while i < len(logical_blocks):
-            b, log_idx = logical_blocks[i]
-            if b.kind == BlockKind.ASSIGNED or (b.label and b.kind not in (BlockKind.SLEEP, BlockKind.WORK, BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY)):
+        # Group currently scheduled tasks (split into Upcoming vs Elapsed)
+        upcoming_commitments = []
+        past_commitments = []
+        idx_loop = 0
+        while idx_loop < len(logical_blocks):
+            b, log_idx = logical_blocks[idx_loop]
+            if b.kind == BlockKind.ASSIGNED or (b.label and b.label != "Work" and b.kind != BlockKind.SLEEP):
                 lbl = b.label or "Scheduled Task"
                 start_log = log_idx
-                start_time = b.start_dt.strftime('%I:%M %p')
-                end_time = b.end_dt.strftime('%I:%M %p')
-                j = i + 1
+                start_time = b.start_dt.strftime('%I:%M %p').lstrip('0')
+                end_time = b.end_dt.strftime('%I:%M %p').lstrip('0')
+                j = idx_loop + 1
                 while j < len(logical_blocks):
                     next_b, next_log = logical_blocks[j]
                     if (next_b.kind == b.kind or next_b.label == b.label) and next_b.label == lbl:
-                        end_time = next_b.end_dt.strftime('%I:%M %p')
+                        end_time = next_b.end_dt.strftime('%I:%M %p').lstrip('0')
                         j += 1
                     else:
                         break
                 end_log = logical_blocks[j - 1][1]
+                count = j - idx_loop
+                count_str = f"{count} chunk" if count == 1 else f"{count} chunks"
                 if start_log == end_log:
-                    scheduled_commitments.append(f"- Block {start_log} ({start_time} – {end_time}): {lbl}")
+                    entry = f"- Block {start_log} ({start_time} – {end_time}, {count_str}): {lbl}"
                 else:
-                    scheduled_commitments.append(f"- Blocks {start_log} through {end_log} ({start_time} – {end_time}): {lbl}")
-                i = j
+                    entry = f"- Blocks {start_log} through {end_log} ({start_time} – {end_time}, {count_str}): {lbl}"
+
+                if is_today and b.end_dt <= now:
+                    past_commitments.append(entry)
+                else:
+                    upcoming_commitments.append(entry)
+                idx_loop = j
             else:
-                i += 1
-        scheduled_commitments_str = "\n".join(scheduled_commitments) or "None scheduled yet"
+                idx_loop += 1
+
+        upcoming_commitments_str = "\n".join(upcoming_commitments) or "None scheduled"
+        past_commitments_str = "\n".join(past_commitments) or "None"
+        scheduled_commitments_str = (
+            f"- Upcoming Commitments (Later Today):\n{upcoming_commitments_str}\n\n"
+            f"- Completed Commitments (Earlier Today, Elapsed):\n{past_commitments_str}"
+        )
 
         return f"""You are the Thirties Planning Assistant. You schedule the user's day in 48 discrete thirty-minute blocks numbered 1 to 48.
 The day begins at Block 1 (the thirty containing sunrise). Each subsequent block is exactly 30 minutes long.
@@ -421,20 +447,33 @@ BEHAVIOR RULES:
                     if work_start <= b.index <= work_end:
                         target_blocks.append(b)
 
-            reinstated_count = 0
+            target_indices: set[int] = {self.day_plan.get_logical_index(b) for b in target_blocks}
+
+            # 1. Clear any OLD work blocks that fall OUTSIDE the new work window!
+            for b in self.day_plan.blocks:
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.kind == BlockKind.WORK and log_idx not in target_indices:
+                    if b.assigned_task_id or (b.label and b.label != "Work"):
+                        b.kind = BlockKind.ASSIGNED
+                    else:
+                        b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                        b.label = ""
+                        b.is_locked = False
+                        b.assigned_task_id = None
+
+            # 2. Assign target window to WORK, preserving task assignments inside
+            reinstated_count = len(target_blocks)
             preserved_tasks: list[str] = []
             for b in target_blocks:
-                if b.kind == BlockKind.ASSIGNED:
-                    log_idx = self.day_plan.get_logical_index(b)
-                    lbl = b.label or "scheduled task"
-                    preserved_tasks.append(f"Block {log_idx} ('{lbl}')")
-                    continue
-                b.kind = BlockKind.WORK
-                b.label = "Work"
-                b.is_locked = True
-                b.assigned_task_id = None
-                reinstated_count += 1
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.label and b.label != "Work":
+                    preserved_tasks.append(f"Block {log_idx} ('{b.label}')")
+                else:
+                    b.label = "Work"
+                    b.assigned_task_id = None
 
+                b.kind = BlockKind.WORK
+                b.is_locked = True
             self.day_plan.recalculate_counts()
 
             if self.scheduler and self.scheduler.state_db:
@@ -589,9 +628,5 @@ BEHAVIOR RULES:
         if executed_tools:
             for fn_name, tool_output in executed_tools:
                 if fn_name in ("reinstate_work_blocks", "clear_blocks"):
-                    if "4 through 18" in reply_content or not reply_content.strip():
-                        reply_content = tool_output
-                    elif fn_name == "reinstate_work_blocks" and any(k in user_text.lower() for k in ("7am", "7:00", "8am", "9am", "10am")) and "4 through 18" in reply_content:
-                        reply_content = tool_output
-
+                    reply_content = tool_output
         return reply_content
