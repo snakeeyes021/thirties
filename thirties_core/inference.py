@@ -2,6 +2,7 @@
 
 Runs quantized Gemma models (.litertlm) directly on-device with GPU acceleration
 and automatic CPU fallback. Strictly self-contained without external daemons.
+Supports both in-process execution and host GPU execution from Flatpak sandbox.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -51,28 +54,104 @@ class LiteRTInferenceEngine:
 
     def _find_model_path(self) -> Optional[Path]:
         """Check standard paths for available Gemma .litertlm models."""
-        models_dir = Path.home() / ".local" / "share" / "thirties" / "models"
-        candidates = [
-            Path(os.path.expanduser(self.inf_cfg.litert_model_path)),
-            models_dir / "gemma-4-e4b.litertlm",
-            models_dir / "gemma-4-E4B-it-gpu.litertlm",
-            models_dir / "gemma-4-e2b.litertlm",
-            models_dir / "gemma-4-E4B-it.litertlm",
+        username = os.environ.get("USER", "matt")
+        base_dirs = [
+            Path.home() / ".local" / "share" / "thirties" / "models",
+            Path(f"/var/home/{username}/.local/share/thirties/models"),
+            Path(f"/home/{username}/.local/share/thirties/models"),
+            Path("/var/home/matt/.local/share/thirties/models"),
+            Path("/home/matt/.local/share/thirties/models"),
         ]
+        candidates = [Path(os.path.expanduser(self.inf_cfg.litert_model_path))]
+        for b in base_dirs:
+            candidates.extend([
+                b / "gemma-4-E4B-it-gpu.litertlm",
+                b / "gemma-4-e4b.litertlm",
+                b / "gemma-4-e2b.litertlm",
+                b / "gemma-4-E4B-it.litertlm",
+            ])
         for c in candidates:
             if c.is_file():
                 return c
         return None
 
+    def _find_host_runner(self) -> Optional[Dict[str, str]]:
+        """Find host python interpreter and runner script for host GPU execution."""
+        username = os.environ.get("USER", "matt")
+        python_candidates = [
+            f"/var/home/{username}/dev/Thirties/.venv/bin/python",
+            f"/home/{username}/dev/Thirties/.venv/bin/python",
+            "/var/home/matt/dev/Thirties/.venv/bin/python",
+            "/home/matt/dev/Thirties/.venv/bin/python",
+        ]
+        script_candidates = [
+            f"/var/home/{username}/dev/Thirties/thirties_core/runner.py",
+            f"/home/{username}/dev/Thirties/thirties_core/runner.py",
+            "/var/home/matt/dev/Thirties/thirties_core/runner.py",
+            "/home/matt/dev/Thirties/thirties_core/runner.py",
+        ]
+
+        found_python: Optional[str] = None
+        for py in python_candidates:
+            if Path(py).is_file():
+                found_python = py
+                break
+
+        # Inside Flatpak, test host existence via flatpak-spawn
+        if not found_python and shutil.which("flatpak-spawn"):
+            for py in python_candidates:
+                try:
+                    res = subprocess.run(
+                        ["flatpak-spawn", "--host", "test", "-f", py],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    if res.returncode == 0:
+                        found_python = py
+                        break
+                except Exception:
+                    pass
+
+        if not found_python:
+            return None
+
+        found_script: Optional[str] = None
+        for sc in script_candidates:
+            if Path(sc).is_file():
+                found_script = sc
+                break
+
+        if not found_script and shutil.which("flatpak-spawn"):
+            for sc in script_candidates:
+                try:
+                    res = subprocess.run(
+                        ["flatpak-spawn", "--host", "test", "-f", sc],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    if res.returncode == 0:
+                        found_script = sc
+                        break
+                except Exception:
+                    pass
+
+        if found_python and found_script:
+            return {"python": found_python, "script": found_script}
+        return None
+
     def is_available(self) -> bool:
-        """Return True if a model bundle exists and LiteRT-LM is importable."""
-        if not self._find_model_path():
-            return False
+        """Return True if in-process LiteRT-LM or host runner is available."""
         try:
             import litert_lm  # noqa: F401
-            return True
+            if self._find_model_path():
+                return True
         except ImportError:
-            return False
+            pass
+
+        if self._find_host_runner():
+            return True
+
+        return False
 
     def _ensure_initialized(self) -> None:
         if self._is_initialized and self._engine_instance is not None:
@@ -111,8 +190,6 @@ class LiteRTInferenceEngine:
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Execute chat turn against local LiteRT-LM model."""
-        self._ensure_initialized()
-
         last_user_msg = ""
         for m in reversed(messages):
             if m.get("role") == "user":
@@ -122,12 +199,44 @@ class LiteRTInferenceEngine:
         if not last_user_msg:
             return {"role": "assistant", "content": "How can I help you plan your Thirties today?", "tool_calls": []}
 
-        # Send to conversational session
+        has_litert = False
         try:
-            raw_reply = self._conv_session.send_message(last_user_msg)
-        except Exception as e:
-            logger.error("Inference generation error: %s", e)
-            return {"role": "assistant", "content": f"Inference notice: {e}", "tool_calls": []}
+            import litert_lm  # noqa: F401
+            has_litert = True
+        except ImportError:
+            has_litert = False
+
+        raw_reply = ""
+        host_runner = self._find_host_runner()
+
+        if has_litert:
+            try:
+                self._ensure_initialized()
+                raw_reply = str(self._conv_session.send_message(last_user_msg)).strip()
+            except Exception as e:
+                logger.error("In-process inference error: %s", e)
+                return {"role": "assistant", "content": f"Inference notice: {e}", "tool_calls": []}
+        elif host_runner:
+            cmd: List[str] = []
+            if shutil.which("flatpak-spawn") and (os.environ.get("FLATPAK_ID") or not os.path.exists(host_runner["python"])):
+                cmd = ["flatpak-spawn", "--host", host_runner["python"], host_runner["script"], "--prompt", last_user_msg]
+            else:
+                cmd = [host_runner["python"], host_runner["script"], "--prompt", last_user_msg]
+
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                stdout = proc.stdout
+                if "---THIRTIES_RESPONSE_START---" in stdout and "---THIRTIES_RESPONSE_END---" in stdout:
+                    start_idx = stdout.find("---THIRTIES_RESPONSE_START---") + len("---THIRTIES_RESPONSE_START---")
+                    end_idx = stdout.find("---THIRTIES_RESPONSE_END---")
+                    raw_reply = stdout[start_idx:end_idx].strip()
+                else:
+                    raw_reply = stdout.strip() or proc.stderr.strip()
+            except Exception as e:
+                logger.error("Host runner execution error: %s", e)
+                return {"role": "assistant", "content": f"Inference runner error: {e}", "tool_calls": []}
+        else:
+            return {"role": "assistant", "content": "LiteRT-LM model runner not available.", "tool_calls": []}
 
         # Parse potential intent/tool calls from user prompt or model text
         tool_calls: List[Dict[str, Any]] = []

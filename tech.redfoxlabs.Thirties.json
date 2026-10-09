@@ -14,6 +14,7 @@
         "--talk-name=org.gnome.evolution.dataserver.Calendar8",
         "--talk-name=org.gnome.evolution.dataserver.Subprocess.Backend.*",
         "--talk-name=org.gnome.OnlineAccounts",
+        "--talk-name=org.freedesktop.Flatpak",
         "--filesystem=~/.config/joplin-desktop:ro",
         "--filesystem=~/.var/app/net.cozic.joplin_desktop/config/joplin-desktop:ro",
         "--filesystem=xdg-config/thirties:create",

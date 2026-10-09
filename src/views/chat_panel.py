@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Callable, Optional
+import threading
 from gi.repository import Gtk, Adw, Pango, GLib
 
 from thirties_core.conversation import ConversationManager
@@ -199,8 +200,21 @@ class ChatPanel(Gtk.Box):
 
     def send_user_text(self, text: str) -> None:
         self.add_message("user", text)
-        reply = self.conversation_manager.send_user_message(text)
-        self.add_message("assistant", reply)
+        self.entry.set_sensitive(False)
+        self.send_btn.set_sensitive(False)
 
-        if self.on_plan_updated:
-            self.on_plan_updated(self.conversation_manager.day_plan)
+        def worker():
+            reply = self.conversation_manager.send_user_message(text)
+
+            def update_ui():
+                self.add_message("assistant", reply)
+                self.entry.set_sensitive(True)
+                self.send_btn.set_sensitive(True)
+                self.entry.grab_focus()
+                if self.on_plan_updated:
+                    self.on_plan_updated(self.conversation_manager.day_plan)
+                return False
+
+            GLib.idle_add(update_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
