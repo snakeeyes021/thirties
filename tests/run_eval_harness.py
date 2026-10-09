@@ -134,12 +134,14 @@ class PersistentGemmaEngine:
                 line = self.proc.stdout.readline()
                 if not line:
                     err = self.proc.stderr.read() if self.proc.stderr else ""
-                    raise RuntimeError(f"Daemon process died during inference (stderr: {err})")
+                    logger.warning("Persistent GPU daemon died during turn (%s). Restarting daemon cleanly...", err.strip()[:100])
+                    self._start_server()
+                    return f"Inference error: daemon restarted ({err.strip()[:100]})"
                 if line.startswith("===RESPONSE==="):
                     payload = json.loads(line[len("===RESPONSE==="):])
                     return payload.get("reply", "")
         except Exception as e:
-            logger.error("Daemon communication error: %s", e)
+            logger.error("Daemon communication error: %s; restarting daemon.", e)
             self._start_server()
             return f"Error: {e}"
 
@@ -897,7 +899,13 @@ class EvalHarnessRunner:
 
             turn_evals: List[TurnEvaluation] = []
             for t_idx, turn_spec in enumerate(spec.turns, start=1):
-                reply = conv_mgr.send_user_message(turn_spec.user_text)
+                try:
+                    reply = conv_mgr.send_user_message(turn_spec.user_text)
+                except Exception as e:
+                    logger.warning("Scenario %s turn %d threw exception: %s", spec.scenario_id, t_idx, e)
+                    reply = f"Inference error: {e}"
+                    if self.daemon:
+                        self.daemon.reset()
                 t_eval = self.evaluator.evaluate_turn(
                     turn_index=t_idx,
                     turn_spec=turn_spec,
@@ -1181,20 +1189,42 @@ def main():
 
     try:
         for idx, spec in enumerate(scenario_specs, start=1):
-            if idx % 50 == 0 or idx == 1:
+            if idx % 25 == 0 or idx == 1:
                 elapsed = time.time() - t_start
                 rate = idx / max(0.001, elapsed)
-                logger.info("Progress: %d / %d scenarios completed (%.1f scn/sec, elapsed: %.1fs)", idx, count, rate, elapsed)
+                logger.info("Progress: %d / %d scenarios completed (%.2f scn/sec, elapsed: %.1fs)", idx, count, rate, elapsed)
+                if evaluations:
+                    # Incrementally write out latest report and transcripts so progress is never lost
+                    ReportWriter.write_report(evaluations, out_file, elapsed)
 
-            res = harness.run_scenario(spec)
-            evaluations.append(res)
+            try:
+                res = harness.run_scenario(spec)
+                evaluations.append(res)
+            except Exception as e:
+                logger.error("Scenario %s crashed with unhandled exception: %s", spec.scenario_id, e)
+                fallback_eval = ScenarioEvaluation(
+                    scenario_id=spec.scenario_id,
+                    archetype=spec.archetype,
+                    length_tier=spec.length_tier,
+                    total_turns=len(spec.turns),
+                    mean_comprehension=0.0,
+                    mean_state_invariants=0.0,
+                    mean_anti_hallucination=0.0,
+                    mean_legibility=0.0,
+                    composite_score=0.0,
+                    passed=False,
+                    turn_evaluations=[],
+                    catastrophic_failures=[f"Unhandled scenario crash: {e}"],
+                    db_diffs=[],
+                )
+                evaluations.append(fallback_eval)
+                if harness.daemon:
+                    harness.daemon.reset()
     finally:
         harness.close()
-
-    total_duration = time.time() - t_start
-    logger.info("All %d scenarios finished in %.2f seconds.", count, total_duration)
-
-    ReportWriter.write_report(evaluations, out_file, total_duration)
+        total_duration = time.time() - t_start
+        if evaluations:
+            ReportWriter.write_report(evaluations, out_file, total_duration)
 
     passed = sum(1 for e in evaluations if e.passed)
     pass_rate = (passed / max(1, count)) * 100.0
