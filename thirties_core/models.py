@@ -51,7 +51,18 @@ class ThirtyBlock:
 
     @property
     def is_discretionary(self) -> bool:
+        """True if this block is within discretionary (non-work, non-sleep) diurnal time."""
         return self.kind in (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY)
+
+    @property
+    def is_open(self) -> bool:
+        """True if this block is discretionary and has no assigned tasks or events."""
+        return self.is_discretionary and not self.is_assigned
+
+    @property
+    def is_assigned(self) -> bool:
+        """True if this block has an active user task or event assigned to it."""
+        return bool(self.assigned_task_id or (self.label and self.label not in ("Work", "Sleep")) or self.kind == BlockKind.ASSIGNED)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

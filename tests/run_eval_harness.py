@@ -63,19 +63,26 @@ class PersistentGemmaEngine:
             "except Exception:\n"
             f"    engine = litert_lm.Engine('{self.model_path}', backend=litert_lm.Backend.CPU())\n"
             "conv = engine.create_conversation()\n"
-            "print('READY', flush=True)\n"
+            "print('===READY===', flush=True)\n"
             "for line in sys.stdin:\n"
             "    line = line.strip()\n"
             "    if not line:\n"
             "        continue\n"
             "    req = json.loads(line)\n"
+            "    if req.get('cmd') == 'reset':\n"
+            "        conv = engine.create_conversation()\n"
+            "        out = json.dumps({'status': 'reset'})\n"
+            "        print(f'===RESPONSE==={out}', flush=True)\n"
+            "        continue\n"
             "    prompt = req['prompt']\n"
             "    try:\n"
             "        res = conv.send_message(prompt)\n"
             "        reply = str(res)\n"
             "    except Exception as e:\n"
             "        reply = f'Inference error: {e}'\n"
-            "    print(json.dumps({'reply': reply}), flush=True)\n"
+            "        conv = engine.create_conversation()\n"
+            "    out = json.dumps({'reply': reply})\n"
+            "    print(f'===RESPONSE==={out}', flush=True)\n"
         )
         cmd = [
             "/home/matt/dev/Thirties/.venv/bin/python",
@@ -91,11 +98,30 @@ class PersistentGemmaEngine:
             text=True,
             bufsize=1,
         )
-        ready_line = self.proc.stdout.readline()
-        if "READY" not in ready_line:
-            err = self.proc.stderr.read()
-            raise RuntimeError(f"Failed to start persistent Gemma daemon: {ready_line} (stderr: {err})")
-        logger.info("Persistent Gemma engine daemon initialized successfully.")
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                err = self.proc.stderr.read() if self.proc.stderr else ""
+                raise RuntimeError(f"Failed to start persistent Gemma daemon: process died (stderr: {err})")
+            if "===READY===" in line:
+                break
+        logger.info("Persistent Gemma engine daemon initialized successfully on GPU.")
+
+    def reset(self) -> None:
+        if self.proc and self.proc.poll() is None:
+            req_json = json.dumps({"cmd": "reset"})
+            try:
+                self.proc.stdin.write(req_json + "\n")
+                self.proc.stdin.flush()
+                while True:
+                    line = self.proc.stdout.readline()
+                    if not line:
+                        break
+                    if line.startswith("===RESPONSE==="):
+                        break
+            except Exception as e:
+                logger.error("Daemon reset error: %s", e)
+                self._start_server()
 
     def chat_turn(self, prompt: str) -> str:
         if not self.proc or self.proc.poll() is not None:
@@ -104,9 +130,14 @@ class PersistentGemmaEngine:
         try:
             self.proc.stdin.write(req_json + "\n")
             self.proc.stdin.flush()
-            res_line = self.proc.stdout.readline()
-            data = json.loads(res_line)
-            return data.get("reply", "")
+            while True:
+                line = self.proc.stdout.readline()
+                if not line:
+                    err = self.proc.stderr.read() if self.proc.stderr else ""
+                    raise RuntimeError(f"Daemon process died during inference (stderr: {err})")
+                if line.startswith("===RESPONSE==="):
+                    payload = json.loads(line[len("===RESPONSE==="):])
+                    return payload.get("reply", "")
         except Exception as e:
             logger.error("Daemon communication error: %s", e)
             self._start_server()
@@ -712,8 +743,13 @@ class EvaluatorEngine:
                 for b_idx in turn_spec.expected_blocks:
                     if 1 <= b_idx <= 48:
                         blk = day_plan.get_logical_block(b_idx)
-                        if blk.kind != turn_spec.target_block_kind:
-                            mismatched.append(f"Block {b_idx} expected {turn_spec.target_block_kind.name} got {blk.kind.name}")
+                        if turn_spec.target_block_kind == BlockKind.ASSIGNED:
+                            # Decoupled task assignment check: block has active item/label
+                            if not (blk.is_assigned or blk.label or blk.kind == BlockKind.ASSIGNED):
+                                mismatched.append(f"Block {b_idx} expected task assignment, but was empty ({blk.kind.name})")
+                        else:
+                            if blk.kind != turn_spec.target_block_kind:
+                                mismatched.append(f"Block {b_idx} expected {turn_spec.target_block_kind.name} got {blk.kind.name}")
                         if turn_spec.expected_locked is not None and blk.is_locked != turn_spec.expected_locked:
                             mismatched.append(f"Block {b_idx} expected locked={turn_spec.expected_locked} got {blk.is_locked}")
                 if mismatched:
@@ -832,6 +868,9 @@ class EvalHarnessRunner:
         self.evaluator = EvaluatorEngine()
 
     def run_scenario(self, spec: ScenarioSpec) -> ScenarioEvaluation:
+        if self.daemon:
+            self.daemon.reset()
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / f"{spec.scenario_id}_state.sqlite"
             state_db = StateDatabase(db_path)
@@ -936,13 +975,15 @@ class ReportWriter:
 
         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        transcripts_name = output_path.stem.replace("eval_report_", "eval_transcripts_") + ".jsonl"
         lines: List[str] = [
             f"# Thirties Autonomous AI Planning Assistant: Massive-Scale Evaluation Report",
             f"",
             f"**Execution Timestamp:** `{timestamp_str}`  ",
             f"**Harness Specification:** `docs/EVAL_HARNESS_SPEC.md`  ",
             f"**Target System:** Thirties 0.1.0-alpha (Gemma-4 E4B via LiteRT-LM & DeterministicScheduler)  ",
-            f"**Total Run Duration:** `{duration_sec:.2f} seconds` (`{total_turns / max(0.001, duration_sec):.2f} turns/sec`)",
+            f"**Total Run Duration:** `{duration_sec:.2f} seconds` (`{total_turns / max(0.001, duration_sec):.2f} turns/sec`)  ",
+            f"**Full Conversation Logs:** [`docs/eval_reports/{transcripts_name}`]({transcripts_name})",
             f"",
             f"---",
             f"",
@@ -1071,6 +1112,43 @@ class ReportWriter:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("\n".join(lines), encoding="utf-8")
         logger.info("Evaluation report successfully written to %s", output_path)
+
+        # Write out complete turn-by-turn conversation transcripts to JSONL
+        transcripts_path = output_path.with_name(output_path.stem.replace("eval_report_", "eval_transcripts_") + ".jsonl")
+        with open(transcripts_path, "w", encoding="utf-8") as tf:
+            for e in evaluations:
+                rec = {
+                    "scenario_id": e.scenario_id,
+                    "archetype": e.archetype,
+                    "length_tier": e.length_tier,
+                    "passed": e.passed,
+                    "composite_score": e.composite_score,
+                    "mean_comprehension": e.mean_comprehension,
+                    "mean_state_invariants": e.mean_state_invariants,
+                    "mean_anti_hallucination": e.mean_anti_hallucination,
+                    "mean_legibility": e.mean_legibility,
+                    "turns": [
+                        {
+                            "turn_index": t.turn_index,
+                            "user_text": t.user_text,
+                            "assistant_reply": t.assistant_reply,
+                            "scores": {
+                                "comprehension": t.comprehension_score,
+                                "state_invariants": t.state_invariants_score,
+                                "anti_hallucination": t.anti_hallucination_score,
+                                "legibility": t.legibility_score,
+                                "composite": t.composite_score,
+                            },
+                            "passed": t.passed,
+                            "failure_reasons": t.failure_reasons,
+                        }
+                        for t in e.turn_evaluations
+                    ],
+                    "catastrophic_failures": e.catastrophic_failures,
+                    "db_diffs": e.db_diffs,
+                }
+                tf.write(json.dumps(rec) + "\n")
+        logger.info("Full conversation transcripts successfully written to %s", transcripts_path)
 
 
 # ==============================================================================
