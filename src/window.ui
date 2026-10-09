@@ -38,6 +38,13 @@
                     <property name="tooltip-text" translatable="yes">Next Day</property>
                   </object>
                 </child>
+                <child>
+                  <object class="GtkButton" id="today_btn">
+                    <property name="label" translatable="yes">Today</property>
+                    <property name="tooltip-text" translatable="yes">Jump to Today</property>
+                    <property name="visible">False</property>
+                  </object>
+                </child>
               </object>
             </child>
             <child type="title">

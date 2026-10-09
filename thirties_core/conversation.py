@@ -126,13 +126,42 @@ class ConversationManager:
         sunrise_str = self.day_plan.sunrise.strftime("%I:%M %p")
         sunset_str = self.day_plan.sunset.strftime("%I:%M %p")
 
-        # Compute index anchors
+        # Compute index anchors (clock 0-47)
         sunrise_idx = next((b.index for b in self.day_plan.blocks if b.is_sunlight), 14)
-        sunset_idx = next((b.index for b in reversed(self.day_plan.blocks) if b.is_sunlight), 37)
+        sunset_clock_idx = next((b.index for b in reversed(self.day_plan.blocks) if b.is_sunlight), 37)
+        sunset_logical_idx = (sunset_clock_idx - sunrise_idx) % 48 + 1
 
-        sleep_indices = [str(b.index) for b in self.day_plan.blocks if b.kind == BlockKind.SLEEP]
-        work_indices = [str(b.index) for b in self.day_plan.blocks if b.kind == BlockKind.WORK]
-        busy_indices = [str(b.index) for b in self.day_plan.blocks if b.kind == BlockKind.BUSY_CALENDAR]
+        # Logical 1-48 blocks starting at Sunrise
+        logical_blocks: list[tuple[ThirtyBlock, int]] = [
+            (self.day_plan.get_block((sunrise_idx + i) % 48), i + 1) for i in range(48)
+        ]
+
+        open_daylight = [
+            f"Block {log_idx} ({b.start_dt.strftime('%I:%M %p')} – {b.end_dt.strftime('%I:%M %p')})"
+            for b, log_idx in logical_blocks
+            if b.kind == BlockKind.DAYLIGHT_DISCRETIONARY
+        ]
+        open_dark = [
+            f"Block {log_idx} ({b.start_dt.strftime('%I:%M %p')} – {b.end_dt.strftime('%I:%M %p')})"
+            for b, log_idx in logical_blocks
+            if b.kind == BlockKind.DARK_DISCRETIONARY
+        ]
+
+        sleep_blocks = [
+            str(log_idx)
+            for b, log_idx in logical_blocks
+            if b.kind == BlockKind.SLEEP
+        ]
+        work_blocks = [
+            str(log_idx)
+            for b, log_idx in logical_blocks
+            if b.kind == BlockKind.WORK
+        ]
+        busy_blocks = [
+            str(log_idx)
+            for b, log_idx in logical_blocks
+            if b.kind == BlockKind.BUSY_CALENDAR
+        ]
 
         ambiguous_list = "\n".join(
             f"- [ID: {e.id}] '{e.summary}' ({e.start_dt.strftime('%I:%M %p')} - {e.end_dt.strftime('%I:%M %p')})"
@@ -144,24 +173,17 @@ class ConversationManager:
             for t in self.tasks[:10]
         ) or "No active backlog tasks"
 
-        open_daylight = [
-            f"{b.index} ({b.start_dt.strftime('%I:%M %p')})"
-            for b in self.day_plan.blocks
-            if b.kind == BlockKind.DAYLIGHT_DISCRETIONARY
-        ]
-        open_dark = [
-            f"{b.index} ({b.start_dt.strftime('%I:%M %p')})"
-            for b in self.day_plan.blocks
-            if b.kind == BlockKind.DARK_DISCRETIONARY
-        ]
+        sunrise_start_str = self.day_plan.get_block(sunrise_idx).start_dt.strftime("%I:%M %p")
 
-        return f"""You are the Thirties Planning Assistant. You schedule the user's day into 48 discrete thirty-minute blocks (0 to 47).
-You speak in units of "Thirties", Daylight Thirties, and Dark Thirties.
+        return f"""You are the Thirties Planning Assistant. You schedule the user's day in 48 discrete thirty-minute blocks numbered 1 to 48.
+The day begins at Block 1 (the thirty containing sunrise). Each subsequent block is exactly 30 minutes long.
 Keep all answers concise, structured, and action-oriented (1-3 sentences). Never write creative essays or long conversational rambles.
 
+PLANNING DATE: {self.day_plan.target_date.strftime('%A, %B %d, %Y')}
+
 CURRENT ASTRONOMICAL CONTEXT:
-- Sunrise: {sunrise_str} (Block {sunrise_idx})
-- Sunset: {sunset_str} (Block {sunset_idx})
+- Block 1 (Sunrise block): starts at {sunrise_start_str} (exact sunrise at {sunrise_str})
+- Sunset: {sunset_str} (Block {sunset_logical_idx})
 - Available Daylight Thirties: {self.day_plan.daylight_available_count}
 - Available Dark Thirties: {self.day_plan.dark_available_count}
 
@@ -170,9 +192,9 @@ AVAILABLE OPEN TIME:
 - Open Dark Thirties: {', '.join(open_dark) or 'None'}
 
 DETERMINISTIC CONSTRAINTS:
-- Sleep Blocks: {', '.join(sleep_indices)}
-- Work Blocks: {', '.join(work_indices)}
-- Hard Calendar Blocks: {', '.join(busy_indices) or 'None'}
+- Sleep Blocks: {', '.join(sleep_blocks) or 'None'}
+- Work Blocks: {', '.join(work_blocks) or 'None'}
+- Hard Calendar Blocks: {', '.join(busy_blocks) or 'None'}
 
 AMBIGUOUS EVENTS REQUIRING CLARIFICATION:
 {ambiguous_list}
@@ -182,14 +204,13 @@ TOP BACKLOG TASKS:
 
 BEHAVIOR RULES:
 1. You are a concise, structured day planning assistant.
-2. Always resolve ambiguous calendar commitments first if any exist.
-3. When the user asks to schedule, allocate, or put an activity or task in a block (e.g. "composing in Dorico in an open dark block", "put writing in block 20"):
-   - Choose a specific open block index from the available open lists above.
+2. When the user asks to schedule, allocate, or put an activity or task in a block (e.g. "composing in Dorico in an open dark block", "put writing in block 2"):
+   - Choose a specific open block from the available open lists above using its block number (1 to 48).
    - Output the directive line on its own:
-     ALLOCATE_BLOCK: <block_index> | <label>
+     ALLOCATE_BLOCK: <block_number> | <label>
    - Provide a 1-sentence confirmation stating the block number, start time, and activity.
-4. When the user confirms attendance ("yes", "attending"), confirm the event.
-5. Respect daily energy: creative/deep work is best in Daylight Thirties; administrative, reading, or calm planning in Dark Thirties.
+3. When the user confirms attendance ("yes", "attending"), confirm the event.
+4. Respect daily energy: creative/deep work is best in Daylight Thirties; administrative, reading, or calm planning in Dark Thirties.
 """
 
     def _init_conversation(self) -> None:
@@ -220,16 +241,27 @@ BEHAVIOR RULES:
             return f"Event {event_id} resolved: {action_desc}."
 
         elif name == "allocate_thirty_block":
-            idx = arguments["block_index"]
+            raw_idx = arguments["block_index"]
             task_id = arguments.get("task_id")
             label = arguments.get("custom_label") or ""
 
-            block = self.day_plan.get_block(idx)
+            if 1 <= raw_idx <= 48:
+                block = self.day_plan.get_logical_block(raw_idx)
+                logical_idx = raw_idx
+            else:
+                block = self.day_plan.get_block(raw_idx % 48)
+                logical_idx = self.day_plan.get_logical_index(block)
+
             block.kind = BlockKind.ASSIGNED
             block.assigned_task_id = task_id
             block.label = label
             self.day_plan.recalculate_counts()
-            return f"Allocated block {idx} to '{label}'."
+
+            # Persist to database so allocations survive calendar navigation!
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+            return f"Allocated block {logical_idx} to '{label}'."
 
         elif name == "decompose_task":
             parent_id = arguments["parent_task_id"]

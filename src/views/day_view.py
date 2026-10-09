@@ -114,15 +114,15 @@ class DayView(Gtk.Box):
                 now_idx = b.index
                 break
 
-        # Natural Day Flow: Start day at sunrise
+        # Natural Day Flow: Start day at sunrise (Block #01)
         sunrise_idx = next((b.index for b in day_plan.blocks if b.is_sunlight), 14)
 
-        ordered_blocks: list[ThirtyBlock] = [
-            day_plan.get_block((sunrise_idx + i) % 48) for i in range(48)
+        ordered_items: list[tuple[ThirtyBlock, int]] = [
+            (day_plan.get_block((sunrise_idx + i) % 48), i + 1) for i in range(48)
         ]
 
         # Group contiguous locked Sleep and Work blocks
-        current_run: list[ThirtyBlock] = []
+        current_run: list[tuple[ThirtyBlock, int]] = []
         current_kind: BlockKind | None = None
 
         def flush_run():
@@ -132,23 +132,23 @@ class DayView(Gtk.Box):
             if current_kind in (BlockKind.SLEEP, BlockKind.WORK) and len(current_run) > 1:
                 self.list_box.append(GroupedBlockWidget(current_run, now_block_idx=now_idx))
             else:
-                for b in current_run:
-                    self.list_box.append(BlockWidget(b, is_current=(b.index == now_idx)))
+                for b, disp_idx in current_run:
+                    self.list_box.append(BlockWidget(b, is_current=(b.index == now_idx), display_index=disp_idx))
             current_run = []
             current_kind = None
 
-        for block in ordered_blocks:
+        for block, disp_idx in ordered_items:
             is_collapsible = block.is_locked and block.kind in (BlockKind.SLEEP, BlockKind.WORK)
 
             if is_collapsible:
                 if current_kind == block.kind:
-                    current_run.append(block)
+                    current_run.append((block, disp_idx))
                 else:
                     flush_run()
                     current_kind = block.kind
-                    current_run = [block]
+                    current_run = [(block, disp_idx)]
             else:
                 flush_run()
-                self.list_box.append(BlockWidget(block, is_current=(block.index == now_idx)))
+                self.list_box.append(BlockWidget(block, is_current=(block.index == now_idx), display_index=disp_idx))
 
         flush_run()

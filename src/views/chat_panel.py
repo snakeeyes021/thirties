@@ -201,11 +201,16 @@ class ChatPanel(Gtk.Box):
         self.append(clamp)
 
     def _send_initial_greeting(self) -> None:
+        from datetime import date
         plan = self.conversation_manager.day_plan
         ambiguous = self.conversation_manager.ambiguous_events
 
+        target_str = plan.target_date.strftime("%A, %B %d")
+        day_prefix = f"Today ({target_str})" if plan.target_date == date.today() else target_str
+
         greeting = (
-            f"Good day! You have {plan.daylight_available_count} Daylight Thirties "
+            f"Good day! You are planning {day_prefix}.\n"
+            f"You have {plan.daylight_available_count} Daylight Thirties "
             f"and {plan.dark_available_count} Dark Thirties available.\n\n"
         )
         if ambiguous:

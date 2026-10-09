@@ -116,6 +116,19 @@ class DayPlan:
     is_finalized: bool = False
     notes: str = ""
 
+    def get_logical_block(self, logical_index: int) -> ThirtyBlock:
+        """Retrieve block by 1-based user-logical day index (1 to 48, starting at Sunrise)."""
+        if not (1 <= logical_index <= 48):
+            raise IndexError(f"Logical block index must be between 1 and 48, got {logical_index}")
+        sunrise_idx = next((b.index for b in self.blocks if b.is_sunlight), 14)
+        clock_idx = (sunrise_idx + logical_index - 1) % 48
+        return self.get_block(clock_idx)
+
+    def get_logical_index(self, block: ThirtyBlock) -> int:
+        """Return 1-based logical index (1 to 48) for a block relative to Sunrise."""
+        sunrise_idx = next((b.index for b in self.blocks if b.is_sunlight), 14)
+        return (block.index - sunrise_idx) % 48 + 1
+
     def get_block(self, index: int) -> ThirtyBlock:
         if not (0 <= index <= 47):
             raise IndexError(f"Block index out of bounds: {index}")

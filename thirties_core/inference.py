@@ -326,16 +326,18 @@ class MockInferenceEngine:
 
         last_msg = messages[-1]["content"].lower() if messages else ""
 
-        if "dorico" in last_msg and "32" in last_msg:
+        if "dorico" in last_msg:
+            match = re.search(r"\b(\d{1,2})\b", last_msg)
+            idx = int(match.group(1)) if match else 19
             return {
                 "role": "assistant",
-                "content": "I allocated block 32 to Dorico Compose.",
+                "content": f"I allocated block {idx} to Dorico Compose.",
                 "tool_calls": [
                     {
                         "id": "call_1",
                         "name": "allocate_thirty_block",
                         "arguments": {
-                            "block_index": 32,
+                            "block_index": idx,
                             "custom_label": "Dorico Compose",
                         },
                     }

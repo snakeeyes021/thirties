@@ -52,10 +52,10 @@ class TestConversation(unittest.TestCase):
         )
 
         # Mark block 32 with the ambiguous event for testing
-        b32 = self.plan.get_block(32)
-        b32.kind = BlockKind.AMBIGUOUS_CALENDAR
-        b32.source_event_id = "e_doc"
-        b32.label = "Doctor Appointment"
+        b19 = self.plan.get_logical_block(19)
+        b19.kind = BlockKind.AMBIGUOUS_CALENDAR
+        b19.source_event_id = "e_doc"
+        b19.label = "Doctor Appointment"
         self.ambiguous = [self.ambiguous_event]
 
         self.mock_inf = MockInferenceEngine()
@@ -85,7 +85,7 @@ class TestConversation(unittest.TestCase):
         )
         self.assertIn("Allocated block 33", out)
 
-        b33 = self.plan.get_block(33)
+        b33 = self.plan.get_logical_block(33)
         self.assertEqual(b33.kind, BlockKind.ASSIGNED)
         self.assertEqual(b33.assigned_task_id, "t1")
         self.assertEqual(b33.label, "Dorico Compose")
@@ -97,9 +97,9 @@ class TestConversation(unittest.TestCase):
         )
         self.assertIn("ignored and opened as discretionary", out)
 
-        b32 = self.plan.get_block(32)
-        self.assertEqual(b32.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-        self.assertFalse(b32.is_locked)
+        b19 = self.plan.get_logical_block(19)
+        self.assertEqual(b19.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
+        self.assertFalse(b19.is_locked)
         self.assertEqual(len(self.manager.ambiguous_events), 0)
 
     def test_resolve_calendar_event_accepted(self) -> None:
@@ -109,9 +109,9 @@ class TestConversation(unittest.TestCase):
         )
         self.assertIn("locked as busy calendar block", out)
 
-        b32 = self.plan.get_block(32)
-        self.assertEqual(b32.kind, BlockKind.BUSY_CALENDAR)
-        self.assertTrue(b32.is_locked)
+        b19 = self.plan.get_logical_block(19)
+        self.assertEqual(b19.kind, BlockKind.BUSY_CALENDAR)
+        self.assertTrue(b19.is_locked)
         self.assertEqual(len(self.manager.ambiguous_events), 0)
 
     def test_finalize_day_plan_tool(self) -> None:
@@ -129,13 +129,13 @@ class TestConversation(unittest.TestCase):
         self.assertTrue(saved.is_finalized)
 
     def test_send_user_message_triggers_tool_dispatch(self) -> None:
-        reply = self.manager.send_user_message("Let's allocate 32 to Dorico")
-        self.assertIn("allocated block 32", reply)
+        reply = self.manager.send_user_message("Let's allocate 19 to Dorico")
+        self.assertIn("allocated block 19", reply)
 
         # Block 32 must now be ASSIGNED
-        b32 = self.plan.get_block(32)
-        self.assertEqual(b32.kind, BlockKind.ASSIGNED)
-        self.assertEqual(b32.label, "Dorico Compose")
+        b19 = self.plan.get_logical_block(19)
+        self.assertEqual(b19.kind, BlockKind.ASSIGNED)
+        self.assertEqual(b19.label, "Dorico Compose")
 
 
 if __name__ == "__main__":

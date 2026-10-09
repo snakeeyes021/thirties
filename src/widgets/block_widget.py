@@ -10,10 +10,11 @@ from thirties_core.models import BlockKind, ThirtyBlock
 class BlockWidget(Gtk.Box):
     """Visual pill representing a single Thirty block."""
 
-    def __init__(self, block: ThirtyBlock, is_current: bool = False) -> None:
+    def __init__(self, block: ThirtyBlock, is_current: bool = False, display_index: int = -1) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.block = block
         self.is_current = is_current
+        self.display_index = display_index
 
         self.set_margin_start(8)
         self.set_margin_end(8)
@@ -31,7 +32,8 @@ class BlockWidget(Gtk.Box):
         time_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         time_box.set_size_request(80, -1)
 
-        idx_label = Gtk.Label(label=f"#{self.block.index:02d}")
+        idx_num = self.display_index if self.display_index > 0 else (self.block.index + 1)
+        idx_label = Gtk.Label(label=f"#{idx_num:02d}")
         idx_label.add_css_class("caption")
         idx_label.add_css_class("dim-label")
         idx_label.set_xalign(0.0)
@@ -150,11 +152,18 @@ class BlockWidget(Gtk.Box):
 class GroupedBlockWidget(Gtk.Box):
     """Consolidated card for contiguous locked blocks (Sleep or Work) with optional drilldown."""
 
-    def __init__(self, blocks: list[ThirtyBlock], now_block_idx: int = -1) -> None:
+    def __init__(
+        self,
+        blocks_with_indices: list[tuple[ThirtyBlock, int]],
+        now_block_idx: int = -1,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.blocks = blocks
-        self.kind = blocks[0].kind
+        self.items = blocks_with_indices
+        self.blocks = [b for b, _ in blocks_with_indices]
+        self.indices = [idx for _, idx in blocks_with_indices]
+        self.kind = self.blocks[0].kind
         self.now_block_idx = now_block_idx
+        self.is_current = any(b.index == self.now_block_idx for b in self.blocks)
 
         self.set_margin_start(8)
         self.set_margin_end(8)
@@ -163,6 +172,9 @@ class GroupedBlockWidget(Gtk.Box):
 
         self.add_css_class("card")
         self.add_css_class("block-grouped")
+
+        if self.is_current:
+            self.add_css_class("block-current")
 
         self._build_ui()
 
@@ -174,8 +186,11 @@ class GroupedBlockWidget(Gtk.Box):
         header_row.set_margin_top(10)
         header_row.set_margin_bottom(10)
 
-        # 1. Block Count Pill
-        count_pill = Gtk.Label(label=f"{len(self.blocks)} Thirties")
+        # 1. Logical Range Pill (e.g. #33–#48)
+        start_idx = self.indices[0]
+        end_idx = self.indices[-1]
+        range_tag = f"#{start_idx:02d}–#{end_idx:02d}"
+        count_pill = Gtk.Label(label=range_tag)
         count_pill.add_css_class("caption")
         count_pill.add_css_class("dim-label")
         count_pill.set_size_request(80, -1)
@@ -200,7 +215,7 @@ class GroupedBlockWidget(Gtk.Box):
         start_str = self.blocks[0].start_dt.strftime("%I:%M %p").lstrip("0")
         end_str = self.blocks[-1].end_dt.strftime("%I:%M %p").lstrip("0")
         total_hours = len(self.blocks) * 0.5
-        range_lbl = Gtk.Label(label=f"{start_str} – {end_str} ({total_hours:.1f} hours)")
+        range_lbl = Gtk.Label(label=f"{start_str} – {end_str} ({total_hours:.1f} hours, {len(self.blocks)} Thirties)")
         range_lbl.add_css_class("caption")
         range_lbl.add_css_class("dim-label")
         range_lbl.set_xalign(0.0)
@@ -209,7 +224,13 @@ class GroupedBlockWidget(Gtk.Box):
         title_box.append(range_lbl)
         header_row.append(title_box)
 
-        # 4. Expand / Collapse Button
+        # 4. "Now" indicator if current time is inside this collapsed block
+        if self.is_current:
+            now_badge = Gtk.Label(label="Now")
+            now_badge.add_css_class("badge-current")
+            header_row.append(now_badge)
+
+        # 5. Expand / Collapse Button
         self.toggle_btn = Gtk.Button(icon_name="pan-down-symbolic")
         self.toggle_btn.add_css_class("flat")
         self.toggle_btn.set_tooltip_text("Expand individual thirties")
@@ -218,7 +239,7 @@ class GroupedBlockWidget(Gtk.Box):
 
         self.append(header_row)
 
-        # 5. Collapsible Revealer containing individual pills
+        # 6. Collapsible Revealer containing individual pills with logical numbering
         self.revealer = Gtk.Revealer()
         self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
         self.revealer.set_reveal_child(False)
@@ -228,9 +249,9 @@ class GroupedBlockWidget(Gtk.Box):
         sub_list.set_margin_end(8)
         sub_list.set_margin_bottom(8)
 
-        for b in self.blocks:
+        for b, disp_idx in self.items:
             is_cur = (b.index == self.now_block_idx)
-            sub_list.append(BlockWidget(b, is_current=is_cur))
+            sub_list.append(BlockWidget(b, is_current=is_cur, display_index=disp_idx))
 
         self.revealer.set_child(sub_list)
         self.append(self.revealer)

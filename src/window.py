@@ -18,6 +18,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     prev_day_btn = Gtk.Template.Child()
     next_day_btn = Gtk.Template.Child()
+    today_btn = Gtk.Template.Child()
     calendar_menu_btn = Gtk.Template.Child()
     calendar_popover = Gtk.Template.Child()
     date_calendar = Gtk.Template.Child()
@@ -73,12 +74,14 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         # Event connections
         self.prev_day_btn.connect("clicked", self._on_prev_day)
         self.next_day_btn.connect("clicked", self._on_next_day)
+        self.today_btn.connect("clicked", self._on_today_clicked)
         self.date_calendar.connect("day-selected", self._on_calendar_day_selected)
 
         self._load_day(self.current_date)
 
     def _load_day(self, target_date: date) -> None:
         self.current_date = target_date
+        self.today_btn.set_visible(target_date != date.today())
 
         # Sync GtkCalendar selected day
         try:
@@ -114,6 +117,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     def _on_next_day(self, _btn: Gtk.Button) -> None:
         self._load_day(self.current_date + timedelta(days=1))
+
+    def _on_today_clicked(self, _btn: Gtk.Button) -> None:
+        self._load_day(date.today())
 
     def _on_calendar_day_selected(self, calendar: Gtk.Calendar) -> None:
         gdt = calendar.get_date()

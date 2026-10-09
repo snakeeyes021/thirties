@@ -221,6 +221,11 @@ class DeterministicScheduler:
         gen = self.config.general
         tz = ZoneInfo(gen.timezone)
 
+        # Check if saved snapshot exists with user allocations
+        saved_plan = self.state_db.get_day_snapshot(target_date)
+        if saved_plan:
+            return saved_plan, []
+
         # 1. Base astronomical 48 blocks
         phases = get_solar_phases(gen.latitude, gen.longitude, target_date, tz)
         blocks = build_base_thirties(gen.latitude, gen.longitude, target_date, tz)
