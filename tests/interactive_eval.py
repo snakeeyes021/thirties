@@ -272,6 +272,7 @@ class InteractiveEvaluator:
         simulated_time: Optional[datetime] = None,
         session_id: Optional[str] = None,
         use_gpu: bool = True,
+        engine: Optional[Any] = None,
     ) -> EvalSession:
         sid = session_id or f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         s_dir = SESSIONS_DIR / sid
@@ -293,7 +294,8 @@ class InteractiveEvaluator:
         if simulated_time:
             set_debug_time(simulated_time)
 
-        engine = InteractiveEvaluator._create_engine(use_gpu=use_gpu)
+        if engine is None:
+            engine = InteractiveEvaluator._create_engine(use_gpu=use_gpu)
 
         conv = ConversationManager(
             day_plan=day_plan,
@@ -340,6 +342,7 @@ class InteractiveEvaluator:
         session: EvalSession,
         user_message: str,
         use_gpu: bool = True,
+        engine: Optional[Any] = None,
     ) -> TurnRecord:
         config = ThirtiesConfig()
         state_db = StateDatabase(db_path=session.db_path)
@@ -350,7 +353,8 @@ class InteractiveEvaluator:
         if session.simulated_time_iso:
             set_debug_time(datetime.fromisoformat(session.simulated_time_iso))
 
-        engine = InteractiveEvaluator._create_engine(use_gpu=use_gpu)
+        if engine is None:
+            engine = InteractiveEvaluator._create_engine(use_gpu=use_gpu)
 
         sample_tasks = [
             TaskItem(id="t1", source_notebook="3. Creative", title="Compose bridge in Dorico", deferred_count=1),
@@ -403,11 +407,12 @@ class InteractiveEvaluator:
         for b_idx in delta.modified_blocks:
             old_b = snap_before.blocks[b_idx]
             new_b = snap_after.blocks[b_idx]
-            blk_obj = day_plan.get_logical_block(b_idx)
+            blk_obj = day_plan.get_block(b_idx)
+            log_idx = day_plan.get_logical_index(blk_obj)
             s_clk = blk_obj.start_dt.strftime('%I:%M %p').lstrip('0')
             e_clk = blk_obj.end_dt.strftime('%I:%M %p').lstrip('0')
             block_diffs.append(
-                f"Block {b_idx} ({s_clk}–{e_clk}): {old_b.kind.name} (label='{old_b.label}') -> {new_b.kind.name} (label='{new_b.label}') [locked={new_b.is_locked}]"
+                f"Block {log_idx} ({s_clk}–{e_clk}): {old_b.kind.name} (label='{old_b.label}') -> {new_b.kind.name} (label='{new_b.label}') [locked={new_b.is_locked}]"
             )
         delta_summary["block_diffs"] = block_diffs
 
