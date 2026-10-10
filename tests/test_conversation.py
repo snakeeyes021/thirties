@@ -389,5 +389,124 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
 
 
+    def test_clear_blocks_all_preserves_work_and_sleep(self) -> None:
+        # Assign task inside work (block 10)
+        self.manager.modify_blocks(start_block=10, end_block=10, label="Work Task", task_id="task_work")
+        # Assign daylight task (block 21: 5:00 PM - 5:30 PM, before sunset)
+        self.manager.modify_blocks(start_block=21, end_block=21, label="Outdoor Walk", task_id="task_walk")
+        # Assign dark task (block 25: 7:00 PM - 7:30 PM, after sunset)
+        self.manager.modify_blocks(start_block=25, end_block=25, label="Dorico Composing", task_id="task_music")
+
+        # Clear kind = ALL
+        out = self.manager.clear_blocks(clear_kind="ALL")
+        self.assertIn("Cleared all scheduled tasks and custom events", out)
+
+        # Daylight discretionary block 21 is cleared back to daylight discretionary
+        b21 = self.plan.get_logical_block(21)
+        self.assertEqual(b21.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
+        self.assertEqual(b21.label, "")
+        self.assertIsNone(b21.assigned_task_id)
+
+        # Dark discretionary block 25 is cleared back to dark discretionary
+        b25 = self.plan.get_logical_block(25)
+        self.assertEqual(b25.kind, BlockKind.DARK_DISCRETIONARY)
+        self.assertEqual(b25.label, "")
+        self.assertIsNone(b25.assigned_task_id)
+
+        # Work block 10 task is cleared, but remains WORK
+        b10 = self.plan.get_logical_block(10)
+        self.assertEqual(b10.kind, BlockKind.WORK)
+        self.assertEqual(b10.label, "Work")
+        self.assertIsNone(b10.assigned_task_id)
+
+        # Other work blocks remain WORK
+        b4 = self.plan.get_logical_block(4)
+        self.assertEqual(b4.kind, BlockKind.WORK)
+
+    def test_modify_blocks_work_defaults_to_clear_existing_envelope(self) -> None:
+        # Work envelope is initially blocks 4-18 (8am-4pm)
+        self.assertEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
+        
+        # Modify work without explicitly passing clear_existing_envelope
+        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK")
+        self.assertIn("Blocks 1–16", out)
+
+        # Blocks 1-16 are work
+        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
+        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
+
+        # Blocks 17 and 18 are replaced and restored to discretionary
+        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.DAYLIGHT_DISCRETIONARY)
+        self.assertEqual(self.plan.get_logical_block(18).kind, BlockKind.DAYLIGHT_DISCRETIONARY)
+
+    def test_contract_verifier_triggers_reflection_on_hallucinated_action(self) -> None:
+        # Mock engine claims it cleared tasks, but emitted no tool calls (hallucination)
+        mock_engine = MockInferenceEngine([
+            {
+                "role": "assistant",
+                "content": "I have cleared all tasks for today.",
+                "tool_calls": [],
+            },
+            {
+                "role": "assistant",
+                "content": "I have now cleared all tasks for today.",
+                "tool_calls": [
+                    {
+                        "id": "clear_call",
+                        "name": "clear_blocks",
+                        "arguments": {"clear_kind": "ALL"},
+                    }
+                ],
+            }
+        ])
+        self.manager.inference_engine = mock_engine
+        reply = self.manager.send_user_message("Please clear all my tasks.")
+        
+        # Verify reflection turn happened by inspecting message history
+        user_msgs = [m["content"] for m in self.manager.messages if m.get("role") == "user"]
+        self.assertTrue(any("[CONTRACT VERIFICATION NOTICE]" in str(m) for m in user_msgs))
+        self.assertEqual(reply, "I have now cleared all tasks for today.")
+
+    def test_contract_verifier_suppresses_persistent_hallucination(self) -> None:
+        # Mock engine claims it cleared tasks on turn 1 AND turn 2 without ever calling a tool
+        mock_engine = MockInferenceEngine([
+            {
+                "role": "assistant",
+                "content": "I have cleared all tasks for today.",
+                "tool_calls": [],
+            },
+            {
+                "role": "assistant",
+                "content": "I have cleared all tasks for today as requested.",
+                "tool_calls": [],
+            }
+        ])
+        self.manager.inference_engine = mock_engine
+        reply = self.manager.send_user_message("Please clear all my tasks.")
+        
+        # Final verifier guard intercepts the hallucination
+        self.assertIn("I was unable to update your schedule because no valid modification directive could be executed", reply)
+
+    def test_system_prompt_diurnal_today_alignment(self) -> None:
+        from thirties_core.astronomy import set_debug_time
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        # At 12:23 AM on 2026-10-10, diurnal today is 2026-10-09
+        set_debug_time(datetime(2026, 10, 10, 0, 23, tzinfo=ZoneInfo("America/New_York")))
+        try:
+            # Plan is for 2026-10-09 (Friday)
+            self.manager.day_plan.target_date = date(2026, 10, 9)
+            prompt = self.manager._build_system_prompt()
+            self.assertIn("PLANNING DATE: Today (Friday, October 09, 2026)", prompt)
+
+            # Plan is for 2026-10-10 (Saturday) -> Not diurnal today!
+            self.manager.day_plan.target_date = date(2026, 10, 10)
+            prompt_future = self.manager._build_system_prompt()
+            self.assertIn("PLANNING DATE: Saturday, October 10, 2026", prompt_future)
+            self.assertNotIn("PLANNING DATE: Today", prompt_future)
+        finally:
+            set_debug_time(None)
+
+
 if __name__ == "__main__":
     unittest.main()

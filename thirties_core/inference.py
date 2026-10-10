@@ -386,7 +386,7 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             continue
 
         # 2. CLEAR_BLOCKS
-        clr_kind_m = re.match(r"^CLEAR_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", trimmed, re.IGNORECASE)
+        clr_kind_m = re.match(r"^CLEAR_BLOCKS?:\s*(WORK|SLEEP|ALL|TASKS|EVENTS)\b", trimmed, re.IGNORECASE)
         if clr_kind_m:
             target_k = clr_kind_m.group(1).upper()
             tool_calls.append({

@@ -4,7 +4,8 @@ import unittest
 from datetime import date
 from zoneinfo import ZoneInfo
 
-from thirties_core.astronomy import build_base_thirties, create_base_day_plan, get_solar_phases
+from datetime import datetime
+from thirties_core.astronomy import build_base_thirties, create_base_day_plan, get_diurnal_date, get_solar_phases
 from thirties_core.models import BlockKind
 
 
@@ -81,6 +82,15 @@ class TestAstronomy(unittest.TestCase):
         # In Arlington: ~14.5 hours daylight in June (~29-30 blocks) vs ~9.5 hours in Dec (~19 blocks)
         self.assertGreaterEqual(summer_plan.daylight_available_count, 28)
         self.assertLessEqual(winter_plan.daylight_available_count, 20)
+
+    def test_get_diurnal_date(self) -> None:
+        # Pre-sunrise nocturnal time (e.g. 12:23 AM on Oct 10, 2026) anchors to yesterday (Oct 9)
+        nocturnal_dt = datetime(2026, 10, 10, 0, 23, tzinfo=ZoneInfo(self.tz))
+        self.assertEqual(get_diurnal_date(nocturnal_dt, self.lat, self.lon, self.tz), date(2026, 10, 9))
+
+        # Post-sunrise daylight time (e.g. 10:00 AM on Oct 10, 2026) anchors to today (Oct 10)
+        daylight_dt = datetime(2026, 10, 10, 10, 0, tzinfo=ZoneInfo(self.tz))
+        self.assertEqual(get_diurnal_date(daylight_dt, self.lat, self.lon, self.tz), date(2026, 10, 10))
 
     def test_twilight_flagging(self) -> None:
         blocks = build_base_thirties(self.lat, self.lon, self.test_date, self.tz)

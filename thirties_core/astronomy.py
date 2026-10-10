@@ -191,6 +191,30 @@ def get_solar_phases(
         return _noaa_solar_phases(lat, lon, target_date, tz)
 
 
+def get_diurnal_date(
+    current_dt: Optional[datetime] = None,
+    lat: float = 40.7128,
+    lon: float = -74.0060,
+    tz_name: str | ZoneInfo = "UTC",
+) -> date:
+    """Return the active diurnal date for current_dt.
+
+    A Thirties day cycle begins at sunrise. If current_dt is before today's
+    sunrise, it belongs to yesterday's nocturnal cycle.
+    """
+    tz = _get_zoneinfo(tz_name)
+    now = current_dt or get_current_time(tz)
+    cal_date = now.date()
+    try:
+        phases = get_solar_phases(lat, lon, cal_date, tz)
+        today_sunrise = phases["sunrise"]
+        if now < today_sunrise:
+            return cal_date - timedelta(days=1)
+    except Exception:
+        pass
+    return cal_date
+
+
 def build_base_thirties(
     lat: float,
     lon: float,

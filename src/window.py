@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from gi.repository import Adw, GLib, Gtk
 
+from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import load_config
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
@@ -30,7 +31,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.config = load_config()
         self.scheduler = DeterministicScheduler(self.config)
         self.joplin_engine = JoplinEngine(self.config)
-        self.current_date = date.today()
+        self.current_date = self._get_active_diurnal_date()
 
         # Ingest backlog tasks from Joplin
         self.backlog_tasks = self.joplin_engine.fetch_tasks()
@@ -82,7 +83,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     def _load_day(self, target_date: date) -> None:
         self.current_date = target_date
-        self.today_btn.set_sensitive(target_date != date.today())
+        self.today_btn.set_sensitive(target_date != self._get_active_diurnal_date())
 
         # Sync GtkCalendar selected day
         try:
@@ -123,8 +124,16 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     def _on_next_day(self, _btn: Gtk.Button) -> None:
         self._load_day(self.current_date + timedelta(days=1))
 
+    def _get_active_diurnal_date(self) -> date:
+        gen = self.config.general
+        return get_diurnal_date(
+            lat=gen.latitude,
+            lon=gen.longitude,
+            tz_name=gen.timezone,
+        )
+
     def _on_today_clicked(self, _btn: Gtk.Button) -> None:
-        self._load_day(date.today())
+        self._load_day(self._get_active_diurnal_date())
 
     def _on_calendar_day_selected(self, calendar: Gtk.Calendar) -> None:
         gdt = calendar.get_date()

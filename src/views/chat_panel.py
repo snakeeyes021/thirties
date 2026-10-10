@@ -308,12 +308,18 @@ class ChatPanel(Gtk.Box):
         return False
 
     def _send_initial_greeting(self) -> None:
-        from datetime import date
+        from thirties_core.astronomy import get_diurnal_date
         plan = self.conversation_manager.day_plan
         ambiguous = self.conversation_manager.ambiguous_events
 
+        gen = self.conversation_manager.scheduler.config.general if self.conversation_manager.scheduler else None
+        lat = gen.latitude if gen else 40.7128
+        lon = gen.longitude if gen else -74.0060
+        tz_name = gen.timezone if gen else "UTC"
+        diurnal_today = get_diurnal_date(lat=lat, lon=lon, tz_name=tz_name)
+
         target_str = plan.target_date.strftime("%A, %B %d")
-        day_prefix = f"Today ({target_str})" if plan.target_date == date.today() else target_str
+        day_prefix = f"Today ({target_str})" if plan.target_date == diurnal_today else target_str
 
         greeting = (
             f"Good day! You are planning {day_prefix}.\n"

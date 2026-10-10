@@ -280,6 +280,17 @@ Have a productive shift!"""
         self.assertEqual(calls[0]["arguments"]["end_time"], "3pm")
         self.assertEqual(calls[0]["arguments"]["kind"], "WORK")
 
+    def test_clear_blocks_kinds_directive_parsing(self) -> None:
+        raw = "CLEAR_BLOCKS: ALL\nCLEAR_BLOCKS: TASKS\nCLEAR_BLOCKS: EVENTS"
+        clean, calls = parse_model_directives(raw)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0]["name"], "clear_blocks")
+        self.assertEqual(calls[0]["arguments"]["clear_kind"], "ALL")
+        self.assertEqual(calls[1]["name"], "clear_blocks")
+        self.assertEqual(calls[1]["arguments"]["clear_kind"], "TASKS")
+        self.assertEqual(calls[2]["name"], "clear_blocks")
+        self.assertEqual(calls[2]["arguments"]["clear_kind"], "EVENTS")
+
     def test_clear_and_inspect_clock_time_directive_parsing(self) -> None:
         raw = """CLEAR_BLOCKS: 02:00 PM - 03:00 PM
 INSPECT_BLOCKS: 10:00 AM - 12:00 PM"""

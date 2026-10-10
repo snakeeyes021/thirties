@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from thirties_core.astronomy import get_current_time, set_debug_time
+from thirties_core.astronomy import get_current_time, get_diurnal_date, set_debug_time
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.inference import InferenceEngine, MockInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
@@ -20,6 +21,41 @@ from thirties_core.models import BlockKind, DayPlan, TaskItem
 from thirties_core.scheduler import DeterministicScheduler
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BlockState:
+    kind: BlockKind
+    label: str
+    assigned_task_id: Optional[str]
+    is_locked: bool
+    source_event_id: Optional[str]
+
+
+@dataclass
+class PlanSnapshot:
+    blocks: dict[int, BlockState]
+    ambiguous_event_ids: set[str]
+    is_finalized: bool
+
+
+@dataclass
+class StateDelta:
+    modified_blocks: list[int]
+    resolved_events: list[str]
+    finalized_changed: bool
+
+    @property
+    def total_changes(self) -> int:
+        return len(self.modified_blocks) + len(self.resolved_events) + (1 if self.finalized_changed else 0)
+
+
+ACTION_CLAIM_PATTERN = re.compile(
+    r"\b(?:i\s+have|i\'ve|i\s+did|i)\s+(?:(?:\w+ly|now|already|just)\s+)?(?:cleared|scheduled|allocated|updated|set|assigned|removed|reverted|corrected|locked|finalized|put|placed)\b"
+    r"|\b(?:plan|schedule|work\s+shift|blocks?)\s+(?:has\s+been\s+)?(?:updated|cleared|scheduled|finalized|locked|set)\b"
+    r"|\bday\s+plan\s+finalized\b",
+    re.IGNORECASE,
+)
 
 PLANNING_TOOLS = [
     {
@@ -54,7 +90,7 @@ PLANNING_TOOLS = [
                     "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
                     "start_time": {"type": "string", "description": "Start clock time e.g. '07:00 AM'"},
                     "end_time": {"type": "string", "description": "End clock time e.g. '03:00 PM'"},
-                    "clear_kind": {"type": "string", "enum": ["WORK", "SLEEP", "ALL"]},
+                    "clear_kind": {"type": "string", "enum": ["WORK", "SLEEP", "ALL", "TASKS", "EVENTS"]},
                     "clear_all_work": {"type": "boolean", "description": "True to clear all work blocks for today"}
                 }
             }
@@ -139,7 +175,11 @@ class ConversationManager:
         sunset_logical_idx = (sunset_clock_idx - sunrise_idx) % 48 + 1
 
         now = get_current_time(self.day_plan.sunrise.tzinfo)
-        is_today = (self.day_plan.target_date == now.date())
+        gen = self.scheduler.config.general if self.scheduler else None
+        lat = gen.latitude if gen else 40.7128
+        lon = gen.longitude if gen else -74.0060
+        diurnal_today = get_diurnal_date(now, lat=lat, lon=lon, tz_name=self.day_plan.sunrise.tzinfo)
+        is_today = (self.day_plan.target_date == diurnal_today)
 
         # Logical 1-48 blocks starting at Sunrise
         logical_blocks: list[tuple[ThirtyBlock, int]] = [
@@ -253,11 +293,17 @@ class ConversationManager:
             f"- Completed Commitments (Earlier Today, Elapsed):\n{past_commitments_str}"
         )
 
+        planning_date_desc = (
+            f"Today ({self.day_plan.target_date.strftime('%A, %B %d, %Y')})"
+            if is_today
+            else self.day_plan.target_date.strftime('%A, %B %d, %Y')
+        )
+
         return f"""You are the Thirties Planning Assistant. You schedule the user's day in 48 discrete thirty-minute blocks numbered 1 to 48.
 The day begins at Block 1 (the thirty containing sunrise). Each subsequent block is exactly 30 minutes long.
 Keep all answers concise, structured, and action-oriented (1-3 sentences). Never write creative essays or long conversational rambles.
 
-PLANNING DATE: {self.day_plan.target_date.strftime('%A, %B %d, %Y')}
+PLANNING DATE: {planning_date_desc}
 
 CURRENT ASTRONOMICAL CONTEXT:
 TEMPORAL STATUS:
@@ -317,7 +363,8 @@ BEHAVIOR RULES & DIRECTIVES:
       - Inspect range: INSPECT_BLOCKS: 1-10
       - Inspect time range: INSPECT_BLOCKS: 02:00 PM - 04:00 PM
    e) FINALIZE_PLAN
-      - Finalize day plan: FINALIZE_PLAN
+      - ONLY emit FINALIZE_PLAN when the user explicitly confirms they are finished planning or asks to lock in their plan (e.g. "looks good", "finalize my plan", "all set").
+      - NEVER emit FINALIZE_PLAN on an initial turn, during ongoing negotiation, or when merely updating work/sleep hours!
 
 4. DURATION & THIRTY ARITHMETIC:
    - 1 block = 30 minutes (0.5 hr).
@@ -342,6 +389,10 @@ BEHAVIOR RULES & DIRECTIVES:
 7. ENERGY ALIGNMENT:
    - Daylight Thirties are for high-focus, creative composition, writing, and deep problem-solving.
    - Dark Thirties are for administrative tasks, reading, light dev chores, and calm wind-down.
+
+8. CONTRACT MUTATION INTEGRITY & BOUNDARIES:
+   - YOU CANNOT CHANGE THE SCHEDULE THROUGH POLITE WORDS ALONE! If you claim in your response to have cleared, scheduled, or updated blocks, you MUST emit the corresponding directive (e.g. CLEAR_BLOCKS, MODIFY_BLOCKS). Never claim an action occurred without emitting the directive.
+   - DO NOT automatically schedule backlog tasks across open blocks unless the user explicitly requests you to schedule tasks or asks you to fill open time. When the user asks to modify work or clear blocks, ONLY perform that specific action!
 """
 
     def _init_conversation(self) -> None:
@@ -358,7 +409,7 @@ BEHAVIOR RULES & DIRECTIVES:
         label: Optional[str] = None,
         task_id: Optional[str] = None,
         is_locked: Optional[bool] = None,
-        clear_existing_envelope: bool = False,
+        clear_existing_envelope: Optional[bool] = None,
         force_calendar: bool = False,
         **kwargs: Any,
     ) -> str:
@@ -369,6 +420,8 @@ BEHAVIOR RULES & DIRECTIVES:
             end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
 
         norm_kind = kind.upper() if kind else None
+        if clear_existing_envelope is None:
+            clear_existing_envelope = (norm_kind in ("WORK", "SLEEP"))
 
         if start_block is None and end_block is None:
             if norm_kind == "WORK":
@@ -526,6 +579,11 @@ BEHAVIOR RULES & DIRECTIVES:
             target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.WORK]
         elif norm_kind == "SLEEP":
             target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.SLEEP]
+        elif norm_kind in ("ALL", "TASKS", "EVENTS"):
+            target_blocks = [
+                b for b in self.day_plan.blocks
+                if b.kind not in (BlockKind.WORK, BlockKind.SLEEP) or b.assigned_task_id or (b.label and b.label not in ("Work", "Sleep"))
+            ]
         elif start_block is not None:
             if end_block is None:
                 end_block = start_block
@@ -538,11 +596,15 @@ BEHAVIOR RULES & DIRECTIVES:
         for b in target_blocks:
             if (b.kind == BlockKind.BUSY_CALENDAR or b.source_event_id) and b.is_locked and not force_calendar:
                 continue
-            b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-            b.is_locked = False
-            b.label = ""
-            b.assigned_task_id = None
-            b.source_event_id = None
+            if norm_kind in ("ALL", "TASKS", "EVENTS") and b.kind in (BlockKind.WORK, BlockKind.SLEEP):
+                b.label = "Work" if b.kind == BlockKind.WORK else "Sleep"
+                b.assigned_task_id = None
+            else:
+                b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                b.is_locked = False
+                b.label = ""
+                b.assigned_task_id = None
+                b.source_event_id = None
             cleared_count += 1
             cleared_blocks_list.append(b)
 
@@ -551,6 +613,8 @@ BEHAVIOR RULES & DIRECTIVES:
             self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
         count_str = f"{cleared_count} block" if cleared_count == 1 else f"{cleared_count} blocks"
+        if norm_kind in ("ALL", "TASKS", "EVENTS"):
+            return f"Cleared all scheduled tasks and custom events for today ({count_str} cleared)."
         if cleared_blocks_list and not norm_kind and not clear_all_work:
             first_log = self.day_plan.get_logical_index(cleared_blocks_list[0])
             last_log = self.day_plan.get_logical_index(cleared_blocks_list[-1])
@@ -621,6 +685,44 @@ BEHAVIOR RULES & DIRECTIVES:
                 e_clk = b.end_dt.strftime('%I:%M %p').lstrip('0')
                 lines.append(f"Block {idx} ({s_clk}–{e_clk}): {b.kind.name} | label='{b.label}' | locked={b.is_locked}")
         return "\n".join(lines) if lines else "No blocks found in range."
+
+    def _capture_plan_snapshot(self) -> PlanSnapshot:
+        """Capture complete immutable state snapshot of DayPlan before/after turn."""
+        b_map = {}
+        for b in self.day_plan.blocks:
+            b_map[b.index] = BlockState(
+                kind=b.kind,
+                label=b.label or "",
+                assigned_task_id=b.assigned_task_id,
+                is_locked=b.is_locked,
+                source_event_id=b.source_event_id,
+            )
+        return PlanSnapshot(
+            blocks=b_map,
+            ambiguous_event_ids={e.id for e in self.ambiguous_events},
+            is_finalized=bool(self.day_plan.is_finalized),
+        )
+
+    def _compute_state_delta(self, before: PlanSnapshot, after: PlanSnapshot) -> StateDelta:
+        """Compute factual delta between two state snapshots."""
+        modified: list[int] = []
+        for idx, old_b in before.blocks.items():
+            new_b = after.blocks.get(idx)
+            if new_b and (
+                old_b.kind != new_b.kind
+                or old_b.label != new_b.label
+                or old_b.assigned_task_id != new_b.assigned_task_id
+                or old_b.is_locked != new_b.is_locked
+                or old_b.source_event_id != new_b.source_event_id
+            ):
+                modified.append(idx)
+        resolved = list(before.ambiguous_event_ids - after.ambiguous_event_ids)
+        finalized_changed = (before.is_finalized != after.is_finalized)
+        return StateDelta(
+            modified_blocks=modified,
+            resolved_events=resolved,
+            finalized_changed=finalized_changed,
+        )
 
     def _detect_discrepancy(self, draft_text: str, tool_output: str) -> bool:
         """Check for factual contradictions between model draft text and executed tool output."""
@@ -702,6 +804,9 @@ BEHAVIOR RULES & DIRECTIVES:
             self.messages.append({"role": "assistant", "content": reply})
             return reply
 
+        # 1. Capture snapshot before turn
+        snapshot_before = self._capture_plan_snapshot()
+
         logger.info("[Conversation] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
 
@@ -716,7 +821,7 @@ BEHAVIOR RULES & DIRECTIVES:
 
         self.messages.append(response)
 
-        # Execute returned tool calls
+        # 2. Execute returned tool calls
         executed_tools: list[tuple[str, str]] = []
         if tool_calls:
             for call in tool_calls:
@@ -733,16 +838,30 @@ BEHAVIOR RULES & DIRECTIVES:
                     "content": tool_output,
                 })
 
-        # Agentic ReAct / Self-Correction loop:
-        # Trigger follow-up turn if:
-        # 1. inspect_blocks was executed (model needs to see read-only inspection results)
-        # 2. Or draft reply_content is empty (model emitted only directives)
-        # 3. Or draft reply_content has a factual discrepancy with the executed tool output
+        snapshot_after = self._capture_plan_snapshot()
+        delta = self._compute_state_delta(snapshot_before, snapshot_after)
+
+        claims_mutation = bool(ACTION_CLAIM_PATTERN.search(reply_content))
+        contract_violation = (claims_mutation and delta.total_changes == 0)
+
         needs_follow_up = False
         if any(fn_name == "inspect_blocks" for fn_name, _ in executed_tools):
             needs_follow_up = True
         elif executed_tools and not reply_content.strip():
             needs_follow_up = True
+        elif contract_violation:
+            needs_follow_up = True
+            logger.warning("[Conversation] Contract Violation: Model claimed mutation '%s' but delta was 0. Triggering reflection turn.", reply_content)
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    "[CONTRACT VERIFICATION NOTICE]: You stated to the user that you cleared, scheduled, or updated the plan, "
+                    "but you emitted NO tool directives and no schedule state was changed (state delta = 0). "
+                    "You CANNOT change the schedule through conversational statements alone. "
+                    "You MUST output explicit tool directives (e.g. CLEAR_BLOCKS: ALL, MODIFY_BLOCKS: ...) "
+                    "on their own line to execute changes. Output the required directive now."
+                )
+            })
         elif executed_tools and reply_content.strip():
             for _, t_out in executed_tools:
                 if self._detect_discrepancy(reply_content, t_out):
@@ -770,8 +889,18 @@ BEHAVIOR RULES & DIRECTIVES:
                         "name": fn_name,
                         "content": tool_output,
                     })
+                # Re-compute delta after follow-up calls
+                snapshot_after = self._capture_plan_snapshot()
+                delta = self._compute_state_delta(snapshot_before, snapshot_after)
+
             if follow_up_content.strip():
                 reply_content = follow_up_content
+
+        # Final Verifier Guard: If the final reply STILL claims mutation but delta.total_changes == 0,
+        # prevent lying to the user
+        if ACTION_CLAIM_PATTERN.search(reply_content) and delta.total_changes == 0:
+            logger.warning("[Conversation] Final Verifier Guard: Suppressing unverified mutation claim: %r", reply_content)
+            reply_content = "I was unable to update your schedule because no valid modification directive could be executed. Please specify the blocks or time range you would like to change."
 
         if not reply_content.strip():
             if executed_tools:
