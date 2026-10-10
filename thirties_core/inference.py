@@ -273,138 +273,162 @@ class LiteRTInferenceEngine:
         else:
             return {"role": "assistant", "content": "LiteRT-LM model runner not available.", "tool_calls": []}
 
-        # Parse explicit tool directives emitted by model text
-        tool_calls: List[Dict[str, Any]] = []
-
-        # 1. Directive: MODIFY_BLOCKS: <start>[-<end>] | [kind=<KIND>] [label=<LABEL>] [locked=<true|false>]
-        modify_dir = re.search(r"MODIFY_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*(?:\|\s*(.+))?", raw_reply, re.IGNORECASE)
-        if modify_dir:
-            s_idx = int(modify_dir.group(1))
-            e_idx = int(modify_dir.group(2)) if modify_dir.group(2) else s_idx
-            rest = modify_dir.group(3) or ""
-            kind_val = None
-            label_val = None
-            locked_val = None
-            if "kind=" in rest.lower():
-                km = re.search(r"kind=([A-Za-z_]+)", rest, re.IGNORECASE)
-                if km:
-                    kind_val = km.group(1).upper()
-            if "label=" in rest.lower():
-                lm = re.search(r"label=([^|]+)", rest, re.IGNORECASE)
-                if lm:
-                    label_val = lm.group(1).strip()
-            elif rest and not kind_val:
-                label_val = rest.strip()
-            if "locked=" in rest.lower():
-                locked_m = re.search(r"locked=(true|false)", rest, re.IGNORECASE)
-                if locked_m:
-                    locked_val = (locked_m.group(1).lower() == "true")
-
-            tool_calls.append({
-                "id": f"modify_call_{s_idx}",
-                "name": "modify_blocks",
-                "arguments": {
-                    "start_block": s_idx,
-                    "end_block": e_idx,
-                    "kind": kind_val,
-                    "label": label_val,
-                    "is_locked": locked_val,
-                },
-            })
-            raw_reply = re.sub(r"MODIFY_BLOCKS?:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # Backward compatibility for ALLOCATE_BLOCKS: <start>[-<end>] | <label>
-        alloc_matches = list(re.finditer(r"ALLOCATE_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*\|\s*([^\n]+)", raw_reply, re.IGNORECASE))
-        for match in alloc_matches:
-            s_idx = int(match.group(1))
-            e_idx = int(match.group(2)) if match.group(2) else s_idx
-            lbl = match.group(3).strip()
-            tool_calls.append({
-                "id": f"modify_call_{s_idx}",
-                "name": "modify_blocks",
-                "arguments": {
-                    "start_block": s_idx,
-                    "end_block": e_idx,
-                    "label": lbl,
-                },
-            })
-        if alloc_matches:
-            raw_reply = re.sub(r"ALLOCATE_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 2. Directive: CLEAR_BLOCKS: <start>[-<end>] OR CLEAR_BLOCKS: WORK / CLEAR_WORK_BLOCKS
-        if clear_kind_match := re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", raw_reply, re.IGNORECASE):
-            target_k = clear_kind_match.group(1).upper()
-            tool_calls.append({
-                "id": "clear_blocks_call",
-                "name": "clear_blocks",
-                "arguments": {"clear_kind": target_k, "clear_all_work": (target_k == "WORK")},
-            })
-            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(?:WORK|SLEEP|ALL)[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-        elif re.search(r"\b(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
-            tool_calls.append({
-                "id": "clear_work_call",
-                "name": "clear_blocks",
-                "arguments": {"clear_all_work": True},
-            })
-            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-        elif clear_dir := re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE):
-            s_idx = int(clear_dir.group(1))
-            e_idx = int(clear_dir.group(2)) if clear_dir.group(2) else s_idx
-            tool_calls.append({
-                "id": "clear_blocks_call",
-                "name": "clear_blocks",
-                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
-            })
-            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 3. Directive: RESOLVE_EVENT: <event_id> | <attend|decline>
-        if resolve_dir := re.search(r"RESOLVE_EVENT:\s*([^|\n]+)\s*\|\s*(attend|decline)\b", raw_reply, re.IGNORECASE):
-            ev_id = resolve_dir.group(1).strip()
-            action_val = resolve_dir.group(2).strip().lower()
-            tool_calls.append({
-                "id": f"resolve_call_{ev_id}",
-                "name": "resolve_event",
-                "arguments": {"event_id": ev_id, "action": action_val},
-            })
-            raw_reply = re.sub(r"RESOLVE_EVENT:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 4. Directive: INSPECT_BLOCKS: <start>[-<end>]
-        if inspect_dir := re.search(r"INSPECT_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE):
-            s_idx = int(inspect_dir.group(1))
-            e_idx = int(inspect_dir.group(2)) if inspect_dir.group(2) else s_idx
-            tool_calls.append({
-                "id": "inspect_blocks_call",
-                "name": "inspect_blocks",
-                "arguments": {"start_block": s_idx, "end_block": e_idx},
-            })
-            raw_reply = re.sub(r"INSPECT_BLOCKS?:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 5. Directive: FINALIZE_PLAN / FINALIZE_DAY_PLAN
-        if re.search(r"\bFINALIZE_(?:DAY_)?PLAN\b", raw_reply, re.IGNORECASE):
-            tool_calls.append({
-                "id": "finalize_call",
-                "name": "finalize_day_plan",
-                "arguments": {"notes": "Plan agreed in chat."},
-            })
-            raw_reply = re.sub(r"\bFINALIZE_(?:DAY_)?PLAN[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # Backward compatibility for REINSTATE_WORK_BLOCKS directive
-        if re.search(r"\b(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
-            tool_calls.append({
-                "id": "modify_work_call",
-                "name": "modify_blocks",
-                "arguments": {"kind": "WORK"},
-            })
-            raw_reply = re.sub(r"(?:REINSTATE|RESTORE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
+        cleaned_content, tool_calls = parse_model_directives(raw_reply)
         if tool_calls:
             logger.info("[Inference] Extracted tool directives from model: %s", [c["name"] for c in tool_calls])
 
         return {
             "role": "assistant",
-            "content": str(raw_reply).strip(),
+            "content": cleaned_content,
             "tool_calls": tool_calls,
         }
+
+
+def _parse_modify_attributes(rest: str) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    if not rest:
+        return args
+    rest = rest.strip()
+
+    km = re.search(r"\bkind=([A-Za-z_]+)\b", rest, re.IGNORECASE)
+    if km:
+        args["kind"] = km.group(1).upper()
+        rest = rest[:km.start()] + " " + rest[km.end():]
+
+    lm = re.search(r"\blocked=(true|false)\b", rest, re.IGNORECASE)
+    if lm:
+        args["is_locked"] = (lm.group(1).lower() == "true")
+        rest = rest[:lm.start()] + " " + rest[lm.end():]
+
+    tm = re.search(r"\btask_id=([^\s|]+)", rest, re.IGNORECASE)
+    if tm:
+        args["task_id"] = tm.group(1).strip()
+        rest = rest[:tm.start()] + " " + rest[tm.end():]
+
+    label_m = re.search(r"\blabel=\s*([^|]+)", rest, re.IGNORECASE)
+    if label_m:
+        lbl = label_m.group(1).strip()
+    else:
+        lbl = re.sub(r"^[|\s]+|[|\s]+$", "", rest).strip()
+
+    if lbl:
+        args["label"] = lbl
+    return args
+
+
+def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
+    """Extract explicit tool directives emitted by model text and return cleaned reply and tool calls.
+    
+    Supports multiple directives per turn in order of occurrence.
+    """
+    tool_calls: list[dict[str, Any]] = []
+    clean_lines: list[str] = []
+
+    for line in str(raw_reply).splitlines():
+        trimmed = line.strip()
+        if not trimmed:
+            clean_lines.append(line)
+            continue
+
+        # 1. MODIFY_BLOCKS / ALLOCATE_BLOCKS
+        mod_m = re.match(r"^(?:MODIFY|ALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
+        if mod_m:
+            s_idx = int(mod_m.group(1))
+            e_idx = int(mod_m.group(2)) if mod_m.group(2) else s_idx
+            rest = mod_m.group(3) or ""
+            attrs = _parse_modify_attributes(rest)
+            tool_calls.append({
+                "id": f"modify_call_{s_idx}_{len(tool_calls)}",
+                "name": "modify_blocks",
+                "arguments": {
+                    "start_block": s_idx,
+                    "end_block": e_idx,
+                    "kind": attrs.get("kind"),
+                    "label": attrs.get("label"),
+                    "task_id": attrs.get("task_id"),
+                    "is_locked": attrs.get("is_locked"),
+                },
+            })
+            continue
+
+        # 2. CLEAR_BLOCKS / DEALLOCATE_BLOCKS
+        clr_kind_m = re.match(r"^(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", trimmed, re.IGNORECASE)
+        if clr_kind_m:
+            target_k = clr_kind_m.group(1).upper()
+            tool_calls.append({
+                "id": f"clear_blocks_call_{len(tool_calls)}",
+                "name": "clear_blocks",
+                "arguments": {"clear_kind": target_k, "clear_all_work": (target_k == "WORK")},
+            })
+            continue
+
+        if re.match(r"^(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", trimmed, re.IGNORECASE):
+            tool_calls.append({
+                "id": f"clear_work_call_{len(tool_calls)}",
+                "name": "clear_blocks",
+                "arguments": {"clear_kind": "WORK", "clear_all_work": True},
+            })
+            continue
+
+        clr_range_m = re.match(r"^(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
+        if clr_range_m:
+            s_idx = int(clr_range_m.group(1))
+            e_idx = int(clr_range_m.group(2)) if clr_range_m.group(2) else s_idx
+            tool_calls.append({
+                "id": f"clear_blocks_call_{len(tool_calls)}",
+                "name": "clear_blocks",
+                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
+            })
+            continue
+
+        # 3. RESOLVE_EVENT
+        res_m = re.match(r"^RESOLVE_EVENT:\s*([^|\n]+)\s*\|\s*(attend|decline)\b", trimmed, re.IGNORECASE)
+        if res_m:
+            ev_id = res_m.group(1).strip()
+            action_val = res_m.group(2).strip().lower()
+            tool_calls.append({
+                "id": f"resolve_call_{ev_id}_{len(tool_calls)}",
+                "name": "resolve_event",
+                "arguments": {"event_id": ev_id, "action": action_val},
+            })
+            continue
+
+        # 4. INSPECT_BLOCKS
+        insp_m = re.match(r"^INSPECT_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
+        if insp_m:
+            s_idx = int(insp_m.group(1))
+            e_idx = int(insp_m.group(2)) if insp_m.group(2) else s_idx
+            tool_calls.append({
+                "id": f"inspect_blocks_call_{len(tool_calls)}",
+                "name": "inspect_blocks",
+                "arguments": {"start_block": s_idx, "end_block": e_idx},
+            })
+            continue
+
+        # 5. FINALIZE_PLAN
+        fin_m = re.match(r"^FINALIZE_(?:DAY_)?PLAN(?:\s*\|\s*(.*))?", trimmed, re.IGNORECASE)
+        if fin_m:
+            notes = fin_m.group(1).strip() if fin_m.group(1) else "Plan agreed in chat."
+            tool_calls.append({
+                "id": f"finalize_call_{len(tool_calls)}",
+                "name": "finalize_day_plan",
+                "arguments": {"notes": notes},
+            })
+            continue
+
+        # 6. Backward compatibility REINSTATE_WORK_BLOCKS
+        if re.match(r"^(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", trimmed, re.IGNORECASE):
+            tool_calls.append({
+                "id": f"modify_work_call_{len(tool_calls)}",
+                "name": "modify_blocks",
+                "arguments": {"kind": "WORK"},
+            })
+            continue
+
+        clean_lines.append(line)
+
+    clean_text = "\n".join(clean_lines).strip()
+    return clean_text, tool_calls
 
 
 class MockInferenceEngine:
@@ -438,10 +462,12 @@ class MockInferenceEngine:
                 "tool_calls": [
                     {
                         "id": "call_1",
-                        "name": "allocate_thirty_block",
+                        "name": "modify_blocks",
                         "arguments": {
+                            "start_block": idx,
+                            "end_block": idx,
                             "block_index": idx,
-                            "custom_label": "Dorico Compose",
+                            "label": "Dorico Compose",
                         },
                     }
                 ],
@@ -454,10 +480,28 @@ class MockInferenceEngine:
                 "tool_calls": [
                     {
                         "id": "call_2",
-                        "name": "resolve_calendar_event",
+                        "name": "resolve_event",
                         "arguments": {
                             "event_id": "e_doc",
-                            "attending": True,
+                            "action": "attend",
+                        },
+                    }
+                ],
+            }
+
+        if "work" in last_msg and "7am" in last_msg and "3pm" in last_msg:
+            return {
+                "role": "assistant",
+                "content": "Work is now scheduled from 7:00 AM to 3:00 PM (Blocks 1–16) for 16 chunks.",
+                "tool_calls": [
+                    {
+                        "id": "call_work",
+                        "name": "modify_blocks",
+                        "arguments": {
+                            "start_block": 1,
+                            "end_block": 16,
+                            "kind": "WORK",
+                            "is_locked": True,
                         },
                     }
                 ],

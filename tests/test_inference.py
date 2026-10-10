@@ -157,5 +157,105 @@ Here is your plan.
                 self.assertEqual(res['tool_calls'][1]['name'], 'finalize_day_plan')
 
 
+    def test_multiple_modify_directives_in_single_turn(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
+            with patch('subprocess.run') as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+MODIFY_BLOCKS: 19-21 | label=Composing
+MODIFY_BLOCKS: 22 | label=Lunch
+I scheduled both.
+---THIRTIES_RESPONSE_END---""",
+                    stderr='',
+                    returncode=0,
+                )
+                res = engine.chat([{'role': 'user', 'content': 'Schedule composing 19-21 and lunch 22'}])
+                self.assertEqual(res['content'], 'I scheduled both.')
+                self.assertEqual(len(res['tool_calls']), 2)
+                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
+                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 19)
+                self.assertEqual(res['tool_calls'][0]['arguments']['end_block'], 21)
+                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Composing')
+
+                self.assertEqual(res['tool_calls'][1]['name'], 'modify_blocks')
+                self.assertEqual(res['tool_calls'][1]['arguments']['start_block'], 22)
+                self.assertEqual(res['tool_calls'][1]['arguments']['end_block'], 22)
+                self.assertEqual(res['tool_calls'][1]['arguments']['label'], 'Lunch')
+
+    def test_space_separated_attributes_no_greedy_swallow(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
+            with patch('subprocess.run') as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+MODIFY_BLOCKS: 19-22 | label=Composing Session locked=true
+Scheduled composing session.
+---THIRTIES_RESPONSE_END---""",
+                    stderr='',
+                    returncode=0,
+                )
+                res = engine.chat([{'role': 'user', 'content': 'Schedule composing'}])
+                self.assertEqual(len(res['tool_calls']), 1)
+                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Composing Session')
+                self.assertTrue(res['tool_calls'][0]['arguments']['is_locked'])
+
+    def test_combined_clear_and_modify_directives(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
+            with patch('subprocess.run') as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+CLEAR_BLOCKS: WORK
+MODIFY_BLOCKS: 25-28 | label=Gym Session
+Cleared work and added gym.
+---THIRTIES_RESPONSE_END---""",
+                    stderr='',
+                    returncode=0,
+                )
+                res = engine.chat([{'role': 'user', 'content': 'No work today, let us do gym at 25-28'}])
+                self.assertEqual(res['content'], 'Cleared work and added gym.')
+                self.assertEqual(len(res['tool_calls']), 2)
+                self.assertEqual(res['tool_calls'][0]['name'], 'clear_blocks')
+                self.assertEqual(res['tool_calls'][0]['arguments']['clear_kind'], 'WORK')
+                self.assertEqual(res['tool_calls'][1]['name'], 'modify_blocks')
+                self.assertEqual(res['tool_calls'][1]['arguments']['start_block'], 25)
+                self.assertEqual(res['tool_calls'][1]['arguments']['label'], 'Gym Session')
+
+    def test_lowercase_directive_handling(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
+            with patch('subprocess.run') as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+modify_blocks: 10 | label=Break
+Enjoy your break!
+---THIRTIES_RESPONSE_END---""",
+                    stderr='',
+                    returncode=0,
+                )
+                res = engine.chat([{'role': 'user', 'content': 'Block 10 break'}])
+                self.assertEqual(res['content'], 'Enjoy your break!')
+                self.assertEqual(len(res['tool_calls']), 1)
+                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
+                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 10)
+                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Break')
+
+    def test_conversational_reply_with_no_directives(self) -> None:
+        engine = LiteRTInferenceEngine()
+        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
+            with patch('subprocess.run') as mock_subproc:
+                mock_subproc.return_value = MagicMock(
+                    stdout="""---THIRTIES_RESPONSE_START---
+I recommend scheduling that during the daylight hours around 2:00 PM.
+---THIRTIES_RESPONSE_END---""",
+                    stderr='',
+                    returncode=0,
+                )
+                res = engine.chat([{'role': 'user', 'content': 'Where should I compose?'}])
+                self.assertEqual(res['content'], 'I recommend scheduling that during the daylight hours around 2:00 PM.')
+                self.assertEqual(len(res['tool_calls']), 0)
+
+
 if __name__ == '__main__':
     unittest.main()

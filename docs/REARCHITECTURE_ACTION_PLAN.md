@@ -1,7 +1,7 @@
 # Thirties Core: Universal Primitives Rearchitecture Action Plan
 
 **Date:** October 9, 2026  
-**Status:** Approved & Ready for Execution  
+**Status:** Completed & Verified  
 **Target Branch:** `feat/initial-mvp`  
 **Prerequisite Commit:** `93a855d` (Stripped prompt-scraping regexes and response-hijack overrides)
 
@@ -64,21 +64,21 @@ FINALIZE_PLAN [| notes=<NOTES>]
 **Primary File:** `thirties_core/inference.py`  
 **Secondary File:** `tests/run_eval_harness.py`
 
-- [ ] **Task 1.1: Replace Single-Match `re.search` with Multi-Directive Scanner**
+- [x] **Task 1.1: Replace Single-Match `re.search` with Multi-Directive Scanner**
   - Implement a structured parser function `parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]`.
   - Scan line-by-line or with `re.finditer` to capture **all** valid directive lines in order.
   - Test case: verify that multiple `MODIFY_BLOCKS` lines (e.g. `MODIFY_BLOCKS: 19-21 | label=Dorico\nMODIFY_BLOCKS: 22 | label=Lunch`) yield 2 distinct tool calls.
-- [ ] **Task 1.2: Robust Attribute Lexer for `MODIFY_BLOCKS`**
+- [x] **Task 1.2: Robust Attribute Lexer for `MODIFY_BLOCKS`**
   - Tokenize the attribute segment after `|`.
   - Recognize keys: `kind=(WORK|SLEEP|DISCRETIONARY)`, `locked=(true|false)`, `task_id=\S+`.
   - Everything else assigned to `label=...` (or unquoted trailing text) must not accidentally ingest subsequent `locked=true` tokens.
-- [ ] **Task 1.3: Support `CLEAR_BLOCKS` Syntax Variants**
+- [x] **Task 1.3: Support `CLEAR_BLOCKS` Syntax Variants**
   - Handle both `CLEAR_BLOCKS: 24-28`, `CLEAR_BLOCKS: WORK`, and `CLEAR_BLOCKS: | kind=WORK`.
   - Map `clear_kind` cleanly to `clear_blocks` arguments without needing legacy `clear_all_work` booleans.
-- [ ] **Task 1.4: Update `MockInferenceEngine`**
+- [x] **Task 1.4: Update `MockInferenceEngine`**
   - Stop returning legacy `allocate_thirty_block` and `resolve_calendar_event` tool calls in `MockInferenceEngine.chat`.
   - Change default mock responses to return `modify_blocks` and `resolve_event`.
-- [ ] **Task 1.5: Harmonize `run_eval_harness.py`**
+- [x] **Task 1.5: Harmonize `run_eval_harness.py`**
   - Remove duplicated regex extraction logic inside `FastHybridInferenceEngine`.
   - Import and use `parse_model_directives` directly from `thirties_core.inference`.
 
@@ -88,10 +88,10 @@ FINALIZE_PLAN [| notes=<NOTES>]
 **Primary File:** `thirties_core/conversation.py`  
 **Secondary File:** `thirties_core/models.py`
 
-- [ ] **Task 2.1: Enforce Orthogonality & Calendar Protection in `modify_blocks`**
+- [x] **Task 2.1: Enforce Orthogonality & Calendar Protection in `modify_blocks`**
   - Before modifying a block, check if `b.kind == BlockKind.BUSY_CALENDAR` or `b.is_locked`. If locked by calendar and `force_calendar` is False, skip or reject with a descriptive warning message.
   - Remove the global loop that auto-deallocates all other `WORK` and `SLEEP` blocks when a range is set to `WORK` or `SLEEP`. If the intent is explicitly to shift the work envelope (e.g. from prompt / command), introduce a parameter `clear_existing_envelope: bool = False`, defaulting to `False`.
-- [ ] **Task 2.2: Fix `resolve_event` Ambiguous Event Scoping**
+- [x] **Task 2.2: Fix `resolve_event` Ambiguous Event Scoping**
   - Fix line 534:
     ```python
     if event_id in ('unconfirmed', '*'):
@@ -102,13 +102,13 @@ FINALIZE_PLAN [| notes=<NOTES>]
     self.ambiguous_events = [e for e in self.ambiguous_events if e.id != target_id]
     ```
   - Ensure resolving one event does not delete unrelated ambiguous events.
-- [ ] **Task 2.3: Implement Agentic ReAct Turn for Read-Only Directives (`inspect_blocks`)**
+- [x] **Task 2.3: Implement Agentic ReAct Turn for Read-Only Directives (`inspect_blocks`)**
   - In `ConversationManager.send_user_message`:
     If `executed_tools` contains read-only tools like `inspect_blocks`, do NOT terminate the turn immediately.
     Append the tool output to `self.messages`, and perform a follow-up call: `self.inference_engine.chat(self.messages, tools=PLANNING_TOOLS)` (up to a max depth of 2 turns) so the model can inspect and then output its response or mutation directives.
-- [ ] **Task 2.4: Clean Up Legacy Tool Shims in `execute_tool`**
+- [x] **Task 2.4: Clean Up Legacy Tool Shims in `execute_tool`**
   - Keep legacy names (`allocate_thirty_block`, `reinstate_work_blocks`) solely with `@deprecated` log warnings if needed for backwards compatibility, or migrate all internal callers and tests to only dispatch `modify_blocks`, `clear_blocks`, `resolve_event`, `inspect_blocks`, `finalize_day_plan`.
-- [ ] **Task 2.5: Synchronize System Prompt & `PLANNING_TOOLS`**
+- [x] **Task 2.5: Synchronize System Prompt & `PLANNING_TOOLS`**
   - Ensure the tools in `PLANNING_TOOLS` match the 5 primitives exactly.
   - Ensure the directive grammar in `_build_system_prompt` matches the parser implemented in Work Package 1.
 
@@ -117,18 +117,18 @@ FINALIZE_PLAN [| notes=<NOTES>]
 ### Work Package 3: Test Suite Modernization & Orphan Reclamation
 **Primary Files:** `tests/test_conversation.py`, `tests/test_inference.py`
 
-- [ ] **Task 3.1: Reclaim Orphaned Tests in `test_conversation.py`**
+- [x] **Task 3.1: Reclaim Orphaned Tests in `test_conversation.py`**
   - Move lines 254–289 back into the `TestConversation(unittest.TestCase)` class body before `if __name__ == '__main__':`.
   - Fix `test_user_message_sets_custom_work_hours`: configure `MockInferenceEngine` or mock chat response to emit `MODIFY_BLOCKS: 1-16 | kind=WORK` so the test exercises directive execution cleanly without prompt-scraping fallbacks.
   - Verify that `test_discretionary_totals` and `test_work_window_moves_clearing_old_work_blocks` pass.
-- [ ] **Task 3.2: Modernize `test_conversation.py` Tool Calls**
+- [x] **Task 3.2: Modernize `test_conversation.py` Tool Calls**
   - Replace calls to `self.manager.execute_tool('allocate_thirty_block', ...)` with `self.manager.execute_tool('modify_blocks', ...)`.
   - Replace calls to `self.manager.execute_tool('resolve_calendar_event', ...)` with `self.manager.execute_tool('resolve_event', ...)`.
   - Add explicit unit tests for:
     - Direct invocation of `modify_blocks` with single block, multi-block, labels, and work kinds.
     - Direct invocation of `inspect_blocks`.
     - Protection against overwriting `BUSY_CALENDAR` blocks.
-- [ ] **Task 3.3: Expand `test_inference.py` Edge Cases**
+- [x] **Task 3.3: Expand `test_inference.py` Edge Cases**
   - Add tests for:
     - Multiple `MODIFY_BLOCKS` directives in one reply.
     - Combined `MODIFY_BLOCKS` + `CLEAR_BLOCKS` in one reply.
@@ -142,10 +142,10 @@ FINALIZE_PLAN [| notes=<NOTES>]
 ### Work Package 4: Verification & Evaluation Harness Run
 **Primary Files:** `tests/run_eval_harness.py`, test suite
 
-- [ ] **Task 4.1: Run Full Unit Test Suite**
+- [x] **Task 4.1: Run Full Unit Test Suite**
   - Execute `python3 -m unittest discover tests`.
   - Ensure all 52+ tests pass with zero warnings or failures.
-- [ ] **Task 4.2: Execute Evaluation Harness**
+- [x] **Task 4.2: Execute Evaluation Harness**
   - Run `python3 tests/run_eval_harness.py --scenarios 50` (or local dry-run).
   - Verify that tool extraction and qualitative evaluation metrics remain at or above current benchmarks without relying on prompt regex fallbacks.
 

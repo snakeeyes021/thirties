@@ -248,9 +248,6 @@ class TestConversation(unittest.TestCase):
         self.assertIn("Simulated time cleared", reply_reset)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_user_message_sets_custom_work_hours(self) -> None:
         self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
         reply = self.manager.send_user_message("Oh shoot, turns out work today is from 7am to 3pm.")
@@ -287,3 +284,68 @@ if __name__ == "__main__":
         self.assertNotEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
         self.assertTrue(self.plan.get_logical_block(17).is_discretionary)
         self.assertTrue(self.plan.get_logical_block(18).is_discretionary)
+
+    def test_modify_blocks_primitive_direct(self) -> None:
+        out = self.manager.modify_blocks(start_block=20, end_block=22, label="Deep Focus", is_locked=True)
+        self.assertIn("Allocated blocks 20 through 22", out)
+        for idx in range(20, 23):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.label, "Deep Focus")
+            self.assertTrue(b.is_locked)
+
+    def test_calendar_lock_protection_in_modify_and_clear(self) -> None:
+        b12 = self.plan.get_logical_block(12)
+        b12.kind = BlockKind.BUSY_CALENDAR
+        b12.is_locked = True
+        b12.label = "Dentist Appointment"
+
+        # Attempt to modify block 12 without force_calendar
+        out = self.manager.modify_blocks(start_block=12, end_block=12, label="Gaming")
+        self.assertIn("Cannot modify block(s) [12]: locked by calendar event", out)
+        self.assertEqual(b12.label, "Dentist Appointment")
+        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
+
+        # Attempt to clear block 12 without force_calendar
+        out_clear = self.manager.clear_blocks(start_block=12, end_block=12)
+        self.assertIn("0 blocks", out_clear)
+        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
+
+    def test_resolve_event_preserves_other_ambiguous_events(self) -> None:
+        e2 = CalendarEvent(
+            id="e_dentist",
+            summary="Dentist",
+            start_dt=datetime(2026, 10, 8, 17, 0, tzinfo=self.tz),
+            end_dt=datetime(2026, 10, 8, 17, 30, tzinfo=self.tz),
+            is_ambiguous=True,
+        )
+        self.manager.ambiguous_events.append(e2)
+        self.assertEqual(len(self.manager.ambiguous_events), 2)
+
+        out = self.manager.resolve_event(event_id="e_doc", action="attend")
+        self.assertIn("Event e_doc resolved: locked as busy calendar block", out)
+        self.assertEqual(len(self.manager.ambiguous_events), 1)
+        self.assertEqual(self.manager.ambiguous_events[0].id, "e_dentist")
+
+    def test_react_loop_on_inspect_blocks(self) -> None:
+        # Mock engine returning INSPECT_BLOCKS on first turn, then a conversational reply on second turn
+        mock_engine = MockInferenceEngine([
+            {
+                "role": "assistant",
+                "content": "Let me inspect.",
+                "tool_calls": [
+                    {"id": "insp_1", "name": "inspect_blocks", "arguments": {"start_block": 1, "end_block": 5}}
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "I have verified blocks 1 to 5 are open.",
+                "tool_calls": [],
+            }
+        ])
+        self.manager.inference_engine = mock_engine
+        reply = self.manager.send_user_message("Can you check blocks 1 to 5?")
+        self.assertEqual(reply, "I have verified blocks 1 to 5 are open.")
+
+
+if __name__ == "__main__":
+    unittest.main()

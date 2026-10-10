@@ -349,6 +349,8 @@ BEHAVIOR RULES & DIRECTIVES:
         label: Optional[str] = None,
         task_id: Optional[str] = None,
         is_locked: Optional[bool] = None,
+        clear_existing_envelope: bool = False,
+        force_calendar: bool = False,
         **kwargs: Any,
     ) -> str:
         """Universal schedule primitive: modify block kinds, assigned tasks, or lock states."""
@@ -387,20 +389,34 @@ BEHAVIOR RULES & DIRECTIVES:
                 target_blocks.append(b)
                 target_indices.add(idx)
 
+        # Check calendar lock invariant
+        skipped_calendar: list[int] = []
+        mutable_blocks: list[ThirtyBlock] = []
+        for b in target_blocks:
+            log_idx = self.day_plan.get_logical_index(b)
+            if (b.kind == BlockKind.BUSY_CALENDAR or b.source_event_id) and b.is_locked and not force_calendar:
+                skipped_calendar.append(log_idx)
+            else:
+                mutable_blocks.append(b)
+
+        if not mutable_blocks and skipped_calendar:
+            return f"Cannot modify block(s) {skipped_calendar}: locked by calendar event. Use force_calendar=True to override."
+
         preserved_tasks: list[str] = []
 
         if norm_kind == "WORK":
-            # Clear old WORK blocks outside target_indices back to discretionary
-            for b in self.day_plan.blocks:
-                log_idx = self.day_plan.get_logical_index(b)
-                if b.kind == BlockKind.WORK and log_idx not in target_indices:
-                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                    b.is_locked = False
-                    if not b.assigned_task_id and b.label == "Work":
-                        b.label = ""
+            if clear_existing_envelope:
+                # Clear old WORK blocks outside target_indices back to discretionary
+                for b in self.day_plan.blocks:
+                    log_idx = self.day_plan.get_logical_index(b)
+                    if b.kind == BlockKind.WORK and log_idx not in target_indices:
+                        b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                        b.is_locked = False
+                        if not b.assigned_task_id and b.label == "Work":
+                            b.label = ""
 
-            # Assign target blocks to WORK
-            for b in target_blocks:
+            # Assign mutable blocks to WORK
+            for b in mutable_blocks:
                 log_idx = self.day_plan.get_logical_index(b)
                 if b.label and b.label != "Work":
                     preserved_tasks.append(f"Block {log_idx} ('{b.label}')")
@@ -411,24 +427,25 @@ BEHAVIOR RULES & DIRECTIVES:
                 b.is_locked = True if is_locked is None else is_locked
 
         elif norm_kind == "SLEEP":
-            # Clear old SLEEP blocks outside target_indices
-            for b in self.day_plan.blocks:
-                log_idx = self.day_plan.get_logical_index(b)
-                if b.kind == BlockKind.SLEEP and log_idx not in target_indices:
-                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                    b.is_locked = False
-                    if b.label == "Sleep":
-                        b.label = ""
+            if clear_existing_envelope:
+                # Clear old SLEEP blocks outside target_indices
+                for b in self.day_plan.blocks:
+                    log_idx = self.day_plan.get_logical_index(b)
+                    if b.kind == BlockKind.SLEEP and log_idx not in target_indices:
+                        b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                        b.is_locked = False
+                        if b.label == "Sleep":
+                            b.label = ""
 
-            # Assign target blocks to SLEEP
-            for b in target_blocks:
+            # Assign mutable blocks to SLEEP
+            for b in mutable_blocks:
                 b.kind = BlockKind.SLEEP
                 b.label = label or "Sleep"
                 b.is_locked = True if is_locked is None else is_locked
                 b.assigned_task_id = None
 
         elif norm_kind == "DISCRETIONARY":
-            for b in target_blocks:
+            for b in mutable_blocks:
                 b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
                 b.is_locked = False if is_locked is None else is_locked
                 b.label = label or ""
@@ -436,7 +453,7 @@ BEHAVIOR RULES & DIRECTIVES:
 
         else:
             # Assign task / label while preserving diurnal container kind
-            for b in target_blocks:
+            for b in mutable_blocks:
                 if label:
                     b.label = label
                 if task_id:
@@ -448,31 +465,33 @@ BEHAVIOR RULES & DIRECTIVES:
         if self.scheduler and self.scheduler.state_db:
             self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
-        count = len(target_blocks)
+        count = len(mutable_blocks)
         chunk_word = "chunk" if count == 1 else "chunks"
         count_str = f"{count} {chunk_word}"
 
-        if target_blocks:
-            first_log = self.day_plan.get_logical_index(target_blocks[0])
-            last_log = self.day_plan.get_logical_index(target_blocks[-1])
-            start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
-            end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
+        if mutable_blocks:
+            first_log = self.day_plan.get_logical_index(mutable_blocks[0])
+            last_log = self.day_plan.get_logical_index(mutable_blocks[-1])
+            start_clk = mutable_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
+            end_clk = mutable_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
             span_str = f"from {start_clk} to {end_clk} (Block {first_log})" if first_log == last_log else f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
         else:
             span_str = "requested blocks"
 
+        conflict_note = f" (skipped locked calendar blocks {skipped_calendar})" if skipped_calendar else ""
+
         if norm_kind == "WORK":
             if preserved_tasks:
-                return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."
-            return f"Work is now scheduled {span_str} for {count_str}."
+                return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact.{conflict_note}"
+            return f"Work is now scheduled {span_str} for {count_str}.{conflict_note}"
         elif norm_kind == "SLEEP":
-            return f"Sleep window is now scheduled {span_str} for {count_str}."
+            return f"Sleep window is now scheduled {span_str} for {count_str}.{conflict_note}"
         else:
             lbl_desc = f"'{label}'" if label else "scheduled"
-            if len(target_blocks) == 1:
-                return f"Allocated block {first_log} from {start_clk} to {end_clk} (1 chunk) to {lbl_desc}."
+            if len(mutable_blocks) == 1:
+                return f"Allocated block {first_log} from {start_clk} to {end_clk} (1 chunk) to {lbl_desc}.{conflict_note}"
             else:
-                return f"Allocated blocks {first_log} through {last_log} from {start_clk} to {end_clk} ({count_str}) to {lbl_desc}."
+                return f"Allocated blocks {first_log} through {last_log} from {start_clk} to {end_clk} ({count_str}) to {lbl_desc}.{conflict_note}"
 
     def clear_blocks(
         self,
@@ -480,6 +499,7 @@ BEHAVIOR RULES & DIRECTIVES:
         end_block: Optional[int] = None,
         clear_kind: Optional[str] = None,
         clear_all_work: bool = False,
+        force_calendar: bool = False,
         **kwargs: Any,
     ) -> str:
         """Clear blocks back to open discretionary time."""
@@ -497,19 +517,22 @@ BEHAVIOR RULES & DIRECTIVES:
                 if 1 <= b_idx <= 48:
                     target_blocks.append(self.day_plan.get_logical_block(b_idx))
 
+        cleared_count = 0
         for b in target_blocks:
+            if (b.kind == BlockKind.BUSY_CALENDAR or b.source_event_id) and b.is_locked and not force_calendar:
+                continue
             b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
             b.is_locked = False
             b.label = ""
             b.assigned_task_id = None
             b.source_event_id = None
+            cleared_count += 1
 
         self.day_plan.recalculate_counts()
         if self.scheduler and self.scheduler.state_db:
             self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
-        count = len(target_blocks)
-        count_str = f"{count} block" if count == 1 else f"{count} blocks"
+        count_str = f"{cleared_count} block" if cleared_count == 1 else f"{cleared_count} blocks"
         return f"Cleared and opened {count_str} as discretionary time."
 
     def resolve_event(
@@ -525,8 +548,13 @@ BEHAVIOR RULES & DIRECTIVES:
         else:
             is_attending = bool(attending)
 
+        target_event_id = event_id
+        if event_id in ("unconfirmed", "*"):
+            if self.ambiguous_events:
+                target_event_id = self.ambiguous_events[0].id
+
         for block in self.day_plan.blocks:
-            if block.source_event_id == event_id or (event_id in ("unconfirmed", "*") and block.source_event_id):
+            if block.source_event_id == target_event_id:
                 if is_attending:
                     block.kind = BlockKind.BUSY_CALENDAR
                     block.is_locked = True
@@ -536,12 +564,12 @@ BEHAVIOR RULES & DIRECTIVES:
                     block.source_event_id = None
                     block.is_locked = False
 
-        self.ambiguous_events = [e for e in self.ambiguous_events if e.id != event_id and (event_id != "unconfirmed")]
+        self.ambiguous_events = [e for e in self.ambiguous_events if e.id != target_event_id]
         self.day_plan.recalculate_counts()
         if self.scheduler and self.scheduler.state_db:
             self.scheduler.state_db.save_day_snapshot(self.day_plan)
         action_desc = "locked as busy calendar block" if is_attending else "declined and opened as discretionary"
-        return f"Event {event_id} resolved: {action_desc}."
+        return f"Event {target_event_id} resolved: {action_desc}."
 
     def inspect_blocks(
         self,
@@ -599,6 +627,7 @@ BEHAVIOR RULES & DIRECTIVES:
                 start_time=arguments.get("start_time"),
                 end_time=arguments.get("end_time"),
                 kind="WORK",
+                clear_existing_envelope=True,
             )
 
         elif name in ("set_sleep_blocks", "adjust_sleep_window", "set_bedtime"):
@@ -608,6 +637,7 @@ BEHAVIOR RULES & DIRECTIVES:
                 start_time=arguments.get("start_time"),
                 end_time=arguments.get("end_time"),
                 kind="SLEEP",
+                clear_existing_envelope=True,
             )
 
         elif name == "decompose_task":
@@ -687,6 +717,30 @@ BEHAVIOR RULES & DIRECTIVES:
                     "name": fn_name,
                     "content": tool_output,
                 })
+
+        # Agentic ReAct loop: if inspect_blocks was executed, do a follow-up turn so model sees inspection results
+        if any(fn_name == "inspect_blocks" for fn_name, _ in executed_tools):
+            follow_up = self.inference_engine.chat(
+                messages=self.messages,
+                tools=PLANNING_TOOLS,
+            )
+            follow_up_content = follow_up.get("content", "")
+            follow_up_calls = follow_up.get("tool_calls", [])
+            self.messages.append(follow_up)
+            if follow_up_calls:
+                for call in follow_up_calls:
+                    fn_name = call.get("name")
+                    fn_args = call.get("arguments", {})
+                    tool_output = self.execute_tool(fn_name, fn_args)
+                    executed_tools.append((fn_name, tool_output))
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": call.get("id", "call"),
+                        "name": fn_name,
+                        "content": tool_output,
+                    })
+            if follow_up_content.strip():
+                reply_content = follow_up_content
 
         if not reply_content.strip():
             if executed_tools:
