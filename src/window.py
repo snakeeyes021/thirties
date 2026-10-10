@@ -37,8 +37,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.joplin_engine = JoplinEngine(self.config)
         self.current_date = self._get_active_diurnal_date()
 
-        # Ingest backlog tasks from Joplin
+        # Ingest backlog tasks & notes from Joplin
         self.backlog_tasks = self.joplin_engine.fetch_tasks()
+        self.active_notes = self.joplin_engine.fetch_active_notes()
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
 
         # Inference backend (Gemini via Antigravity, LiteRT, or Mock)
@@ -76,6 +77,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             scheduler=self.scheduler,
             joplin_engine=self.joplin_engine,
             inference_engine=self.inference_engine,
+            active_notes=self.active_notes,
         )
 
         self.chat_panel = ChatPanel(
@@ -121,6 +123,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             scheduler=self.scheduler,
             joplin_engine=self.joplin_engine,
             inference_engine=self.inference_engine,
+            active_notes=self.active_notes,
         )
         self.chat_panel.set_conversation_manager(
             self.conv_manager,

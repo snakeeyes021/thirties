@@ -154,6 +154,7 @@ class ConversationManager:
         scheduler: DeterministicScheduler,
         joplin_engine: Optional[JoplinEngine] = None,
         inference_engine: Optional[InferenceEngine] = None,
+        active_notes: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self.day_plan = day_plan
         self.tasks = tasks
@@ -161,6 +162,12 @@ class ConversationManager:
         self.scheduler = scheduler
         self.joplin_engine = joplin_engine
         self.inference_engine = inference_engine or MockInferenceEngine()
+        if active_notes is not None:
+            self.active_notes = active_notes
+        elif self.joplin_engine:
+            self.active_notes = self.joplin_engine.fetch_active_notes()
+        else:
+            self.active_notes = []
 
         self.messages: List[Dict[str, Any]] = []
         self._init_conversation()
@@ -391,48 +398,123 @@ BEHAVIOR RULES & DIRECTIVES:
    - YOU CANNOT CHANGE THE SCHEDULE THROUGH POLITE WORDS ALONE! If you claim in your response to have cleared, scheduled, or updated blocks, you MUST emit the corresponding directive (e.g. CLEAR_BLOCKS, MODIFY_BLOCKS). Never claim an action occurred without emitting the directive.
    - DO NOT automatically schedule backlog tasks across open blocks unless the user explicitly requests you to schedule tasks or asks you to fill open time. When the user asks to modify work or clear blocks, ONLY perform that specific action!
 
-9. JOPLIN BACKLOG PRIORITIZATION & TOUGH-LOVE GUIDANCE:
-   - When suggesting backlog tasks:
-     * Suggest Creative & Dev tasks during upcoming Daylight Thirties.
-     * Suggest Admin & Chore tasks during upcoming Dark Thirties or midday transition blocks.
-     * For Chronically Deferred tasks (3+ deferrals), offer honest tough love: encourage the user to schedule just one single block (30 minutes) to break the avoidance cycle, break the task into smaller sub-tasks, or explicitly drop it rather than carrying lingering guilt.
+9. JOPLIN BACKLOG PRIORITIZATION & TAXONOMIC AWARENESS:
+   - You have full, transparent visibility into the user's active Joplin notebooks, notes, and checklist items.
+   - DISTINGUISH CONCRETE ACTIONS FROM REFERENCE LISTS & PROJECT BUCKETS:
+     * Never suggest a reference wishlist (like 'Shopping List') as an errand to do today!
+     * Never suggest a generic note title (like 'Errands/Admin' or 'Wedding To-Do') as an action—always recommend the SPECIFIC concrete action inside the note (e.g. 'Costco customer service' or 'Print out recipes').
+     * Creative & Dev tasks (from '3. Creative', '2. Dev'): Map into upcoming Daylight Thirties.
+     * Admin & Chore tasks (from '1. Tasks', '4. Media', '5. Misc.'): Map into upcoming Dark Thirties.
+     * For Chronically Deferred items (3+ deferrals), offer honest tough love: advise tackling just 1 single block (30 minutes) to break avoidance, breaking it down, or deleting it.
 """
 
     def _build_backlog_summary(self) -> str:
-        if not self.tasks:
-            return "No active backlog tasks"
+        """Construct comprehensive Joplin backlog presentation for Gemini."""
+        if not self.tasks and not self.active_notes:
+            return "No active backlog tasks or notes found."
 
-        chronically_deferred = []
-        creative_dev = []
-        admin_chores = []
-
-        for t in self.tasks[:50]:
-            parent_ctx = f" (in note '{t.parent_note_title}')" if t.parent_note_title else ""
-            def_badge = f" [CHRONIC DEFERRAL: {t.deferred_count}x]" if t.deferred_count >= 3 else (f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else "")
-            line = f"- [ID: {t.id}] '{t.title}'{parent_ctx} [Notebook: {t.source_notebook}]{def_badge}"
-
-            if t.deferred_count >= 3:
-                chronically_deferred.append(line)
-            elif any(k in t.source_notebook.lower() for k in ("creative", "dev", "comp")):
-                creative_dev.append(line)
+        # Map tasks by parent_note_id
+        tasks_by_note: Dict[str, List[TaskItem]] = {}
+        standalone_tasks: List[TaskItem] = []
+        for t in self.tasks:
+            if t.parent_note_id:
+                tasks_by_note.setdefault(t.parent_note_id, []).append(t)
             else:
-                admin_chores.append(line)
+                standalone_tasks.append(t)
 
-        nl = chr(10)
+        # 1. Flag chronically deferred tasks first (tough love)
+        chronic_lines = []
+        for t in self.tasks:
+            if t.deferred_count >= 3:
+                parent_str = f" (in note '{t.parent_note_title}')" if t.parent_note_title else ""
+                chronic_lines.append(
+                    f"- [ID: {t.id}] '{t.title}'{parent_str} [Notebook: {t.source_notebook}] [CHRONIC DEFERRAL: {t.deferred_count}x]"
+                )
+
         sections = []
-        if chronically_deferred:
-            sections.append("🔥 CHRONICALLY DEFERRED TASKS (Needs Tough Love / Single 30-Min Chunk):" + nl + nl.join(chronically_deferred))
-        if creative_dev:
-            sections.append("🎨 CREATIVE & DEV TASKS (Best for Daylight Thirties):" + nl + nl.join(creative_dev))
-        if admin_chores:
-            sections.append("📋 ADMIN, CHORES & GENERAL (Best for Dark Thirties / Fillers):" + nl + nl.join(admin_chores))
-
-        if not sections:
-            return nl.join(
-                f"- [ID: {t.id}] '{t.title}' (Notebook: {t.source_notebook}, Deferrals: {t.deferred_count})"
-                for t in self.tasks[:20]
+        if chronic_lines:
+            sections.append(
+                "🔥 CHRONICALLY DEFERRED ITEMS (Urgent / Needs Tough Love or Single 30-Min Chunk):\n"
+                + "\n".join(chronic_lines)
             )
-        return (nl + nl).join(sections)
+
+        # 2. Present notes organized by notebook hierarchy
+        notes_by_notebook: Dict[str, List[Dict[str, Any]]] = {}
+        for note in self.active_notes:
+            notes_by_notebook.setdefault(note["source_notebook"], []).append(note)
+
+        # Include standalone tasks if any
+        for t in standalone_tasks:
+            if not any(n["id"] == t.id for n in self.active_notes):
+                notes_by_notebook.setdefault(t.source_notebook, []).append({
+                    "id": t.id,
+                    "source_notebook": t.source_notebook,
+                    "title": t.title,
+                    "body": t.description,
+                    "is_todo": True,
+                    "todo_completed": 0,
+                })
+
+        backlog_sections = []
+        for nb_path in sorted(notes_by_notebook.keys()):
+            nb_notes = notes_by_notebook[nb_path]
+            nb_block = [f"=== NOTEBOOK: {nb_path} ==="]
+
+            for note in nb_notes:
+                n_id = note["id"]
+                title = note["title"]
+                body = note.get("body", "")
+                is_todo = note.get("is_todo", False)
+                todo_comp = note.get("todo_completed", 0)
+
+                note_tasks = tasks_by_note.get(n_id, [])
+
+                # Classify note intent (Reference list vs Actionable note vs Routine)
+                lower_title = title.lower()
+                if "routine" in lower_title:
+                    note_type_badge = " [Daily Routine Checklist]"
+                elif "shopping" in lower_title or "wishlist" in lower_title or "purchas" in lower_title:
+                    note_type_badge = " [Reference / Purchasing Wishlist - NOT an immediate daily errand]"
+                elif "errand" in lower_title or "admin" in lower_title:
+                    note_type_badge = " [Active Admin & Logistics Bucket]"
+                elif is_todo:
+                    note_type_badge = " [To-Do Note]"
+                else:
+                    note_type_badge = " [Note]"
+
+                nb_block.append(f"### Note: \"{title}\"{note_type_badge}")
+
+                if note_tasks:
+                    nb_block.append("  Active Checklist Items:")
+                    for t in note_tasks:
+                        def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
+                        nb_block.append(f"  - [ID: {t.id}] '{t.title}'{def_str}")
+                elif is_todo and todo_comp == 0:
+                    nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
+                    if body.strip():
+                        excerpt = "\n    ".join(body.strip().splitlines()[:5])
+                        nb_block.append(f"    Details:\n    {excerpt}")
+                elif body.strip():
+                    clean_lines = [l for l in body.splitlines() if l.strip()]
+                    if clean_lines:
+                        excerpt = "\n    ".join(clean_lines[:8])
+                        nb_block.append(f"    Contents:\n    {excerpt}")
+
+                nb_block.append("")
+
+            backlog_sections.append("\n".join(nb_block))
+
+        if backlog_sections:
+            sections.append("ACTIVE JOPLIN NOTEBOOK HIERARCHY & TASK BACKLOG:\n" + "\n\n".join(backlog_sections))
+        elif self.tasks:
+            # Fallback if active_notes was empty
+            task_lines = [
+                f"- [ID: {t.id}] '{t.title}' [Notebook: {t.source_notebook}]"
+                for t in self.tasks[:50]
+            ]
+            sections.append("ACTIVE TASKS:\n" + "\n".join(task_lines))
+
+        return "\n\n".join(sections)
 
     def _init_conversation(self) -> None:
         sys_prompt = self._build_system_prompt()

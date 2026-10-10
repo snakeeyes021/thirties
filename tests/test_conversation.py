@@ -521,6 +521,7 @@ class TestConversation(unittest.TestCase):
                 source_notebook="3. Creative > Music > Dorico",
                 title="Compose String Quartet Mvt 2",
                 parent_note_title="Current Commissions",
+                parent_note_id="note_comm",
                 deferred_count=1,
             ),
             TaskItem(
@@ -530,17 +531,45 @@ class TestConversation(unittest.TestCase):
                 deferred_count=0,
             ),
         ]
+        active_notes = [
+            {
+                "id": "note_taxes",
+                "source_notebook": "1. Tasks > Taxes",
+                "title": "Taxes 2025",
+                "body": "Need receipts and W2",
+                "is_todo": True,
+                "todo_completed": 0,
+            },
+            {
+                "id": "note_comm",
+                "source_notebook": "3. Creative > Music > Dorico",
+                "title": "Current Commissions",
+                "body": "- [ ] Compose String Quartet Mvt 2",
+                "is_todo": False,
+                "todo_completed": 0,
+            },
+            {
+                "id": "note_shop",
+                "source_notebook": "1. Tasks",
+                "title": "Shopping List",
+                "body": "- [ ] Two suits\n- [ ] NAS upgrade",
+                "is_todo": True,
+                "todo_completed": 0,
+            },
+        ]
         self.manager.tasks = tasks
+        self.manager.active_notes = active_notes
         prompt = self.manager._build_system_prompt()
-        self.assertIn("CHRONICALLY DEFERRED TASKS", prompt)
+        self.assertIn("CHRONICALLY DEFERRED ITEMS", prompt)
         self.assertIn("File 2025 Tax Return", prompt)
         self.assertIn("[CHRONIC DEFERRAL: 4x]", prompt)
-        self.assertIn("CREATIVE & DEV TASKS", prompt)
+        self.assertIn("=== NOTEBOOK: 1. Tasks ===", prompt)
+        self.assertIn("=== NOTEBOOK: 3. Creative > Music > Dorico ===", prompt)
+        self.assertIn("Shopping List", prompt)
+        self.assertIn("Reference / Purchasing Wishlist", prompt)
+        self.assertIn("Current Commissions", prompt)
         self.assertIn("Compose String Quartet Mvt 2", prompt)
-        self.assertIn("in note 'Current Commissions'", prompt)
-        self.assertIn("ADMIN, CHORES & GENERAL", prompt)
-        self.assertIn("Download History Episode", prompt)
-        self.assertIn("TOUGH-LOVE GUIDANCE", prompt)
+        self.assertIn("TAXONOMIC AWARENESS", prompt)
 
 
 if __name__ == "__main__":

@@ -243,41 +243,88 @@ class JoplinEngine:
             if not (is_allowed_notebook or is_whitelisted_note):
                 continue
 
-            if is_todo:
-                if todo_completed != 0:
-                    continue  # already completed
+            # 1. Parse markdown lines for "- [ ]" checkboxes (across both todo and normal notes)
+            found_checkboxes = False
+            for line_idx, line in enumerate(body.splitlines(), start=1):
+                match = CHECKBOX_REGEX.match(line)
+                if match:
+                    found_checkboxes = True
+                    task_text = match.group(1).strip()
+                    synthetic_seed = f"{note_id}_{line_idx}_{task_text}".encode("utf-8")
+                    synthetic_id = hashlib.sha256(synthetic_seed).hexdigest()[:16]
+                    tasks.append(
+                        TaskItem(
+                            id=synthetic_id,
+                            source_notebook=full_path,
+                            title=task_text,
+                            description="",
+                            is_checkbox_item=True,
+                            parent_note_title=title,
+                            parent_note_id=note_id,
+                        )
+                    )
+
+            # 2. If it is an uncompleted todo note without internal checkboxes, treat the note itself as a task
+            if is_todo and not found_checkboxes and todo_completed == 0:
                 tasks.append(
                     TaskItem(
                         id=note_id,
                         source_notebook=full_path,
                         title=title,
-                        description="",
+                        description=body.strip(),
                         is_checkbox_item=False,
                         parent_note_title=None,
                         parent_note_id=None,
                     )
                 )
-            else:
-                # Parse markdown lines for "- [ ]" checkboxes
-                for line_idx, line in enumerate(body.splitlines(), start=1):
-                    match = CHECKBOX_REGEX.match(line)
-                    if match:
-                        task_text = match.group(1).strip()
-                        synthetic_seed = f"{note_id}_{line_idx}_{task_text}".encode("utf-8")
-                        synthetic_id = hashlib.sha256(synthetic_seed).hexdigest()[:16]
-                        tasks.append(
-                            TaskItem(
-                                id=synthetic_id,
-                                source_notebook=full_path,
-                                title=task_text,
-                                description="",
-                                is_checkbox_item=True,
-                                parent_note_title=title,
-                                parent_note_id=note_id,
-                            )
-                        )
 
         return tasks
+
+    def fetch_active_notes(self, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+        """Fetch all active non-archive notes with notebook path, title, body, and metadata."""
+        path = db_path or self.config.resolve_joplin_db_path()
+        if not path or not path.is_file():
+            return []
+
+        try:
+            with self._open_db(path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(JOPLIN_EXTRACTION_QUERY)
+                rows = cursor.fetchall()
+        except sqlite3.Error as e:
+            logger.error("Failed reading Joplin SQLite: %s", e)
+            return []
+
+        allowed_notebooks = self.joplin_cfg.allowed_notebooks
+        whitelist_notes = self.joplin_cfg.whitelist_notes
+        notes: List[Dict[str, Any]] = []
+
+        for row in rows:
+            full_path = row["full_path"]
+            title = row["title"]
+            body = row["body"] or ""
+            is_todo = bool(row["is_todo"])
+            todo_completed = row["todo_completed"]
+
+            is_allowed = any(
+                full_path == nb or full_path.startswith(f"{nb} >")
+                for nb in allowed_notebooks
+            )
+            is_whitelisted = title in whitelist_notes
+
+            if not (is_allowed or is_whitelisted):
+                continue
+
+            notes.append({
+                "id": row["id"],
+                "source_notebook": full_path,
+                "title": title,
+                "body": body,
+                "is_todo": is_todo,
+                "todo_completed": todo_completed,
+            })
+
+        return notes
 
     def complete_task(self, task: TaskItem) -> Tuple[bool, str]:
         """Mark a task complete in Joplin.

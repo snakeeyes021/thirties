@@ -56,6 +56,15 @@ def create_mock_joplin_db(db_path: Path) -> None:
     cur.execute("INSERT INTO folders VALUES ('f_unallowed', '', 'Random Vault', 0)")
 
     # Notes
+    # 9. Todo note with internal checkboxes in "1. Tasks"
+    cur.execute('''
+    INSERT INTO notes VALUES (
+        'note_9', 'f_tasks', 'Errands/Admin',
+        '## Active\n- [ ] Call Costco\n- [ ] Print recipes',
+        1, 0, 0, 0, 0, 0, 9000
+    )
+    ''')
+
     # 1. Active Markdown note with checkboxes in "1. Tasks"
     cur.execute("""
     INSERT INTO notes VALUES (
@@ -155,7 +164,7 @@ class TestJoplinEngine(unittest.TestCase):
         # 2. "Write Joplin integration" (checkbox in note_1)
         # 3. "Fix CI builds" (todo note_2)
         titles = [t.title for t in tasks]
-        self.assertEqual(len(tasks), 3)
+        self.assertEqual(len(tasks), 5)
         self.assertIn("Ship MVP models", titles)
         self.assertIn("Write Joplin integration", titles)
         self.assertIn("Fix CI builds", titles)
@@ -242,6 +251,16 @@ class TestJoplinEngine(unittest.TestCase):
             call_args = mock_update.call_args[0]
             self.assertEqual(call_args[0], "note_2")
             self.assertIn("todo_completed", call_args[1])
+
+
+    def test_fetch_active_notes(self) -> None:
+        notes = self.engine.fetch_active_notes(self.db_path)
+        titles = [n["title"] for n in notes]
+        self.assertIn("Weekly Sprint", titles)
+        self.assertIn("Fix CI builds", titles)
+        self.assertIn("Errands/Admin", titles)
+        self.assertNotIn("Archived Note", titles)
+        self.assertNotIn("Secret Note", titles)
 
 
 if __name__ == "__main__":
