@@ -18,6 +18,12 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.general.work_end_thirty, 31)
         self.assertIn("1. Tasks", cfg.joplin.allowed_notebooks)
         self.assertIn("Archive", cfg.joplin.excluded_notebooks)
+        self.assertEqual(cfg.inference.backend, "gemini")
+        self.assertEqual(cfg.inference.gemini_model, "gemini-3.8-flash-low")
+        self.assertTrue(cfg.sync.enabled)
+        self.assertEqual(cfg.sync.notebook_name, "Archive")
+        self.assertEqual(cfg.sync.sync_subfolder, "Thirties_System")
+        self.assertEqual(cfg.sync.sync_note_title, "Thirties_State_Sync")
 
     def test_load_custom_toml(self) -> None:
         toml_content = """
@@ -35,8 +41,16 @@ api_port = 41185
 allowed_notebooks = ["Work", "Personal"]
 
 [inference]
-backend = "litert"
+backend = "gemini"
+gemini_model = "gemini-3.8-flash-high"
+gemini_api_key = "AIzaSyTest"
 temperature = 0.5
+
+[sync]
+enabled = true
+notebook_name = "Archive"
+sync_subfolder = "My_Thirties"
+sync_note_title = "Sync_Note"
 """
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
             f.write(toml_content)
@@ -50,7 +64,13 @@ temperature = 0.5
             self.assertEqual(cfg.joplin.api_token, "secret123")
             self.assertEqual(cfg.joplin.api_port, 41185)
             self.assertEqual(cfg.joplin.allowed_notebooks, ["Work", "Personal"])
+            self.assertEqual(cfg.inference.backend, "gemini")
+            self.assertEqual(cfg.inference.gemini_model, "gemini-3.8-flash-high")
+            self.assertEqual(cfg.inference.gemini_api_key, "AIzaSyTest")
             self.assertEqual(cfg.inference.temperature, 0.5)
+            self.assertTrue(cfg.sync.enabled)
+            self.assertEqual(cfg.sync.sync_subfolder, "My_Thirties")
+            self.assertEqual(cfg.sync.sync_note_title, "Sync_Note")
         finally:
             temp_path.unlink()
 

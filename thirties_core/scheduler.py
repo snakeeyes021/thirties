@@ -79,6 +79,12 @@ class StateDatabase:
                 is_finalized INTEGER DEFAULT 0
             );
             """)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS sync_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """)
             conn.commit()
 
     def get_task_history(self, task_id: str) -> Optional[TaskHistoryRecord]:
@@ -165,6 +171,82 @@ class StateDatabase:
                 return None
             data = json.loads(row["plan_json"])
             return DayPlan.from_dict(data)
+
+    def get_all_task_histories(self) -> List[TaskHistoryRecord]:
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM task_history")
+            return [
+                TaskHistoryRecord(
+                    task_id=row["task_id"],
+                    first_scheduled_date=row["first_scheduled_date"],
+                    last_scheduled_date=row["last_scheduled_date"],
+                    deferred_count=row["deferred_count"],
+                    completed_date=row["completed_date"],
+                    allocated_thirties=row["allocated_thirties"],
+                )
+                for row in cur.fetchall()
+            ]
+
+    def upsert_task_history(self, rec: TaskHistoryRecord) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO task_history (
+                task_id, first_scheduled_date, last_scheduled_date,
+                deferred_count, completed_date, allocated_thirties
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+                first_scheduled_date = excluded.first_scheduled_date,
+                last_scheduled_date = excluded.last_scheduled_date,
+                deferred_count = excluded.deferred_count,
+                completed_date = excluded.completed_date,
+                allocated_thirties = excluded.allocated_thirties
+            """, (
+                rec.task_id,
+                rec.first_scheduled_date,
+                rec.last_scheduled_date,
+                rec.deferred_count,
+                rec.completed_date,
+                rec.allocated_thirties,
+            ))
+            conn.commit()
+
+    def get_all_day_snapshots(self, limit: int = 30) -> List[Tuple[str, str, int]]:
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT plan_date, plan_json, is_finalized FROM day_snapshots ORDER BY plan_date DESC LIMIT ?",
+                (limit,),
+            )
+            return [(row["plan_date"], row["plan_json"], row["is_finalized"]) for row in cur.fetchall()]
+
+    def save_raw_day_snapshot(self, plan_date_str: str, plan_json: str, is_finalized: int = 0) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO day_snapshots (plan_date, plan_json, is_finalized)
+            VALUES (?, ?, ?)
+            ON CONFLICT(plan_date) DO UPDATE SET
+                plan_json = excluded.plan_json,
+                is_finalized = excluded.is_finalized
+            """, (plan_date_str, plan_json, is_finalized))
+            conn.commit()
+
+    def get_sync_meta(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM sync_meta WHERE key = ?", (key,))
+            row = cur.fetchone()
+            return row["value"] if row else None
+
+    def set_sync_meta(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO sync_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (key, value))
+            conn.commit()
 
 
 class DeterministicScheduler:

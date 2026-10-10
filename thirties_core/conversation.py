@@ -225,10 +225,7 @@ class ConversationManager:
             for e in self.ambiguous_events
         ) or "None"
 
-        tasks_summary = "\n".join(
-            f"- [ID: {t.id}] '{t.title}' (Notebook: {t.source_notebook}, Deferrals: {t.deferred_count})"
-            for t in self.tasks[:10]
-        ) or "No active backlog tasks"
+        tasks_summary = self._build_backlog_summary()
 
         sunrise_start_str = self.day_plan.get_block(sunrise_idx).start_dt.strftime("%I:%M %p")
 
@@ -393,7 +390,49 @@ BEHAVIOR RULES & DIRECTIVES:
 8. CONTRACT MUTATION INTEGRITY & BOUNDARIES:
    - YOU CANNOT CHANGE THE SCHEDULE THROUGH POLITE WORDS ALONE! If you claim in your response to have cleared, scheduled, or updated blocks, you MUST emit the corresponding directive (e.g. CLEAR_BLOCKS, MODIFY_BLOCKS). Never claim an action occurred without emitting the directive.
    - DO NOT automatically schedule backlog tasks across open blocks unless the user explicitly requests you to schedule tasks or asks you to fill open time. When the user asks to modify work or clear blocks, ONLY perform that specific action!
+
+9. JOPLIN BACKLOG PRIORITIZATION & TOUGH-LOVE GUIDANCE:
+   - When suggesting backlog tasks:
+     * Suggest Creative & Dev tasks during upcoming Daylight Thirties.
+     * Suggest Admin & Chore tasks during upcoming Dark Thirties or midday transition blocks.
+     * For Chronically Deferred tasks (3+ deferrals), offer honest tough love: encourage the user to schedule just one single block (30 minutes) to break the avoidance cycle, break the task into smaller sub-tasks, or explicitly drop it rather than carrying lingering guilt.
 """
+
+    def _build_backlog_summary(self) -> str:
+        if not self.tasks:
+            return "No active backlog tasks"
+
+        chronically_deferred = []
+        creative_dev = []
+        admin_chores = []
+
+        for t in self.tasks[:50]:
+            parent_ctx = f" (in note '{t.parent_note_title}')" if t.parent_note_title else ""
+            def_badge = f" [CHRONIC DEFERRAL: {t.deferred_count}x]" if t.deferred_count >= 3 else (f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else "")
+            line = f"- [ID: {t.id}] '{t.title}'{parent_ctx} [Notebook: {t.source_notebook}]{def_badge}"
+
+            if t.deferred_count >= 3:
+                chronically_deferred.append(line)
+            elif any(k in t.source_notebook.lower() for k in ("creative", "dev", "comp")):
+                creative_dev.append(line)
+            else:
+                admin_chores.append(line)
+
+        nl = chr(10)
+        sections = []
+        if chronically_deferred:
+            sections.append("🔥 CHRONICALLY DEFERRED TASKS (Needs Tough Love / Single 30-Min Chunk):" + nl + nl.join(chronically_deferred))
+        if creative_dev:
+            sections.append("🎨 CREATIVE & DEV TASKS (Best for Daylight Thirties):" + nl + nl.join(creative_dev))
+        if admin_chores:
+            sections.append("📋 ADMIN, CHORES & GENERAL (Best for Dark Thirties / Fillers):" + nl + nl.join(admin_chores))
+
+        if not sections:
+            return nl.join(
+                f"- [ID: {t.id}] '{t.title}' (Notebook: {t.source_notebook}, Deferrals: {t.deferred_count})"
+                for t in self.tasks[:20]
+            )
+        return (nl + nl).join(sections)
 
     def _init_conversation(self) -> None:
         sys_prompt = self._build_system_prompt()

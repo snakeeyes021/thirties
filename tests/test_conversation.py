@@ -507,6 +507,41 @@ class TestConversation(unittest.TestCase):
         finally:
             set_debug_time(None)
 
+    def test_enriched_joplin_backlog_prompt_ingestion(self) -> None:
+        from thirties_core.models import TaskItem
+        tasks = [
+            TaskItem(
+                id="t_def",
+                source_notebook="1. Tasks > Taxes",
+                title="File 2025 Tax Return",
+                deferred_count=4,
+            ),
+            TaskItem(
+                id="t_creat",
+                source_notebook="3. Creative > Music > Dorico",
+                title="Compose String Quartet Mvt 2",
+                parent_note_title="Current Commissions",
+                deferred_count=1,
+            ),
+            TaskItem(
+                id="t_chore",
+                source_notebook="4. Media > Podcasts",
+                title="Download History Episode",
+                deferred_count=0,
+            ),
+        ]
+        self.manager.tasks = tasks
+        prompt = self.manager._build_system_prompt()
+        self.assertIn("CHRONICALLY DEFERRED TASKS", prompt)
+        self.assertIn("File 2025 Tax Return", prompt)
+        self.assertIn("[CHRONIC DEFERRAL: 4x]", prompt)
+        self.assertIn("CREATIVE & DEV TASKS", prompt)
+        self.assertIn("Compose String Quartet Mvt 2", prompt)
+        self.assertIn("in note 'Current Commissions'", prompt)
+        self.assertIn("ADMIN, CHORES & GENERAL", prompt)
+        self.assertIn("Download History Episode", prompt)
+        self.assertIn("TOUGH-LOVE GUIDANCE", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

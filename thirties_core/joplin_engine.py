@@ -118,6 +118,73 @@ class JoplinAPIClient:
             logger.error("Failed to update Joplin note %s: %s", note_id, e)
             return False
 
+    def get_folders(self) -> List[Dict[str, Any]]:
+        """List folders from Joplin Local API."""
+        url = self._build_url("/folders", {"fields": "id,title,parent_id"})
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Thirties/0.1"})
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data.get("items", data) if isinstance(data, dict) else data
+        except Exception as e:
+            logger.warning("Failed to fetch Joplin folders: %s", e)
+        return []
+
+    def create_folder(self, title: str, parent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a folder via POST /folders."""
+        url = self._build_url("/folders")
+        payload = {"title": title}
+        if parent_id:
+            payload["parent_id"] = parent_id
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "Thirties/0.1"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status in (200, 201):
+                    return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.error("Failed to create Joplin folder '%s': %s", title, e)
+        return None
+
+    def search_notes(self, query: str, fields: str = "id,title,parent_id,updated_time") -> List[Dict[str, Any]]:
+        """Search notes via GET /search."""
+        url = self._build_url("/search", {"query": query, "type": "note", "fields": fields})
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Thirties/0.1"})
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data.get("items", data) if isinstance(data, dict) else data
+        except Exception as e:
+            logger.warning("Failed to search Joplin notes for '%s': %s", query, e)
+        return []
+
+    def create_note(self, title: str, body: str, parent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a note via POST /notes."""
+        url = self._build_url("/notes")
+        payload: Dict[str, Any] = {"title": title, "body": body}
+        if parent_id:
+            payload["parent_id"] = parent_id
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "Thirties/0.1"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status in (200, 201):
+                    return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.error("Failed to create Joplin note '%s': %s", title, e)
+        return None
+
+
 
 class JoplinEngine:
     """Orchestrates read-only SQLite extraction and write-back mutations."""
@@ -263,3 +330,91 @@ class JoplinEngine:
             if success:
                 return True, f"Todo note '{task.title}' marked complete"
             return False, "Failed to complete todo note via Joplin Local API"
+
+    def get_sync_note_body(self, notebook_name: str, subfolder_name: str, note_title: str) -> Optional[Dict[str, Any]]:
+        """Fetch sync note body from Joplin, checking API first, then local SQLite DB fallback."""
+        # 1. API search
+        if self.joplin_cfg.api_token:
+            results = self.api_client.search_notes(note_title)
+            for item in results:
+                if item.get("title") == note_title:
+                    note = self.api_client.get_note(item["id"])
+                    if note:
+                        return note
+
+        # 2. Local SQLite DB fallback (mode=ro)
+        path = self.config.resolve_joplin_db_path()
+        if path and path.is_file():
+            try:
+                with self._open_db(path) as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        SELECT n.id, n.title, n.body, n.updated_time, f.title as folder_title
+                        FROM notes n
+                        JOIN folders f ON n.parent_id = f.id
+                        WHERE n.title = ? AND n.deleted_time = 0
+                        LIMIT 1
+                    """, (note_title,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            "id": row["id"],
+                            "title": row["title"],
+                            "body": row["body"] or "",
+                            "updated_time": row["updated_time"],
+                        }
+            except sqlite3.Error as e:
+                logger.warning("Failed reading sync note from local SQLite: %s", e)
+
+        return None
+
+    def upsert_sync_note(
+        self,
+        notebook_name: str,
+        subfolder_name: str,
+        note_title: str,
+        note_body: str,
+    ) -> Tuple[bool, str]:
+        """Create or update the sync note via Joplin Local API."""
+        if not self.joplin_cfg.api_token:
+            return False, "Joplin API token is not configured in config.toml"
+
+        if not self.api_client.ping():
+            return False, "Joplin Local API is not reachable (is Joplin desktop running?)"
+
+        # 1. Look up folders
+        folders = self.api_client.get_folders()
+        archive_folder = next((f for f in folders if f.get("title") == notebook_name), None)
+        archive_id = archive_folder["id"] if archive_folder else None
+
+        subfolder = next(
+            (f for f in folders if f.get("title") == subfolder_name and (archive_id is None or f.get("parent_id") == archive_id)),
+            None
+        )
+        if not subfolder:
+            created_sub = self.api_client.create_folder(title=subfolder_name, parent_id=archive_id)
+            if not created_sub or "id" not in created_sub:
+                return False, f"Failed to create subfolder '{subfolder_name}' via Joplin API"
+            subfolder_id = created_sub["id"]
+        else:
+            subfolder_id = subfolder["id"]
+
+        # 2. Check if note already exists
+        existing_notes = self.api_client.search_notes(note_title)
+        matching_note = next(
+            (n for n in existing_notes if n.get("title") == note_title and (n.get("parent_id") == subfolder_id or not n.get("parent_id"))),
+            None
+        )
+
+        if matching_note:
+            note_id = matching_note["id"]
+            ok = self.api_client.update_note(note_id, {"body": note_body})
+            if ok:
+                return True, f"Updated sync note '{note_title}' (id: {note_id})"
+            return False, f"Failed updating sync note '{note_title}'"
+        else:
+            created_note = self.api_client.create_note(title=note_title, body=note_body, parent_id=subfolder_id)
+            if created_note and "id" in created_note:
+                return True, f"Created sync note '{note_title}' (id: {created_note['id']})"
+            return False, f"Failed creating sync note '{note_title}'"
+
