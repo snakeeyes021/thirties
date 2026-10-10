@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -590,19 +589,15 @@ BEHAVIOR RULES & DIRECTIVES:
         return "\n".join(lines) if lines else "No blocks found in range."
 
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Dispatch model tool call and mutate local DayPlan / Joplin state."""
+        """Dispatch model tool call and mutate local DayPlan state."""
         if name == "modify_blocks":
             return self.modify_blocks(**arguments)
-
-        elif name in ("clear_blocks", "deallocate_blocks"):
+        elif name == "clear_blocks":
             return self.clear_blocks(**arguments)
-
-        elif name in ("resolve_event", "resolve_calendar_event"):
+        elif name == "resolve_event":
             return self.resolve_event(**arguments)
-
         elif name == "inspect_blocks":
             return self.inspect_blocks(**arguments)
-
         elif name == "finalize_day_plan":
             self.day_plan.is_finalized = True
             notes = arguments.get("notes", "")
@@ -611,43 +606,6 @@ BEHAVIOR RULES & DIRECTIVES:
             if self.scheduler and self.scheduler.state_db:
                 self.scheduler.state_db.save_day_snapshot(self.day_plan)
             return "Day plan finalized and locked in."
-
-        # Backward compatibility aliases for existing tests
-        elif name in ("allocate_thirty_block", "allocate_thirty_blocks"):
-            start_idx = arguments.get("start_block", arguments.get("block_index"))
-            end_idx = arguments.get("end_block", start_idx)
-            task_id = arguments.get("task_id")
-            label = arguments.get("custom_label") or arguments.get("label", "")
-            return self.modify_blocks(start_block=start_idx, end_block=end_idx, label=label, task_id=task_id)
-
-        elif name in ("reinstate_work_blocks", "restore_work_blocks", "set_work_blocks"):
-            return self.modify_blocks(
-                start_block=arguments.get("start_block"),
-                end_block=arguments.get("end_block"),
-                start_time=arguments.get("start_time"),
-                end_time=arguments.get("end_time"),
-                kind="WORK",
-                clear_existing_envelope=True,
-            )
-
-        elif name in ("set_sleep_blocks", "adjust_sleep_window", "set_bedtime"):
-            return self.modify_blocks(
-                start_block=arguments.get("start_block"),
-                end_block=arguments.get("end_block"),
-                start_time=arguments.get("start_time"),
-                end_time=arguments.get("end_time"),
-                kind="SLEEP",
-                clear_existing_envelope=True,
-            )
-
-        elif name == "decompose_task":
-            parent_id = arguments["parent_task_id"]
-            subtasks = arguments.get("subtasks", [])
-            return f"Task {parent_id} decomposed into {len(subtasks)} subtasks."
-
-        elif name == "create_calendar_entry":
-            return f"Calendar entry created: {arguments.get('summary')}."
-
         return f"Unknown tool: {name}"
 
     def send_user_message(self, user_text: str) -> str:

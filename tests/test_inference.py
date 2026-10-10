@@ -14,7 +14,8 @@ class TestInference(unittest.TestCase):
         resp = engine.chat([{'role': 'user', 'content': 'allocate block 32 to Dorico'}])
         self.assertIn('Dorico', resp['content'])
         self.assertEqual(len(resp['tool_calls']), 1)
-        self.assertEqual(resp['tool_calls'][0]['arguments']['block_index'], 32)
+        self.assertEqual(resp['tool_calls'][0]['name'], 'modify_blocks')
+        self.assertEqual(resp['tool_calls'][0]['arguments']['start_block'], 32)
 
     def test_litert_availability_detection(self) -> None:
         engine = LiteRTInferenceEngine()

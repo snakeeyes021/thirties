@@ -1,4 +1,4 @@
-"""Unit tests for thirties_core.conversation."""
+"""Unit tests for thirties_core.conversation planning state machine and orthogonal primitives."""
 
 import tempfile
 import unittest
@@ -6,6 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from thirties_core.astronomy import get_current_time
 from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
 from thirties_core.conversation import ConversationManager
@@ -48,21 +49,19 @@ class TestConversation(unittest.TestCase):
             start_dt=datetime(2026, 10, 8, 16, 0, tzinfo=self.tz),
             end_dt=datetime(2026, 10, 8, 16, 30, tzinfo=self.tz),
             is_ambiguous=True,
-            response_status="needsAction",
         )
 
-        # Mark block 32 with the ambiguous event for testing
+        # Mark block 19 with the ambiguous event for testing
         b19 = self.plan.get_logical_block(19)
         b19.kind = BlockKind.AMBIGUOUS_CALENDAR
         b19.source_event_id = "e_doc"
         b19.label = "Doctor Appointment"
-        self.ambiguous = [self.ambiguous_event]
 
         self.mock_inf = MockInferenceEngine()
         self.manager = ConversationManager(
             day_plan=self.plan,
             tasks=[self.task1],
-            ambiguous_events=self.ambiguous,
+            ambiguous_events=[self.ambiguous_event],
             scheduler=self.scheduler,
             inference_engine=self.mock_inf,
         )
@@ -72,16 +71,16 @@ class TestConversation(unittest.TestCase):
 
     def test_system_prompt_contains_context(self) -> None:
         sys_msg = self.manager.messages[0]["content"]
-        self.assertIn("CURRENT ASTRONOMICAL CONTEXT:", sys_msg)
+        self.assertIn("Thursday, October 08, 2026", sys_msg)
         self.assertIn("Available Daylight Thirties:", sys_msg)
         self.assertIn("Available Dark Thirties:", sys_msg)
         self.assertIn("Compose bridge in Dorico", sys_msg)
         self.assertIn("Doctor Appointment", sys_msg)
 
-    def test_allocate_thirty_block_tool(self) -> None:
+    def test_modify_blocks_single_block(self) -> None:
         out = self.manager.execute_tool(
-            "allocate_thirty_block",
-            {"block_index": 33, "task_id": "t1", "custom_label": "Dorico Compose"},
+            "modify_blocks",
+            {"start_block": 33, "task_id": "t1", "label": "Dorico Compose"},
         )
         self.assertIn("Allocated block 33", out)
 
@@ -90,10 +89,127 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(b33.assigned_task_id, "t1")
         self.assertEqual(b33.label, "Dorico Compose")
 
-    def test_resolve_calendar_event_declined(self) -> None:
+    def test_modify_blocks_multiple_blocks(self) -> None:
         out = self.manager.execute_tool(
-            "resolve_calendar_event",
-            {"event_id": "e_doc", "attending": False},
+            "modify_blocks",
+            {"start_block": 28, "end_block": 31, "label": "Composing in Dorico"},
+        )
+        self.assertIn("Allocated blocks 28 through 31", out)
+        for idx in range(28, 32):
+            b = self.plan.get_logical_block(idx)
+            self.assertTrue(b.is_assigned)
+            self.assertEqual(b.label, "Composing in Dorico")
+
+    def test_modify_blocks_work_envelope(self) -> None:
+        # First clear all work blocks
+        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
+        self.assertEqual(len([b for b in self.plan.blocks if b.kind == BlockKind.WORK]), 0)
+
+        # Assign work blocks
+        out = self.manager.execute_tool(
+            "modify_blocks",
+            {"start_block": 4, "end_block": 18, "kind": "WORK", "is_locked": True},
+        )
+        self.assertIn("Work is now scheduled", out)
+        work_restored = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
+        self.assertEqual(len(work_restored), 15)
+        self.assertEqual(work_restored[0].label, "Work")
+        self.assertTrue(work_restored[0].is_locked)
+
+    def test_modify_blocks_preserves_assigned_tasks(self) -> None:
+        # Clear all work blocks
+        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
+        # Schedule an appointment in Block 17
+        self.manager.execute_tool("modify_blocks", {"start_block": 17, "end_block": 17, "label": "Doctor Appointment"})
+        self.assertTrue(self.plan.get_logical_block(17).is_assigned)
+
+        # Set work blocks
+        out = self.manager.execute_tool("modify_blocks", {"start_block": 4, "end_block": 18, "kind": "WORK"})
+        self.assertIn("keeping your existing Block 17 ('Doctor Appointment') intact", out)
+
+        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
+        self.assertEqual(self.plan.get_logical_block(17).label, "Doctor Appointment")
+        self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
+
+    def test_modify_blocks_custom_time_range(self) -> None:
+        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
+        out = self.manager.execute_tool("modify_blocks", {"start_time": "7am", "end_time": "3pm", "kind": "WORK"})
+        self.assertIn("Blocks 1–16", out)
+        for idx in range(1, 17):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.kind, BlockKind.WORK)
+
+    def test_work_window_moves_clearing_old_work_blocks(self) -> None:
+        # Initial work blocks 4-18 are set
+        # Schedule composing in Block 3
+        self.manager.execute_tool("modify_blocks", {"start_block": 3, "end_block": 3, "label": "Composing"})
+        # Move work window to 7am to 3pm (Blocks 1-16) with explicit clear_existing_envelope=True
+        out = self.manager.execute_tool(
+            "modify_blocks",
+            {"start_time": "7am", "end_time": "3pm", "kind": "WORK", "clear_existing_envelope": True},
+        )
+        self.assertIn("Blocks 1–16", out)
+        self.assertIn("Composing", out)
+
+        for idx in range(1, 17):
+            b = self.plan.get_logical_block(idx)
+            self.assertEqual(b.kind, BlockKind.WORK, f"Block {idx} should be WORK")
+
+        self.assertEqual(self.plan.get_logical_block(3).label, "Composing")
+        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
+        self.assertNotEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
+        self.assertTrue(self.plan.get_logical_block(17).is_discretionary)
+        self.assertTrue(self.plan.get_logical_block(18).is_discretionary)
+
+    def test_calendar_lock_protection_in_modify_and_clear(self) -> None:
+        b12 = self.plan.get_logical_block(12)
+        b12.kind = BlockKind.BUSY_CALENDAR
+        b12.is_locked = True
+        b12.label = "Dentist Appointment"
+
+        # Attempt to modify block 12 without force_calendar
+        out = self.manager.modify_blocks(start_block=12, end_block=12, label="Gaming")
+        self.assertIn("Cannot modify block(s) [12]: locked by calendar event", out)
+        self.assertEqual(b12.label, "Dentist Appointment")
+        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
+
+        # Attempt to clear block 12 without force_calendar
+        out_clear = self.manager.clear_blocks(start_block=12, end_block=12)
+        self.assertIn("0 blocks", out_clear)
+        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
+
+    def test_clear_work_blocks_tool(self) -> None:
+        initial_daylight = self.plan.daylight_available_count
+        out = self.manager.execute_tool(
+            "clear_blocks",
+            {"clear_kind": "WORK"},
+        )
+        self.assertIn("Cleared and opened", out)
+        work_remaining = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
+        self.assertEqual(len(work_remaining), 0)
+        self.assertGreater(self.plan.daylight_available_count, initial_daylight)
+
+    def test_clear_specific_blocks_tool(self) -> None:
+        self.manager.execute_tool(
+            "modify_blocks",
+            {"start_block": 28, "end_block": 30, "label": "Composing"},
+        )
+        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
+
+        out = self.manager.execute_tool(
+            "clear_blocks",
+            {"start_block": 28, "end_block": 30},
+        )
+        self.assertIn("Cleared and opened 3 blocks", out)
+        for idx in range(28, 31):
+            b = self.plan.get_logical_block(idx)
+            self.assertIn(b.kind, (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY))
+            self.assertEqual(b.label, "")
+
+    def test_resolve_event_declined(self) -> None:
+        out = self.manager.execute_tool(
+            "resolve_event",
+            {"event_id": "e_doc", "action": "decline"},
         )
         self.assertTrue("opened as discretionary" in out)
 
@@ -102,10 +218,10 @@ class TestConversation(unittest.TestCase):
         self.assertFalse(b19.is_locked)
         self.assertEqual(len(self.manager.ambiguous_events), 0)
 
-    def test_resolve_calendar_event_accepted(self) -> None:
+    def test_resolve_event_accepted(self) -> None:
         out = self.manager.execute_tool(
-            "resolve_calendar_event",
-            {"event_id": "e_doc", "attending": True},
+            "resolve_event",
+            {"event_id": "e_doc", "action": "attend"},
         )
         self.assertIn("locked as busy calendar block", out)
 
@@ -113,6 +229,31 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(b19.kind, BlockKind.BUSY_CALENDAR)
         self.assertTrue(b19.is_locked)
         self.assertEqual(len(self.manager.ambiguous_events), 0)
+
+    def test_resolve_event_preserves_other_ambiguous_events(self) -> None:
+        e2 = CalendarEvent(
+            id="e_dentist",
+            summary="Dentist",
+            start_dt=datetime(2026, 10, 8, 17, 0, tzinfo=self.tz),
+            end_dt=datetime(2026, 10, 8, 17, 30, tzinfo=self.tz),
+            is_ambiguous=True,
+        )
+        self.manager.ambiguous_events.append(e2)
+        self.assertEqual(len(self.manager.ambiguous_events), 2)
+
+        out = self.manager.resolve_event(event_id="e_doc", action="attend")
+        self.assertIn("Event e_doc resolved: locked as busy calendar block", out)
+        self.assertEqual(len(self.manager.ambiguous_events), 1)
+        self.assertEqual(self.manager.ambiguous_events[0].id, "e_dentist")
+
+    def test_inspect_blocks_tool(self) -> None:
+        out = self.manager.execute_tool(
+            "inspect_blocks",
+            {"start_block": 1, "end_block": 3},
+        )
+        self.assertIn("Block 1", out)
+        self.assertIn("Block 2", out)
+        self.assertIn("Block 3", out)
 
     def test_finalize_day_plan_tool(self) -> None:
         out = self.manager.execute_tool(
@@ -132,92 +273,13 @@ class TestConversation(unittest.TestCase):
         reply = self.manager.send_user_message("Let's allocate 19 to Dorico")
         self.assertIn("block 19", reply.lower())
 
-        # Block 32 must now be ASSIGNED
         b19 = self.plan.get_logical_block(19)
         self.assertTrue(b19.is_assigned)
         self.assertEqual(b19.label, "Dorico Compose")
 
-
-    def test_allocate_multiple_thirty_blocks_tool(self) -> None:
-        out = self.manager.execute_tool(
-            "allocate_thirty_block",
-            {"start_block": 28, "end_block": 31, "custom_label": "Composing in Dorico"},
-        )
-        self.assertIn("Allocated blocks 28 through 31", out)
-        for idx in range(28, 32):
-            b = self.plan.get_logical_block(idx)
-            self.assertTrue(b.is_assigned)
-            self.assertEqual(b.label, "Composing in Dorico")
-
-    def test_clear_work_blocks_tool(self) -> None:
-        initial_daylight = self.plan.daylight_available_count
-        # Clear all work blocks
-        out = self.manager.execute_tool(
-            "clear_blocks",
-            {"clear_all_work": True},
-        )
-        self.assertIn("Cleared and opened", out)
-        # Verify no WORK blocks remain
-        work_remaining = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
-        self.assertEqual(len(work_remaining), 0)
-        # Daylight available count should have increased significantly
-        self.assertGreater(self.plan.daylight_available_count, initial_daylight)
-
-    def test_clear_specific_blocks_tool(self) -> None:
-        # First assign blocks 28-30
-        self.manager.execute_tool(
-            "allocate_thirty_block",
-            {"start_block": 28, "end_block": 30, "custom_label": "Composing"},
-        )
-        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
-
-        # Now clear blocks 28-30
-        out = self.manager.execute_tool(
-            "clear_blocks",
-            {"start_block": 28, "end_block": 30},
-        )
-        self.assertIn("Cleared and opened 3 blocks", out)
-        for idx in range(28, 31):
-            b = self.plan.get_logical_block(idx)
-            self.assertIn(b.kind, (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY))
-            self.assertEqual(b.label, "")
-
-
-    def test_reinstate_work_blocks_tool(self) -> None:
-        # First clear all work blocks
-        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
-        self.assertEqual(len([b for b in self.plan.blocks if b.kind == BlockKind.WORK]), 0)
-
-        # Now reinstate work blocks
-        out = self.manager.execute_tool("reinstate_work_blocks", {})
-        self.assertIn("Work is now scheduled", out)
-        work_restored = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
-        self.assertGreater(len(work_restored), 0)
-        self.assertEqual(work_restored[0].label, "Work")
-        self.assertTrue(work_restored[0].is_locked)
-
-
-    def test_reinstate_work_blocks_preserves_assigned_tasks(self) -> None:
-        # Clear all work blocks
-        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
-        # Schedule an appointment in Block 17 (e.g. 3:00 PM)
-        self.manager.execute_tool("allocate_thirty_block", {"block_index": 17, "custom_label": "Doctor Appointment"})
-        self.assertTrue(self.plan.get_logical_block(17).is_assigned)
-
-        # Reinstate work blocks
-        out = self.manager.execute_tool("reinstate_work_blocks", {})
-        self.assertIn("keeping your existing Block 17 ('Doctor Appointment') intact", out)
-
-        # Block 17 remains ASSIGNED, other blocks restored to WORK
-        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(17).label, "Doctor Appointment")
-        self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
-
-
     def test_system_prompt_contains_scheduled_commitments(self) -> None:
-        # Schedule Game Night in 24-27 and Composing in 28
-        self.manager.execute_tool("allocate_thirty_block", {"start_block": 24, "end_block": 27, "custom_label": "Game Night"})
-        self.manager.execute_tool("allocate_thirty_block", {"block_index": 28, "custom_label": "Composing"})
+        self.manager.execute_tool("modify_blocks", {"start_block": 24, "end_block": 27, "label": "Game Night"})
+        self.manager.execute_tool("modify_blocks", {"start_block": 28, "end_block": 28, "label": "Composing"})
 
         prompt = self.manager._build_system_prompt()
         self.assertIn("CURRENTLY SCHEDULED TASKS & COMMITMENTS:", prompt)
@@ -226,18 +288,7 @@ class TestConversation(unittest.TestCase):
         self.assertIn("Blocks 24 through 27", prompt)
         self.assertIn("Block 28", prompt)
 
-    def test_reinstate_work_blocks_custom_time_range(self) -> None:
-        # Clear all blocks first
-        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
-        # Set custom work hours from 7am to 3pm
-        out = self.manager.execute_tool("reinstate_work_blocks", {"start_time": "7am", "end_time": "3pm"})
-        self.assertIn("Blocks 1–16", out)
-        for idx in range(1, 17):
-            b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.kind, BlockKind.WORK)
-
     def test_slash_command_night_and_reset(self) -> None:
-        from thirties_core.astronomy import get_current_time
         reply_night = self.manager.send_user_message("/night")
         self.assertIn("Simulated time set to 10:30 PM", reply_night)
         sim_now = get_current_time(self.tz)
@@ -247,9 +298,8 @@ class TestConversation(unittest.TestCase):
         reply_reset = self.manager.send_user_message("/reset")
         self.assertIn("Simulated time cleared", reply_reset)
 
-
     def test_user_message_sets_custom_work_hours(self) -> None:
-        self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
+        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
         reply = self.manager.send_user_message("Oh shoot, turns out work today is from 7am to 3pm.")
         self.assertIn("Blocks 1–16", reply)
         self.assertIn("7:00 AM", reply)
@@ -258,76 +308,10 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
 
     def test_discretionary_totals(self) -> None:
-        # Check discretionary totals
         self.assertGreater(self.plan.daylight_discretionary_total, 0)
         self.assertGreater(self.plan.dark_discretionary_total, 0)
 
-    def test_work_window_moves_clearing_old_work_blocks(self) -> None:
-        # Initial work blocks 4-18 are set
-        # Schedule composing in Block 3
-        self.manager.execute_tool("allocate_thirty_block", {"block_index": 3, "custom_label": "Composing"})
-        # Move work window to 7am to 3pm (Blocks 1-16)
-        out = self.manager.execute_tool("reinstate_work_blocks", {"start_time": "7am", "end_time": "3pm"})
-        self.assertIn("Blocks 1–16", out)
-        self.assertIn("Composing", out)
-
-        # Blocks 1-16 must all be WORK
-        for idx in range(1, 17):
-            b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.kind, BlockKind.WORK, f"Block {idx} should be WORK")
-
-        # Block 3 should retain label Composing
-        self.assertEqual(self.plan.get_logical_block(3).label, "Composing")
-
-        # Blocks 17 and 18 (old 3:00-4:00 PM work) must be cleared back to discretionary!
-        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
-        self.assertNotEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
-        self.assertTrue(self.plan.get_logical_block(17).is_discretionary)
-        self.assertTrue(self.plan.get_logical_block(18).is_discretionary)
-
-    def test_modify_blocks_primitive_direct(self) -> None:
-        out = self.manager.modify_blocks(start_block=20, end_block=22, label="Deep Focus", is_locked=True)
-        self.assertIn("Allocated blocks 20 through 22", out)
-        for idx in range(20, 23):
-            b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.label, "Deep Focus")
-            self.assertTrue(b.is_locked)
-
-    def test_calendar_lock_protection_in_modify_and_clear(self) -> None:
-        b12 = self.plan.get_logical_block(12)
-        b12.kind = BlockKind.BUSY_CALENDAR
-        b12.is_locked = True
-        b12.label = "Dentist Appointment"
-
-        # Attempt to modify block 12 without force_calendar
-        out = self.manager.modify_blocks(start_block=12, end_block=12, label="Gaming")
-        self.assertIn("Cannot modify block(s) [12]: locked by calendar event", out)
-        self.assertEqual(b12.label, "Dentist Appointment")
-        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
-
-        # Attempt to clear block 12 without force_calendar
-        out_clear = self.manager.clear_blocks(start_block=12, end_block=12)
-        self.assertIn("0 blocks", out_clear)
-        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
-
-    def test_resolve_event_preserves_other_ambiguous_events(self) -> None:
-        e2 = CalendarEvent(
-            id="e_dentist",
-            summary="Dentist",
-            start_dt=datetime(2026, 10, 8, 17, 0, tzinfo=self.tz),
-            end_dt=datetime(2026, 10, 8, 17, 30, tzinfo=self.tz),
-            is_ambiguous=True,
-        )
-        self.manager.ambiguous_events.append(e2)
-        self.assertEqual(len(self.manager.ambiguous_events), 2)
-
-        out = self.manager.resolve_event(event_id="e_doc", action="attend")
-        self.assertIn("Event e_doc resolved: locked as busy calendar block", out)
-        self.assertEqual(len(self.manager.ambiguous_events), 1)
-        self.assertEqual(self.manager.ambiguous_events[0].id, "e_dentist")
-
     def test_react_loop_on_inspect_blocks(self) -> None:
-        # Mock engine returning INSPECT_BLOCKS on first turn, then a conversational reply on second turn
         mock_engine = MockInferenceEngine([
             {
                 "role": "assistant",

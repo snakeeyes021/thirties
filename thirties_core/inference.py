@@ -330,8 +330,8 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             clean_lines.append(line)
             continue
 
-        # 1. MODIFY_BLOCKS / ALLOCATE_BLOCKS
-        mod_m = re.match(r"^(?:MODIFY|ALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
+        # 1. MODIFY_BLOCKS
+        mod_m = re.match(r"^MODIFY_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
         if mod_m:
             s_idx = int(mod_m.group(1))
             e_idx = int(mod_m.group(2)) if mod_m.group(2) else s_idx
@@ -351,8 +351,8 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             })
             continue
 
-        # 2. CLEAR_BLOCKS / DEALLOCATE_BLOCKS
-        clr_kind_m = re.match(r"^(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", trimmed, re.IGNORECASE)
+        # 2. CLEAR_BLOCKS
+        clr_kind_m = re.match(r"^CLEAR_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", trimmed, re.IGNORECASE)
         if clr_kind_m:
             target_k = clr_kind_m.group(1).upper()
             tool_calls.append({
@@ -362,15 +362,7 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             })
             continue
 
-        if re.match(r"^(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", trimmed, re.IGNORECASE):
-            tool_calls.append({
-                "id": f"clear_work_call_{len(tool_calls)}",
-                "name": "clear_blocks",
-                "arguments": {"clear_kind": "WORK", "clear_all_work": True},
-            })
-            continue
-
-        clr_range_m = re.match(r"^(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
+        clr_range_m = re.match(r"^CLEAR_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
         if clr_range_m:
             s_idx = int(clr_range_m.group(1))
             e_idx = int(clr_range_m.group(2)) if clr_range_m.group(2) else s_idx
@@ -416,15 +408,6 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             })
             continue
 
-        # 6. Backward compatibility REINSTATE_WORK_BLOCKS
-        if re.match(r"^(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", trimmed, re.IGNORECASE):
-            tool_calls.append({
-                "id": f"modify_work_call_{len(tool_calls)}",
-                "name": "modify_blocks",
-                "arguments": {"kind": "WORK"},
-            })
-            continue
-
         clean_lines.append(line)
 
     clean_text = "\n".join(clean_lines).strip()
@@ -466,7 +449,6 @@ class MockInferenceEngine:
                         "arguments": {
                             "start_block": idx,
                             "end_block": idx,
-                            "block_index": idx,
                             "label": "Dorico Compose",
                         },
                     }
