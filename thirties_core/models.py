@@ -173,7 +173,18 @@ class DayPlan:
         elif not meridiem and h < 7:  # heuristic: times like 3 without am/pm are usually afternoon
             h += 12
 
-        target_dt = datetime.combine(self.target_date, time(h, mins), tzinfo=self.sunrise.tzinfo)
+        target_time = time(h, mins)
+        # 1. Exact boundary match on clock time
+        for b in self.blocks:
+            if is_end:
+                if b.end_dt.time() == target_time:
+                    return self.get_logical_index(b)
+            else:
+                if b.start_dt.time() == target_time:
+                    return self.get_logical_index(b)
+
+        # 2. Fallback to interval inclusion (using datetime)
+        target_dt = datetime.combine(self.target_date, target_time, tzinfo=self.sunrise.tzinfo)
         for b in self.blocks:
             if is_end:
                 if b.start_dt < target_dt <= b.end_dt:

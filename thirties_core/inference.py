@@ -305,6 +305,16 @@ def _parse_modify_attributes(rest: str) -> dict[str, Any]:
         args["task_id"] = tm.group(1).strip()
         rest = rest[:tm.start()] + " " + rest[tm.end():]
 
+    stm = re.search(r"\bstart_time=([^\s|]+)", rest, re.IGNORECASE)
+    if stm:
+        args["start_time"] = stm.group(1).strip()
+        rest = rest[:stm.start()] + " " + rest[stm.end():]
+
+    etm = re.search(r"\bend_time=([^\s|]+)", rest, re.IGNORECASE)
+    if etm:
+        args["end_time"] = etm.group(1).strip()
+        rest = rest[:etm.start()] + " " + rest[etm.end():]
+
     label_m = re.search(r"\blabel=\s*([^|]+)", rest, re.IGNORECASE)
     if label_m:
         lbl = label_m.group(1).strip()
@@ -314,6 +324,25 @@ def _parse_modify_attributes(rest: str) -> dict[str, Any]:
     if lbl:
         args["label"] = lbl
     return args
+
+
+def _parse_range_or_time(target_str: str) -> dict[str, Any]:
+    """Parse a target specifier into either block numbers or clock time bounds."""
+    target = target_str.strip()
+    if not target:
+        return {}
+    if re.search(r":|\d\s*(?:am|pm)\b", target, re.IGNORECASE):
+        parts = re.split(r"\s*(?:-|–|—|\bto\b|\bthrough\b)\s*", target, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            return {"start_time": parts[0].strip(), "end_time": parts[1].strip()}
+        else:
+            return {"start_time": parts[0].strip(), "end_time": parts[0].strip()}
+    m = re.match(r"^(\d{1,2})(?:\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d{1,2}))?$", target, re.IGNORECASE)
+    if m:
+        s_idx = int(m.group(1))
+        e_idx = int(m.group(2)) if m.group(2) else s_idx
+        return {"start_block": s_idx, "end_block": e_idx}
+    return {}
 
 
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
@@ -330,24 +359,29 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             clean_lines.append(line)
             continue
 
-        # 1. MODIFY_BLOCKS
-        mod_m = re.match(r"^MODIFY_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
+        # 1. MODIFY_BLOCKS (accepts block numbers or clock times)
+        mod_m = re.match(r"^MODIFY_BLOCKS?:\s*([^|\n]+)?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
         if mod_m:
-            s_idx = int(mod_m.group(1))
-            e_idx = int(mod_m.group(2)) if mod_m.group(2) else s_idx
-            rest = mod_m.group(3) or ""
+            target_str = (mod_m.group(1) or "").strip()
+            rest = mod_m.group(2) or ""
+            parsed_range = _parse_range_or_time(target_str)
             attrs = _parse_modify_attributes(rest)
+            args = {
+                "start_block": parsed_range.get("start_block"),
+                "end_block": parsed_range.get("end_block"),
+                "start_time": parsed_range.get("start_time") or attrs.get("start_time"),
+                "end_time": parsed_range.get("end_time") or attrs.get("end_time"),
+                "kind": attrs.get("kind"),
+                "label": attrs.get("label"),
+                "task_id": attrs.get("task_id"),
+                "is_locked": attrs.get("is_locked"),
+            }
+            args = {k: v for k, v in args.items() if v is not None}
+            call_id = f"modify_call_{parsed_range.get('start_block') or parsed_range.get('start_time') or len(tool_calls)}_{len(tool_calls)}"
             tool_calls.append({
-                "id": f"modify_call_{s_idx}_{len(tool_calls)}",
+                "id": call_id,
                 "name": "modify_blocks",
-                "arguments": {
-                    "start_block": s_idx,
-                    "end_block": e_idx,
-                    "kind": attrs.get("kind"),
-                    "label": attrs.get("label"),
-                    "task_id": attrs.get("task_id"),
-                    "is_locked": attrs.get("is_locked"),
-                },
+                "arguments": args,
             })
             continue
 
@@ -362,16 +396,25 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             })
             continue
 
-        clr_range_m = re.match(r"^CLEAR_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
-        if clr_range_m:
-            s_idx = int(clr_range_m.group(1))
-            e_idx = int(clr_range_m.group(2)) if clr_range_m.group(2) else s_idx
-            tool_calls.append({
-                "id": f"clear_blocks_call_{len(tool_calls)}",
-                "name": "clear_blocks",
-                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
-            })
-            continue
+        clr_target_m = re.match(r"^CLEAR_BLOCKS?:\s*([^|\n]+)", trimmed, re.IGNORECASE)
+        if clr_target_m:
+            target_str = clr_target_m.group(1).strip()
+            parsed_range = _parse_range_or_time(target_str)
+            if parsed_range:
+                args = {
+                    "start_block": parsed_range.get("start_block"),
+                    "end_block": parsed_range.get("end_block"),
+                    "start_time": parsed_range.get("start_time"),
+                    "end_time": parsed_range.get("end_time"),
+                    "clear_all_work": False,
+                }
+                args = {k: v for k, v in args.items() if v is not None}
+                tool_calls.append({
+                    "id": f"clear_blocks_call_{len(tool_calls)}",
+                    "name": "clear_blocks",
+                    "arguments": args,
+                })
+                continue
 
         # 3. RESOLVE_EVENT
         res_m = re.match(r"^RESOLVE_EVENT:\s*([^|\n]+)\s*\|\s*(attend|decline)\b", trimmed, re.IGNORECASE)
@@ -386,14 +429,21 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             continue
 
         # 4. INSPECT_BLOCKS
-        insp_m = re.match(r"^INSPECT_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", trimmed, re.IGNORECASE)
+        insp_m = re.match(r"^INSPECT_BLOCKS?:\s*([^|\n]+)", trimmed, re.IGNORECASE)
         if insp_m:
-            s_idx = int(insp_m.group(1))
-            e_idx = int(insp_m.group(2)) if insp_m.group(2) else s_idx
+            target_str = insp_m.group(1).strip()
+            parsed_range = _parse_range_or_time(target_str)
+            args = {
+                "start_block": parsed_range.get("start_block"),
+                "end_block": parsed_range.get("end_block"),
+                "start_time": parsed_range.get("start_time"),
+                "end_time": parsed_range.get("end_time"),
+            }
+            args = {k: v for k, v in args.items() if v is not None}
             tool_calls.append({
                 "id": f"inspect_blocks_call_{len(tool_calls)}",
                 "name": "inspect_blocks",
-                "arguments": {"start_block": s_idx, "end_block": e_idx},
+                "arguments": args,
             })
             continue
 

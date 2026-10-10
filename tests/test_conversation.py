@@ -331,5 +331,63 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(reply, "I have verified blocks 1 to 5 are open.")
 
 
+    def test_modify_blocks_with_clock_times(self) -> None:
+        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK", clear_existing_envelope=True)
+        self.assertIn("Blocks 1–16", out)
+        self.assertIn("16 chunks", out)
+        self.assertIn("7:00 AM to 3:00 PM", out)
+
+        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
+        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
+        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
+
+    def test_clear_and_inspect_blocks_with_clock_times(self) -> None:
+        # First assign tasks to blocks 28 to 30
+        self.manager.modify_blocks(start_block=28, end_block=30, label="Deep Work")
+        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
+
+        # Inspect using clock times (8:30 PM to 10:00 PM corresponds to blocks 28 to 30)
+        insp_out = self.manager.inspect_blocks(start_time="8:30 PM", end_time="10:00 PM")
+        self.assertIn("Block 28", insp_out)
+        self.assertIn("Block 30", insp_out)
+
+        # Clear using clock times
+        clear_out = self.manager.clear_blocks(start_time="8:30 PM", end_time="10:00 PM")
+        self.assertIn("3 blocks", clear_out)
+        self.assertIn("Blocks 28–30", clear_out)
+        self.assertFalse(self.plan.get_logical_block(28).is_assigned)
+
+    def test_react_self_correction_on_discrepancy(self) -> None:
+        # Simulates the transcript issue: Model draft claimed 15 chunks (Blocks 1-15),
+        # but the tool executed 16 chunks (Blocks 1-16).
+        mock_engine = MockInferenceEngine([
+            {
+                "role": "assistant",
+                "content": "I have scheduled Work blocks from 07:00 AM to 03:00 PM (Blocks 1-15). This encompasses 15 chunks.",
+                "tool_calls": [
+                    {
+                        "id": "call_work",
+                        "name": "modify_blocks",
+                        "arguments": {"start_time": "7am", "end_time": "3pm", "kind": "WORK"},
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "I have updated the schedule: Work is set from 07:00 AM to 03:00 PM (Blocks 1–16) for 16 chunks.",
+                "tool_calls": [],
+            }
+        ])
+        self.manager.inference_engine = mock_engine
+        reply = self.manager.send_user_message("I actually did have work though, from 7 to 3")
+        self.assertEqual(
+            reply,
+            "I have updated the schedule: Work is set from 07:00 AM to 03:00 PM (Blocks 1–16) for 16 chunks.",
+        )
+        # Ensure that blocks 1 through 16 are indeed WORK
+        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
+        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
+
+
 if __name__ == "__main__":
     unittest.main()

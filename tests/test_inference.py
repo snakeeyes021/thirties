@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from thirties_core.config import ThirtiesConfig
-from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
+from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine, parse_model_directives
 
 
 class TestInference(unittest.TestCase):
@@ -256,6 +256,41 @@ I recommend scheduling that during the daylight hours around 2:00 PM.
                 res = engine.chat([{'role': 'user', 'content': 'Where should I compose?'}])
                 self.assertEqual(res['content'], 'I recommend scheduling that during the daylight hours around 2:00 PM.')
                 self.assertEqual(len(res['tool_calls']), 0)
+
+
+    def test_modify_blocks_clock_time_directive_parsing(self) -> None:
+        raw = """I have scheduled your work shift for today.
+MODIFY_BLOCKS: 07:00 AM - 03:00 PM | kind=WORK locked=true
+Have a productive shift!"""
+        clean, calls = parse_model_directives(raw)
+        self.assertIn("I have scheduled your work shift for today.", clean)
+        self.assertIn("Have a productive shift!", clean)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "modify_blocks")
+        self.assertEqual(calls[0]["arguments"]["start_time"], "07:00 AM")
+        self.assertEqual(calls[0]["arguments"]["end_time"], "03:00 PM")
+        self.assertEqual(calls[0]["arguments"]["kind"], "WORK")
+        self.assertTrue(calls[0]["arguments"]["is_locked"])
+
+    def test_modify_blocks_natural_clock_time_parsing(self) -> None:
+        raw = "MODIFY_BLOCKS: 7am - 3pm | kind=WORK"
+        clean, calls = parse_model_directives(raw)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["arguments"]["start_time"], "7am")
+        self.assertEqual(calls[0]["arguments"]["end_time"], "3pm")
+        self.assertEqual(calls[0]["arguments"]["kind"], "WORK")
+
+    def test_clear_and_inspect_clock_time_directive_parsing(self) -> None:
+        raw = """CLEAR_BLOCKS: 02:00 PM - 03:00 PM
+INSPECT_BLOCKS: 10:00 AM - 12:00 PM"""
+        clean, calls = parse_model_directives(raw)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["name"], "clear_blocks")
+        self.assertEqual(calls[0]["arguments"]["start_time"], "02:00 PM")
+        self.assertEqual(calls[0]["arguments"]["end_time"], "03:00 PM")
+        self.assertEqual(calls[1]["name"], "inspect_blocks")
+        self.assertEqual(calls[1]["arguments"]["start_time"], "10:00 AM")
+        self.assertEqual(calls[1]["arguments"]["end_time"], "12:00 PM")
 
 
 if __name__ == '__main__':

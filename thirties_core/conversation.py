@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,6 +52,8 @@ PLANNING_TOOLS = [
                 "properties": {
                     "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
                     "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "start_time": {"type": "string", "description": "Start clock time e.g. '07:00 AM'"},
+                    "end_time": {"type": "string", "description": "End clock time e.g. '03:00 PM'"},
                     "clear_kind": {"type": "string", "enum": ["WORK", "SLEEP", "ALL"]},
                     "clear_all_work": {"type": "boolean", "description": "True to clear all work blocks for today"}
                 }
@@ -76,12 +79,14 @@ PLANNING_TOOLS = [
         "type": "function",
         "function": {
             "name": "inspect_blocks",
-            "description": "Inspect schedule occupancy, envelope kinds, labels, and times for a block range.",
+            "description": "Inspect schedule occupancy, envelope kinds, labels, and times for a block range or clock times.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
-                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48}
+                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "start_time": {"type": "string", "description": "Start clock time e.g. '07:00 AM'"},
+                    "end_time": {"type": "string", "description": "End clock time e.g. '03:00 PM'"}
                 }
             }
         }
@@ -293,19 +298,24 @@ BEHAVIOR RULES & DIRECTIVES:
      DO NOT output directives when merely suggesting!
 
 3. GENERIC SCHEDULE MUTATION DIRECTIVES (Output on their own line when executing user actions):
-   a) MODIFY_BLOCKS: <start>[-<end>] | [kind=<WORK|SLEEP|DISCRETIONARY>] [label=<label>] [locked=<true|false>]
+   a) MODIFY_BLOCKS: <start>[-<end>] OR <start_time> - <end_time> | [kind=<WORK|SLEEP|DISCRETIONARY>] [label=<label>] [locked=<true|false>]
       - For single block task: MODIFY_BLOCKS: 26 | label=Quick Lunch
       - For multi-block duration: MODIFY_BLOCKS: 19-22 | label=Composing
+      - For clock times (PREFER clock times when the user specifies clock times to let the engine resolve exact boundaries!):
+        MODIFY_BLOCKS: 07:00 AM - 03:00 PM | kind=WORK
+        MODIFY_BLOCKS: 7am - 3pm | kind=WORK
       - For work envelope: MODIFY_BLOCKS: 7-18 | kind=WORK locked=true
       - For sleep envelope: MODIFY_BLOCKS: 32-47 | kind=SLEEP locked=true
-   b) CLEAR_BLOCKS: <start>[-<end>] (or CLEAR_BLOCKS: WORK)
+   b) CLEAR_BLOCKS: <start>[-<end>] OR <start_time> - <end_time> (or CLEAR_BLOCKS: WORK)
       - Clear work blocks for day off: CLEAR_BLOCKS: WORK
       - Clear specific block: CLEAR_BLOCKS: 26
+      - Clear clock range: CLEAR_BLOCKS: 02:00 PM - 03:00 PM
    c) RESOLVE_EVENT: <event_id> | <attend|decline>
       - Confirm attendance: RESOLVE_EVENT: unconfirmed | attend
       - Decline event: RESOLVE_EVENT: unconfirmed | decline
-   d) INSPECT_BLOCKS: <start>[-<end>]
+   d) INSPECT_BLOCKS: <start>[-<end>] OR <start_time> - <end_time>
       - Inspect range: INSPECT_BLOCKS: 1-10
+      - Inspect time range: INSPECT_BLOCKS: 02:00 PM - 04:00 PM
    e) FINALIZE_PLAN
       - Finalize day plan: FINALIZE_PLAN
 
@@ -496,12 +506,19 @@ BEHAVIOR RULES & DIRECTIVES:
         self,
         start_block: Optional[int] = None,
         end_block: Optional[int] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
         clear_kind: Optional[str] = None,
         clear_all_work: bool = False,
         force_calendar: bool = False,
         **kwargs: Any,
     ) -> str:
         """Clear blocks back to open discretionary time."""
+        if start_time and not start_block:
+            start_block = self.day_plan.time_str_to_logical_block(str(start_time))
+        if end_time and not end_block:
+            end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
+
         target_blocks: list[ThirtyBlock] = []
         norm_kind = clear_kind.upper() if clear_kind else None
 
@@ -517,6 +534,7 @@ BEHAVIOR RULES & DIRECTIVES:
                     target_blocks.append(self.day_plan.get_logical_block(b_idx))
 
         cleared_count = 0
+        cleared_blocks_list: list[ThirtyBlock] = []
         for b in target_blocks:
             if (b.kind == BlockKind.BUSY_CALENDAR or b.source_event_id) and b.is_locked and not force_calendar:
                 continue
@@ -526,12 +544,20 @@ BEHAVIOR RULES & DIRECTIVES:
             b.assigned_task_id = None
             b.source_event_id = None
             cleared_count += 1
+            cleared_blocks_list.append(b)
 
         self.day_plan.recalculate_counts()
         if self.scheduler and self.scheduler.state_db:
             self.scheduler.state_db.save_day_snapshot(self.day_plan)
 
         count_str = f"{cleared_count} block" if cleared_count == 1 else f"{cleared_count} blocks"
+        if cleared_blocks_list and not norm_kind and not clear_all_work:
+            first_log = self.day_plan.get_logical_index(cleared_blocks_list[0])
+            last_log = self.day_plan.get_logical_index(cleared_blocks_list[-1])
+            s_clk = cleared_blocks_list[0].start_dt.strftime('%I:%M %p').lstrip('0')
+            e_clk = cleared_blocks_list[-1].end_dt.strftime('%I:%M %p').lstrip('0')
+            span_str = f"from {s_clk} to {e_clk} (Block {first_log})" if first_log == last_log else f"from {s_clk} to {e_clk} (Blocks {first_log}–{last_log})"
+            return f"Cleared and opened {count_str} {span_str} as discretionary time."
         return f"Cleared and opened {count_str} as discretionary time."
 
     def resolve_event(
@@ -572,11 +598,19 @@ BEHAVIOR RULES & DIRECTIVES:
 
     def inspect_blocks(
         self,
-        start_block: int = 1,
+        start_block: Optional[int] = None,
         end_block: Optional[int] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
         **kwargs: Any,
     ) -> str:
-        """Inspect schedule occupancy, envelope kinds, labels, and times for a block range."""
+        """Inspect schedule occupancy, envelope kinds, labels, and times for a block range or clock times."""
+        if start_time and not start_block:
+            start_block = self.day_plan.time_str_to_logical_block(str(start_time))
+        if end_time and not end_block:
+            end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
+        if start_block is None:
+            start_block = 1
         if end_block is None:
             end_block = start_block
         lines = []
@@ -587,6 +621,29 @@ BEHAVIOR RULES & DIRECTIVES:
                 e_clk = b.end_dt.strftime('%I:%M %p').lstrip('0')
                 lines.append(f"Block {idx} ({s_clk}–{e_clk}): {b.kind.name} | label='{b.label}' | locked={b.is_locked}")
         return "\n".join(lines) if lines else "No blocks found in range."
+
+    def _detect_discrepancy(self, draft_text: str, tool_output: str) -> bool:
+        """Check for factual contradictions between model draft text and executed tool output."""
+        if not draft_text or not tool_output:
+            return False
+
+        # 1. Chunk count mismatch
+        t_cm = re.search(r"(\d+)\s+chunks?", tool_output, re.IGNORECASE)
+        d_cm = re.search(r"(\d+)\s+chunks?", draft_text, re.IGNORECASE)
+        if t_cm and d_cm:
+            if int(t_cm.group(1)) != int(d_cm.group(1)):
+                return True
+
+        # 2. Block range mismatch (e.g. tool scheduled Blocks 1–16, but model claimed Blocks 1-15)
+        t_bm = re.search(r"Blocks?\s+(\d+)(?:\s*(?:–|-|through)\s*(\d+))?", tool_output, re.IGNORECASE)
+        d_bm = re.search(r"Blocks?\s+(\d+)(?:\s*(?:–|-|through)\s*(\d+))?", draft_text, re.IGNORECASE)
+        if t_bm and d_bm:
+            t_start, t_end = int(t_bm.group(1)), int(t_bm.group(2) or t_bm.group(1))
+            d_start, d_end = int(d_bm.group(1)), int(d_bm.group(2) or d_bm.group(1))
+            if (t_start, t_end) != (d_start, d_end):
+                return True
+
+        return False
 
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
         """Dispatch model tool call and mutate local DayPlan state."""
@@ -676,8 +733,24 @@ BEHAVIOR RULES & DIRECTIVES:
                     "content": tool_output,
                 })
 
-        # Agentic ReAct loop: if inspect_blocks was executed, do a follow-up turn so model sees inspection results
+        # Agentic ReAct / Self-Correction loop:
+        # Trigger follow-up turn if:
+        # 1. inspect_blocks was executed (model needs to see read-only inspection results)
+        # 2. Or draft reply_content is empty (model emitted only directives)
+        # 3. Or draft reply_content has a factual discrepancy with the executed tool output
+        needs_follow_up = False
         if any(fn_name == "inspect_blocks" for fn_name, _ in executed_tools):
+            needs_follow_up = True
+        elif executed_tools and not reply_content.strip():
+            needs_follow_up = True
+        elif executed_tools and reply_content.strip():
+            for _, t_out in executed_tools:
+                if self._detect_discrepancy(reply_content, t_out):
+                    logger.info("[Conversation] Discrepancy detected between draft reply and tool output. Initiating self-correction turn.")
+                    needs_follow_up = True
+                    break
+
+        if needs_follow_up:
             follow_up = self.inference_engine.chat(
                 messages=self.messages,
                 tools=PLANNING_TOOLS,
