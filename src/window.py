@@ -1,30 +1,143 @@
-# window.py
-#
-# Copyright 2026 Matthew Samson
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#
-# SPDX-License-Identifier: GPL-3.0-or-later
+"""Main application window for Thirties."""
 
-from gi.repository import Adw
-from gi.repository import Gtk
+from datetime import date, timedelta
+from gi.repository import Adw, GLib, Gtk
+
+from thirties_core.astronomy import get_diurnal_date
+from thirties_core.config import load_config
+from thirties_core.conversation import ConversationManager
+from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
+from thirties_core.joplin_engine import JoplinEngine
+from thirties_core.scheduler import DeterministicScheduler
+from thirties.views.chat_panel import ChatPanel
+from thirties.views.day_view import DayView
+
 
 @Gtk.Template(resource_path='/tech/redfoxlabs/Thirties/window.ui')
 class ThirtiesWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'ThirtiesWindow'
 
-    label = Gtk.Template.Child()
+    prev_day_btn = Gtk.Template.Child()
+    next_day_btn = Gtk.Template.Child()
+    today_btn = Gtk.Template.Child()
+    calendar_menu_btn = Gtk.Template.Child()
+    calendar_popover = Gtk.Template.Child()
+    date_calendar = Gtk.Template.Child()
+    view_switcher_title = Gtk.Template.Child()
+    view_stack = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.config = load_config()
+        self.scheduler = DeterministicScheduler(self.config)
+        self.joplin_engine = JoplinEngine(self.config)
+        self.current_date = self._get_active_diurnal_date()
+
+        # Ingest backlog tasks from Joplin
+        self.backlog_tasks = self.joplin_engine.fetch_tasks()
+        self.scheduler.attach_history_to_tasks(self.backlog_tasks)
+
+        # Inference backend
+        litert_engine = LiteRTInferenceEngine(self.config)
+        self.inference_engine = litert_engine if litert_engine.is_available() else MockInferenceEngine()
+
+        # 1. Schedule View (DayView)
+        self.day_view = DayView()
+        self.view_stack.add_titled_with_icon(
+            self.day_view,
+            "schedule",
+            "Schedule",
+            "x-office-calendar-symbolic",
+        )
+
+        # 2. Assistant Chat View (ChatPanel)
+        initial_plan, ambiguous_events = self.scheduler.build_day_plan(self.current_date)
+        self.conv_manager = ConversationManager(
+            day_plan=initial_plan,
+            tasks=self.backlog_tasks,
+            ambiguous_events=ambiguous_events,
+            scheduler=self.scheduler,
+            joplin_engine=self.joplin_engine,
+            inference_engine=self.inference_engine,
+        )
+
+        self.chat_panel = ChatPanel(
+            conversation_manager=self.conv_manager,
+            on_plan_updated=self._on_plan_updated,
+        )
+        self.view_stack.add_titled_with_icon(
+            self.chat_panel,
+            "chat",
+            "Assistant Chat",
+            "chat-symbolic",
+        )
+
+        # Event connections
+        self.prev_day_btn.connect("clicked", self._on_prev_day)
+        self.next_day_btn.connect("clicked", self._on_next_day)
+        self.today_btn.connect("clicked", self._on_today_clicked)
+        self.date_calendar.connect("day-selected", self._on_calendar_day_selected)
+        self.view_stack.connect("notify::visible-child-name", self._on_view_changed)
+
+        self._load_day(self.current_date)
+
+    def _load_day(self, target_date: date) -> None:
+        self.current_date = target_date
+        self.today_btn.set_sensitive(target_date != self._get_active_diurnal_date())
+
+        # Sync GtkCalendar selected day
+        try:
+            gdt = GLib.DateTime.new_local(target_date.year, target_date.month, target_date.day, 0, 0, 0)
+            self.date_calendar.select_day(gdt)
+        except Exception:
+            pass
+
+        # Build plan for target date
+        plan, ambiguous = self.scheduler.build_day_plan(target_date)
+        self.day_view.refresh_plan(plan)
+
+        # Update conversational manager for this day
+        self.conv_manager = ConversationManager(
+            day_plan=plan,
+            tasks=self.backlog_tasks,
+            ambiguous_events=ambiguous,
+            scheduler=self.scheduler,
+            joplin_engine=self.joplin_engine,
+            inference_engine=self.inference_engine,
+        )
+        self.chat_panel.set_conversation_manager(
+            self.conv_manager,
+            on_plan_updated=self._on_plan_updated,
+        )
+
+    def _on_view_changed(self, stack: Adw.ViewStack, _param) -> None:
+        if stack.get_visible_child_name() == "chat":
+            GLib.idle_add(self.chat_panel.text_view.grab_focus)
+
+    def _on_plan_updated(self, plan) -> None:
+        """Triggered when tool calls (allocate block, resolve event) modify the plan."""
+        self.day_view.refresh_plan(plan)
+
+    def _on_prev_day(self, _btn: Gtk.Button) -> None:
+        self._load_day(self.current_date - timedelta(days=1))
+
+    def _on_next_day(self, _btn: Gtk.Button) -> None:
+        self._load_day(self.current_date + timedelta(days=1))
+
+    def _get_active_diurnal_date(self) -> date:
+        gen = self.config.general
+        return get_diurnal_date(
+            lat=gen.latitude,
+            lon=gen.longitude,
+            tz_name=gen.timezone,
+        )
+
+    def _on_today_clicked(self, _btn: Gtk.Button) -> None:
+        self._load_day(self._get_active_diurnal_date())
+
+    def _on_calendar_day_selected(self, calendar: Gtk.Calendar) -> None:
+        gdt = calendar.get_date()
+        selected_date = date(gdt.get_year(), gdt.get_month(), gdt.get_day_of_month())
+        if selected_date != self.current_date:
+            self._load_day(selected_date)
+            self.calendar_popover.popdown()

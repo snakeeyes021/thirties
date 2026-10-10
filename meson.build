@@ -7,8 +7,8 @@ project('thirties',
 i18n = import('i18n')
 gnome = import('gnome')
 
-
-
+pkgdatadir = get_option('prefix') / get_option('datadir') / meson.project_name()
+install_subdir('thirties_core', install_dir: pkgdatadir)
 
 subdir('data')
 subdir('src')
