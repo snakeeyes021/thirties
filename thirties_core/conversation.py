@@ -25,6 +25,27 @@ PLANNING_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "modify_blocks",
+            "description": "Universal primitive to modify schedule blocks: set block kinds (WORK, SLEEP, DISCRETIONARY), assign tasks/labels, or set lock state across a logical block range (1 to 48) or clock times.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_block": {"type": "integer", "minimum": 1, "maximum": 48, "description": "Start logical block (1 to 48)"},
+                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48, "description": "End logical block (1 to 48)"},
+                    "start_time": {"type": "string", "description": "Start clock time e.g. '10:00 AM'"},
+                    "end_time": {"type": "string", "description": "End clock time e.g. '4:00 PM'"},
+                    "kind": {"type": "string", "enum": ["WORK", "SLEEP", "DISCRETIONARY"], "description": "Diurnal container kind"},
+                    "label": {"type": "string", "description": "Activity or task label for these blocks"},
+                    "task_id": {"type": "string", "description": "Joplin task ID if assigning a task"},
+                    "is_locked": {"type": "boolean", "description": "True if locked in card envelope"}
+                }
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_calendar_event",
             "description": "Mark an ambiguous calendar event as attended (hard block) or ignored.",
             "parameters": {
@@ -364,13 +385,220 @@ BEHAVIOR RULES:
         sys_prompt = self._build_system_prompt()
         self.messages = [{"role": "system", "content": sys_prompt}]
 
+    def modify_blocks(
+        self,
+        start_block: Optional[int] = None,
+        end_block: Optional[int] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        kind: Optional[str] = None,
+        label: Optional[str] = None,
+        task_id: Optional[str] = None,
+        is_locked: Optional[bool] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Universal schedule primitive: modify block kinds, assigned tasks, or lock states."""
+        if start_time and not start_block:
+            start_block = self.day_plan.time_str_to_logical_block(str(start_time))
+        if end_time and not end_block:
+            end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
+
+        norm_kind = kind.upper() if kind else None
+
+        if start_block is None and end_block is None:
+            if norm_kind == "WORK":
+                work_start = self.scheduler.config.general.work_start_thirty
+                work_end = self.scheduler.config.general.work_end_thirty
+                start_block = self.day_plan.get_logical_index(self.day_plan.get_block(work_start))
+                end_block = self.day_plan.get_logical_index(self.day_plan.get_block(work_end))
+            elif norm_kind == "SLEEP":
+                start_block = 33
+                end_block = 48
+            else:
+                return "No blocks specified to modify."
+
+        if start_block is not None and end_block is None:
+            end_block = start_block
+
+        if end_block >= start_block:
+            indices_range = list(range(start_block, end_block + 1))
+        else:
+            indices_range = list(range(start_block, 49)) + list(range(1, end_block + 1))
+
+        target_blocks: list[ThirtyBlock] = []
+        target_indices: set[int] = set()
+        for idx in indices_range:
+            if 1 <= idx <= 48:
+                b = self.day_plan.get_logical_block(idx)
+                target_blocks.append(b)
+                target_indices.add(idx)
+
+        preserved_tasks: list[str] = []
+
+        if norm_kind == "WORK":
+            # Clear old WORK blocks outside target_indices back to discretionary
+            for b in self.day_plan.blocks:
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.kind == BlockKind.WORK and log_idx not in target_indices:
+                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                    b.is_locked = False
+                    if not b.assigned_task_id and b.label == "Work":
+                        b.label = ""
+
+            # Assign target blocks to WORK
+            for b in target_blocks:
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.label and b.label != "Work":
+                    preserved_tasks.append(f"Block {log_idx} ('{b.label}')")
+                else:
+                    b.label = label or "Work"
+                    b.assigned_task_id = task_id
+                b.kind = BlockKind.WORK
+                b.is_locked = True if is_locked is None else is_locked
+
+        elif norm_kind == "SLEEP":
+            # Clear old SLEEP blocks outside target_indices
+            for b in self.day_plan.blocks:
+                log_idx = self.day_plan.get_logical_index(b)
+                if b.kind == BlockKind.SLEEP and log_idx not in target_indices:
+                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                    b.is_locked = False
+                    if b.label == "Sleep":
+                        b.label = ""
+
+            # Assign target blocks to SLEEP
+            for b in target_blocks:
+                b.kind = BlockKind.SLEEP
+                b.label = label or "Sleep"
+                b.is_locked = True if is_locked is None else is_locked
+                b.assigned_task_id = None
+
+        elif norm_kind == "DISCRETIONARY":
+            for b in target_blocks:
+                b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                b.is_locked = False if is_locked is None else is_locked
+                b.label = label or ""
+                b.assigned_task_id = task_id
+
+        else:
+            # Assign task / label while preserving diurnal container kind
+            for b in target_blocks:
+                if label:
+                    b.label = label
+                if task_id:
+                    b.assigned_task_id = task_id
+                if is_locked is not None:
+                    b.is_locked = is_locked
+
+        self.day_plan.recalculate_counts()
+        if self.scheduler and self.scheduler.state_db:
+            self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+        count = len(target_blocks)
+        chunk_word = "chunk" if count == 1 else "chunks"
+        count_str = f"{count} {chunk_word}"
+
+        if target_blocks:
+            first_log = self.day_plan.get_logical_index(target_blocks[0])
+            last_log = self.day_plan.get_logical_index(target_blocks[-1])
+            start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
+            end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
+            span_str = f"from {start_clk} to {end_clk} (Block {first_log})" if first_log == last_log else f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
+        else:
+            span_str = "requested blocks"
+
+        if norm_kind == "WORK":
+            if preserved_tasks:
+                return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."
+            return f"Work is now scheduled {span_str} for {count_str}."
+        elif norm_kind == "SLEEP":
+            return f"Sleep window is now scheduled {span_str} for {count_str}."
+        else:
+            lbl_desc = f"'{label}'" if label else "scheduled"
+            if len(target_blocks) == 1:
+                return f"Allocated block {first_log} from {start_clk} to {end_clk} (1 chunk) to {lbl_desc}."
+            else:
+                return f"Allocated blocks {first_log} through {last_log} from {start_clk} to {end_clk} ({count_str}) to {lbl_desc}."
+
+    def clear_blocks(
+        self,
+        start_block: Optional[int] = None,
+        end_block: Optional[int] = None,
+        clear_kind: Optional[str] = None,
+        clear_all_work: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        """Clear blocks back to open discretionary time."""
+        target_blocks: list[ThirtyBlock] = []
+        norm_kind = clear_kind.upper() if clear_kind else None
+
+        if norm_kind == "WORK" or clear_all_work:
+            target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.WORK]
+        elif norm_kind == "SLEEP":
+            target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.SLEEP]
+        elif start_block is not None:
+            if end_block is None:
+                end_block = start_block
+            for b_idx in range(start_block, end_block + 1):
+                if 1 <= b_idx <= 48:
+                    target_blocks.append(self.day_plan.get_logical_block(b_idx))
+
+        for b in target_blocks:
+            b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
+            b.is_locked = False
+            b.label = ""
+            b.assigned_task_id = None
+            b.source_event_id = None
+
+        self.day_plan.recalculate_counts()
+        if self.scheduler and self.scheduler.state_db:
+            self.scheduler.state_db.save_day_snapshot(self.day_plan)
+
+        count = len(target_blocks)
+        count_str = f"{count} block" if count == 1 else f"{count} blocks"
+        return f"Cleared and opened {count_str} as discretionary time."
+
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
         """Dispatch model tool call and mutate local DayPlan / Joplin state."""
-        if name == "resolve_calendar_event":
+        if name == "modify_blocks":
+            return self.modify_blocks(**arguments)
+
+        elif name in ("allocate_thirty_block", "allocate_thirty_blocks"):
+            start_idx = arguments.get("start_block", arguments.get("block_index"))
+            end_idx = arguments.get("end_block", start_idx)
+            task_id = arguments.get("task_id")
+            label = arguments.get("custom_label") or arguments.get("label", "")
+            return self.modify_blocks(start_block=start_idx, end_block=end_idx, label=label, task_id=task_id)
+
+        elif name in ("reinstate_work_blocks", "restore_work_blocks", "set_work_blocks"):
+            return self.modify_blocks(
+                start_block=arguments.get("start_block"),
+                end_block=arguments.get("end_block"),
+                start_time=arguments.get("start_time"),
+                end_time=arguments.get("end_time"),
+                kind="WORK",
+            )
+
+        elif name in ("set_sleep_blocks", "adjust_sleep_window", "set_bedtime"):
+            return self.modify_blocks(
+                start_block=arguments.get("start_block"),
+                end_block=arguments.get("end_block"),
+                start_time=arguments.get("start_time"),
+                end_time=arguments.get("end_time"),
+                kind="SLEEP",
+            )
+
+        elif name in ("clear_blocks", "deallocate_blocks"):
+            return self.clear_blocks(
+                start_block=arguments.get("start_block"),
+                end_block=arguments.get("end_block"),
+                clear_kind=arguments.get("clear_kind"),
+                clear_all_work=arguments.get("clear_all_work", False),
+            )
+
+        elif name == "resolve_calendar_event":
             event_id = arguments["event_id"]
             attending = arguments["attending"]
-
-            # Update blocks associated with this event
             for block in self.day_plan.blocks:
                 if block.source_event_id == event_id:
                     if attending:
@@ -381,228 +609,29 @@ BEHAVIOR RULES:
                         block.label = ""
                         block.source_event_id = None
                         block.is_locked = False
-
             self.ambiguous_events = [e for e in self.ambiguous_events if e.id != event_id]
             self.day_plan.recalculate_counts()
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
             action_desc = "locked as busy calendar block" if attending else "ignored and opened as discretionary"
             return f"Event {event_id} resolved: {action_desc}."
 
-        elif name in ("allocate_thirty_block", "allocate_thirty_blocks"):
-            start_idx = arguments.get("start_block", arguments.get("block_index"))
-            end_idx = arguments.get("end_block", start_idx)
-            task_id = arguments.get("task_id")
-            label = arguments.get("custom_label") or ""
-
-            if start_idx is None:
-                start_idx = 1
-            if end_idx is None:
-                end_idx = start_idx
-
-            assigned_indices: list[int] = []
-            for b_idx in range(start_idx, end_idx + 1):
-                if 1 <= b_idx <= 48:
-                    block = self.day_plan.get_logical_block(b_idx)
-                    log_idx = b_idx
-                else:
-                    block = self.day_plan.get_block(b_idx % 48)
-                    log_idx = self.day_plan.get_logical_index(block)
-
-                block.kind = BlockKind.ASSIGNED
-                block.assigned_task_id = task_id
-                block.label = label
-                block.is_locked = False
-                assigned_indices.append(log_idx)
-
-            self.day_plan.recalculate_counts()
-
-            # Persist to database so allocations survive calendar navigation!
+        elif name == "finalize_day_plan":
+            self.day_plan.is_finalized = True
+            notes = arguments.get("notes", "")
+            if notes:
+                self.day_plan.notes = notes
             if self.scheduler and self.scheduler.state_db:
                 self.scheduler.state_db.save_day_snapshot(self.day_plan)
-
-            if len(assigned_indices) == 1:
-                return f"Allocated block {assigned_indices[0]} to '{label}'."
-            else:
-                return f"Allocated blocks {start_idx} through {end_idx} ({len(assigned_indices)} blocks) to '{label}'."
-
-        elif name in ("reinstate_work_blocks", "restore_work_blocks", "set_work_blocks"):
-            start_block = arguments.get("start_block")
-            end_block = arguments.get("end_block")
-            start_time = arguments.get("start_time")
-            end_time = arguments.get("end_time")
-
-            if start_time and not start_block:
-                start_block = self.day_plan.time_str_to_logical_block(str(start_time))
-            if end_time and not end_block:
-                end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
-
-            target_blocks: list[ThirtyBlock] = []
-            if start_block is not None and end_block is not None:
-                for idx in range(start_block, end_block + 1):
-                    if 1 <= idx <= 48:
-                        target_blocks.append(self.day_plan.get_logical_block(idx))
-            else:
-                work_start = self.scheduler.config.general.work_start_thirty
-                work_end = self.scheduler.config.general.work_end_thirty
-                for b in self.day_plan.blocks:
-                    if work_start <= b.index <= work_end:
-                        target_blocks.append(b)
-
-            target_indices: set[int] = {self.day_plan.get_logical_index(b) for b in target_blocks}
-
-            # 1. Clear any OLD work blocks that fall OUTSIDE the new work window!
-            for b in self.day_plan.blocks:
-                log_idx = self.day_plan.get_logical_index(b)
-                if b.kind == BlockKind.WORK and log_idx not in target_indices:
-                    if b.assigned_task_id or (b.label and b.label != "Work"):
-                        b.kind = BlockKind.ASSIGNED
-                    else:
-                        b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                        b.label = ""
-                        b.is_locked = False
-                        b.assigned_task_id = None
-
-            # 2. Assign target window to WORK, preserving task assignments inside
-            reinstated_count = len(target_blocks)
-            preserved_tasks: list[str] = []
-            for b in target_blocks:
-                log_idx = self.day_plan.get_logical_index(b)
-                if b.label and b.label != "Work":
-                    preserved_tasks.append(f"Block {log_idx} ('{b.label}')")
-                else:
-                    b.label = "Work"
-                    b.assigned_task_id = None
-
-                b.kind = BlockKind.WORK
-                b.is_locked = True
-            self.day_plan.recalculate_counts()
-
-            if self.scheduler and self.scheduler.state_db:
-                self.scheduler.state_db.save_day_snapshot(self.day_plan)
-
-            if target_blocks:
-                first_log = self.day_plan.get_logical_index(target_blocks[0])
-                last_log = self.day_plan.get_logical_index(target_blocks[-1])
-                start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
-                end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
-                span_str = f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
-            else:
-                span_str = "work blocks"
-
-            chunk_word = "chunk" if reinstated_count == 1 else "chunks"
-            count_str = f"{reinstated_count} {chunk_word}"
-
-            if preserved_tasks:
-                return f"Work is now scheduled {span_str} for {count_str}, keeping your existing {', '.join(preserved_tasks)} intact."
-            return f"Work is now scheduled {span_str} for {count_str}."
-
-        elif name in ("set_sleep_blocks", "adjust_sleep_window", "set_bedtime"):
-            start_block = arguments.get("start_block")
-            end_block = arguments.get("end_block")
-            start_time = arguments.get("start_time")
-            end_time = arguments.get("end_time")
-
-            if start_time and not start_block:
-                start_block = self.day_plan.time_str_to_logical_block(str(start_time))
-            if end_time and not end_block:
-                end_block = self.day_plan.time_str_to_logical_block(str(end_time), is_end=True)
-
-            target_indices: set[int] = set()
-            target_blocks: list[ThirtyBlock] = []
-
-            if start_block is not None and end_block is not None:
-                if end_block >= start_block:
-                    indices_range = list(range(start_block, end_block + 1))
-                else:
-                    indices_range = list(range(start_block, 49)) + list(range(1, end_block + 1))
-                for idx in indices_range:
-                    if 1 <= idx <= 48:
-                        target_indices.add(idx)
-                        target_blocks.append(self.day_plan.get_logical_block(idx))
-            elif start_block is not None:
-                # If only start_block (bedtime) is given, default to 16 blocks (8 hours) of sleep
-                for i in range(16):
-                    idx = (start_block + i - 1) % 48 + 1
-                    target_indices.add(idx)
-                    target_blocks.append(self.day_plan.get_logical_block(idx))
-            else:
-                for b in self.day_plan.blocks:
-                    if b.kind == BlockKind.SLEEP:
-                        target_indices.add(self.day_plan.get_logical_index(b))
-                        target_blocks.append(b)
-
-            # Clear old sleep blocks outside new window
-            for b in self.day_plan.blocks:
-                log_idx = self.day_plan.get_logical_index(b)
-                if b.kind == BlockKind.SLEEP and log_idx not in target_indices:
-                    b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                    b.label = ""
-                    b.is_locked = False
-                    b.assigned_task_id = None
-
-            # Reassign target window to SLEEP with is_locked = True
-            for b in target_blocks:
-                b.kind = BlockKind.SLEEP
-                b.label = "Sleep"
-                b.is_locked = True
-                b.assigned_task_id = None
-
-            self.day_plan.recalculate_counts()
-            if self.scheduler and self.scheduler.state_db:
-                self.scheduler.state_db.save_day_snapshot(self.day_plan)
-
-            reinstated_count = len(target_blocks)
-            chunk_word = "chunk" if reinstated_count == 1 else "chunks"
-            if target_blocks:
-                first_log = self.day_plan.get_logical_index(target_blocks[0])
-                last_log = self.day_plan.get_logical_index(target_blocks[-1])
-                start_clk = target_blocks[0].start_dt.strftime('%I:%M %p').lstrip('0')
-                end_clk = target_blocks[-1].end_dt.strftime('%I:%M %p').lstrip('0')
-                span_str = f"from {start_clk} to {end_clk} (Blocks {first_log}–{last_log})"
-            else:
-                span_str = "sleep window"
-            return f"Sleep window is now scheduled {span_str} for {reinstated_count} {chunk_word}."
-
-        elif name in ("clear_blocks", "deallocate_blocks"):
-            clear_all_work = arguments.get("clear_all_work", False)
-            start_idx = arguments.get("start_block")
-            end_idx = arguments.get("end_block", start_idx)
-
-            target_blocks = []
-            if clear_all_work:
-                target_blocks = [b for b in self.day_plan.blocks if b.kind == BlockKind.WORK]
-            elif start_idx is not None:
-                if end_idx is None:
-                    end_idx = start_idx
-                for b_idx in range(start_idx, end_idx + 1):
-                    if 1 <= b_idx <= 48:
-                        target_blocks.append(self.day_plan.get_logical_block(b_idx))
-                    else:
-                        target_blocks.append(self.day_plan.get_block(b_idx % 48))
-
-            for b in target_blocks:
-                b.kind = BlockKind.DAYLIGHT_DISCRETIONARY if b.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                b.is_locked = False
-                b.label = ""
-                b.assigned_task_id = None
-                b.source_event_id = None
-
-            self.day_plan.recalculate_counts()
-
-            if self.scheduler and self.scheduler.state_db:
-                self.scheduler.state_db.save_day_snapshot(self.day_plan)
-
-            return f"Cleared and opened {len(target_blocks)} blocks as discretionary time."
+            return "Day plan finalized and locked in."
 
         elif name == "decompose_task":
             parent_id = arguments["parent_task_id"]
             subtasks = arguments.get("subtasks", [])
             return f"Task {parent_id} decomposed into {len(subtasks)} subtasks."
 
-        elif name == "finalize_day_plan":
-            notes = arguments.get("notes", "")
-            self.day_plan.notes = notes
-            self.scheduler.finalize_day_plan(self.day_plan)
-            return "Day plan finalized and locked in."
+        elif name == "create_calendar_entry":
+            return f"Calendar entry created: {arguments.get('summary')}."
 
         return f"Unknown tool: {name}"
 
@@ -698,8 +727,15 @@ BEHAVIOR RULES:
         # If schedule mutations were executed, ensure the reply accurately reflects the verified action.
         if executed_tools:
             for fn_name, tool_output in executed_tools:
-                if fn_name in ("reinstate_work_blocks", "clear_blocks", "set_sleep_blocks"):
+                if fn_name in ("modify_blocks", "reinstate_work_blocks", "clear_blocks", "set_sleep_blocks", "allocate_thirty_block"):
                     logger.debug("[Conversation] Grounding sync override from %s: %s", fn_name, tool_output)
                     reply_content = tool_output
+
+        if not reply_content.strip():
+            if executed_tools:
+                reply_content = executed_tools[-1][1]
+            else:
+                reply_content = "Understood. Let me know if you would like me to adjust any of your upcoming blocks."
+
         logger.info("[Conversation] Final assistant reply: %r", reply_content)
         return reply_content

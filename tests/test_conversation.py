@@ -86,7 +86,7 @@ class TestConversation(unittest.TestCase):
         self.assertIn("Allocated block 33", out)
 
         b33 = self.plan.get_logical_block(33)
-        self.assertEqual(b33.kind, BlockKind.ASSIGNED)
+        self.assertTrue(b33.is_assigned)
         self.assertEqual(b33.assigned_task_id, "t1")
         self.assertEqual(b33.label, "Dorico Compose")
 
@@ -130,11 +130,11 @@ class TestConversation(unittest.TestCase):
 
     def test_send_user_message_triggers_tool_dispatch(self) -> None:
         reply = self.manager.send_user_message("Let's allocate 19 to Dorico")
-        self.assertIn("allocated block 19", reply)
+        self.assertIn("Allocated block 19", reply)
 
         # Block 32 must now be ASSIGNED
         b19 = self.plan.get_logical_block(19)
-        self.assertEqual(b19.kind, BlockKind.ASSIGNED)
+        self.assertTrue(b19.is_assigned)
         self.assertEqual(b19.label, "Dorico Compose")
 
 
@@ -146,7 +146,7 @@ class TestConversation(unittest.TestCase):
         self.assertIn("Allocated blocks 28 through 31", out)
         for idx in range(28, 32):
             b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.kind, BlockKind.ASSIGNED)
+            self.assertTrue(b.is_assigned)
             self.assertEqual(b.label, "Composing in Dorico")
 
     def test_clear_work_blocks_tool(self) -> None:
@@ -169,7 +169,7 @@ class TestConversation(unittest.TestCase):
             "allocate_thirty_block",
             {"start_block": 28, "end_block": 30, "custom_label": "Composing"},
         )
-        self.assertEqual(self.plan.get_logical_block(28).kind, BlockKind.ASSIGNED)
+        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
 
         # Now clear blocks 28-30
         out = self.manager.execute_tool(
@@ -202,7 +202,7 @@ class TestConversation(unittest.TestCase):
         self.manager.execute_tool("clear_blocks", {"clear_all_work": True})
         # Schedule an appointment in Block 17 (e.g. 3:00 PM)
         self.manager.execute_tool("allocate_thirty_block", {"block_index": 17, "custom_label": "Doctor Appointment"})
-        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.ASSIGNED)
+        self.assertTrue(self.plan.get_logical_block(17).is_assigned)
 
         # Reinstate work blocks
         out = self.manager.execute_tool("reinstate_work_blocks", {})

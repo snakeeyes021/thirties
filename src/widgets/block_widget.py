@@ -89,7 +89,7 @@ class BlockWidget(Gtk.Box):
             return "x-office-calendar-symbolic"
         elif kind == BlockKind.AMBIGUOUS_CALENDAR:
             return "dialog-question-symbolic"
-        elif kind == BlockKind.ASSIGNED:
+        elif self.block.is_assigned:
             return "starred-symbolic"
         else:
             if self.block.is_sunlight:
@@ -112,7 +112,7 @@ class BlockWidget(Gtk.Box):
             return "Open Daylight Thirty"
         elif kind == BlockKind.DARK_DISCRETIONARY:
             return "Open Dark Thirty"
-        elif kind == BlockKind.ASSIGNED:
+        elif self.block.is_assigned:
             return "Assigned Task"
         elif kind == BlockKind.AMBIGUOUS_CALENDAR:
             return "Unconfirmed Event"
@@ -123,7 +123,7 @@ class BlockWidget(Gtk.Box):
             pill = Gtk.Label(label="Needs Action")
             pill.add_css_class("badge-warning")
             return pill
-        elif self.block.kind == BlockKind.ASSIGNED:
+        elif self.block.is_assigned:
             pill = Gtk.Label(label="Allocated")
             pill.add_css_class("badge-assigned")
             return pill
@@ -142,7 +142,7 @@ class BlockWidget(Gtk.Box):
         if self.block.is_locked:
             self.add_css_class("block-locked")
 
-        if self.block.kind == BlockKind.ASSIGNED:
+        if self.block.is_assigned:
             self.add_css_class("block-assigned")
 
         if self.is_current:

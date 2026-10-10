@@ -34,9 +34,9 @@ class TestInference(unittest.TestCase):
                 res = engine.chat([{"role": "user", "content": "Please allocate block 24 to Writing Session"}])
                 self.assertEqual(res["content"], "Sure, I scheduled that for you.")
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
-                self.assertEqual(res["tool_calls"][0]["arguments"]["block_index"], 24)
-                self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Writing Session")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 24)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["label"], "Writing Session")
 
 
     def test_litert_directive_parsing(self) -> None:
@@ -51,9 +51,9 @@ class TestInference(unittest.TestCase):
                 res = engine.chat([{"role": "user", "content": "Let's throw some composing in an open dark block"}])
                 self.assertEqual(res["content"], "I scheduled Dorico in Dark Block 38.")
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
-                self.assertEqual(res["tool_calls"][0]["arguments"]["block_index"], 38)
-                self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Dorico Compose")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 38)
+                self.assertEqual(res["tool_calls"][0]["arguments"]["label"], "Dorico Compose")
 
     def test_multi_block_directive_parsing(self) -> None:
         engine = LiteRTInferenceEngine()
@@ -70,10 +70,10 @@ Allocated 2 hours of composing.
                 res = engine.chat([{"role": "user", "content": "Let's go block 28, I'll probably want to go for at least two hours"}])
                 self.assertEqual(res["content"], "Allocated 2 hours of composing.")
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 28)
                 self.assertEqual(res["tool_calls"][0]["arguments"]["end_block"], 31)
-                self.assertEqual(res["tool_calls"][0]["arguments"]["custom_label"], "Composing Session")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["label"], "Composing Session")
 
     def test_clear_work_blocks_directive_parsing(self) -> None:
         engine = LiteRTInferenceEngine()
@@ -107,7 +107,7 @@ Sounds like a solid plan!
                 )
                 res = engine.chat([{"role": "user", "content": "Let's go block 28, I'll probably want to go for at least two hours"}])
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "allocate_thirty_block")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["start_block"], 28)
                 self.assertEqual(res["tool_calls"][0]["arguments"]["end_block"], 31)
 
@@ -143,7 +143,8 @@ I have reinstated your work blocks.
                 res = engine.chat([{"role": "user", "content": "Oh shoot, turns out I do have work today. Can you put them back?"}])
                 self.assertEqual(res["content"], "I have reinstated your work blocks.")
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["kind"], "WORK")
 
     def test_reinstate_work_intent_fallback(self) -> None:
         engine = LiteRTInferenceEngine()
@@ -158,7 +159,8 @@ No problem at all!
                 )
                 res = engine.chat([{"role": "user", "content": "Oh shoot, turns out I do have work today. Can you put them back?"}])
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["kind"], "WORK")
 
 
     def test_sleep_intent_parsing(self) -> None:
@@ -174,7 +176,8 @@ I will adjust your sleep window.
                 )
                 res = engine.chat([{"role": "user", "content": "Ok, actually I'm going to bed at 10pm and I'll wake up tomorrow at 5am."}])
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "set_sleep_blocks")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["kind"], "SLEEP")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["start_time"], "10pm")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["end_time"], "5am")
 
@@ -191,7 +194,8 @@ Work hours updated.
                 )
                 res = engine.chat([{"role": "user", "content": "Oh shoot, work hours are normal today. 8:30-4"}])
                 self.assertEqual(len(res["tool_calls"]), 1)
-                self.assertEqual(res["tool_calls"][0]["name"], "reinstate_work_blocks")
+                self.assertEqual(res["tool_calls"][0]["name"], "modify_blocks")
+                self.assertEqual(res["tool_calls"][0]["arguments"]["kind"], "WORK")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["start_time"], "8:30")
                 self.assertEqual(res["tool_calls"][0]["arguments"]["end_time"], "4")
 

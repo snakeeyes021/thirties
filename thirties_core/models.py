@@ -64,6 +64,11 @@ class ThirtyBlock:
         """True if this block has an active user task or event assigned to it."""
         return bool(self.assigned_task_id or (self.label and self.label not in ("Work", "Sleep")) or self.kind == BlockKind.ASSIGNED)
 
+    @property
+    def is_open(self) -> bool:
+        """True if this block is an open, unallocated discretionary block."""
+        return self.kind in (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY) and not self.is_assigned and not self.source_event_id
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "index": self.index,
@@ -193,10 +198,11 @@ class DayPlan:
         daylight = 0
         dark = 0
         for block in self.blocks:
-            if block.kind == BlockKind.DAYLIGHT_DISCRETIONARY:
-                daylight += 1
-            elif block.kind == BlockKind.DARK_DISCRETIONARY:
-                dark += 1
+            if block.is_open:
+                if block.kind == BlockKind.DAYLIGHT_DISCRETIONARY or block.is_sunlight:
+                    daylight += 1
+                else:
+                    dark += 1
         self.daylight_available_count = daylight
         self.dark_available_count = dark
 
