@@ -347,6 +347,12 @@ class LiteRTInferenceEngine:
             s_idx = int(match.group(1))
             e_idx = int(match.group(2)) if match.group(2) else s_idx
             lbl = match.group(3).strip()
+            # Physical Arithmetic Guardrail: align e_idx with explicit user duration in hours
+            dur_hr_match = re.search(r"(?:for\s+)?(\d+(?:\.\d+)?)\s*hours?", last_user_msg, re.IGNORECASE)
+            if dur_hr_match:
+                exp_chunks = int(round(float(dur_hr_match.group(1)) * 2))
+                if exp_chunks >= 1:
+                    e_idx = min(48, s_idx + exp_chunks - 1)
             tool_calls.append({
                 "id": f"modify_call_{s_idx}",
                 "name": "modify_blocks",

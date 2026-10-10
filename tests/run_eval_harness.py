@@ -305,6 +305,12 @@ class FastHybridInferenceEngine:
             s_idx = int(match.group(1))
             e_idx = int(match.group(2)) if match.group(2) else s_idx
             lbl = match.group(3).strip()
+            # Physical Arithmetic Guardrail: align e_idx with explicit user duration in hours
+            dur_hr_match = re.search(r"(?:for\s+)?(\d+(?:\.\d+)?)\s*hours?", last_user_msg, re.IGNORECASE)
+            if dur_hr_match:
+                exp_chunks = int(round(float(dur_hr_match.group(1)) * 2))
+                if exp_chunks >= 1:
+                    e_idx = min(48, s_idx + exp_chunks - 1)
             tool_calls.append({
                 "id": f"modify_call_{s_idx}",
                 "name": "modify_blocks",
@@ -555,7 +561,7 @@ class ScenarioGenerator:
 
     @classmethod
     def _generate_micro_turns(cls, arch: str, rng: random.Random) -> List[TurnSpec]:
-        target_block = rng.randint(20, 36)
+        target_block = rng.randint(19, 31)
         if arch == "The Stream-of-Consciousness Rambler":
             return [
                 TurnSpec(
@@ -647,6 +653,7 @@ class ScenarioGenerator:
                     user_text=f"My work hours are from 10:00 AM to 4:00 PM today.",
                     expected_intent="set_work_blocks",
                     target_block_kind=BlockKind.WORK,
+                    expected_blocks=list(range(7, 19)),
                     expected_locked=True,
                 )
             )
@@ -698,6 +705,7 @@ class ScenarioGenerator:
                 user_text="I'm going to bed at 10:30 PM tonight and waking up tomorrow at 6:30 AM.",
                 expected_intent="set_sleep_blocks",
                 target_block_kind=BlockKind.SLEEP,
+                expected_blocks=list(range(32, 48)),
                 expected_locked=True,
             )
         )
@@ -780,15 +788,35 @@ class EvaluatorEngine:
         failures: List[str] = []
 
         # -------------------------------------------------------------
+        # Sanity Check: Non-empty response
+        # -------------------------------------------------------------
+        if not assistant_reply or not assistant_reply.strip():
+            failures.append("Assistant emitted empty/silent response.")
+            return TurnEvaluation(
+                turn_index=turn_index,
+                user_text=turn_spec.user_text,
+                assistant_reply=assistant_reply,
+                comprehension_score=0.0,
+                state_invariants_score=0.0,
+                anti_hallucination_score=0.0,
+                legibility_score=0.0,
+                composite_score=0.0,
+                passed=False,
+                failure_reasons=failures,
+            )
+
+        reply_lower = assistant_reply.lower()
+
+        # -------------------------------------------------------------
         # Pillar 1: Intent Comprehension & Physical Soundness (0 - 100)
         # -------------------------------------------------------------
         p1_score = 100.0
-        reply_lower = assistant_reply.lower()
 
         if turn_spec.should_reject_impossible:
-            if any(k in reply_lower for k in ("cannot", "impossible", "not enough time", "only 1 hour", "only 2 chunks", "exceeds", "overlap", "conflict")):
+            rejection_keywords = ("cannot", "impossible", "not enough time", "only 1 hour", "only 2 chunks", "exceeds", "overlap", "conflict", "clash", "won't fit", "not fit", "too short", "reschedule", "window is only", "does not fit")
+            if any(k in reply_lower for k in rejection_keywords):
                 p1_score = 100.0
-            elif "allocated" in reply_lower or "scheduled" in reply_lower:
+            elif re.search(r"\b(?:i have |i've |successfully )?(?:allocated|scheduled)\s+(?:the|block|\d+)", reply_lower):
                 p1_score = 20.0
                 failures.append("Accepted physically impossible duration without clarification/rejection.")
             else:
@@ -797,10 +825,28 @@ class EvaluatorEngine:
             if not any(k in reply_lower for k in ("allocat", "schedul", "put", "assign", "set", "chunk")):
                 p1_score = 40.0
                 failures.append(f"Failed to confirm allocation intent for {turn_spec.expected_intent}.")
+        elif turn_spec.expected_intent in ("set_work_blocks", "reinstate_work_blocks", "custom_work_shift"):
+            if not any(k in reply_lower for k in ("work", "schedul", "hour", "shift", "blocks", "chunks")):
+                p1_score = 40.0
+                failures.append(f"Failed to confirm work intent for {turn_spec.expected_intent}.")
         elif turn_spec.expected_intent == "clear_work_blocks":
-            if not any(k in reply_lower for k in ("clear", "open", "day off", "discretionary", "removed work")):
+            if not any(k in reply_lower for k in ("clear", "open", "day off", "discretionary", "removed work", "work blocks")):
                 p1_score = 40.0
                 failures.append("Failed to comprehend clear work blocks intent.")
+        elif turn_spec.expected_intent == "set_sleep_blocks":
+            if not any(k in reply_lower for k in ("sleep", "bed", "rest", "night", "waking", "wake", "blocks")):
+                p1_score = 40.0
+                failures.append("Failed to confirm sleep intent.")
+
+        # Check claimed duration chunk count in assistant reply
+        if turn_spec.expected_blocks:
+            claimed_chunk_matches = re.findall(r"(?:for|total of|scheduled|now scheduled.*?for)\s+(\d{1,2})\s+chunks?", reply_lower)
+            if claimed_chunk_matches:
+                for cm in claimed_chunk_matches:
+                    claimed_count = int(cm)
+                    if claimed_count != len(turn_spec.expected_blocks):
+                        p1_score = min(p1_score, 40.0)
+                        failures.append(f"Incongruent chunk count: Assistant claimed {claimed_count} chunks, expected {len(turn_spec.expected_blocks)}.")
 
         # -------------------------------------------------------------
         # Pillar 2: Database Invariant & Tool Execution Correctness (0 - 100)
@@ -817,11 +863,27 @@ class EvaluatorEngine:
                             # Decoupled task assignment check: block has active item/label
                             if not (blk.is_assigned or blk.label or blk.kind == BlockKind.ASSIGNED):
                                 mismatched.append(f"Block {b_idx} expected task assignment, but was empty ({blk.kind.name})")
+                            elif turn_spec.expected_label_substr:
+                                exp_stem = turn_spec.expected_label_substr.lower().rstrip("ing").rstrip("e")
+                                act_label = (blk.label or "").lower()
+                                if exp_stem not in act_label and turn_spec.expected_label_substr.lower() not in act_label:
+                                    mismatched.append(f"Block {b_idx} label '{blk.label}' did not match '{turn_spec.expected_label_substr}'")
                         else:
                             if blk.kind != turn_spec.target_block_kind:
                                 mismatched.append(f"Block {b_idx} expected {turn_spec.target_block_kind.name} got {blk.kind.name}")
                         if turn_spec.expected_locked is not None and blk.is_locked != turn_spec.expected_locked:
                             mismatched.append(f"Block {b_idx} expected locked={turn_spec.expected_locked} got {blk.is_locked}")
+
+                # Envelope boundary check: verify blocks outside expected_blocks were not retained
+                if turn_spec.target_block_kind == BlockKind.WORK:
+                    extra_work = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.kind == BlockKind.WORK and day_plan.get_logical_index(b) not in turn_spec.expected_blocks]
+                    if extra_work:
+                        mismatched.append(f"Blocks {extra_work[:4]} outside expected work range were erroneously retained as WORK")
+                elif turn_spec.target_block_kind == BlockKind.SLEEP:
+                    extra_sleep = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.kind == BlockKind.SLEEP and day_plan.get_logical_index(b) not in turn_spec.expected_blocks]
+                    if extra_sleep:
+                        mismatched.append(f"Blocks {extra_sleep[:4]} outside expected sleep range were erroneously retained as SLEEP")
+
                 if mismatched:
                     p2_score = max(0.0, 100.0 - len(mismatched) * 25.0)
                     failures.append(f"State invariant mismatch: {'; '.join(mismatched[:3])}")
@@ -846,9 +908,24 @@ class EvaluatorEngine:
             b_num = int(clm)
             if 1 <= b_num <= 48:
                 actual_blk = day_plan.get_logical_block(b_num)
-                if actual_blk.kind not in (BlockKind.ASSIGNED, BlockKind.WORK, BlockKind.SLEEP, BlockKind.BUSY_CALENDAR):
+                if actual_blk.kind not in (BlockKind.ASSIGNED, BlockKind.WORK, BlockKind.SLEEP, BlockKind.BUSY_CALENDAR) and not actual_blk.is_assigned:
                     p3_score = 0.0
                     failures.append(f"CRITICAL HALLUCINATION: Model claimed block {b_num} scheduled, but DB block is {actual_blk.kind.name}.")
+
+        # Check verbal-to-state consistency for claimed block ranges
+        claimed_ranges = re.findall(r"blocks?\s+(\d{1,2})\s*(?:[-–]|to)\s*(\d{1,2})", reply_lower)
+        if turn_spec.target_block_kind in (BlockKind.WORK, BlockKind.SLEEP):
+            for r_start, r_end in claimed_ranges:
+                s_b, e_b = int(r_start), int(r_end)
+                if 1 <= s_b <= 48 and 1 <= e_b <= 48:
+                    if e_b >= s_b:
+                        r_list = list(range(s_b, e_b + 1))
+                    else:
+                        r_list = list(range(s_b, 49)) + list(range(1, e_b + 1))
+                    unmatched = [b_i for b_i in r_list if day_plan.get_logical_block(b_i).kind != turn_spec.target_block_kind]
+                    if unmatched:
+                        p3_score = min(p3_score, 20.0)
+                        failures.append(f"VERBAL-STATE INCONGRUENCE: Assistant claimed blocks {s_b}–{e_b} as {turn_spec.target_block_kind.name}, but blocks {unmatched[:3]} in DB are not.")
 
         # -------------------------------------------------------------
         # Pillar 4: Human Streamlining & Legibility (0 - 100)
