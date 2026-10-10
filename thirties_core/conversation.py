@@ -26,7 +26,7 @@ PLANNING_TOOLS = [
         "type": "function",
         "function": {
             "name": "modify_blocks",
-            "description": "Universal primitive to modify schedule blocks: set block kinds (WORK, SLEEP, DISCRETIONARY), assign tasks/labels, or set lock state across a logical block range (1 to 48) or clock times.",
+            "description": "Universal schedule mutation primitive: set block kinds (WORK, SLEEP, DISCRETIONARY), assign tasks/labels, or set lock state across a logical block range (1 to 48) or clock times.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -42,60 +42,17 @@ PLANNING_TOOLS = [
             }
         }
     },
-
-    {
-        "type": "function",
-        "function": {
-            "name": "resolve_calendar_event",
-            "description": "Mark an ambiguous calendar event as attended (hard block) or ignored.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event_id": {"type": "string", "description": "The unique event ID"},
-                    "attending": {"type": "boolean", "description": "True if attending, False if declining"}
-                },
-                "required": ["event_id", "attending"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "allocate_thirty_block",
-            "description": "Assign a task or label to a Thirty block or range of blocks (1 to 48).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "block_index": {"type": "integer", "minimum": 1, "maximum": 48},
-                    "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
-                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
-                    "task_id": {"type": "string", "description": "Joplin task ID if assigning a task"},
-                    "custom_label": {"type": "string", "description": "Display label for this block"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "reinstate_work_blocks",
-            "description": "Reinstate or restore the configured work blocks for today (re-locking them as Work).",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    },
     {
         "type": "function",
         "function": {
             "name": "clear_blocks",
-            "description": "Clear or deallocate blocks (e.g. opening work blocks for a day off, or unassigning scheduled tasks), returning them to open discretionary time.",
+            "description": "Clear or open blocks (e.g. opening work blocks for a day off, or unassigning scheduled tasks), returning them to open discretionary time.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
                     "end_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "clear_kind": {"type": "string", "enum": ["WORK", "SLEEP", "ALL"]},
                     "clear_all_work": {"type": "boolean", "description": "True to clear all work blocks for today"}
                 }
             }
@@ -104,34 +61,29 @@ PLANNING_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "create_calendar_entry",
-            "description": "Add an appointment or hard block to Google / GNOME Calendar.",
+            "name": "resolve_event",
+            "description": "Mark an ambiguous calendar event as attended (hard block) or declined (open discretionary).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string"},
-                    "start_time": {"type": "string", "format": "date-time"},
-                    "end_time": {"type": "string", "format": "date-time"}
+                    "event_id": {"type": "string", "description": "The unique event ID"},
+                    "action": {"type": "string", "enum": ["attend", "decline"], "description": "'attend' to lock as busy calendar block, 'decline' to open as discretionary"}
                 },
-                "required": ["summary", "start_time", "end_time"]
+                "required": ["event_id", "action"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "decompose_task",
-            "description": "Break a heavily deferred task into smaller subtasks in Joplin.",
+            "name": "inspect_blocks",
+            "description": "Inspect schedule occupancy, envelope kinds, labels, and times for a block range.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "parent_task_id": {"type": "string"},
-                    "subtasks": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
-                },
-                "required": ["parent_task_id", "subtasks"]
+                    "start_block": {"type": "integer", "minimum": 1, "maximum": 48},
+                    "end_block": {"type": "integer", "minimum": 1, "maximum": 48}
+                }
             }
         }
     },
@@ -328,44 +280,45 @@ AMBIGUOUS EVENTS REQUIRING CLARIFICATION:
 TOP BACKLOG TASKS:
 {tasks_summary}
 
-BEHAVIOR RULES:
+BEHAVIOR RULES & DIRECTIVES:
 1. COMMUNICATION STYLE (CLOCK TIMES & CHUNK COUNTS):
    - Always communicate using clear clock times and chunk counts first, with block numbers as secondary reference.
      Good: "You have 4 chunks scheduled for Game Night from 6:30 PM to 8:30 PM (Blocks 24–27)."
      Bad: "Game Night is in Blocks 24 through 27."
    - The user does not memorize block numbers: always anchor your statements with start/end clock times (e.g. "from 06:30 PM to 08:30 PM") and discrete chunk/thirty counts. Never translate chunks into hours (e.g. say "4 chunks", never "2 hours").
    - Keep answers concise, structured, and action-oriented (1-3 sentences).
+
 2. DISTINGUISH SUGGESTIONS FROM DIRECT ALLOCATIONS:
    - When the user asks for advice or a suggestion (e.g. "Where would you suggest I compose?", "What should I do next?", "Any ideas?"):
      Suggest 1 or 2 UPCOMING open blocks suitable for the task, explain briefly why, and ask if they would like you to schedule it.
-     DO NOT output ALLOCATE_BLOCK when merely suggesting!
-   - When the user instructs you to allocate/schedule (e.g. "allocate block 12 to Dorico", "put composing in block 12", "let's go block 28 for two hours"), OR confirms a suggestion (e.g. "yes", "sure", "let's do that", "sounds good"):
-     For a single block:
-       ALLOCATE_BLOCK: <block_number> | <label>
-     For a multi-block span or duration:
-       ALLOCATE_BLOCKS: <start_block>-<end_block> | <label>
-     And provide a 1-sentence confirmation stating the block number(s), start and end times, and activity.
-3. DURATION & THIRTY ARITHMETIC:
+     DO NOT output directives when merely suggesting!
+
+3. GENERIC SCHEDULE MUTATION DIRECTIVES (Output on their own line when executing user actions):
+   a) MODIFY_BLOCKS: <start>[-<end>] | [kind=<WORK|SLEEP|DISCRETIONARY>] [label=<label>] [locked=<true|false>]
+      - For single block task: MODIFY_BLOCKS: 26 | label=Quick Lunch
+      - For multi-block duration: MODIFY_BLOCKS: 19-22 | label=Composing
+      - For work envelope: MODIFY_BLOCKS: 7-18 | kind=WORK locked=true
+      - For sleep envelope: MODIFY_BLOCKS: 32-47 | kind=SLEEP locked=true
+   b) CLEAR_BLOCKS: <start>[-<end>] (or CLEAR_BLOCKS: WORK)
+      - Clear work blocks for day off: CLEAR_BLOCKS: WORK
+      - Clear specific block: CLEAR_BLOCKS: 26
+   c) RESOLVE_EVENT: <event_id> | <attend|decline>
+      - Confirm attendance: RESOLVE_EVENT: unconfirmed | attend
+      - Decline event: RESOLVE_EVENT: unconfirmed | decline
+   d) INSPECT_BLOCKS: <start>[-<end>]
+      - Inspect range: INSPECT_BLOCKS: 1-10
+   e) FINALIZE_PLAN
+      - Finalize day plan: FINALIZE_PLAN
+
+4. DURATION & THIRTY ARITHMETIC:
    - 1 block = 30 minutes (0.5 hr).
    - 2 blocks = 1 hour.
-   - 3 blocks = 1.5 hours.
    - 4 blocks = 2 hours.
    - N hours = round(N * 2) blocks.
-   - When a duration is requested (e.g. "at least 2 hours starting at block 28"):
-     2 hours = 4 blocks -> Block 28 through Block 31 (28 + 4 - 1 = 31).
-     Directive: ALLOCATE_BLOCKS: 28-31 | <label>
-4. SCHEDULE MUTATIONS & DAYS OFF:
-   - When the user indicates they do not have work today (e.g. "I don't have work today", "day off", "open my work blocks"):
-     Output directive:
-       CLEAR_WORK_BLOCKS
-     And confirm that all work blocks are now open discretionary time for planning.
-   - When the user asks to reinstate, restore, or put back work blocks (e.g. "turns out I do have work today", "put them back", "reinstate work blocks"):
-     Output directive:
-       REINSTATE_WORK_BLOCKS
-     And confirm that work blocks are reinstated on their schedule.
-   - When the user asks to deallocate or clear specific blocks (e.g. "clear blocks 4-18", "deallocate block 28"):
-     Output directive:
-       CLEAR_BLOCKS: <start_block>-<end_block>
+   - When a duration is requested (e.g. "schedule block 19 for 2 hours"):
+     2 hours = 4 blocks -> Blocks 19 through 22 (19 + 4 - 1 = 22).
+     Directive: MODIFY_BLOCKS: 19-22 | label=Composing
+
 5. BACKWARD SCHEDULING (APPOINTMENTS, BUFFERS & ROUTINES):
    - When the user has an appointment or event at Time T (e.g. 03:00 PM, Block 17):
      1. Transit / travel buffer MUST be placed in the block immediately BEFORE the appointment (e.g. Block 16: 02:30 PM – 03:00 PM).
@@ -373,12 +326,13 @@ BEHAVIOR RULES:
      3. NEVER schedule preparation or travel buffer in or after the appointment block!
    - When the user mentions uncompleted morning routines:
      Schedule the morning routine in the EARLIEST upcoming open block today, NOT right before an afternoon appointment!
+
 6. TEMPORAL AWARENESS:
-   - For forward planning and recommendations, ONLY pick from UPCOMING open blocks. Never recommend or schedule into past elapsed blocks unless the user explicitly asks to retroactively log past work (e.g. "Earlier this morning at 8:00 AM I worked on X").
+   - For forward planning and recommendations, ONLY pick from UPCOMING open blocks. Never recommend or schedule into past elapsed blocks unless the user explicitly asks to retroactively log past work.
+
 7. ENERGY ALIGNMENT:
    - Daylight Thirties are for high-focus, creative composition, writing, and deep problem-solving.
    - Dark Thirties are for administrative tasks, reading, light dev chores, and calm wind-down.
-8. When the user confirms attendance ("yes", "attending"), confirm the event.
 """
 
     def _init_conversation(self) -> None:
@@ -558,11 +512,79 @@ BEHAVIOR RULES:
         count_str = f"{count} block" if count == 1 else f"{count} blocks"
         return f"Cleared and opened {count_str} as discretionary time."
 
+    def resolve_event(
+        self,
+        event_id: str,
+        action: str = "attend",
+        attending: Optional[bool] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Mark an ambiguous calendar event as attended (hard block) or declined (open discretionary)."""
+        if attending is None:
+            is_attending = (str(action).lower() in ("attend", "attending", "confirm", "accept", "true"))
+        else:
+            is_attending = bool(attending)
+
+        for block in self.day_plan.blocks:
+            if block.source_event_id == event_id or (event_id in ("unconfirmed", "*") and block.source_event_id):
+                if is_attending:
+                    block.kind = BlockKind.BUSY_CALENDAR
+                    block.is_locked = True
+                else:
+                    block.kind = BlockKind.DAYLIGHT_DISCRETIONARY if block.is_sunlight else BlockKind.DARK_DISCRETIONARY
+                    block.label = ""
+                    block.source_event_id = None
+                    block.is_locked = False
+
+        self.ambiguous_events = [e for e in self.ambiguous_events if e.id != event_id and (event_id != "unconfirmed")]
+        self.day_plan.recalculate_counts()
+        if self.scheduler and self.scheduler.state_db:
+            self.scheduler.state_db.save_day_snapshot(self.day_plan)
+        action_desc = "locked as busy calendar block" if is_attending else "declined and opened as discretionary"
+        return f"Event {event_id} resolved: {action_desc}."
+
+    def inspect_blocks(
+        self,
+        start_block: int = 1,
+        end_block: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Inspect schedule occupancy, envelope kinds, labels, and times for a block range."""
+        if end_block is None:
+            end_block = start_block
+        lines = []
+        for idx in range(start_block, end_block + 1):
+            if 1 <= idx <= 48:
+                b = self.day_plan.get_logical_block(idx)
+                s_clk = b.start_dt.strftime('%I:%M %p').lstrip('0')
+                e_clk = b.end_dt.strftime('%I:%M %p').lstrip('0')
+                lines.append(f"Block {idx} ({s_clk}–{e_clk}): {b.kind.name} | label='{b.label}' | locked={b.is_locked}")
+        return "\n".join(lines) if lines else "No blocks found in range."
+
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
         """Dispatch model tool call and mutate local DayPlan / Joplin state."""
         if name == "modify_blocks":
             return self.modify_blocks(**arguments)
 
+        elif name in ("clear_blocks", "deallocate_blocks"):
+            return self.clear_blocks(**arguments)
+
+        elif name in ("resolve_event", "resolve_calendar_event"):
+            return self.resolve_event(**arguments)
+
+        elif name == "inspect_blocks":
+            return self.inspect_blocks(**arguments)
+
+        elif name == "finalize_day_plan":
+            self.day_plan.is_finalized = True
+            notes = arguments.get("notes", "")
+            if notes:
+                self.day_plan.notes = notes
+            if self.scheduler and self.scheduler.state_db:
+                self.scheduler.state_db.save_day_snapshot(self.day_plan)
+            return "Day plan finalized and locked in."
+
+        # Backward compatibility aliases for existing tests
         elif name in ("allocate_thirty_block", "allocate_thirty_blocks"):
             start_idx = arguments.get("start_block", arguments.get("block_index"))
             end_idx = arguments.get("end_block", start_idx)
@@ -587,43 +609,6 @@ BEHAVIOR RULES:
                 end_time=arguments.get("end_time"),
                 kind="SLEEP",
             )
-
-        elif name in ("clear_blocks", "deallocate_blocks"):
-            return self.clear_blocks(
-                start_block=arguments.get("start_block"),
-                end_block=arguments.get("end_block"),
-                clear_kind=arguments.get("clear_kind"),
-                clear_all_work=arguments.get("clear_all_work", False),
-            )
-
-        elif name == "resolve_calendar_event":
-            event_id = arguments["event_id"]
-            attending = arguments["attending"]
-            for block in self.day_plan.blocks:
-                if block.source_event_id == event_id:
-                    if attending:
-                        block.kind = BlockKind.BUSY_CALENDAR
-                        block.is_locked = True
-                    else:
-                        block.kind = BlockKind.DAYLIGHT_DISCRETIONARY if block.is_sunlight else BlockKind.DARK_DISCRETIONARY
-                        block.label = ""
-                        block.source_event_id = None
-                        block.is_locked = False
-            self.ambiguous_events = [e for e in self.ambiguous_events if e.id != event_id]
-            self.day_plan.recalculate_counts()
-            if self.scheduler and self.scheduler.state_db:
-                self.scheduler.state_db.save_day_snapshot(self.day_plan)
-            action_desc = "locked as busy calendar block" if attending else "ignored and opened as discretionary"
-            return f"Event {event_id} resolved: {action_desc}."
-
-        elif name == "finalize_day_plan":
-            self.day_plan.is_finalized = True
-            notes = arguments.get("notes", "")
-            if notes:
-                self.day_plan.notes = notes
-            if self.scheduler and self.scheduler.state_db:
-                self.scheduler.state_db.save_day_snapshot(self.day_plan)
-            return "Day plan finalized and locked in."
 
         elif name == "decompose_task":
             parent_id = arguments["parent_task_id"]
@@ -702,34 +687,6 @@ BEHAVIOR RULES:
                     "name": fn_name,
                     "content": tool_output,
                 })
-
-        # Anti-hallucination grounding check:
-        # If the assistant generated text claiming an action or the user instructed a change,
-        # but the model failed to emit a tool directive, execute the corresponding mutation directly!
-        if not executed_tools:
-            # 1. Setting or reinstating work blocks
-            if (re.search(r"\b(reinstat|restor|put.*back)\b.*\bwork\b", reply_content, re.IGNORECASE) or
-                re.search(r"(?:work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|do have work)", user_text, re.IGNORECASE)):
-                reinstate_args: dict[str, Any] = {}
-                time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", user_text, re.IGNORECASE)
-                if time_range_match:
-                    reinstate_args["start_time"] = time_range_match.group(1).strip()
-                    reinstate_args["end_time"] = time_range_match.group(2).strip()
-                tool_output = self.execute_tool("reinstate_work_blocks", reinstate_args)
-                executed_tools.append(("reinstate_work_blocks", tool_output))
-            # 2. Clearing work blocks
-            elif (re.search(r"\b(deallocat|cleared|marked.*open)\b.*\bwork\b", reply_content, re.IGNORECASE) or
-                  re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work)", user_text, re.IGNORECASE)):
-                tool_output = self.execute_tool("clear_blocks", {"clear_all_work": True})
-                executed_tools.append(("clear_blocks", tool_output))
-
-        # Grounding synchronization:
-        # If schedule mutations were executed, ensure the reply accurately reflects the verified action.
-        if executed_tools:
-            for fn_name, tool_output in executed_tools:
-                if fn_name in ("modify_blocks", "reinstate_work_blocks", "clear_blocks", "set_sleep_blocks", "allocate_thirty_block"):
-                    logger.debug("[Conversation] Grounding sync override from %s: %s", fn_name, tool_output)
-                    reply_content = tool_output
 
         if not reply_content.strip():
             if executed_tools:

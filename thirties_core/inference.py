@@ -273,24 +273,10 @@ class LiteRTInferenceEngine:
         else:
             return {"role": "assistant", "content": "LiteRT-LM model runner not available.", "tool_calls": []}
 
-        # Parse potential intent/tool calls from user prompt or model text
+        # Parse explicit tool directives emitted by model text
         tool_calls: List[Dict[str, Any]] = []
 
-        # 0. Directive: REINSTATE_WORK_BLOCKS / RESTORE_WORK_BLOCKS
-        if re.search(r"\b(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
-            reinstate_args: dict[str, Any] = {"kind": "WORK"}
-            time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
-            if time_range_match:
-                reinstate_args["start_time"] = time_range_match.group(1).strip()
-                reinstate_args["end_time"] = time_range_match.group(2).strip()
-            tool_calls.append({
-                "id": "modify_work_call",
-                "name": "modify_blocks",
-                "arguments": reinstate_args,
-            })
-            raw_reply = re.sub(r"(?:REINSTATE|RESTORE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 0b. Directive: MODIFY_BLOCKS: <start>[-<end>] | [kind=<KIND>] [label=<LABEL>]
+        # 1. Directive: MODIFY_BLOCKS: <start>[-<end>] | [kind=<KIND>] [label=<LABEL>] [locked=<true|false>]
         modify_dir = re.search(r"MODIFY_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*(?:\|\s*(.+))?", raw_reply, re.IGNORECASE)
         if modify_dir:
             s_idx = int(modify_dir.group(1))
@@ -298,6 +284,7 @@ class LiteRTInferenceEngine:
             rest = modify_dir.group(3) or ""
             kind_val = None
             label_val = None
+            locked_val = None
             if "kind=" in rest.lower():
                 km = re.search(r"kind=([A-Za-z_]+)", rest, re.IGNORECASE)
                 if km:
@@ -308,6 +295,11 @@ class LiteRTInferenceEngine:
                     label_val = lm.group(1).strip()
             elif rest and not kind_val:
                 label_val = rest.strip()
+            if "locked=" in rest.lower():
+                locked_m = re.search(r"locked=(true|false)", rest, re.IGNORECASE)
+                if locked_m:
+                    locked_val = (locked_m.group(1).lower() == "true")
+
             tool_calls.append({
                 "id": f"modify_call_{s_idx}",
                 "name": "modify_blocks",
@@ -316,43 +308,17 @@ class LiteRTInferenceEngine:
                     "end_block": e_idx,
                     "kind": kind_val,
                     "label": label_val,
+                    "is_locked": locked_val,
                 },
             })
             raw_reply = re.sub(r"MODIFY_BLOCKS?:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-        # 1. Directive: CLEAR_WORK_BLOCKS / DEALLOCATE_WORK_BLOCKS
-        if re.search(r"\b(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
-            tool_calls.append({
-                "id": "clear_work_call",
-                "name": "clear_blocks",
-                "arguments": {"clear_all_work": True},
-            })
-            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 2. Directive: CLEAR_BLOCKS: <start>[-<end>]
-        clear_dir = re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE)
-        if clear_dir:
-            s_idx = int(clear_dir.group(1))
-            e_idx = int(clear_dir.group(2)) if clear_dir.group(2) else s_idx
-            tool_calls.append({
-                "id": "clear_blocks_call",
-                "name": "clear_blocks",
-                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
-            })
-            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\\s*\d{1,2}(?:\\s*-\\s*\d{1,2})?[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
-
-        # 3. Directive: ALLOCATE_BLOCK(S)?: <start>[-<end>] | <label>
+        # Backward compatibility for ALLOCATE_BLOCKS: <start>[-<end>] | <label>
         alloc_matches = list(re.finditer(r"ALLOCATE_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*\|\s*([^\n]+)", raw_reply, re.IGNORECASE))
         for match in alloc_matches:
             s_idx = int(match.group(1))
             e_idx = int(match.group(2)) if match.group(2) else s_idx
             lbl = match.group(3).strip()
-            # Physical Arithmetic Guardrail: align e_idx with explicit user duration in hours
-            dur_hr_match = re.search(r"(?:for\s+)?(\d+(?:\.\d+)?)\s*hours?", last_user_msg, re.IGNORECASE)
-            if dur_hr_match:
-                exp_chunks = int(round(float(dur_hr_match.group(1)) * 2))
-                if exp_chunks >= 1:
-                    e_idx = min(48, s_idx + exp_chunks - 1)
             tool_calls.append({
                 "id": f"modify_call_{s_idx}",
                 "name": "modify_blocks",
@@ -365,110 +331,74 @@ class LiteRTInferenceEngine:
         if alloc_matches:
             raw_reply = re.sub(r"ALLOCATE_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?\s*\|[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-        if tool_calls:
-            logger.info("[Inference] Extracted tool directives from model: %s", [c["name"] for c in tool_calls])
-        else:
-            logger.debug("[Inference] No explicit tool directives emitted by model; checking intent extraction fallbacks")
+        # 2. Directive: CLEAR_BLOCKS: <start>[-<end>] OR CLEAR_BLOCKS: WORK / CLEAR_WORK_BLOCKS
+        if clear_kind_match := re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(WORK|SLEEP|ALL)\b", raw_reply, re.IGNORECASE):
+            target_k = clear_kind_match.group(1).upper()
+            tool_calls.append({
+                "id": "clear_blocks_call",
+                "name": "clear_blocks",
+                "arguments": {"clear_kind": target_k, "clear_all_work": (target_k == "WORK")},
+            })
+            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(?:WORK|SLEEP|ALL)[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+        elif re.search(r"\b(?:CLEAR|DEALLOCATE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
+            tool_calls.append({
+                "id": "clear_work_call",
+                "name": "clear_blocks",
+                "arguments": {"clear_all_work": True},
+            })
+            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+        elif clear_dir := re.search(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE):
+            s_idx = int(clear_dir.group(1))
+            e_idx = int(clear_dir.group(2)) if clear_dir.group(2) else s_idx
+            tool_calls.append({
+                "id": "clear_blocks_call",
+                "name": "clear_blocks",
+                "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
+            })
+            raw_reply = re.sub(r"(?:CLEAR|DEALLOCATE)_BLOCKS?:\s*\d{1,2}(?:\s*-\s*\d{1,2})?[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-        # Fallback to User Intent Extraction if model did not emit directives:
-        if not tool_calls:
-            # Intent: Adjust sleep window / bedtime (e.g. going to bed at 10pm and wake up tomorrow at 5am)
-            bed_match = re.search(r"(?:going to bed|go to bed|bedtime|sleep)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
-            wake_match = re.search(r"(?:wake(?:\s+up)?|waking(?:\s+up)?)\s+(?:at\s+|tomorrow\s+at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
-            if (bed_match or wake_match) and not any(k in last_user_msg.lower() for k in ("work", "composing", "game night")):
-                sleep_args: dict[str, Any] = {"kind": "SLEEP"}
-                if bed_match:
-                    sleep_args["start_time"] = bed_match.group(1).strip()
-                if wake_match:
-                    sleep_args["end_time"] = wake_match.group(1).strip()
-                tool_calls.append({
-                    "id": "modify_sleep_call",
-                    "name": "modify_blocks",
-                    "arguments": sleep_args,
-                })
-            # Intent: Day off / Clear all work blocks
-            elif re.search(r"(?:don't(?:\s+\w+)?\s+have\s+work|no\s+work(?:day|\s+today)?|day\s+off|(?:clear|deallocate|open)\s+(?:all\s+)?(?:my\s+)?work(?:\s+blocks)?)", last_user_msg, re.IGNORECASE):
-                tool_calls.append({
-                    "id": "clear_work_call",
-                    "name": "clear_blocks",
-                    "arguments": {"clear_all_work": True},
-                })
-            # Intent: Reinstate or set work blocks (supporting custom work hours like 7am to 3pm)
-            elif re.search(r"(?:work\s+hours\s+are|work\s+today\s+is|work\s+is|schedule\s+work|set\s+work|reinstate|restore|put (?:them )?back|add back|turns out(?:\s+I)?(?:\s+do)?\s+have\s+work|(?:^|\s)do have work)", last_user_msg, re.IGNORECASE):
-                reinstate_args: dict[str, Any] = {"kind": "WORK"}
-                # Check for explicit start and end times
-                time_range_match = re.search(r"(?:started at|from|at)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:and goes until|to|until|-)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", last_user_msg, re.IGNORECASE)
-                if time_range_match:
-                    reinstate_args["start_time"] = time_range_match.group(1).strip()
-                    reinstate_args["end_time"] = time_range_match.group(2).strip()
+        # 3. Directive: RESOLVE_EVENT: <event_id> | <attend|decline>
+        if resolve_dir := re.search(r"RESOLVE_EVENT:\s*([^|\n]+)\s*\|\s*(attend|decline)\b", raw_reply, re.IGNORECASE):
+            ev_id = resolve_dir.group(1).strip()
+            action_val = resolve_dir.group(2).strip().lower()
+            tool_calls.append({
+                "id": f"resolve_call_{ev_id}",
+                "name": "resolve_event",
+                "arguments": {"event_id": ev_id, "action": action_val},
+            })
+            raw_reply = re.sub(r"RESOLVE_EVENT:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-                tool_calls.append({
-                    "id": "modify_work_call",
-                    "name": "modify_blocks",
-                    "arguments": reinstate_args,
-                })
-            # Intent: Clear specific blocks (e.g. "clear blocks 4-18" or "deallocate block 28")
-            elif clear_user_match := re.search(r"(?:clear|deallocate|remove|unassign)\s+(?:blocks?\s+)?(\d{1,2})(?:\s*-\s*(\d{1,2}))?", last_user_msg, re.IGNORECASE):
-                s_idx = int(clear_user_match.group(1))
-                e_idx = int(clear_user_match.group(2)) if clear_user_match.group(2) else s_idx
-                tool_calls.append({
-                    "id": "clear_blocks_call",
-                    "name": "clear_blocks",
-                    "arguments": {"start_block": s_idx, "end_block": e_idx, "clear_all_work": False},
-                })
-            # Intent: Block with duration (e.g. "Let's schedule block 22 for 2 hours of composing")
-            elif (block_user := re.search(r"\bblock\s+(\d{1,2})\b", last_user_msg, re.IGNORECASE)) and (dur_user := re.search(r"(\d+(?:\.\d+)?|half|one|two|three|four|five|an?)\s*(?:hours?|hrs?)", last_user_msg, re.IGNORECASE)):
-                s_idx = int(block_user.group(1))
-                dur_str = dur_user.group(1).lower()
-                word_map = {'a': 1.0, 'an': 1.0, 'half': 0.5, 'one': 1.0, 'two': 2.0, 'three': 3.0, 'four': 4.0, 'five': 5.0}
-                hrs = float(dur_str) if dur_str.replace('.', '', 1).isdigit() else word_map.get(dur_str, 1.0)
-                num_blocks = max(1, int(round(hrs * 2)))
-                e_idx = min(48, s_idx + num_blocks - 1)
-                lbl = "Focus Session"
-                for word in ["composing", "dorico", "writing", "coding", "reading", "study", "exercise", "dev", "walk"]:
-                    if word in last_user_msg.lower():
-                        lbl = word.capitalize()
-                        break
-                tool_calls.append({
-                    "id": f"modify_call_{s_idx}",
-                    "name": "modify_blocks",
-                    "arguments": {
-                        "start_block": s_idx,
-                        "end_block": e_idx,
-                        "label": lbl,
-                    },
-                })
-            elif alloc_match := re.search(r"(?:allocate|put|assign|schedule|set)\s+(?:block\s+)?(\d{1,2})\s+(?:to|for|with)\s+(.+)", last_user_msg, re.IGNORECASE):
-                block_idx = int(alloc_match.group(1))
-                label_text = alloc_match.group(2).strip()
-                tool_calls.append({
-                    "id": f"modify_call_{block_idx}",
-                    "name": "modify_blocks",
-                    "arguments": {
-                        "start_block": block_idx,
-                        "end_block": block_idx,
-                        "label": label_text,
-                    },
-                })
-            elif re.search(r"\b(attend|attending|confirm|yes|accept)\b", last_user_msg, re.IGNORECASE) and any(e.id for e in getattr(self, "ambiguous_events", [])):
-                tool_calls.append({
-                    "id": "confirm_call",
-                    "name": "resolve_calendar_event",
-                    "arguments": {"event_id": "unconfirmed", "attending": True},
-                })
-            elif re.search(r"\b(decline|skip|no|not attending)\b", last_user_msg, re.IGNORECASE):
-                tool_calls.append({
-                    "id": "decline_call",
-                    "name": "resolve_calendar_event",
-                    "arguments": {"event_id": "unconfirmed", "attending": False},
-                })
+        # 4. Directive: INSPECT_BLOCKS: <start>[-<end>]
+        if inspect_dir := re.search(r"INSPECT_BLOCKS?:\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?", raw_reply, re.IGNORECASE):
+            s_idx = int(inspect_dir.group(1))
+            e_idx = int(inspect_dir.group(2)) if inspect_dir.group(2) else s_idx
+            tool_calls.append({
+                "id": "inspect_blocks_call",
+                "name": "inspect_blocks",
+                "arguments": {"start_block": s_idx, "end_block": e_idx},
+            })
+            raw_reply = re.sub(r"INSPECT_BLOCKS?:[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
 
-        if re.search(r"\b(finalize|lock in|looks good|done)\b", last_user_msg, re.IGNORECASE):
+        # 5. Directive: FINALIZE_PLAN / FINALIZE_DAY_PLAN
+        if re.search(r"\bFINALIZE_(?:DAY_)?PLAN\b", raw_reply, re.IGNORECASE):
             tool_calls.append({
                 "id": "finalize_call",
                 "name": "finalize_day_plan",
                 "arguments": {"notes": "Plan agreed in chat."},
             })
+            raw_reply = re.sub(r"\bFINALIZE_(?:DAY_)?PLAN[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+
+        # Backward compatibility for REINSTATE_WORK_BLOCKS directive
+        if re.search(r"\b(?:REINSTATE|RESTORE)_WORK_BLOCKS\b", raw_reply, re.IGNORECASE):
+            tool_calls.append({
+                "id": "modify_work_call",
+                "name": "modify_blocks",
+                "arguments": {"kind": "WORK"},
+            })
+            raw_reply = re.sub(r"(?:REINSTATE|RESTORE)_WORK_BLOCKS[^\n]*(\n|$)", "", raw_reply, flags=re.IGNORECASE).strip()
+
+        if tool_calls:
+            logger.info("[Inference] Extracted tool directives from model: %s", [c["name"] for c in tool_calls])
 
         return {
             "role": "assistant",
