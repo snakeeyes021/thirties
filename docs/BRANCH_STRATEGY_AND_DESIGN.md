@@ -2,6 +2,7 @@
 
 > **Branch Identity**: Long-term research testbed for autonomous, on-device small language models (4B parameters, LiteRT-LM).
 > **Primary Philosophy**: "Primacy of Primitives & Agentic Evaluation." Small models fail when forced to perform mental arithmetic, container ontology gymnastics, or multi-factor constraint optimization. Success requires radically simplifying the data model so the model only does what it excels at (dialogue & intent extraction), letting deterministic Python do the heavy lifting, and steering development with an exhaustive, agent-as-human evaluation battery.
+> **Documentation Authority**: This file is the **sole primary source of truth** for this branch. Previous specs and phase plans in `docs/archive/` are historical references only.
 
 ---
 
@@ -21,20 +22,21 @@ If you are a newly initialized agent in a fresh session working on **this branch
 ## 2. Core Architectural Principles of the Philosophical Branch
 
 ### 2.1. Option B: The Uniform Astronomical Event Canvas
-**The Root Cause**: Currently, the system forces the model to juggle two distinct concepts:
-1. *Block Types / Envelopes*: Is this a `kind=WORK`, `kind=SLEEP`, or `kind=DISCRETIONARY` container? Does modifying work collapse sleep?
+**The Root Cause of SLM Failure**:
+Currently, the system forces Gemma 4B to juggle two mutually interfering concepts:
+1. *Block Types / Container Envelopes*: Is this block `kind=WORK`, `kind=SLEEP`, or `kind=DISCRETIONARY`? Does modifying work collapse sleep? Which block number (1–48) does 4:30 PM map to?
 2. *Events / Tasks*: Is this a calendar appointment or an assigned task label?
 
-When a user says *"oh shoot, actually it went til 4:30"*, the model gets tangled in mental block math, splits blocks arbitrarily, and hallucinates sleep starting at 4:30 PM.
+When a user says *"oh shoot, actually it went til 4:30"*, the 4B model gets tangled in mental arithmetic, splits blocks arbitrarily (1–15 and 16–22), and hallucinates sleep starting at 4:30 PM (Block 23).
 
-**The Solution (Option B)**:
-- **The Universe controls the Canvas**: Every block (1–48) is solely either **Sunlight** or **Dark** based on NOAA solar phase calculations. No negotiation, no mutations.
-- **Humans control Events on the Canvas**: Everything on the schedule is an **Event Span** in natural clock time:
+**The Architectural Solution (Option B)**:
+- **The Universe controls the Canvas**: Every block (1–48) is solely either **Daylight** or **Dark** based on NOAA solar phase calculations. It never mutates based on user activity.
+- **Humans control Events on the Canvas**: Everything on the schedule is a uniform **Event Span** in natural clock time:
   - `Work`: An event from 7:00 AM to 4:30 PM (rendered visually as a collapsible amber banner).
   - `Sleep`: An event from 11:00 PM to 7:00 AM (rendered visually as a collapsible indigo banner).
   - `Dorico Composing`: An event from 5:00 PM to 6:30 PM.
   - `Doctor Appointment`: An event from 4:00 PM to 4:30 PM.
-- **Model Directives are purely event-based**:
+- **Model Directives are purely clock-time event based**:
   ```text
   SCHEDULE_EVENT: <title> | <start_time> - <end_time>
   CLEAR_EVENT: <title_or_time>
@@ -59,38 +61,90 @@ A 4B model cannot evaluate 30 raw Joplin notes across 4 hierarchy layers, calcul
 
 ---
 
-## 3. The Core Engine: Massive Agent-as-Human Evaluation Suite
+## 3. The Evaluation Engine: Inventory, Reconciliation & Expansion
 
-In this branch, **the Evaluation Harness IS the primary development driver**. In an industry setting, an app like this requires thousands of human-tester hours. Here, we use frontier models (Gemini Flash in Antigravity) as **simulated human judges and interactive conversation partners**.
+In this branch, **the Evaluation Harness IS the primary development engine**. We do not tweak prompts blindly. We rely on two foundational test harnesses already developed in the repository:
 
+### 3.1. Inventory of Current Evaluation Harnesses
+
+1. **The Autonomous Combinatorial Harness (`tests/run_eval_harness.py`)**:
+   - **Origin**: The large-scale stress-testing engine developed to run up to 500+ or 1,000 synthetic simulations.
+   - **Key Strengths**:
+     - Exhaustive multidimensional scenario generator covering diverse personas (shift worker, anxious deadline rusher, creative flow composer, decision-fatigued minimalist).
+     - Messy communication styles (terse, rambling, contradictory, sudden mind-changes, typos).
+     - Combinatorial task loads and calendar conflict injection.
+     - Persistent GPU daemon management with auto-restart and sub-process crash isolation.
+     - Batch statistical reporting across dimensions.
+
+2. **The Stepping & Qualitative Judge Harness (`tests/interactive_eval.py`)**:
+   - **Origin**: The interactive stepping and qualitative evaluation engine with real state deltas.
+   - **Key Strengths**:
+     - Turn-by-turn stepping and human-in-the-loop interactive control.
+     - Tracks real SQLite / DayPlan state deltas between turns (`PlanSnapshot`, `StateDelta`).
+     - Action Claim vs Reality verification: checks if the model's textual claim matches actual database state mutations.
+     - Frontier LLM-as-a-judge protocol with qualitative scorecards across 5 axes: Action Execution Accuracy, Diurnal Temporal Awareness, Conversational Tone & Empathy, Directive Adherence, and Diagnostic Accountability.
+     - 25 curated qualitative battery scenarios.
+
+### 3.2. Reconciliation Strategy: Unifying Both Harnesses
+The two harnesses are complementary halves of the ideal testing engine:
+- `tests/run_eval_harness.py` provides the **Scenario Generation Breadth** (massive matrix of personas, communication styles, and messy edge cases).
+- `tests/interactive_eval.py` provides the **Evaluation Depth & Truth Verification** (real SQLite delta tracking, claim vs reality checking, and qualitative scorecards).
+
+**Reconciliation Architecture**:
 ```mermaid
 graph TD
-    Matrix[Combinatorial Scenario Matrix: 500+ Scenarios] --> Runner[interactive_eval Stepping Engine]
-    Runner --> Gemma[Local Gemma 4B on GPU]
-    Gemma --> Response[Model Response & Tool Directives]
-    Response --> Delta[SQLite State Delta Tracker]
-    Delta --> Judge[Agent-as-Human Judge: Gemini Flash]
-    Judge --> Scorecard[Qualitative Scorecard: Accuracy, Tone, Adherence, Reasoning]
-    Scorecard --> Diagnostic[Big-Picture Architectural Friction Report]
+    Matrix[Scenario Matrix Generator: from run_eval_harness.py] --> Feeder[Unified Scenario Feeder]
+    Feeder --> Stepper[Interactive Stepping Engine: interactive_eval.py]
+    Stepper --> GPU[Persistent Gemma 4B Daemon]
+    GPU --> Deltas[SQLite State Delta Tracker]
+    Deltas --> ClaimCheck[Action Claim vs Reality Guard]
+    Deltas --> Judge[LLM-as-a-Judge: Gemini 3.8 Flash]
+    Judge --> Scorecard[Standardized Qualitative Scorecard]
+    Scorecard --> Reporter[Batch & Interactive Diagnostics]
 ```
 
-### 3.1. The 500+ Combinatorial Scenario Battery
-The evaluation suite must incorporate the complete spectrum of messy human dialogue:
-- **Elliptical human speech**: *"it went til 4:30"*, *"actually nevermind"*, *"make it 15 mins later"*.
-- **Relative nudges**: *"push it back an hour"*, *"give me a 30 min buffer"*.
-- **Adversarial & Impossible requests**: 4 hours into a 1-hour window, overlapping locked calendar appointments.
-- **Diagnostic challenges**: *"Why did you do that?"*, *"Did that wipe out my morning work?"*.
-- **Archetypes**: Shift worker, anxious deadline rusher, decision-fatigued minimalist, creative flow composer.
+To reconcile them:
+1. Extract the scenario generator classes from `tests/run_eval_harness.py` into a reusable module or import them directly into `interactive_eval.py`.
+2. Allow `tests/interactive_eval.py` to accept scenarios either from the curated 25-scenario battery OR generated on-the-fly from the 500+ combinatorial space (`--generator-matrix`, `--seed`, `--count 100`).
+3. Ensure both batch mode (autonomous headless execution) and interactive mode (step, pause, challenge) share the same underlying SQLite delta tracking and scoring logic.
 
-### 3.2. Diagnostic Architectural Reporting (Not Just Prompt Band-Aids)
-When a test fails, the evaluation judge does not simply recommend adding another regex or prompt instruction. It asks:
-1. *What tool was the model attempting to use?*
-2. *Was the model forced to do math or conceptual gymnastics it is bad at?*
-3. *How can deterministic Python take over that cognitive burden?*
+### 3.3. Expansion Roadmap Post-Reconciliation
+1. **Tier 1 (Smoke & Sanity)**: 10 core regression scenarios run in seconds with mock/fast engine before any commit.
+2. **Tier 2 (Qualitative Battery)**: 25 curated scenarios run against local Gemma 4B to evaluate conversational nuances.
+3. **Tier 3 (Combinatorial Stress Matrix)**: 100 to 500 multi-turn scenarios generated dynamically to evaluate edge-case robustness, memory retention, and schedule invariants.
+4. **Architectural Diagnosis Reports**: Evaluation failures should categorize errors by root cause:
+   - Arithmetic / Block calculation failure (signals need for Python abstraction).
+   - Prompt context saturation (signals need for tighter pre-scoring).
+   - Invariant violation (signals need for deterministic guardrail).
 
 ---
 
-## 4. Immediate Development Roadmap for this Branch
+## 4. Cross-Branch Sharing & Backporting Protocol
+
+Because `feat/longterm-slm-architecture` and `feat/practical-gemini-assistant` share the same GTK4 / Libadwaita UI shell, calendar connectors, and astronomical engine, improvements must be easily shared without contaminating branch-specific AI logic:
+
+### 4.1. Strict Architectural Decoupling
+- **UI & Presentation** (`thirties_gtk/`): Must remain model-agnostic. All UI components communicate through standard interfaces (`ConversationManager`, `DeterministicScheduler`).
+- **Domain Models & Utilities** (`thirties_core/astronomy.py`, `thirties_core/calendar_engine.py`): Common math and data representations.
+- **Inference Engines** (`thirties_core/inference.py`): Modular backends (`LiteRTInferenceEngine` vs `AntigravityInferenceEngine`).
+
+### 4.2. Cherry-Picking & Sharing Workflow
+When a bug fix, UI enhancement, or utility is created on either branch:
+1. **Commit with Atomic Scopes**:
+   - `fix(ui): adjust solar arc stroke rendering for dark mode`
+   - `feat(calendar): support recurring GNOME EDS events`
+   - `fix(gtk): resolve viewport scrolling clamp in conversation list`
+2. **Cherry-Pick to Sister Branch**:
+   ```bash
+   git checkout feat/practical-gemini-assistant
+   git cherry-pick <commit-hash>
+   ```
+3. **Dedicated Common Branches for Large Features**:
+   If a major non-AI feature is developed (e.g. Google Calendar integration, a brand new visual timeline widget), branch from `main` (or PoC head), complete the feature, merge/cherry-pick into both branches.
+
+---
+
+## 5. Immediate Development Roadmap for this Branch
 
 1. **Refactor Data Model to Option B**:
    - Flatten `BlockKind` so blocks only represent `DAYLIGHT` vs `DARK`.
@@ -99,5 +153,6 @@ When a test fails, the evaluation judge does not simply recommend adding another
    - Simplify directives to `SCHEDULE_EVENT` and `CLEAR_EVENT` in natural clock time.
 3. **Build Deterministic Joplin Pre-Scorer**:
    - Implement ranking algorithm in `thirties_core/scheduler.py` based on due dates and deferral history.
-4. **Scale Evaluation Battery to 100+ and 500+ Scenarios**:
-   - Expand `tests/run_qualitative_battery.py` to stress-test messy conversational dynamics at scale.
+4. **Reconcile Evaluation Harnesses**:
+   - Wire `run_eval_harness.py` scenario generator into `interactive_eval.py`.
+   - Run 100-scenario evaluation round to measure Option B gains on Gemma 4B.
