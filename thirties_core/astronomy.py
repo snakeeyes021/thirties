@@ -19,10 +19,13 @@ from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
 _SIMULATED_DEBUG_TIME: Optional[str] = None
 
 
-def set_debug_time(val: Optional[str]) -> None:
-    """Set or clear runtime simulated time (e.g. '22:30', '12:00', or None)."""
+def set_debug_time(val: Optional[str | datetime]) -> None:
+    """Set or clear runtime simulated time (e.g. '22:30', '12:00', datetime, or None)."""
     global _SIMULATED_DEBUG_TIME
-    _SIMULATED_DEBUG_TIME = val
+    if isinstance(val, datetime):
+        _SIMULATED_DEBUG_TIME = val.isoformat()
+    else:
+        _SIMULATED_DEBUG_TIME = val
 
 
 def get_current_time(tz: Optional[ZoneInfo] = None) -> datetime:
