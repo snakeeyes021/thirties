@@ -184,3 +184,18 @@ The application dynamically selects `AntigravityInferenceEngine` when `backend =
 3. **Build Joplin Sync Engine (`thirties_core/sync_engine.py`)**: Implement serialization of local SQLite schedules and stats into `Archive/Thirties_System/Thirties_State_Sync`.
 4. **Enrich Joplin Ingestion**: Expand `JoplinEngine` to pass full notebook hierarchies, deferral counts, and deadlines into `ConversationManager`.
 5. **End-to-End User Validation**: Test messy, multi-turn dialogues directly in the running GTK app (`oh shoot it went til 4:30`, diagnostic inquiries, cross-device sync).
+
+### 5.3. Headless Telegram Mobile Bridge & Proactive Notifier (`thirties_core/telegram_bridge.py`)
+Provides headless, mobile conversational scheduling and lock-screen push notifications ("buzzes"):
+- **Zero-Dependency Architecture**: Pure Python standard library (`urllib.request`), no external packages.
+- **Two-Way Natural Conversation**: Routes mobile chat directly to `ConversationManager` and Gemini 3.8 Flash, executing scheduling tools and writing directly to local SQLite state.
+- **Cross-Device Sync on Change**: Automatically triggers `SyncEngine.push()` when assistant tool calls modify blocks, propagating changes to Joplin instantly.
+- **Proactive Lock-Screen Buzzes**: Background daemon monitors 30-minute block boundaries and bedtime, sending immediate alerts on block transitions:
+  - `🔔 Block 26 (07:30 PM – 08:00 PM) [Dark Thirty]: Write documentation`
+  - `🌙 Bedtime: Block 33 (11:00 PM – 11:30 PM): Rest well!`
+- **Quick Slash Commands**:
+  - `/now` – Current block, remaining minutes, active task, and bedtime countdown.
+  - `/day` – Condensed timeline of today's schedule.
+  - `/sync` – Immediate pull/push cross-device sync with Joplin.
+  - `/clear` – Reset conversation memory.
+  - `/status` – Backend engine, model, sync state, and notification status.

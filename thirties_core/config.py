@@ -61,6 +61,15 @@ class InferenceConfig:
 
 
 @dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    allowed_chat_ids: List[int] = field(default_factory=list)
+    notify_block_transitions: bool = True
+    poll_interval_seconds: float = 2.0
+
+
+@dataclass
 class SyncConfig:
     enabled: bool = True
     notebook_name: str = "Archive"
@@ -78,6 +87,7 @@ class ThirtiesConfig:
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     def resolve_joplin_db_path(self) -> Optional[Path]:
         """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
@@ -102,7 +112,10 @@ class ThirtiesConfig:
         """Return the path to Thirties local state database."""
         data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
         state_dir = data_home / "thirties"
-        state_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         return state_dir / "state.sqlite"
 
 
@@ -130,6 +143,7 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     calendar_data = data.get("calendar", {})
     inference_data = data.get("inference", {})
     sync_data = data.get("sync", {})
+    telegram_data = data.get("telegram", {})
 
     return ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),
@@ -137,4 +151,5 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
         calendar=CalendarConfig(**calendar_data) if calendar_data else CalendarConfig(),
         inference=InferenceConfig(**inference_data) if inference_data else InferenceConfig(),
         sync=SyncConfig(**sync_data) if sync_data else SyncConfig(),
+        telegram=TelegramConfig(**telegram_data) if telegram_data else TelegramConfig(),
     )
