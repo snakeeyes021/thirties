@@ -452,12 +452,13 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
                 run.end_reason = message
                 break
             run.transcript.append(("user", message, 0.0))
-            runtime = getattr(run.manager.brain, "_runtime", None)
+            from thirties_core.brains.slm.runtime import GemmaRuntime
+            runtime = GemmaRuntime._shared
             calls_before = len(runtime.calls) if runtime is not None else 0
             start = time_mod.time()
             reply = run.manager.send_user_message(message)
             run.transcript.append(("assistant", reply, round(time_mod.time() - start, 1)))
-            runtime = getattr(run.manager.brain, "_runtime", None)
+            runtime = GemmaRuntime._shared
             breakdown = ""
             if runtime is not None:
                 breakdown = " [" + ", ".join(f"{c['kind']} {c['seconds']}s" for c in runtime.calls[calls_before:]) + "]"

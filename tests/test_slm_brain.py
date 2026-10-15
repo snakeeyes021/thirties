@@ -178,6 +178,14 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("walk after work", {"type": "add", "title": "Walk", "start": "after work", "duration": "30 min"})
         self.assertIn("Walk", out)
 
+    def test_unreadable_time_asks_and_move_of_missing_item_becomes_add(self):
+        out = self.say("piano sometime", {"type": "add", "title": "Piano", "start": "whenever", "duration": "2 hours"})
+        self.assertEqual(out, "What time should I put Piano?")
+        out = self.say("piano 7 to 9, and lunch with Sam at 9:30", {"type": "move", "target": "piano", "start": "7", "end": "9"},
+                       {"type": "add", "title": "Lunch with Sam", "start": "9:30", "duration": "1 hour"})
+        self.assertIn("Added Piano: 7:00 PM – 9:00 PM", out)
+        self.assertIn("Added Lunch with Sam", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

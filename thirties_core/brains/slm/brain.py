@@ -232,6 +232,8 @@ class SlmBrain:
         """A clock time on the planned day; adds AM/PM sensibly when the user left it out."""
         plan = self.tools.day_plan
         raw = str(text).strip().lower().replace("in the ", "").replace("this ", "")
+        raw = re.sub(r"^(later|sometime|some time|around|about|by)\s+", "", raw).strip()
+        raw = {"later morning": "late morning"}.get(raw, raw)
         named = {"early morning": "7:00", "morning": "9:00", "mid morning": "10:00", "mid-morning": "10:00",
                  "late morning": "10:30", "lunch": "12:00", "lunchtime": "12:00", "midday": "12:00",
                  "early afternoon": "13:00", "afternoon": "14:00", "mid afternoon": "15:00", "mid-afternoon": "15:00",
@@ -381,10 +383,10 @@ class SlmBrain:
                     if any(k.type == "reject" for k in kept):
                         continue
             if a.type == "move" and not self._span_candidates(a.get("target") or "") and (a.get("start") or a.get("after") or a.get("before")):
-                if not any(b.type == "add" for b in actions):
-                    a = Action("add", {**a.fields, "title": a.get("target")})
-                else:
-                    continue
+                same = {_stem(w) for w in _words(a.get("target") or "")}
+                if any(b.type == "add" and same & {_stem(w) for w in _words(b.get("title") or "")} for b in actions):
+                    continue  # the add in this message already covers it
+                a = Action("add", {**a.fields, "title": a.get("target")})
             kept.append(a)
         return kept
 
@@ -530,8 +532,10 @@ class SlmBrain:
             else:
                 start = self._loose_time(a.get("start"))
                 end = self._loose_time(a.get("end"), after=start) if a.get("end") else None
-        except ClockError as e:
-            return f"I couldn't read that time: {e}", False
+        except ClockError:
+            self.state.awaiting_time = {k: v for k, v in a.fields.items() if k in ("title", "duration", "day", "alongside")}
+            self.state.awaiting_time.setdefault("title", title)
+            return f"What time should I put {title}?", False
         finally:
             self.tools.day_plan = saved
         args: Dict[str, Any] = {"title": title.strip().capitalize() if title.islower() else title.strip(),
