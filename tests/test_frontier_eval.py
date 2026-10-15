@@ -31,11 +31,13 @@ IDEAL = {
     "travel_buffer": [r('CALL remove_event {"event": "Work"}\nCALL add_event {"title": "Travel to dentist", "start": "2:30 PM", "end": "3:00 PM"}\nAdded.')],
     "cancel_and_replace": [r('CALL remove_event {"event": "Composing"}\nCALL add_event {"title": "Laundry", "start": "7:30 PM", "duration": "1 hour"}\nDone.')],
     "attend_ambiguous": [r('CALL resolve_calendar_event {"event": "Team dinner", "attend": true}\nHave fun!')],
-    "negotiate_then_finalize": [
+    "wrap_up_without_ceremony": [
         r('CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 minutes"}\nAdded.'),
-        r("CALL finalize_day\nLocked in."),
+        r("Great, you're all set."),
     ],
-    "no_premature_finalize": [r('CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 minutes"}\nAdded.')],
+    "together_at_once": [r('CALL add_event {"title": "Dinner", "start": "6:00 PM", "end": "7:00 PM"}\n'
+                           'CALL add_event {"title": "Dungeon Crawler Carl", "start": "6:00 PM", "end": "7:00 PM", "alongside": true}\nDone.')],
+    "tomorrow_not_today": [r('CALL add_event {"title": "Move NAS and router", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow"}\nDone.')],
 }
 
 

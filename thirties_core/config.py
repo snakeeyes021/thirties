@@ -18,6 +18,8 @@ class GeneralConfig:
     work_end_thirty: int = 31     # last work thirty starts 3:30 PM, so work ends 4:00 PM
     sleep_start_thirty: int = 46  # 11:00 PM
     sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
+    # Days that get default work (mon..sun). Other days start with no work.
+    work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
 
 
 @dataclass
@@ -41,6 +43,10 @@ class JoplinConfig:
     whitelist_notes: List[str] = field(
         default_factory=lambda: ["30s Completed Log"]
     )
+    # Note headings whose checklist items are "someday/maybe": kept visible, never pushed.
+    someday_sections: List[str] = field(
+        default_factory=lambda: ["Probation", "Someday", "Maybe", "Someday/Maybe", "Backburner"]
+    )
 
 
 @dataclass
@@ -58,6 +64,14 @@ class InferenceConfig:
     litert_model_path: str = "~/.local/share/thirties/models/gemma-4-e2b.litertlm"
     temperature: float = 0.2
     timeout_seconds: float = 60.0
+
+
+@dataclass
+class AssistantConfig:
+    brain: str = "frontier"  # "frontier" (large model, one rich prompt) or "slm" (on-device Gemma pipeline)
+    slm_model_path: str = ""  # empty: look in ~/.local/share/thirties/models
+    checkins: bool = True     # ask "did you get to X?" after planned items end (Telegram)
+    checkin_after_minutes: int = 10
 
 
 @dataclass
@@ -88,6 +102,7 @@ class ThirtiesConfig:
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    assistant: AssistantConfig = field(default_factory=AssistantConfig)
 
     def resolve_joplin_db_path(self) -> Optional[Path]:
         """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
@@ -144,6 +159,7 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     inference_data = data.get("inference", {})
     sync_data = data.get("sync", {})
     telegram_data = data.get("telegram", {})
+    assistant_data = data.get("assistant", {})
 
     return ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),
@@ -152,4 +168,5 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
         inference=InferenceConfig(**inference_data) if inference_data else InferenceConfig(),
         sync=SyncConfig(**sync_data) if sync_data else SyncConfig(),
         telegram=TelegramConfig(**telegram_data) if telegram_data else TelegramConfig(),
+        assistant=AssistantConfig(**assistant_data) if assistant_data else AssistantConfig(),
     )

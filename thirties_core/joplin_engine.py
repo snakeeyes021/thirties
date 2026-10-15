@@ -23,7 +23,63 @@ from thirties_core.models import TaskItem
 
 logger = logging.getLogger(__name__)
 
-CHECKBOX_REGEX = re.compile(r"^[ \t]*-\s*\[ \]\s+(.+)$")
+CHECKBOX_REGEX = re.compile(r"^([ \t]*)-\s*\[ \]\s+(.+)$")
+DONE_CHECKBOX_REGEX = re.compile(r"^([ \t]*)-\s*\[[xX]\]\s+(.+)$")
+HEADING_REGEX = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+
+
+def _indent_width(prefix: str) -> int:
+    return len(prefix.replace("\t", "    "))
+
+
+def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
+                    someday_sections: List[str]) -> List[TaskItem]:
+    """Open checklist items in a note body, with heading, nesting and someday context.
+
+    Ids are stable across edits elsewhere in the note: they hash the note id, the
+    item text and its occurrence number, not the line number.
+    """
+    tasks: List[TaskItem] = []
+    someday = {s.strip().lower() for s in someday_sections}
+    section = ""
+    seen: Dict[str, int] = {}
+    stack: List[Tuple[int, Optional[str], bool]] = []  # (indent, task id or None if done, someday)
+    for line in body.splitlines():
+        heading = HEADING_REGEX.match(line)
+        if heading:
+            section = heading.group(1).strip()
+            stack = []
+            continue
+        open_match = CHECKBOX_REGEX.match(line)
+        done_match = None if open_match else DONE_CHECKBOX_REGEX.match(line)
+        match = open_match or done_match
+        if not match:
+            continue
+        indent = _indent_width(match.group(1))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        parent_id = stack[-1][1] if stack else None
+        is_someday = section.lower() in someday or (bool(stack) and stack[-1][2])
+        if done_match:
+            stack.append((indent, None, is_someday))
+            continue
+        text = open_match.group(2).strip()
+        n = seen.get(text, 0)
+        seen[text] = n + 1
+        task_id = hashlib.sha256(f"{note_id}|{text}|{n}".encode("utf-8")).hexdigest()[:16]
+        tasks.append(TaskItem(
+            id=task_id,
+            source_notebook=notebook,
+            title=text,
+            is_checkbox_item=True,
+            parent_note_title=note_title,
+            parent_note_id=note_id,
+            section=section,
+            parent_task_id=parent_id,
+            someday=is_someday,
+        ))
+        stack.append((indent, task_id, is_someday))
+    return tasks
 
 JOPLIN_EXTRACTION_QUERY = """
 WITH RECURSIVE live_folders AS (
@@ -243,26 +299,10 @@ class JoplinEngine:
             if not (is_allowed_notebook or is_whitelisted_note):
                 continue
 
-            # 1. Parse markdown lines for "- [ ]" checkboxes (across both todo and normal notes)
-            found_checkboxes = False
-            for line_idx, line in enumerate(body.splitlines(), start=1):
-                match = CHECKBOX_REGEX.match(line)
-                if match:
-                    found_checkboxes = True
-                    task_text = match.group(1).strip()
-                    synthetic_seed = f"{note_id}_{line_idx}_{task_text}".encode("utf-8")
-                    synthetic_id = hashlib.sha256(synthetic_seed).hexdigest()[:16]
-                    tasks.append(
-                        TaskItem(
-                            id=synthetic_id,
-                            source_notebook=full_path,
-                            title=task_text,
-                            description="",
-                            is_checkbox_item=True,
-                            parent_note_title=title,
-                            parent_note_id=note_id,
-                        )
-                    )
+            # 1. Checklist items, with their heading, nesting and someday context
+            note_tasks = checklist_tasks(note_id, title, full_path, body, self.joplin_cfg.someday_sections)
+            tasks.extend(note_tasks)
+            found_checkboxes = bool(note_tasks) or any(DONE_CHECKBOX_REGEX.match(l) for l in body.splitlines())
 
             # 2. If it is an uncompleted todo note without internal checkboxes, treat the note itself as a task
             if is_todo and not found_checkboxes and todo_completed == 0:
@@ -349,7 +389,7 @@ class JoplinEngine:
 
             # 2. Targeted regex string replacement with conflict fallback
             target_pattern = re.compile(
-                r"^[ \t]*-\s*\[ \]\s*" + re.escape(task.title) + r"$",
+                r"^([ \t]*)-\s*\[ \]\s*" + re.escape(task.title) + r"[ \t]*$",
                 flags=re.MULTILINE,
             )
 
@@ -362,7 +402,8 @@ class JoplinEngine:
                 return False, f"Conflict: Task '{task.title}' was modified externally in Joplin"
 
             # 3. Replace only the single matching task checkbox
-            updated_body = target_pattern.sub(f"- [x] {task.title}", body, count=1)
+            # Keep the item's indentation so nested checklists stay nested
+            updated_body = target_pattern.sub(lambda m: f"{m.group(1)}- [x] {task.title}", body, count=1)
 
             # 4. PUT updated body
             success = self.api_client.update_note(parent_id, {"body": updated_body})

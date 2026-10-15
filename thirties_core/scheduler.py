@@ -434,9 +434,9 @@ class DeterministicScheduler:
     def routine_spans(self, target_date: date) -> List[EventSpan]:
         """Default work and sleep for a diurnal date, from config.
 
-        Work runs from work_start_thirty through the end of work_end_thirty on
-        target_date. Sleep is the night of target_date: from sleep_start_thirty
-        until sleep_end_thirty the following morning.
+        Work runs from work_start_thirty through the end of work_end_thirty, on the
+        configured work_days only. Sleep is the night of target_date: from
+        sleep_start_thirty until sleep_end_thirty the following morning.
         """
         gen = self.config.general
         tz = self.tz
@@ -454,10 +454,11 @@ class DeterministicScheduler:
 
         # Deterministic ids, so devices that both materialize a day produce the same spans.
         day = target_date.isoformat()
-        return [
-            EventSpan(f"routine-{day}-work", "Work", work_start, work_end, SpanCategory.WORK, source="routine"),
-            EventSpan(f"routine-{day}-sleep", "Sleep", sleep_start, sleep_end, SpanCategory.SLEEP, source="routine"),
-        ]
+        spans = [EventSpan(f"routine-{day}-sleep", "Sleep", sleep_start, sleep_end, SpanCategory.SLEEP, source="routine")]
+        weekday = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[target_date.weekday()]
+        if weekday in [d.strip().lower()[:3] for d in gen.work_days]:
+            spans.insert(0, EventSpan(f"routine-{day}-work", "Work", work_start, work_end, SpanCategory.WORK, source="routine"))
+        return spans
 
     def ensure_routines(self, target_date: date) -> None:
         """Materialize default work and sleep for a date once; later edits are never overwritten."""

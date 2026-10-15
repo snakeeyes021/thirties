@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
@@ -80,6 +81,24 @@ class FrontierBrain:
         else:
             when = f"{date_str} (not today; today is {now.strftime('%A, %B %d')})."
 
+        avail = plan.availability(now if is_today else None)
+        services = self.tools.services
+        assistant = self.tools.assistant
+        profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
+        memory = "\n".join(f"- {n.text} (id {n.id})" for n in services.memory.notes()) if services else ""
+        stats = "\n".join(f"- {f}" for f in assistant.statistics_facts()) if assistant else ""
+        review_block = ""
+        if services and self.tools.scheduler:
+            from thirties_core.stats import unreviewed_spans
+            since = plan.day_start - timedelta(days=1)
+            recent = self.tools.scheduler.state_db.get_spans_between(since, now)
+            waiting = unreviewed_spans(recent, now, since)
+            if waiting:
+                review_block = ("WAITING FOR AN OUTCOME (ask about these once, briefly, when it fits; record with log_outcome)\n"
+                                + "\n".join(f"- {s.start_dt.strftime('%a')} {format_clock(s.start_dt)} – "
+                                             f"{format_clock(s.end_dt)}: {s.title} id={s.id}" for s in waiting[-8:])
+                                + "\n\n")
+
         pending = [s for s in plan.spans_in_view() if s.tentative]
         invites = "\n".join(
             f"- {s.title}, {format_clock(s.start_dt)} – {format_clock(s.end_dt)} id={s.id}" for s in pending
@@ -89,7 +108,7 @@ class FrontierBrain:
 
 PLANNING DATE: {when}
 Sunrise {format_clock(plan.sunrise)}, sunset {format_clock(plan.sunset)}. This day runs from {format_clock(plan.day_start)} until {format_clock(plan.day_end)} tomorrow morning, so tonight belongs to this day.
-Open thirties (30-minute chunks) left: {plan.daylight_available_count} in daylight, {plan.dark_available_count} in the dark.
+Open thirties (30-minute chunks) still ahead: {avail["daylight_open"]} in daylight, {avail["dark_open"]} in the dark.
 
 SCHEDULE
 {self.tools.schedule_text(upcoming_from=now if is_today else None)}
@@ -97,8 +116,17 @@ SCHEDULE
 UNCONFIRMED CALENDAR INVITES
 {invites}
 
-BACKLOG
+{review_block}BACKLOG
 {self.build_backlog_summary()}
+
+USER PROFILE (what you know about the user's life; keep it current with update_profile)
+{profile}
+
+YOUR MEMORY NOTES (how things work for this user; add with remember, delete with forget)
+{memory}
+
+STATISTICS (computed from what actually happened)
+{stats}
 
 HOW TO CHANGE THE SCHEDULE
 Put each tool call on its own line, exactly in this form, then write your reply to the user as normal text:
@@ -116,9 +144,13 @@ RULES
 4. To change something already on the schedule, use update_event or remove_event with its id. For example, "work went til 4:30" means updating the work item's end. Don't recreate items, and don't touch items the user didn't mention.
 5. A result starting with {NOT_DONE} means nothing changed. Tell the user plainly and offer a way forward. Calendar commitments are never overwritten.
 6. Daylight and dark are physical facts, not rules about what belongs when. Only consider them when it physically matters (a daylight hike) or the user has said what they prefer.
-7. Call finalize_day only when the user explicitly says they're done planning.
+7. Changes are live the moment you make them. There is no separate step to save, confirm, "lock in" or finalize a plan, so never offer one.
 8. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
-9. Be concise: a few sentences. Talk in clock times; never mention ids or block numbers to the user.
+9. Be concise: a few sentences. Talk in clock times; never mention ids or block numbers to the user. When you describe two or more scheduled items, put each on its own line ("- 5:00 PM – 6:00 PM: Dinner"), never in a running paragraph.
+10. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome. If they don't say when, estimate and pass estimated=true. If you're unsure whether something happened, ask a short check-in question ("Did you get to X, or are you still on Y?"). If they mention how they feel, log_energy.
+11. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
+12. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
+13. Things done at the same time (an audiobook during dinner, a podcast on a walk) can share the time: add the second one with alongside=true.
 """
 
     def build_backlog_summary(self) -> str:
@@ -198,10 +230,20 @@ RULES
                 nb_block.append(f"### Note: \"{title}\"{note_type_badge}")
 
                 if note_tasks:
-                    nb_block.append("  Active Checklist Items:")
+                    nb_block.append("  Open checklist items:")
+                    depth: Dict[str, int] = {}
+                    current_section = None
                     for t in note_tasks:
+                        if t.section != current_section:
+                            current_section = t.section
+                            if t.section:
+                                tag = " (SOMEDAY/MAYBE: not committed; don't suggest unless asked)" if t.someday else ""
+                                nb_block.append(f"  Section '{t.section}'{tag}:")
+                        depth[t.id] = depth.get(t.parent_task_id, -1) + 1 if t.parent_task_id else 0
+                        indent = "  " * (depth[t.id] + 1)
                         def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
-                        nb_block.append(f"  - [ID: {t.id}] '{t.title}'{def_str}")
+                        maybe = " [someday]" if t.someday and not t.section else ""
+                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}")
                 elif is_todo and todo_comp == 0:
                     nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
                     if body.strip():

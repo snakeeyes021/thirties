@@ -16,12 +16,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from thirties_core.astronomy import get_current_time
+from thirties_core.assistant_tools import (
+    ASSISTANT_READ_ONLY,
+    ASSISTANT_TOOL_SPECS,
+    AssistantTools,
+    Services,
+    ToolError,
+)
+from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.clock import (
     ClockError,
     format_clock,
     format_duration,
+    parse_day,
     parse_duration_minutes,
     parse_shift_minutes,
     resolve_clock,
@@ -32,10 +40,6 @@ from thirties_core.scheduler import DeterministicScheduler
 logger = logging.getLogger(__name__)
 
 NOT_DONE = "NOT_DONE"
-
-
-class ToolError(Exception):
-    """A tool call that cannot be carried out; nothing was changed."""
 
 
 # Tool contract shared by every brain. Times are clock strings like "4:30 PM";
@@ -52,6 +56,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "category": "'activity' (default), 'task' (with task_id), 'work' or 'sleep'.",
             "task_id": "Backlog task ID when scheduling a backlog task.",
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
+            "alongside": "true if it happens at the same time as something else (e.g. an audiobook during dinner).",
+            "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
         },
         "required": ["title", "start"],
     },
@@ -66,13 +72,14 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "shift": "Move the whole item, keeping its length: '+1 hour' is later, '-30 minutes' is earlier.",
             "title": "New title.",
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
+            "day": "The day the item is on (default: the day being planned).",
         },
         "required": ["event"],
     },
     {
         "name": "remove_event",
         "description": "Take an item off the schedule (including work or sleep, e.g. for a day off).",
-        "parameters": {"event": "The item's id (or its exact title)."},
+        "parameters": {"event": "The item's id (or its exact title).", "day": "The day the item is on (default: the day being planned)."},
         "required": ["event"],
     },
     {
@@ -83,6 +90,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "end": "Clock time the stretch ends.",
             "include_work": "true to also clear work in that stretch.",
             "include_sleep": "true to also clear sleep in that stretch.",
+            "day": "Which day (default: the day being planned).",
         },
         "required": ["start", "end"],
     },
@@ -94,13 +102,14 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "after": "Earliest clock time to consider.",
             "before": "Latest clock time to consider.",
             "daylight": "true for daylight only, false for dark only.",
+            "day": "Which day (default: the day being planned).",
         },
         "required": [],
     },
     {
         "name": "list_schedule",
-        "description": "Show the current schedule. Read-only; you will see the result before replying.",
-        "parameters": {},
+        "description": "Show a day's schedule (any day). Read-only; you will see the result before replying.",
+        "parameters": {"day": "Which day, e.g. 'tomorrow' or 'Oct 20' (default: the day being planned)."},
         "required": [],
     },
     {
@@ -112,15 +121,11 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         },
         "required": ["event", "attend"],
     },
-    {
-        "name": "finalize_day",
-        "description": "Lock in the day's plan. Only when the user explicitly says they are done planning.",
-        "parameters": {"notes": "Optional notes for the day."},
-        "required": [],
-    },
 ]
 
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time"}
+SCHEDULE_TOOL_SPECS = TOOL_SPECS
+TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS
+READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY
 
 
 def _as_bool(value: Any) -> bool:
@@ -179,10 +184,16 @@ class PlanTools:
         day_plan: DayPlan,
         ambiguous_events: List[CalendarEvent],
         scheduler: Optional[DeterministicScheduler],
+        services: Optional[Services] = None,
     ) -> None:
         self.day_plan = day_plan
         self.ambiguous_events = list(ambiguous_events)
         self.scheduler = scheduler
+        if services is None and scheduler is not None:
+            services = Services.for_db(scheduler.state_db)
+        self.services = services
+        self.assistant = AssistantTools(self, services) if services else None
+        self._other_days: Dict[Any, DayPlan] = {}
 
     # ------------------------------------------------------------------
     # Helpers
@@ -194,6 +205,34 @@ class PlanTools:
 
     def _now(self) -> datetime:
         return get_current_time(self.day_plan.day_start.tzinfo)
+
+    def today(self):
+        """The diurnal date it is right now (before sunrise still counts as yesterday)."""
+        gen = self.scheduler.config.general if self.scheduler else None
+        if gen is None:
+            return self.day_plan.target_date
+        return get_diurnal_date(self._now(), lat=gen.latitude, lon=gen.longitude, tz_name=gen.timezone)
+
+    def plan_for(self, day: Any) -> DayPlan:
+        """The plan for a day given as text ('tomorrow', 'Oct 20') relative to today."""
+        if day in (None, ""):
+            return self.day_plan
+        target = parse_day(day, self.today())
+        if target == self.day_plan.target_date:
+            return self.day_plan
+        if self.scheduler is None:
+            raise ToolError("Other days are not available here.")
+        if target not in self._other_days:
+            self._other_days[target] = self.scheduler.build_day_plan(target)[0]
+        return self._other_days[target]
+
+    def open_windows_for(self, plan: DayPlan):
+        saved = self.day_plan
+        self.day_plan = plan
+        try:
+            return self.open_windows()
+        finally:
+            self.day_plan = saved
 
     def _start(self, text: Any) -> datetime:
         return resolve_clock(str(text), self.day_plan.day_start)
@@ -309,6 +348,7 @@ class PlanTools:
         category: str = "activity",
         task_id: Optional[str] = None,
         replace_overlaps: Any = False,
+        alongside: Any = False,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -330,7 +370,7 @@ class PlanTools:
             raise ToolError("Give an end time or a duration.")
 
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
-        notes = self._place(span, _as_bool(replace_overlaps))
+        notes = [] if _as_bool(alongside) else self._place(span, _as_bool(replace_overlaps))
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
@@ -498,15 +538,6 @@ class PlanTools:
         self.day_plan.spans = [s for s in self.day_plan.spans if s.id != span.id]
         return f"Declined {self.describe(span)}; that time is free."
 
-    def finalize_day(self, notes: Optional[str] = None, **_: Any) -> str:
-        if self.scheduler:
-            self.scheduler.finalize_day_plan(self.day_plan, notes=notes)
-        else:
-            self.day_plan.is_finalized = True
-            if notes:
-                self.day_plan.notes = notes
-        return "Day plan finalized and locked in."
-
     # ------------------------------------------------------------------
     # Dispatch & state tracking
     # ------------------------------------------------------------------
@@ -521,19 +552,28 @@ class PlanTools:
             "find_open_time": self.find_open_time,
             "list_schedule": self.list_schedule,
             "resolve_calendar_event": self.resolve_calendar_event,
-            "finalize_day": self.finalize_day,
         }
+        if self.assistant:
+            handlers.update(self.assistant.handlers())
         handler = handlers.get(name)
         if handler is None:
             return f"{NOT_DONE}: unknown tool '{name}'. Available: {', '.join(handlers)}."
-        if arguments and "_parse_error" in arguments:
-            return f"{NOT_DONE}: {name} {arguments['_parse_error']}. Write the arguments as a JSON object."
+        args = dict(arguments or {})
+        if "_parse_error" in args:
+            return f"{NOT_DONE}: {name} {args['_parse_error']}. Write the arguments as a JSON object."
+        saved = self.day_plan
         try:
-            return handler(**(arguments or {}))
+            self.day_plan = self.plan_for(args.pop("day", None))
+            result = handler(**args)
+            if self.day_plan is not saved:
+                result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
+            return result
         except (ToolError, ClockError) as e:
             return f"{NOT_DONE}: {e}"
         except TypeError as e:
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
+        finally:
+            self.day_plan = saved
 
     def capture_snapshot(self) -> PlanSnapshot:
         return PlanSnapshot(

@@ -129,3 +129,68 @@ def parse_shift_minutes(value) -> int:
     if not sign:
         raise ClockError(f"Shift '{value}' needs a direction: '+1 hour' (later) or '-30 minutes' (earlier).")
     return sign * parse_duration_minutes(raw)
+
+
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september",
+           "october", "november", "december"]
+
+
+def parse_day(text, today):
+    """Resolve 'today', 'tomorrow', 'yesterday', 'monday', 'next friday', 'last tuesday',
+    'oct 20', 'october 20', '10/20' or '2026-10-20' relative to the diurnal date ``today``.
+
+    A bare weekday means the next one on or after today; 'last <weekday>' the most recent
+    before today. Month-day without a year picks the nearest such date (past or future).
+    """
+    from datetime import date as _date
+    if isinstance(text, _date):
+        return text
+    raw = str(text or "").strip().lower().replace(",", " ")
+    raw = re.sub(r"\s+", " ", raw)
+    if raw in ("", "today", "tonight", "this evening", "this morning", "this afternoon"):
+        return today
+    if raw in ("tomorrow", "tomorrow night", "tomorrow morning"):
+        return today + timedelta(days=1)
+    if raw in ("yesterday", "last night"):
+        return today - timedelta(days=1)
+    m = re.fullmatch(r"(?:in )?(\d+) days?(?: from now)?", raw)
+    if m:
+        return today + timedelta(days=int(m.group(1)))
+    m = re.fullmatch(r"(\d+) days? ago", raw)
+    if m:
+        return today - timedelta(days=int(m.group(1)))
+    m = re.fullmatch(r"(next |this |last |on )?([a-z]+)", raw)
+    if m:
+        name = next((w for w in _WEEKDAYS if w.startswith(m.group(2)) and len(m.group(2)) >= 3), None)
+        if name:
+            target = _WEEKDAYS.index(name)
+            delta = (target - today.weekday()) % 7
+            if m.group(1) == "last ":
+                return today - timedelta(days=(today.weekday() - target) % 7 or 7)
+            if m.group(1) == "next " and delta == 0:
+                delta = 7
+            return today + timedelta(days=delta)
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", raw)
+    if m:
+        return _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    month = day_num = None
+    m = re.fullmatch(r"([a-z]+)\.? (\d{1,2})(?:st|nd|rd|th)?", raw) or re.fullmatch(r"(\d{1,2})(?:st|nd|rd|th)? (?:of )?([a-z]+)", raw)
+    if m:
+        a, b = m.group(1), m.group(2)
+        word, num = (a, b) if not a.isdigit() else (b, a)
+        month = next((i + 1 for i, mo in enumerate(_MONTHS) if mo.startswith(word[:3]) and len(word) >= 3), None)
+        day_num = int(num)
+    m2 = re.fullmatch(r"(\d{1,2})/(\d{1,2})", raw)
+    if m2:
+        month, day_num = int(m2.group(1)), int(m2.group(2))
+    if month and day_num:
+        candidates = []
+        for year in (today.year - 1, today.year, today.year + 1):
+            try:
+                candidates.append(_date(year, month, day_num))
+            except ValueError:
+                pass
+        if candidates:
+            return min(candidates, key=lambda d: abs((d - today).days))
+    raise ClockError(f"Could not read the day '{text}'. Use 'today', 'tomorrow', a weekday, or a date like 'Oct 20'.")

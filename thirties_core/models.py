@@ -108,6 +108,12 @@ class EventSpan:
     tentative: bool = False  # an unconfirmed calendar invite awaiting the user's decision
     status: SpanStatus = SpanStatus.PLANNED
     notes: str = ""
+    # What actually happened, once known. time_source says how reliable the times are:
+    # "reported" (the user said), "checkin" (inferred from a check-in), "estimated" (the
+    # assistant's best guess), or "planned" (no information beyond the plan).
+    actual_start: Optional[datetime] = None
+    actual_end: Optional[datetime] = None
+    time_source: str = ""
 
     def __post_init__(self) -> None:
         if self.start_dt.timestamp() >= self.end_dt.timestamp():
@@ -146,6 +152,9 @@ class EventSpan:
             "tentative": self.tentative,
             "status": self.status.value,
             "notes": self.notes,
+            "actual_start": self.actual_start.isoformat() if self.actual_start else None,
+            "actual_end": self.actual_end.isoformat() if self.actual_end else None,
+            "time_source": self.time_source,
         }
 
     @classmethod
@@ -163,6 +172,9 @@ class EventSpan:
             tentative=data.get("tentative", False),
             status=SpanStatus(data.get("status", "planned")),
             notes=data.get("notes", ""),
+            actual_start=datetime.fromisoformat(data["actual_start"]) if data.get("actual_start") else None,
+            actual_end=datetime.fromisoformat(data["actual_end"]) if data.get("actual_end") else None,
+            time_source=data.get("time_source", ""),
         )
 
 
@@ -179,6 +191,9 @@ class TaskItem:
     estimated_thirties: int = 1
     deferred_count: int = 0
     tags: List[str] = field(default_factory=list)
+    section: str = ""                     # nearest heading above the item inside its note
+    parent_task_id: Optional[str] = None  # the checklist item this one is indented under
+    someday: bool = False                 # listed under a "someday/maybe" heading: visible, never pushed
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -251,6 +266,20 @@ class DayPlan:
             return None
         return min(occupants, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt))
 
+    def display_title(self, block: ThirtyBlock) -> Optional[str]:
+        """Title for a thirty, joining things done at the same time ("Dinner + Audiobook")."""
+        occupants = self.spans_overlapping(block.start_dt, block.end_dt)
+        if not occupants:
+            return None
+        foreground = [s for s in occupants if not s.is_envelope]
+        if not foreground:
+            return self.display_span(block).title
+        titles: List[str] = []
+        for s in sorted(foreground, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt)):
+            if s.title not in titles:
+                titles.append(s.title)
+        return " + ".join(titles)
+
     def is_open(self, block: ThirtyBlock) -> bool:
         return not self.spans_overlapping(block.start_dt, block.end_dt)
 
@@ -258,6 +287,25 @@ class DayPlan:
         return any(s.is_envelope for s in self.spans_overlapping(block.start_dt, block.end_dt))
 
     # --- budgets (derived, never stored) ---
+
+    def availability(self, now: Optional[datetime] = None) -> Dict[str, int]:
+        """Open and schedulable thirties that haven't ended yet, split by daylight and dark.
+
+        "total" counts thirties outside work and sleep; "open" those of them with nothing
+        planned. With ``now``, thirties that have already ended are left out of both, so
+        "Daylight 1/5" means one open daylight thirty among the five still ahead.
+        """
+        counts = {"daylight_open": 0, "daylight_total": 0, "dark_open": 0, "dark_total": 0}
+        for b in self.blocks:
+            if now is not None and b.end_dt.timestamp() <= now.timestamp():
+                continue
+            if self._in_envelope(b):
+                continue
+            key = "daylight" if b.is_sunlight else "dark"
+            counts[f"{key}_total"] += 1
+            if self.is_open(b):
+                counts[f"{key}_open"] += 1
+        return counts
 
     @property
     def daylight_available_count(self) -> int:

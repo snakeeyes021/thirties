@@ -28,3 +28,6 @@ _flatpak_build/
 .venv/
 venv/
 docs/eval_reports/
+
+# Local agent tooling (worktrees, settings)
+.claude/

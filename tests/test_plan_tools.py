@@ -183,14 +183,6 @@ class TestReadOnlyAndCalendar(unittest.TestCase):
         plan, pending = t.scheduler.build_day_plan(DAY)
         self.assertEqual((pending, occupant(plan, "19:00"), occupant(plan, "21:00")), ([], "Team dinner", None))
 
-    def test_finalize_and_unfinalize_on_change(self) -> None:
-        t = tools_for()
-        t.execute("finalize_day", {"notes": "set"})
-        self.assertTrue(t.day_plan.is_finalized)
-        t.execute("add_event", {"title": "Walk", "start": "5:00 PM", "duration": "30 min"})
-        self.assertFalse(t.day_plan.is_finalized)
-        self.assertFalse(t.scheduler.state_db.get_day_meta(DAY).is_finalized)
-
     def test_snapshot_delta(self) -> None:
         t = tools_for()
         before = t.capture_snapshot()

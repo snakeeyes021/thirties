@@ -67,9 +67,11 @@ def occupancy(plan, t: datetime) -> Tuple[str, str]:
     covering = [s for s in plan.spans_overlapping(t, t + timedelta(minutes=1))]
     if not covering or block is None:
         return ("open", "")
-    s = min(covering, key=lambda s: {"calendar": 0, "task": 1, "activity": 1, "work": 2, "sleep": 3}[s.category.value])
+    rank = {"calendar": 0, "task": 1, "activity": 1, "work": 2, "sleep": 3}
+    s = min(covering, key=lambda s: rank[s.category.value])
     cat = "activity" if s.category.value == "task" else s.category.value
-    return (cat, s.title)
+    same = sorted({c.title for c in covering if rank[c.category.value] == rank[s.category.value]})
+    return (cat, " + ".join(same))
 
 
 Check = Callable[["Run"], Optional[str]]  # returns None if OK, else a failure message
@@ -105,6 +107,18 @@ def unchanged_outside(windows: List[Tuple[str, str]]) -> Check:
     return check
 
 
+def occupied_on_day(day_offset: int, hhmm: str, category: str, title_contains: str = "") -> Check:
+    """Like occupied_by, but on another diurnal day's plan (day_offset days after the scenario day)."""
+    def check(run: "Run") -> Optional[str]:
+        plan, _ = run.scheduler.build_day_plan(DAY + timedelta(days=day_offset))
+        cat, title = occupancy(plan, at(hhmm, day_offset))
+        if cat != category or title_contains.lower() not in title.lower():
+            return f"day+{day_offset} {hhmm}: expected {category} ~ {title_contains!r}, got {cat} ({title!r})"
+        return None
+    check.__doc__ = f"day+{day_offset} {hhmm} is {category} ~ {title_contains}"
+    return check
+
+
 def no_changes() -> Check:
     c = unchanged_outside([])
     c.__doc__ = "schedule unchanged"
@@ -123,10 +137,12 @@ def nothing_overlaps(title: str) -> Check:
     return check
 
 
-def finalized(expected: bool) -> Check:
+def reply_avoids(*phrases: str) -> Check:
     def check(run: "Run") -> Optional[str]:
-        return None if bool(run.plan.is_finalized) == expected else f"is_finalized={run.plan.is_finalized}, expected {expected}"
-    check.__doc__ = f"finalized={expected}"
+        said = " ".join(run.replies).lower()
+        found = [p for p in phrases if p in said]
+        return f"replies mention {found}" if found else None
+    check.__doc__ = f"replies avoid {phrases}"
     return check
 
 
@@ -236,16 +252,23 @@ SCENARIOS: List[Scenario] = [
         checks=[occupied_by("19:30", "calendar", "dinner"), occupied_by("20:30", "calendar", "dinner")],
     ),
     Scenario(
-        "negotiate_then_finalize", "Finalize only on explicit confirmation.",
+        "wrap_up_without_ceremony", "Finishing planning needs no 'lock in' step: changes are already live.",
         now="08:00",
-        turns=["let's put a 30 minute walk at 5pm", "great, that's everything, lock it in"],
-        checks=[occupied_by("17:15", "activity", "walk"), finalized(True)],
+        turns=["let's put a 30 minute walk at 5pm", "great, that's everything"],
+        checks=[occupied_by("17:15", "activity", "walk"), reply_avoids("lock it in", "lock in", "finalize")],
     ),
     Scenario(
-        "no_premature_finalize", "Mid-negotiation must not finalize.",
-        now="08:00",
-        turns=["let's put a 30 minute walk at 5pm, I'm still thinking about the rest"],
-        checks=[occupied_by("17:15", "activity", "walk"), finalized(False)],
+        "together_at_once", "Two things at the same time (dinner with an audiobook) both stay on the schedule.",
+        now="17:00",
+        turns=["dinner from 6 to 7 tonight, and I'll listen to Dungeon Crawler Carl while I cook and eat"],
+        checks=[occupied_by("18:15", "activity", "dinner"), occupied_by("18:15", "activity", "carl"),
+                unchanged_outside([("18:00", "19:00")])],
+    ),
+    Scenario(
+        "tomorrow_not_today", "Plans for another day land on that day, not today.",
+        now="09:00",
+        turns=["tomorrow morning, put 1 hour of NAS and router moving at 9am"],
+        checks=[no_changes(), occupied_on_day(1, "09:15", "activity", "nas")],
     ),
 ]
 
@@ -258,6 +281,7 @@ SCENARIOS: List[Scenario] = [
 class Run:
     scenario: Scenario
     plan: object = None
+    scheduler: object = None
     baseline: dict = field(default_factory=dict)
     replies: List[str] = field(default_factory=list)
     transcript: list = field(default_factory=list)
@@ -302,6 +326,7 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
                 raise RuntimeError("model transport failed: " + failed[0][:300])
         run.seconds = time_mod.time() - start
         run.plan = mgr.day_plan
+        run.scheduler = sched
         run.transcript = [m for m in mgr.messages if m.get("role") != "system"]
         for check in scn.checks:
             msg = check(run)

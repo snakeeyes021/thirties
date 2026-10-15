@@ -30,4 +30,13 @@ class Brain(Protocol):
         ...
 
 
-__all__ = ["Brain", "FrontierBrain"]
+def make_brain(config, tools, inference_engine, tasks=None, active_notes=None) -> Brain:
+    """The brain chosen by ``[assistant] brain`` in config ("frontier" or "slm")."""
+    choice = (getattr(getattr(config, "assistant", None), "brain", "frontier") or "frontier").lower()
+    if choice == "slm":
+        from thirties_core.brains.slm import SlmBrain
+        return SlmBrain(tools, tasks=tasks, config=config)
+    return FrontierBrain(tools, inference_engine, tasks=tasks, active_notes=active_notes)
+
+
+__all__ = ["Brain", "FrontierBrain", "make_brain"]

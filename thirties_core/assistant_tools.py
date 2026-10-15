@@ -1,0 +1,406 @@
+"""Tools beyond the day's schedule: outcomes, review, memory, profile, history, statistics.
+
+These sit next to the schedule tools in ``PlanTools`` and share its dispatcher and
+contract: natural-language arguments in, short plain-English results out, and a
+result starting with ``NOT_DONE`` when nothing changed.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes
+from thirties_core.memory import PROFILE_SECTIONS, ConversationStore, EnergyLog, MemoryStore, ProfileStore
+from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
+from thirties_core.stats import fact_lines, unreviewed_spans
+
+if TYPE_CHECKING:
+    from thirties_core.joplin_engine import JoplinEngine
+    from thirties_core.plan_tools import PlanTools
+
+logger = logging.getLogger(__name__)
+
+
+class ToolError(Exception):
+    """A tool call that cannot be carried out; nothing was changed."""
+
+
+@dataclass
+class Services:
+    """Everything beyond the day plan that tools and brains read or write."""
+    conversations: ConversationStore
+    profile: ProfileStore
+    memory: MemoryStore
+    energy: EnergyLog
+    tasks: List[TaskItem] = field(default_factory=list)
+    joplin: Optional["JoplinEngine"] = None
+
+    @classmethod
+    def for_db(cls, db, tasks: Optional[List[TaskItem]] = None, joplin=None) -> "Services":
+        return cls(ConversationStore(db), ProfileStore(db), MemoryStore(db), EnergyLog(db), list(tasks or []), joplin)
+
+
+ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "log_outcome",
+        "description": "Record what happened with a planned item or a backlog task: done, partly done, or skipped. "
+                       "Done backlog tasks are checked off in Joplin.",
+        "parameters": {
+            "event": "The item's id or title (a schedule item, or a backlog task).",
+            "status": "'done', 'partial' or 'skipped'.",
+            "started": "Clock time it actually started, if known.",
+            "finished": "Clock time it actually finished, if known.",
+            "duration": "How long it actually took, if known, e.g. '45 minutes'.",
+            "estimated": "true if the times are your best guess rather than what the user said.",
+            "note": "Optional note.",
+        },
+        "required": ["event", "status"],
+    },
+    {
+        "name": "log_energy",
+        "description": "Record how energetic the user says they feel, 1 (drained) to 5 (great).",
+        "parameters": {"level": "1 to 5.", "note": "Optional note."},
+        "required": ["level"],
+    },
+    {
+        "name": "review_day",
+        "description": "List planned items that have ended with no outcome recorded, and suggest where unfinished "
+                       "backlog tasks could go. Read-only.",
+        "parameters": {"day": "Which day to review (default: today)."},
+        "required": [],
+    },
+    {
+        "name": "remember",
+        "description": "Save a short note about how things work for this user (e.g. 'Probation items are maybes').",
+        "parameters": {"note": "The note."},
+        "required": ["note"],
+    },
+    {
+        "name": "forget",
+        "description": "Delete a memory note.",
+        "parameters": {"note_id": "The note's id."},
+        "required": ["note_id"],
+    },
+    {
+        "name": "update_profile",
+        "description": "Add to or rewrite a section of the user profile: " + ", ".join(PROFILE_SECTIONS) + ".",
+        "parameters": {
+            "section": "Section name.",
+            "text": "What to add (one line) or the new section text.",
+            "replace": "true to replace the whole section instead of adding a line.",
+        },
+        "required": ["section", "text"],
+    },
+    {
+        "name": "search_history",
+        "description": "Search past conversations for a topic. Read-only.",
+        "parameters": {"query": "Words to look for."},
+        "required": ["query"],
+    },
+    {
+        "name": "list_conversations",
+        "description": "List conversations in a date range. Read-only.",
+        "parameters": {"from_day": "First day (default: a week ago).", "to_day": "Last day (default: today)."},
+        "required": [],
+    },
+    {
+        "name": "read_conversation",
+        "description": "Read a past conversation. Read-only.",
+        "parameters": {"conversation_id": "The conversation's id."},
+        "required": ["conversation_id"],
+    },
+    {
+        "name": "get_statistics",
+        "description": "Statistics on completion, real durations, best times of day and energy. Read-only.",
+        "parameters": {"days": "How many days back to look (default 60)."},
+        "required": [],
+    },
+    {
+        "name": "search_backlog",
+        "description": "Find backlog tasks by keywords. Read-only.",
+        "parameters": {"query": "Words to look for."},
+        "required": ["query"],
+    },
+]
+
+ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
+                       "get_statistics", "search_backlog"}
+
+
+def _words(text: str) -> List[str]:
+    return [w for w in re.findall(r"[a-z0-9']+", text.lower()) if len(w) > 1]
+
+
+def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskItem]:
+    """Backlog tasks most relevant to a query (keyword overlap with title, note, notebook and section)."""
+    q = set(_words(query))
+    if not q:
+        return []
+    scored = []
+    for t in tasks:
+        title = set(_words(t.title))
+        context = set(_words(f"{t.parent_note_title or ''} {t.section} {t.source_notebook}"))
+        score = 3 * len(q & title) + len(q & context)
+        if score:
+            scored.append((score, -len(t.title), t))
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [t for _, _, t in scored[:limit]]
+
+
+def describe_task(t: TaskItem) -> str:
+    where = " > ".join(x for x in (t.source_notebook, t.parent_note_title, t.section) if x)
+    flags = []
+    if t.someday:
+        flags.append("someday/maybe")
+    if t.deferred_count:
+        flags.append(f"deferred {t.deferred_count}x")
+    return f"{t.title} [{where}]" + (f" ({', '.join(flags)})" if flags else "") + f" task_id={t.id}"
+
+
+class AssistantTools:
+    """Outcome, review, memory, profile, history and statistics tools."""
+
+    def __init__(self, plan_tools: "PlanTools", services: Services) -> None:
+        self.pt = plan_tools
+        self.s = services
+
+    # --- helpers ---
+
+    @property
+    def _db(self):
+        return self.pt.scheduler.state_db if self.pt.scheduler else None
+
+    def _today(self):
+        return self.pt.today()
+
+    def _find_task(self, ref: str) -> Optional[TaskItem]:
+        ref = ref.strip()
+        exact = [t for t in self.s.tasks if t.id == ref or t.title.lower() == ref.lower()]
+        if exact:
+            return exact[0]
+        ranked = rank_tasks(self.s.tasks, ref, limit=2)
+        if len(ranked) == 1 or (ranked and len(set(_words(ref)) & set(_words(ranked[0].title))) >= 2):
+            return ranked[0]
+        return None
+
+    def _complete_backlog_task(self, task: TaskItem) -> str:
+        if self._db:
+            self._db.record_task_completed(task.id)
+        if self.s.joplin is None:
+            return "(not checked off in Joplin: no Joplin connection)"
+        ok, msg = self.s.joplin.complete_task(task)
+        if ok:
+            self.s.tasks = [t for t in self.s.tasks if t.id != task.id]
+            return "and checked it off in Joplin"
+        return f"(could not check it off in Joplin: {msg})"
+
+    # --- outcomes ---
+
+    def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
+                    estimated: Any = False, note: str = "", **_: Any) -> str:
+        try:
+            st = SpanStatus(str(status).strip().lower())
+        except ValueError:
+            raise ToolError("status must be 'done', 'partial' or 'skipped'.")
+        if st == SpanStatus.PLANNED:
+            raise ToolError("status must be 'done', 'partial' or 'skipped'.")
+
+        span = None
+        try:
+            span = self.pt._find_span(event)
+        except Exception:
+            span = None
+        task = None if span else self._find_task(str(event))
+        if span is None and task is None:
+            raise ToolError(f"There is no schedule item or backlog task matching '{event}'.")
+
+        start_dt = self.pt._start(started) if started not in (None, "") else None
+        end_dt = self.pt._end(finished, start_dt or self.pt.day_plan.day_start) if finished not in (None, "") else None
+        if start_dt and end_dt is None and duration not in (None, ""):
+            end_dt = start_dt + timedelta(minutes=parse_duration_minutes(duration))
+        if end_dt and start_dt is None and duration not in (None, ""):
+            start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
+        guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+
+        if span is None:
+            # A backlog task done outside the plan: record it on the schedule if we know when.
+            result = f"Marked '{task.title}' {st.value}"
+            if st == SpanStatus.DONE:
+                result += " " + self._complete_backlog_task(task)
+            elif st == SpanStatus.SKIPPED and self._db:
+                self._db.record_task_deferred(task.id)
+            if start_dt or end_dt:
+                end_dt = end_dt or start_dt + timedelta(minutes=30)
+                start_dt = start_dt or end_dt - timedelta(minutes=30)
+                logged = EventSpan(new_span_id(), task.title, start_dt, end_dt, SpanCategory.TASK, task_id=task.id,
+                                   status=st, actual_start=start_dt, actual_end=end_dt, notes=note,
+                                   time_source="estimated" if guessed or not (started and finished) else "reported")
+                self.pt.day_plan.spans.append(logged)
+                self.pt._persist(logged)
+                result += f"; logged it {format_clock(start_dt)} – {format_clock(end_dt)}"
+            return result + "."
+
+        if span.source == "calendar" or span.is_envelope:
+            raise ToolError(f"Outcomes are tracked for planned activities, not for {span.title}.")
+        span.status = st
+        if note:
+            span.notes = note
+        if st != SpanStatus.SKIPPED:
+            planned_minutes = span.duration_minutes
+            if start_dt and not end_dt:
+                end_dt = start_dt + timedelta(minutes=planned_minutes)
+            if end_dt and not start_dt:
+                start_dt = end_dt - timedelta(minutes=planned_minutes)
+            span.actual_start = start_dt or span.start_dt
+            span.actual_end = end_dt or span.end_dt
+            if started not in (None, "") and (finished not in (None, "") or duration not in (None, "")) and not guessed:
+                span.time_source = "reported"
+            elif start_dt or end_dt:
+                span.time_source = "estimated"
+            else:
+                span.time_source = "planned"
+        self.pt._persist(span)
+        result = f"Marked {span.title} {st.value}"
+        if span.actual_start and st != SpanStatus.SKIPPED:
+            result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
+        if span.task_id:
+            task = next((t for t in self.s.tasks if t.id == span.task_id), None)
+            if st == SpanStatus.DONE and task:
+                result += " " + self._complete_backlog_task(task)
+            elif st == SpanStatus.SKIPPED and self._db:
+                count = self._db.record_task_deferred(span.task_id)
+                result += f"; it has now been put off {count} times"
+        return result + "."
+
+    def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
+        try:
+            value = int(str(level).strip())
+        except ValueError:
+            raise ToolError("level must be a number from 1 (drained) to 5 (great).")
+        self.s.energy.record(value, at=self.pt._now(), note=note)
+        return f"Noted energy {max(1, min(5, value))}/5."
+
+    def review_day(self, **_: Any) -> str:
+        plan = self.pt.day_plan
+        now = self.pt._now()
+        pending = unreviewed_spans(plan.spans, now, plan.day_start)
+        if not pending:
+            return "Everything that has ended so far has an outcome recorded."
+        lines = [f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title} id={s.id}" for s in pending]
+        out = "No outcome recorded yet for:\n" + "\n".join(lines)
+        tasks = [s for s in pending if s.task_id]
+        if tasks and self.pt.scheduler:
+            tomorrow = plan.target_date + timedelta(days=1)
+            next_plan, _ = self.pt.scheduler.build_day_plan(tomorrow)
+            proposals = []
+            for s in tasks:
+                need = s.duration_minutes
+                slot = next(((a, b) for a, b in self.pt.open_windows_for(next_plan)
+                             if (b - a).total_seconds() // 60 >= need), None)
+                if slot:
+                    proposals.append(f"- {s.title}: tomorrow {format_clock(slot[0])} ({format_duration(need)}), "
+                                     "or back to the backlog")
+                else:
+                    proposals.append(f"- {s.title}: no {format_duration(need)} gap tomorrow; back to the backlog")
+            out += "\nIf unfinished, suggested rollover:\n" + "\n".join(proposals)
+        return out
+
+    # --- memory & profile ---
+
+    def remember(self, note: str, **_: Any) -> str:
+        if not str(note or "").strip():
+            raise ToolError("The note is empty.")
+        saved = self.s.memory.add(str(note))
+        return f"Remembered: {saved.text} (note id {saved.id})."
+
+    def forget(self, note_id: str, **_: Any) -> str:
+        if not self.s.memory.forget(str(note_id)):
+            raise ToolError(f"No memory note with id '{note_id}'.")
+        return f"Forgot note {note_id}."
+
+    def update_profile(self, section: str, text: str, replace: Any = False, **_: Any) -> str:
+        name = next((s for s in self.s.profile.sections() if s.lower() == str(section).strip().lower()), None)
+        if name is None:
+            name = next((s for s in PROFILE_SECTIONS if str(section).strip().lower() in s.lower()), None)
+        if name is None:
+            raise ToolError(f"Unknown profile section '{section}'. Sections: {', '.join(PROFILE_SECTIONS)}.")
+        if str(replace).strip().lower() in ("true", "1", "yes"):
+            self.s.profile.set_section(name, str(text))
+            return f"Rewrote the '{name}' section of the profile."
+        self.s.profile.append(name, str(text))
+        return f"Added to '{name}' in the profile."
+
+    # --- history ---
+
+    def search_history(self, query: str, **_: Any) -> str:
+        hits = self.s.conversations.search(str(query))
+        if not hits:
+            return f"Nothing in past conversations mentions '{query}'."
+        return "Matches:\n" + "\n".join(
+            f"- {h['date']} ({h['role']}, conversation {h['conversation_id']}): {h['text'][:200]}" for h in hits)
+
+    def list_conversations(self, from_day: Any = None, to_day: Any = None, **_: Any) -> str:
+        today = self._today()
+        start = parse_day(from_day, today) if from_day else today - timedelta(days=7)
+        end = parse_day(to_day, today) if to_day else today
+        convs = self.s.conversations.between(start, end)
+        if not convs:
+            return "No conversations in that range."
+        return "\n".join(f"- {c.plan_date.isoformat()} id={c.id}: {c.title or '(untitled)'} "
+                         f"({c.user_turns} messages){' — ' + c.summary if c.summary else ''}" for c in convs)
+
+    def read_conversation(self, conversation_id: str, **_: Any) -> str:
+        conv = self.s.conversations.get(str(conversation_id))
+        if conv is None:
+            raise ToolError(f"No conversation with id '{conversation_id}'.")
+        lines = [f"{m['role']}: {m.get('content', '')}" for m in conv.messages if m.get("role") in ("user", "assistant")]
+        return f"Conversation from {conv.plan_date.isoformat()}:\n" + "\n".join(lines[-40:])
+
+    # --- statistics & backlog ---
+
+    def statistics_facts(self, days: int = 60) -> List[str]:
+        if not self.pt.scheduler:
+            return []
+        now = self.pt._now()
+        db = self.pt.scheduler.state_db
+        spans = db.get_spans_between(now - timedelta(days=days), now + timedelta(days=1))
+        deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2),
+                          key=lambda x: -x[1])
+        return fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+
+    def get_statistics(self, days: Any = 60, **_: Any) -> str:
+        try:
+            n = int(str(days))
+        except ValueError:
+            n = 60
+        facts = self.statistics_facts(n)
+        return "\n".join(f"- {f}" for f in facts) if facts else "Not enough history yet for statistics."
+
+    def search_backlog(self, query: str, **_: Any) -> str:
+        found = rank_tasks(self.s.tasks, str(query))
+        if not found:
+            return f"No backlog tasks match '{query}'."
+        return "\n".join(f"- {describe_task(t)}" for t in found)
+
+    def handlers(self) -> Dict[str, Any]:
+        return {
+            "log_outcome": self.log_outcome,
+            "log_energy": self.log_energy,
+            "review_day": self.review_day,
+            "remember": self.remember,
+            "forget": self.forget,
+            "update_profile": self.update_profile,
+            "search_history": self.search_history,
+            "list_conversations": self.list_conversations,
+            "read_conversation": self.read_conversation,
+            "get_statistics": self.get_statistics,
+            "search_backlog": self.search_backlog,
+        }
+
+
+__all__ = ["AssistantTools", "Services", "ASSISTANT_TOOL_SPECS", "ASSISTANT_READ_ONLY", "rank_tasks",
+           "describe_task", "ToolError", "ClockError"]

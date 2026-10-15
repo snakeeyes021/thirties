@@ -13,10 +13,12 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import set_debug_time
-from thirties_core.brains import Brain, FrontierBrain
+from thirties_core.assistant_tools import Services
+from thirties_core.brains import Brain, make_brain
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.inference import InferenceEngine, MockInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
+from thirties_core.memory import Conversation
 from thirties_core.models import DayPlan, TaskItem
 from thirties_core.plan_tools import PlanTools
 from thirties_core.scheduler import DeterministicScheduler
@@ -25,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationManager:
-    """Pairs a day's PlanTools with a brain and routes user turns to it."""
+    """Pairs a day's PlanTools with a brain, routes user turns to it, and keeps the conversation.
+
+    Conversations persist per diurnal day: opening a day continues its most recent
+    conversation (the same one the Telegram bridge uses), and ``new_conversation``
+    starts a fresh one that becomes the current one everywhere.
+    """
 
     def __init__(
         self,
@@ -37,17 +44,72 @@ class ConversationManager:
         inference_engine: Optional[InferenceEngine] = None,
         active_notes: Optional[List[Dict[str, Any]]] = None,
         brain: Optional[Brain] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         self.joplin_engine = joplin_engine
         if active_notes is None:
             active_notes = self.joplin_engine.fetch_active_notes() if self.joplin_engine else []
-        self.tools = PlanTools(day_plan, ambiguous_events, scheduler)
-        self.brain: Brain = brain or FrontierBrain(
+        services = Services.for_db(scheduler.state_db, tasks, joplin_engine) if scheduler else None
+        self.tools = PlanTools(day_plan, ambiguous_events, scheduler, services=services)
+        self.brain: Brain = brain or make_brain(
+            scheduler.config if scheduler else None,
             self.tools,
             inference_engine or MockInferenceEngine(),
             tasks=tasks,
             active_notes=active_notes,
         )
+        self.conversation: Optional[Conversation] = None
+        if services:
+            conv = services.conversations.get(conversation_id) if conversation_id else None
+            self._load(conv or services.conversations.latest_for_day(day_plan.target_date))
+
+    # --- conversation persistence ---
+
+    @property
+    def _store(self):
+        return self.tools.services.conversations if self.tools.services else None
+
+    def _load(self, conv: Optional[Conversation]) -> None:
+        self.conversation = conv
+        self.brain.reset()
+        if conv:
+            self.brain.messages = [self.brain.messages[0]] + list(conv.messages)
+
+    def _save(self) -> None:
+        if self._store is None:
+            return
+        if self.conversation is None:
+            self.conversation = self._store.create(self.day_plan.target_date)
+        self.conversation.messages = [m for m in self.brain.messages if m.get("role") != "system"]
+        self._store.save(self.conversation)
+
+    def history(self) -> List[Dict[str, str]]:
+        """The visible transcript of the current conversation: user and assistant text only."""
+        return [{"role": m["role"], "content": m.get("content", "")}
+                for m in self.brain.messages
+                if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
+                and not str(m.get("content", "")).startswith("[System check")]
+
+    def conversations_for_day(self) -> List[Conversation]:
+        return self._store.for_day(self.day_plan.target_date) if self._store else []
+
+    def new_conversation(self) -> None:
+        """Start a fresh conversation for this day (it becomes the current one)."""
+        if self.conversation is not None and not self.conversation.messages:
+            return  # the current one is already empty
+        self._load(self._store.create(self.day_plan.target_date) if self._store else None)
+
+    def switch_conversation(self, conversation_id: str) -> bool:
+        conv = self._store.get(conversation_id) if self._store else None
+        if conv is None:
+            return False
+        self._load(conv)
+        return True
+
+    def add_assistant_message(self, text: str) -> None:
+        """Record something the assistant said on its own (e.g. a Telegram check-in)."""
+        self.brain.messages.append({"role": "assistant", "content": text})
+        self._save()
 
     @property
     def day_plan(self) -> DayPlan:
