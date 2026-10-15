@@ -361,8 +361,25 @@ class SlmBrain:
         """Drop or repair actions the message can't support (a small model sometimes invents)."""
         said = {_stem(w) for w in _words(message)}
         refers_back = bool(re.search(r"\b(it|that|those|them|these|this|same|again)\b", message.lower()))
+        lowered = message.lower()
+        slide = bool(re.search(r"\b(slide|push|shift|bump|move)\b.{0,30}\b(everything|the rest|all|things|what'?s)\b.{0,20}\b(after|later|back|down)\b"
+                               r"|\beverything (after|else) (it |that )?(slides?|moves?|gets pushed)", lowered))
+        mentions_sleep = bool(re.search(r"\b(sleep|bed|bedtime|wake|asleep)\b", lowered))
+        mentions_work = bool(re.search(r"\b(work|shift|job|office)\b", lowered))
+        if slide and any(a.type in ("add", "move") and a.get("start") for a in actions):
+            for a in actions:
+                if a.type in ("add", "move") and a.get("start") and not a.get("shift"):
+                    a.fields["push"] = True
+            # The model often spells "slide" as shifting each later item; the push does that properly.
+            actions = [a for a in actions if not (a.type == "move" and a.get("shift"))]
         kept: List[Action] = []
         for a in actions:
+            target_cats = {s.category for s in self._span_candidates(a.get("target") or "")} if a.type in ("move", "remove") else set()
+            if SpanCategory.SLEEP in target_cats and not mentions_sleep:
+                logger.info("[SlmBrain] ignoring a sleep change the user didn't ask for: %s", a.fields)
+                continue
+            if SpanCategory.WORK in target_cats and not mentions_work and a.type == "move" and a.get("shift"):
+                continue
             duration = str(a.get("duration") or "")
             m = re.match(r"^(?:until|til|till|to|ending at|ends at)\s+(.+)$", duration, re.IGNORECASE)
             if m:
@@ -1005,13 +1022,37 @@ class SlmBrain:
         if any(w in topic for w in ("talked", "said", "last week", "yesterday we", "earlier")):
             ok, out = self._run("search_history", {"query": topic})
             return out, False
-        args = {"day": day} if day else {}
-        ok, out = self._run("list_schedule", args)
-        lines = [l for l in out.splitlines() if l.startswith("- ") and "nothing yet" not in l]
-        cleaned = [re.sub(r" \(\d.*?\) \[.*?\] id=\S+$", "", l) for l in lines]
-        head = f"Here's {day or 'today'}:"
-        free = next((l for l in out.splitlines() if l.startswith("Free")), "")
-        return "\n".join([head] + cleaned + ([free] if free else [])), False
+        return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    def _schedule_answer(self, day: Optional[str], wording: str) -> str:
+        """A clean, line-per-item view of a day (or part of it), without sleep or ids."""
+        saved = self.tools.day_plan
+        try:
+            plan = self.tools.plan_for(day)
+            self.tools.day_plan = plan
+            lowered = wording.lower()
+            start, end = plan.day_start, plan.day_end
+            label = day or "today"
+            for part in ("morning", "afternoon", "evening", "tonight"):
+                if part in lowered:
+                    start, end = self._window_for(part) if not day else (start, end)
+                    label = f"the {part}" if part != "tonight" else "tonight"
+                    if self._is_today() and part in ("evening", "tonight"):
+                        start = max(datetime.combine(plan.day_start.date(), time(17, 0), tzinfo=start.tzinfo), plan.day_start)
+                    if part in ("afternoon", "morning"):
+                        start = min(start, self._window_for(part)[0])
+                    break
+            items = [s for s in plan.spans_overlapping(start, end, include_tentative=True)
+                     if s.category != SpanCategory.SLEEP]
+            if not items:
+                return f"Nothing is planned for {label} yet."
+            lines = [f"Here's {label}:"]
+            for s in items:
+                note = " (unconfirmed)" if s.tentative else (f" ({s.status.value})" if s.status.value != "planned" else "")
+                lines.append(f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title}{note}")
+            return "\n".join(lines)
+        finally:
+            self.tools.day_plan = saved
 
     def _do_remember(self, a: Action) -> Tuple[str, bool]:
         text = a.get("text") or a.get("topic")

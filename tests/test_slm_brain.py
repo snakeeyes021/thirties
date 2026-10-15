@@ -201,6 +201,26 @@ class TestSchedulingActions(SlmTestCase):
         self.assertIn("Added Laundry: 7:30 PM – 8:30 PM (1h). (I guessed an hour", out)
         self.assertIn("Added Reading: 8:30 PM – 9:30 PM", out)
 
+    def test_slide_everything_after_and_never_touch_sleep_unasked(self):
+        for title, start, end in [("Upgrades", "7:00", "8:00"), ("Chores", "8:00", "9:00")]:
+            self.say(f"{title} {start} to {end}", {"type": "add", "title": title, "start": start, "end": end})
+        out = self.say("lunch at 7 for 30 minutes and slide everything after it later",
+                       {"type": "add", "title": "Lunch", "start": "7", "duration": "30 minutes"},
+                       {"type": "move", "target": "chores", "shift": "+30 minutes"},
+                       {"type": "move", "target": "sleep", "shift": "+30 minutes"})
+        self.assertIn("Added Lunch: 7:00 PM – 7:30 PM", out)
+        self.assertEqual(occupant(self.m.day_plan, "19:30"), "Upgrades")
+        self.assertEqual(occupant(self.m.day_plan, "20:30"), "Chores")
+        self.assertEqual(occupant(self.m.day_plan, "23:00"), "Sleep")
+
+    def test_clean_list_for_part_of_the_day(self):
+        self.say("reading at 7", {"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"})
+        out = self.say("show me a clean list of the evening", {"type": "question", "topic": "schedule"})
+        self.assertTrue(out.startswith("Here's the evening:"), out)
+        self.assertIn("- 7:00 PM – 8:00 PM: Reading", out)
+        self.assertNotIn("Sleep", out)
+        self.assertNotIn("daylight", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour
