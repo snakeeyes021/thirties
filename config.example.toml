@@ -34,3 +34,22 @@ api_token = ""
 # Syncs Thirties state between computers through a note in Joplin.
 # Leave off unless you run Thirties on more than one computer.
 enabled = false
+
+# [media]
+# Public "want to read / want to watch" lists, read without logins or tokens.
+# Each list must be public. Leave a value empty to skip that service.
+# Lists are cached in ~/.cache/thirties/media/ and refreshed every cache_hours.
+#
+# Goodreads: the number in your profile URL, e.g. goodreads.com/user/show/12345-jane -> "12345".
+# goodreads_user_id = ""
+# goodreads_shelves = ["to-read"]
+#
+# Letterboxd: your username, as in letterboxd.com/<username>/watchlist/.
+# letterboxd_username = ""
+#
+# Serializd: your username (uses Serializd's unofficial web API, which may change).
+# serializd_username = ""
+#
+# cache_hours = 12.0
+# Extra page loads per refresh to fill in Letterboxd directors and Serializd years.
+# detail_lookups_per_refresh = 25

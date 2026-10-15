@@ -95,6 +95,19 @@ class SyncConfig:
 
 
 @dataclass
+class MediaConfig:
+    """Public media wishlists (read-only, no logins). Empty values disable a source."""
+    goodreads_user_id: str = ""
+    goodreads_shelves: List[str] = field(default_factory=lambda: ["to-read"])
+    letterboxd_username: str = ""
+    serializd_username: str = ""
+    cache_hours: float = 12.0
+    # Per refresh, at most this many extra page loads to fill in missing
+    # Letterboxd directors / Serializd premiere years (results are remembered).
+    detail_lookups_per_refresh: int = 25
+
+
+@dataclass
 class ThirtiesConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     joplin: JoplinConfig = field(default_factory=JoplinConfig)
@@ -103,6 +116,7 @@ class ThirtiesConfig:
     sync: SyncConfig = field(default_factory=SyncConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
+    media: MediaConfig = field(default_factory=MediaConfig)
 
     def resolve_joplin_db_path(self) -> Optional[Path]:
         """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
@@ -160,6 +174,7 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     sync_data = data.get("sync", {})
     telegram_data = data.get("telegram", {})
     assistant_data = data.get("assistant", {})
+    media_data = data.get("media", {})
 
     return ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),
@@ -169,4 +184,5 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
         sync=SyncConfig(**sync_data) if sync_data else SyncConfig(),
         telegram=TelegramConfig(**telegram_data) if telegram_data else TelegramConfig(),
         assistant=AssistantConfig(**assistant_data) if assistant_data else AssistantConfig(),
+        media=MediaConfig(**media_data) if media_data else MediaConfig(),
     )
