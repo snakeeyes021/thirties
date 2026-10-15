@@ -523,6 +523,7 @@ class ThirtiesTelegramBridge:
         print("=======================================================\\n")
 
         self.running = True
+        self.conv_manager.warm_in_background()
         self._notifier_thread = threading.Thread(target=self._notifier_loop, daemon=True, name="BlockNotifier")
         self._notifier_thread.start()
 

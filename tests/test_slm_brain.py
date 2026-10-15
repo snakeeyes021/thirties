@@ -27,13 +27,18 @@ TASKS = [
 
 
 class FakeSession:
-    def __init__(self, replies):
+    def __init__(self, replies, default='{"actions":[{"type":"chat"}]}'):
         self.replies = replies
         self.seen = []
+        self.default = default
 
     def ask(self, text):
         self.seen.append(text)
-        return self.replies.pop(0) if self.replies else '{"actions":[{"type":"chat"}]}'
+        if self.replies:
+            return self.replies.pop(0)
+        if "DRAFT:\n" in text:
+            return text.split("DRAFT:\n", 1)[1]  # voice: echo the draft unchanged
+        return self.default
 
     def close(self):
         pass
@@ -41,11 +46,14 @@ class FakeSession:
 
 class FakeRuntime:
     def __init__(self):
-        self.parse_replies, self.pick_replies = [], []
+        self.parse_replies, self.pick_replies, self.voice_replies = [], [], []
         self.parse = FakeSession(self.parse_replies)
         self.pick = FakeSession(self.pick_replies)
+        self.voice = FakeSession(self.voice_replies)
 
     def parser(self, system):
+        if system.startswith("You are Thirties, a warm"):
+            return self.voice
         return self.pick if system.startswith("You help choose") else self.parse
 
     def json_call(self, system, user, schema, max_output_tokens=256):
@@ -183,6 +191,24 @@ class TestProposalsAndOutcomes(SlmTestCase):
     def test_unparseable_output_falls_back(self):
         out = self.say("hmm", "sorry I can't do JSON")
         self.assertEqual(out, "Happy to help!")
+
+
+class TestVoice(SlmTestCase):
+
+    def test_natural_rewrite_is_used_when_facts_survive(self):
+        self.rt.voice_replies.append("Done! Walk is set for 5:00 PM – 5:30 PM. You're free after that.")
+        out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
+        self.assertTrue(out.startswith("Done! Walk is set"), out)
+
+    def test_rewrite_that_changes_a_time_is_rejected(self):
+        self.rt.voice_replies.append("Done! Walk is set for 6:00 PM.")
+        out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
+        self.assertIn("Added Walk: 5:00 PM – 5:30 PM", out)
+
+    def test_rewrite_that_drops_a_title_is_rejected(self):
+        self.rt.voice_replies.append("All set for 5:00 PM – 5:30 PM!")
+        out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
+        self.assertIn("Added Walk", out)
 
 
 class TestParsingHelpers(unittest.TestCase):

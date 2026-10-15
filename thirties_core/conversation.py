@@ -145,6 +145,20 @@ class ConversationManager:
                 self._load(current)  # same conversation, continued elsewhere
             self._note_if_latest()
 
+    def warm_in_background(self) -> None:
+        """Let a brain that needs it (the on-device SLM) load before the first message."""
+        warm = getattr(self.brain, "warm", None)
+        if warm is None:
+            return
+        import threading
+
+        def run() -> None:
+            try:
+                warm()
+            except Exception as e:
+                logger.warning("Brain warm-up failed: %s", e)
+        threading.Thread(target=run, daemon=True, name="BrainWarmup").start()
+
     def add_assistant_message(self, text: str) -> None:
         """Record something the assistant said on its own (e.g. a Telegram check-in)."""
         self.brain.messages.append({"role": "assistant", "content": text})

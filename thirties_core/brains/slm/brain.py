@@ -23,8 +23,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
 from thirties_core.astronomy import get_current_time
-from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, Action, build_context,
-                                            extract_json, parse_actions)
+from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
+                                            build_context, extract_json, parse_actions)
 from thirties_core.clock import ClockError, format_clock, parse_clock, parse_duration_minutes
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
@@ -71,9 +71,11 @@ class SlmBrain:
     def reset(self) -> None:
         self.messages = [{"role": "system", "content": "(SLM brain: no system prompt; see brains/slm)"}]
         self.state = DialogState()
-        if getattr(self, "_parser", None) is not None:
-            self._parser.close()
-        self._parser = None
+        for name in ("_parser", "_picker", "_voice"):
+            session = getattr(self, name, None)
+            if session is not None:
+                session.close()
+            setattr(self, name, None)
 
     @property
     def parser(self):
@@ -82,14 +84,56 @@ class SlmBrain:
         return self._parser
 
     @property
+    def voice(self):
+        if getattr(self, "_voice", None) is None:
+            self._voice = self.runtime.parser(VOICE_PROMPT)
+        return self._voice
+
+    def _voice_enabled(self) -> bool:
+        return bool(getattr(getattr(self.config, "assistant", None), "slm_voice", True))
+
+    _TIME_RE = re.compile(r"\b\d{1,2}:\d{2}\s?[AP]M\b")
+
+    def _polish(self, draft: str, user_text: str) -> str:
+        """Natural wording from the model; facts guaranteed by checking them against the draft."""
+        if not draft.strip() or not self._voice_enabled():
+            return draft
+        try:
+            out = self.voice.ask(f'User said: "{user_text[:300]}"\nDRAFT:\n{draft}').strip().strip('"')
+        except Exception as e:
+            logger.warning("[SlmBrain] voice pass failed: %s", e)
+            return draft
+        if not out or len(out) > 2 * len(draft) + 120:
+            return draft
+        def norm(times):
+            return {t.replace(" ", "").upper() for t in times}
+        required = norm(t for line in draft.splitlines() if not line.lower().startswith(("still free", "free"))
+                        for t in self._TIME_RE.findall(line))
+        allowed = norm(self._TIME_RE.findall(draft))
+        produced = norm(self._TIME_RE.findall(out))
+        if not required <= produced or not produced <= allowed:
+            logger.info("[SlmBrain] voice changed the times; using the draft")
+            return draft
+        names = {s.title for s in self.tools.day_plan.spans if s.title.lower() in draft.lower()}
+        names |= {p["title"] for p in self.state.proposal}
+        if any(n.lower() not in out.lower() for n in names):
+            logger.info("[SlmBrain] voice dropped a title; using the draft")
+            return draft
+        if draft.rstrip().endswith("?") != out.rstrip().endswith("?"):
+            return draft  # asking vs telling must not flip
+        return out
+
+    @property
     def picker(self):
         if getattr(self, "_picker", None) is None:
             self._picker = self.runtime.parser(PICKER_PROMPT)
         return self._picker
 
     def warm(self) -> None:
-        """Load the model and process the instruction before the first message (call off the UI thread)."""
+        """Load the model and process the instructions before the first message (call off the UI thread)."""
         self.parser.warm()
+        if self._voice_enabled():
+            self.voice.ask('User said: "thanks"\nDRAFT:\nYou\'re welcome!')
 
     def _restore_state(self) -> None:
         for m in reversed(self.messages):
@@ -113,6 +157,8 @@ class SlmBrain:
         logger.info("[SlmBrain] actions: %s", [(a.type, a.fields) for a in actions])
         try:
             reply = self._execute(actions, user_text)
+            if actions and not all(a.type == "chat" for a in actions):
+                reply = self._polish(reply, user_text)
         except Exception as e:  # never leave the user without an answer
             logger.exception("[SlmBrain] failed handling %r", user_text)
             reply = f"Sorry, something went wrong on my side ({e}). Could you try saying that another way?"

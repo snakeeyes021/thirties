@@ -146,7 +146,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     # --- loading days ---
 
     def _new_conversation_manager(self, plan, ambiguous) -> ConversationManager:
-        return ConversationManager(
+        manager = ConversationManager(
             day_plan=plan,
             tasks=self.backlog_tasks,
             ambiguous_events=ambiguous,
@@ -155,6 +155,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             inference_engine=self.inference_engine,
             active_notes=self.active_notes,
         )
+        manager.warm_in_background()  # the on-device brain loads its model off the UI thread
+        return manager
 
     def _load_day(self, target_date: date) -> None:
         """Show a day: its plan on the left and its current conversation on the right."""

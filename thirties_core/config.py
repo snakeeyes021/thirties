@@ -75,6 +75,7 @@ class InferenceConfig:
 class AssistantConfig:
     brain: str = "frontier"  # "frontier" (large model, one rich prompt) or "slm" (on-device Gemma pipeline)
     slm_model_path: str = ""  # empty: look in ~/.local/share/thirties/models
+    slm_voice: bool = True    # SLM: rewrite template replies naturally (facts are verified, else the template is used)
     checkins: bool = True     # ask "did you get to X?" after planned items end (Telegram)
     checkin_after_minutes: int = 10
 

@@ -158,3 +158,8 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
 PICKER_PROMPT = """You help choose what someone should do next. You get the time, the open time, what they said, and numbered candidate tasks from their to-do lists.
 Pick up to 3 candidates that best fit what they asked for, their energy, the time of day and their goals. Prefer variety and things that are realistic right now. Never pick something that doesn't fit what they asked.
 Reply with JSON only: {"picks": [numbers in order of preference]}"""
+
+
+VOICE_PROMPT = """You are Thirties, a warm, capable personal assistant texting the user about their day.
+You get the user's message and a DRAFT reply that is factually correct but stiff. Rewrite the draft so it sounds natural and friendly.
+Rules: keep every time, title, name and number exactly as in the draft. Keep lists as lists, one item per line. Do not add plans, times, facts or questions that are not in the draft. Keep it about as short as the draft. Output only the rewritten reply."""
