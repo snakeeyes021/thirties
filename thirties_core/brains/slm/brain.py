@@ -333,6 +333,14 @@ class SlmBrain:
         refers_back = bool(re.search(r"\b(it|that|those|them|these|this|same|again)\b", message.lower()))
         kept: List[Action] = []
         for a in actions:
+            duration = str(a.get("duration") or "")
+            m = re.match(r"^(?:until|til|till|to|ending at|ends at)\s+(.+)$", duration, re.IGNORECASE)
+            if m:
+                a.fields.pop("duration", None)
+                a.fields.setdefault("end", m.group(1))
+            m = re.match(r"^(?:from\s+)?(.+?)\s*(?:-|–|to|until)\s*(.+)$", str(a.get("start") or ""), re.IGNORECASE)
+            if m and re.search(r"\d", m.group(2)) and not a.get("end"):
+                a.fields["start"], a.fields["end"] = m.group(1), m.group(2)
             if a.type == "add" and not refers_back:
                 title_words = {_stem(w) for w in _words(a.get("title") or "")}
                 if title_words and not (title_words & said):
