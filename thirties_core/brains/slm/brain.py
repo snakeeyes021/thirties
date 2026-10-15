@@ -382,7 +382,35 @@ class SlmBrain:
 
     _TIME_IN_TEXT = re.compile(r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon|now|right now)\b", re.IGNORECASE)
 
+    _YES_RE = re.compile(r"^\s*(yes|yeah|yep|yup|sure|ok|okay|sounds good|perfect|great|do it|go for it|please do|"
+                         r"all of them|all of these|both|let'?s do (it|that|those)|yes please)\b", re.IGNORECASE)
+    _NO_RE = re.compile(r"^\s*(no|nah|nope|not really|neither|none of (those|them|these)|pass|skip)\b", re.IGNORECASE)
+    _ORDINAL_WORDS = {"first": 1, "1st": 1, "one": 1, "second": 2, "2nd": 2, "two": 2, "third": 3, "3rd": 3, "three": 3}
+
+    def _dialog_act(self, message: str) -> Optional[Action]:
+        """Answers to our own pending question: yes / no / which option."""
+        if not self.state.proposal:
+            return None
+        lowered = message.lower().strip()
+        m = re.search(r"\b(?:option|number|#)\s*(\d)\b|^\s*(\d)\s*[.!]?\s*$", lowered)
+        if m:
+            return Action("choose", {"option": int(m.group(1) or m.group(2))})
+        m = re.search(r"\bthe (first|second|third|1st|2nd|3rd) (?:one|option)\b|^\s*(first|second|third) one\b", lowered)
+        if m:
+            return Action("choose", {"option": self._ORDINAL_WORDS[m.group(1) or m.group(2)]})
+        if self._NO_RE.search(lowered) and len(lowered) < 60:
+            return Action("reject", {})
+        if self._YES_RE.search(lowered) and len(lowered) < 60:
+            return Action("confirm", {})
+        return None
+
     def _execute(self, actions: List[Action], message: str) -> str:
+        act = self._dialog_act(message)
+        if act is not None and not any(a.type in ("confirm", "reject", "choose") for a in actions):
+            proposed = {p["title"].lower() for p in self.state.proposal}
+            # A re-add of a proposed item (or nothing at all) is the model's way of saying yes / no.
+            actions = [act] + [a for a in actions if not (a.type == "add" and (a.get("title") or "").lower() in proposed)
+                               and a.type != "chat"]
         actions = self._sanity(actions, message)
         waiting = self.state.awaiting_time
         if waiting and not any(a.type in ("add", "move", "remove") for a in actions):
@@ -907,7 +935,7 @@ class SlmBrain:
     def _do_question(self, a: Action) -> Tuple[str, bool]:
         topic = (a.get("topic") or "").lower()
         day = a.get("day")
-        if "week" in topic:
+        if "week" in topic or re.search(r"\b(my|this|the|next) week\b", getattr(self, "_message", "").lower()):
             ok, out = self._run("week_overview", {})
             return "Your week:\n" + "\n".join(f"- {l}" for l in out.splitlines()), False
         if any(w in topic for w in ("free", "open", "available", "time left", "packed", "busy", "room")):

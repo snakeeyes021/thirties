@@ -45,7 +45,7 @@ class GemmaRuntime:
     _shared: Optional["GemmaRuntime"] = None
     _shared_lock = threading.Lock()
 
-    def __init__(self, model_path: Path, max_tokens: int = 4096) -> None:
+    def __init__(self, model_path: Path, max_tokens: int = 8192) -> None:
         try:
             import litert_lm
         except ImportError as e:
@@ -137,10 +137,16 @@ class ParserSession:
     The session restarts before it outgrows the context window.
     """
 
-    def __init__(self, runtime: GemmaRuntime, system: str, budget_chars: int = 9000) -> None:
+    # The KV cache holds 8192 tokens (see GemmaRuntime max_tokens). JSON and examples run ~3 characters per token, so
+    # budget the instruction plus history at about 3 characters per token, with headroom.
+    TOKEN_LIMIT = 8192
+    CHARS_PER_TOKEN = 3.0
+
+    def __init__(self, runtime: GemmaRuntime, system: str, budget_chars: Optional[int] = None) -> None:
         self.runtime = runtime
         self.system = system
-        self.budget_chars = budget_chars
+        usable_tokens = self.TOKEN_LIMIT - 700  # room for the next message and its reply
+        self.budget_chars = budget_chars or int(usable_tokens * self.CHARS_PER_TOKEN) - len(system)
         self._conv = None
         self._used = 0
 
@@ -154,10 +160,15 @@ class ParserSession:
 
     def ask(self, user: str) -> str:
         with self.runtime._lock:
-            if self._conv is None or self._used + len(user) + 400 > self.budget_chars:
+            if self._conv is None or self._used + len(user) + 600 > self.budget_chars:
                 self._open()
             start = time.time()
-            out = self.runtime._text(self._conv.send_message(user)).strip()
+            try:
+                out = self.runtime._text(self._conv.send_message(user)).strip()
+            except RuntimeError as e:
+                logger.warning("Gemma call failed (%s); retrying in a fresh session.", e)
+                self._open()
+                out = self.runtime._text(self._conv.send_message(user)).strip()
             self._used += len(user) + len(out)
             elapsed = time.time() - start
         kind = "parse" if self.system.startswith("You convert") else ("pick" if self.system.startswith("You help") else "voice")

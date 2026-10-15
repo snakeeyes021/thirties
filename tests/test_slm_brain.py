@@ -191,6 +191,19 @@ class TestProposalsAndOutcomes(SlmTestCase):
         out = self.say("yes please", {"type": "confirm"})
         self.assertEqual(out.count("Added "), 2)
 
+    def test_replies_to_a_proposal_are_read_deterministically(self):
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        self.say("ideas for tonight?", {"type": "suggest", "topic": "tonight"})
+        proposed = self.brain.state.proposal[1]["title"]
+        out = self.say("the second one", {"type": "add", "title": proposed, "start": "8"})  # model re-adds it
+        self.assertEqual(out.count("Added "), 1)
+        self.assertIn(proposed, out)
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        self.say("more ideas?", {"type": "suggest", "topic": "tonight"})
+        out = self.say("nah", "")
+        self.assertIn("leave those off", out)
+        self.assertEqual(self.brain.state.proposal, [])
+
     def test_proposal_survives_a_restart(self):
         self.rt.pick_replies.append('{"picks": [1]}')
         self.say("ideas?", {"type": "suggest", "topic": "tonight"})
