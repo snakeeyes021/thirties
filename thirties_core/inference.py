@@ -342,10 +342,15 @@ class GeminiInferenceEngine:
                 if e.code not in (429, 500, 502, 503, 504) or attempt == self.max_retries:
                     detail = e.read().decode("utf-8", "replace")[:300]
                     raise RuntimeError(f"HTTP {e.code}: {detail}") from e
-                delay = min(60.0, 5.0 * (2 ** attempt))
-                logger.warning("Gemini API returned %s; retrying in %.0fs (attempt %d/%d).",
-                               e.code, delay, attempt + 1, self.max_retries)
-                time.sleep(delay)
+                reason = str(e.code)
+            except (TimeoutError, urllib.error.URLError) as e:
+                if attempt == self.max_retries:
+                    raise
+                reason = f"a network error ({e})"
+            delay = min(60.0, 5.0 * (2 ** attempt))
+            logger.warning("Gemini API returned %s; retrying in %.0fs (attempt %d/%d).",
+                           reason, delay, attempt + 1, self.max_retries)
+            time.sleep(delay)
         raise RuntimeError("unreachable")
 
 

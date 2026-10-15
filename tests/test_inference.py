@@ -100,6 +100,14 @@ class TestTransports(unittest.TestCase):
         self.assertEqual(res["content"], "ok")
         sleep.assert_called_once()
 
+    def test_gemini_api_retries_timeouts(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        with patch("urllib.request.urlopen", side_effect=[TimeoutError("read timed out"), _api_response("ok")]), \
+                patch("time.sleep"):
+            self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "ok")
+
     def test_gemini_api_gives_up_on_client_errors(self) -> None:
         cfg = ThirtiesConfig()
         cfg.inference.gemini_api_key = "fake"

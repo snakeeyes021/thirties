@@ -9,7 +9,7 @@
 ## Where We Are
 
 - **Frontier Brain works and has been used for real.** The GTK app runs on Gemini 3.8 Flash (via `agy`, or the Gemini API directly), with the full Joplin backlog in context. In its first full day of real use (before 2026-10-14) it was about **75% usable**: morning planning, back-and-forth task picking, and moving things around later in the day all worked. That day ran on the pre-span core; Phases 1–2 below have changed the core and the prompt since.
-- **Phases 1–2 are implemented but not yet validated against a live model.** Unit tests are green and the Frontier eval's checks are verified with scripted ideal behaviour. A live run is pending (see "Open items from Phases 1–2").
+- **Phases 1–2 are implemented; first live check passed.** Unit tests are green, and the Frontier eval's checks are verified with scripted ideal behaviour. On 2026-10-14 a single live pass, with the free quota split across gemini-3.7-flash and gemini-3.6-flash, scored 10/10 on the 10 scenarios that ran, after relaxing one over-strict check. The other 3 hit API errors (overload, timeout, quota). Still to do: a full run with repeats on gemini-3.8-flash, the model actually used day to day.
 - **The Telegram bridge and the Joplin sync note are built but not yet tried in real use.**
 - **Nothing records what actually happened.** The app helps make a plan but never learns whether it was followed. `StateDatabase.record_task_deferred` and `record_task_completed` exist but nothing calls them.
 - **There is no SLM brain yet.** The LiteRT transport works mechanically. Earlier SLM experiments ran Gemma through essentially the frontier prompt, which does not work.
@@ -42,7 +42,7 @@
 - **Transports:** the Gemini API retries 429 and 5xx responses, both transports now pass tool results to the model, and empty message parts are dropped (they caused HTTP 400s).
 
 ### Open items from Phases 1–2
-- **Run the live Frontier eval** (`python3 -m tests.frontier_eval --repeat 2`) and fix what it finds. It needs about 35 requests per run. The free API tier allows only 20 requests per day per model, and the `agy` installed on the dev machine is too old ("no longer supported"; it needs `agy update` and a fresh login). There is no live baseline from the old core either: the attempt hit the quota.
+- **Run the full live Frontier eval on gemini-3.8-flash** (`python3 -m tests.frontier_eval --repeat 2`). It needs about 35 requests per run. The free API tier allows only 20 requests per day per model, and the `agy` installed on the dev machine is too old ("no longer supported"; it needs `agy update` and a fresh login). The first live check also saw the model claim a change without making a call once; the correction step caught it. There is no live baseline from the old core: that attempt hit the quota.
 - **Check the `agy` transport flags.** `AntigravityInferenceEngine` passes `--output-format json --model ... --disable-slash-commands`, which the agy 1.x on the dev machine rejects. Confirm what the daily-driver machine's agy accepts.
 - **Fix the direct-API default model name.** The config default `gemini-3.8-flash-low` is agy naming. The API engine now splits off the thinking level, but the factory still prefers agy whenever the binary exists, even if it is broken.
 - Consider native function calling on the Gemini API path.

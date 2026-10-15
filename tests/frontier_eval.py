@@ -108,6 +108,18 @@ def no_changes() -> Check:
     return c
 
 
+def nothing_overlaps(title: str) -> Check:
+    def check(run: "Run") -> Optional[str]:
+        target = next((s for s in run.plan.spans if s.title.lower() == title.lower()), None)
+        if target is None:
+            return f"{title} is missing"
+        clashes = [s.title for s in run.plan.spans_overlapping(target.start_dt, target.end_dt)
+                   if s.id != target.id and not s.is_envelope]
+        return f"{title} overlaps {clashes}" if clashes else None
+    check.__doc__ = f"nothing overlaps {title}"
+    return check
+
+
 def finalized(expected: bool) -> Check:
     def check(run: "Run") -> Optional[str]:
         return None if bool(run.plan.is_finalized) == expected else f"is_finalized={run.plan.is_finalized}, expected {expected}"
@@ -193,7 +205,9 @@ SCENARIOS: List[Scenario] = [
         now="09:00",
         events=[_event("dentist", "Dentist", "15:00", "16:00")],
         turns=["I'm off work today. Schedule the gym from 2:30 to 4"],
-        checks=[occupied_by("15:15", "calendar", "dentist"), occupied_by("14:45", "activity", "gym")],
+        # Shortening the gym to 2:30-3:00 or asking the user first are both fine; overlapping the dentist is not.
+        checks=[occupied_by("15:15", "calendar", "dentist"), occupied_by("15:45", "calendar", "dentist"),
+                occupied_by("10:00", "open"), nothing_overlaps("Dentist")],
     ),
     Scenario(
         "travel_buffer", "Buffer goes before the appointment.",
