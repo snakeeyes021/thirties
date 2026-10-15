@@ -7,7 +7,7 @@ Checks never grade wording. Transcripts are saved for an agent or human judge.
 
 Not part of the unit suite (it needs network access and an API key):
 
-    python3 -m tests.frontier_eval                      # all scenarios, gemini-3.8-flash
+    python3 -m tests.frontier_eval                      # all scenarios via agy, gemini-3.8-flash-low
     python3 -m tests.frontier_eval --only work_ran_long --repeat 3
 """
 
@@ -32,13 +32,16 @@ from thirties_core.astronomy import set_debug_time
 from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
 from thirties_core.conversation import ConversationManager
-from thirties_core.inference import GeminiInferenceEngine
+from thirties_core.inference import AntigravityInferenceEngine, GeminiInferenceEngine
 from thirties_core.models import TaskItem
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 
 REPORTS_DIR = REPO_ROOT / "docs" / "eval_reports" / "frontier"
 TZ = ZoneInfo("America/New_York")
-TRANSPORT_ERROR = "Encountered an error communicating with Gemini API"
+TRANSPORT_ERRORS = ("Encountered an error communicating with Gemini API", "Error contacting model via Antigravity CLI",
+                    "Failed invoking Antigravity CLI", "The Antigravity assistant timed out")
+LIVE_ENGINES = {"agy": AntigravityInferenceEngine, "api": GeminiInferenceEngine}
+ENGINE_CHOICE = "agy"
 DAY = date(2026, 10, 15)  # a Thursday
 
 
@@ -280,7 +283,7 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
         ]
         mgr = ConversationManager(
             day_plan=plan, tasks=tasks, ambiguous_events=ambiguous, scheduler=sched,
-            inference_engine=engine or GeminiInferenceEngine(cfg), active_notes=[],
+            inference_engine=engine or LIVE_ENGINES[ENGINE_CHOICE](cfg), active_notes=[],
         )
         for tool, args in scn.setup:
             mgr.execute_tool(tool, args)
@@ -293,9 +296,10 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
         start = time_mod.time()
         for turn in scn.turns:
             run.replies.append(mgr.send_user_message(turn))
-            if any(TRANSPORT_ERROR in str(m.get("content", "")) for m in mgr.messages):
-                raise RuntimeError("model transport failed: " + next(
-                    str(m["content"]) for m in mgr.messages if TRANSPORT_ERROR in str(m.get("content", ""))))
+            failed = [str(m.get("content", "")) for m in mgr.messages
+                      if any(err in str(m.get("content", "")) for err in TRANSPORT_ERRORS)]
+            if failed:
+                raise RuntimeError("model transport failed: " + failed[0][:300])
         run.seconds = time_mod.time() - start
         run.plan = mgr.day_plan
         run.transcript = [m for m in mgr.messages if m.get("role") != "system"]
@@ -312,12 +316,16 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model", default="gemini-3.8-flash")
+    ap.add_argument("--engine", choices=sorted(LIVE_ENGINES), default="agy",
+                    help="agy: the Antigravity CLI on your subscription (default); api: GEMINI_API_KEY")
+    ap.add_argument("--model", default="gemini-3.8-flash-low")
     ap.add_argument("--only", nargs="*", help="Scenario ids to run.")
     ap.add_argument("--repeat", type=int, default=1, help="Runs per scenario (models are not deterministic).")
     ap.add_argument("--label", default="", help="Tag for the report file name.")
     args = ap.parse_args()
 
+    global ENGINE_CHOICE
+    ENGINE_CHOICE = args.engine
     scenarios = [s for s in SCENARIOS if not args.only or s.id in args.only]
     results = []
     for scn in scenarios:

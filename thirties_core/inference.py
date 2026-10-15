@@ -47,6 +47,14 @@ def message_text(msg: Dict[str, Any]) -> str:
     return content
 
 
+def agy_workspace_dir() -> Path:
+    """An empty directory that agy runs in, so the agent never sees real files."""
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    workspace = cache / "thirties" / "agy-workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
 def get_host_home() -> Path:
     """Discover host home directory, working inside or outside Flatpak sandbox."""
     if shutil.which("flatpak-spawn"):
@@ -186,13 +194,17 @@ class AntigravityInferenceEngine:
 
         cmd = [
             agy_bin,
+            "--sandbox",
             "--print", prompt_text,
             "--output-format", "json",
             "--model", self.model,
             "--disable-slash-commands",
         ]
+        # agy is a coding agent: run it in an empty private directory, never in the
+        # repository or wherever Thirties happened to be started.
+        workspace = agy_workspace_dir()
         if is_flatpak:
-            cmd = ["flatpak-spawn", "--host"] + cmd
+            cmd = ["flatpak-spawn", "--host", f"--directory={workspace}"] + cmd
 
         try:
             res = subprocess.run(
@@ -200,6 +212,7 @@ class AntigravityInferenceEngine:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                cwd=workspace,
             )
         except subprocess.TimeoutExpired:
             logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)

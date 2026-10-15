@@ -14,11 +14,11 @@ sleep_start_thirty = 46   # 11:00 PM
 sleep_end_thirty = 14     # sleep ends at 7:00 AM
 
 [inference]
-# "gemini_api" calls the Gemini API directly with gemini_api_key.
-# "gemini" prefers the agy CLI when it is installed, and falls back to the API.
-backend = "gemini_api"
-gemini_model = "gemini-3.8-flash-low"
-gemini_api_key = ""        # https://aistudio.google.com/apikey
+# "gemini" uses the agy CLI (your Antigravity / Google AI subscription) when it is
+# installed and signed in, and falls back to the API key. "gemini_api" always uses the key.
+backend = "gemini"
+gemini_model = "gemini-3.8-flash-low"   # see `agy models`
+gemini_api_key = ""        # optional fallback; free keys allow ~20 requests/day: https://aistudio.google.com/apikey
 
 [telegram]
 enabled = true

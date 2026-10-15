@@ -573,7 +573,7 @@ def check_setup(cfg: ThirtiesConfig) -> bool:
 
     engine = get_inference_engine(cfg)
     name = type(engine).__name__
-    if isinstance(engine, GeminiInferenceEngine):
+    if isinstance(engine, (GeminiInferenceEngine, AntigravityInferenceEngine)):
         try:
             reply = engine.chat([{"role": "user", "content": "Reply with the single word: ready"}])
             passed = "ready" in reply.get("content", "").lower()
@@ -582,12 +582,10 @@ def check_setup(cfg: ThirtiesConfig) -> bool:
         except Exception as e:
             ok = False
             line(False, "Model", f"{name}: {e}")
-    elif isinstance(engine, AntigravityInferenceEngine):
-        line(None, "Model", f"{name} via agy ({engine.model}); not test-called. If replies fail, set "
-             "[inference] backend = \"gemini_api\" and gemini_api_key")
     else:
         ok = False
-        line(False, "Model", f"{name}: no working model backend. Set [inference] backend = \"gemini_api\" and gemini_api_key")
+        line(False, "Model", f"{name}: no working model backend. Install and sign in to agy, or set "
+             "[inference] backend = \"gemini_api\" and gemini_api_key")
 
     joplin_db = cfg.resolve_joplin_db_path()
     line(bool(joplin_db) or None, "Joplin backlog", str(joplin_db) if joplin_db else "database not found; the assistant will have no backlog")

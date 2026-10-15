@@ -42,9 +42,8 @@
 - **Transports:** the Gemini API retries 429 and 5xx responses, both transports now pass tool results to the model, and empty message parts are dropped (they caused HTTP 400s).
 
 ### Open items from Phases 1–2
-- **Run the full live Frontier eval on gemini-3.8-flash** (`python3 -m tests.frontier_eval --repeat 2`). It needs about 35 requests per run. The free API tier allows only 20 requests per day per model, and the `agy` installed on the dev machine is too old ("no longer supported"; it needs `agy update` and a fresh login). The first live check also saw the model claim a change without making a call once; the correction step caught it. There is no live baseline from the old core: that attempt hit the quota.
-- **Check the `agy` transport flags.** `AntigravityInferenceEngine` passes `--output-format json --model ... --disable-slash-commands`, which the agy 1.x on the dev machine rejects. Confirm what the daily-driver machine's agy accepts.
-- **Fix the direct-API default model name.** The config default `gemini-3.8-flash-low` is agy naming. The API engine now splits off the thinking level, but the factory still prefers agy whenever the binary exists, even if it is broken.
+- **Run the full live Frontier eval on gemini-3.8-flash** with `python3 -m tests.frontier_eval --repeat 2`. It now goes through `agy` on the user's subscription by default. Use `--engine api` for the free-tier key, which allows only about 20 requests per model per day. The first live check also saw the model claim a change without making a call once; the correction step caught it. There is no live baseline from the old core: that attempt hit the API quota.
+- `agy` is a coding agent, not just a model endpoint, so the engine runs it with `--sandbox` in an empty directory (`~/.cache/thirties/agy-workspace`). Each call costs about 12.6k input tokens of agy's own agent prompt, and may show up in Antigravity's conversation history. A plain model endpoint would be cleaner once the subscription offers one.
 - Consider native function calling on the Gemini API path.
 - Ask the user whether replies should count time in thirties ("4 chunks"), as the old prompt insisted, or in hours. The new prompt allows either.
 - GUI: a work span interrupted by an appointment renders as two cards. Consider one card with the appointment inside.
@@ -90,7 +89,7 @@ See `docs/SLM_BRAIN.md`. The brain itself depends on Phases 1–2 (it needs the 
 
 - **Real-use feedback is the top input.** After each day of real use, record what broke or was annoying, and turn it into eval scenarios and roadmap items. *Open question for the user: what was the missing 25% on the first test day?*
 - **Frontier eval set:** a small set of replayable multi-turn "real day" scenarios (drawn from real use) that run against the Frontier Brain before prompt or tool changes are merged.
-- **Telegram:** connect it and use it for a day (`docs/TELEGRAM_SETUP.md`). Note: on a free Gemini key, ~20 requests/day is only about 10 messages.
+- **Telegram:** connect it and use it for a day (`docs/TELEGRAM_SETUP.md`).
 - **Connector abstraction (Anti-Pattern 1):** a `TaskSource` interface (Joplin is the first implementation) and a `CalendarSource` interface (EDS first; CalDAV/Google later). Put the Joplin sync note behind a `SyncTransport` interface so state sync is not permanently tied to Joplin.
 - **Housekeeping:**
   - `pyproject.toml` dependencies are stale: `astral` is unused, and `litert-lm-api` should be optional.

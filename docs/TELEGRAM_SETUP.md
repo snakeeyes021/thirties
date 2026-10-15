@@ -13,7 +13,7 @@ The Telegram bridge is a temporary mobile client (AGENTS.md, Anti-Pattern 1): a 
 Edit `~/.config/thirties/config.toml` (template: `config.example.toml`; keep the file `chmod 600`):
 
 - `[telegram] bot_token`: the token from BotFather.
-- `[inference] gemini_api_key`: from https://aistudio.google.com/apikey. The free tier allows only about 20 requests per model per day, and each message costs 1–3, so expect roughly 10 messages a day on a free key.
+- The model: by default the bridge uses the `agy` CLI, signed in to your Antigravity / Google AI subscription, so there's nothing to set if `agy -p "hi"` works. It runs `agy` sandboxed in an empty directory (`~/.cache/thirties/agy-workspace`). An `[inference] gemini_api_key` is only a fallback; a free key allows about 20 requests per model per day (roughly 10 messages).
 - `[general] latitude`, `longitude`, `timezone`: your location, so sunrise and sunset are right.
 - Leave `[sync] enabled = false` unless you run Thirties on more than one computer.
 

@@ -130,8 +130,10 @@ class TestTransports(unittest.TestCase):
             ])
         self.assertEqual(res["content"], "Enjoy the day off.")
         self.assertEqual(res["tool_calls"][0]["arguments"], {"event": "Work"})
-        prompt = run.call_args[0][0][2]
-        self.assertIn("[Result of list_schedule]", prompt)
+        cmd = run.call_args[0][0]
+        self.assertIn("[Result of list_schedule]", cmd[cmd.index("--print") + 1])
+        self.assertIn("--sandbox", cmd)
+        self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
 
     def test_antigravity_timeout(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())
