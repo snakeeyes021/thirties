@@ -2,97 +2,132 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-14 (after Phases 1–2).
+> Last revised: 2026-10-15.
 
 ---
 
 ## Where We Are
 
-- **Frontier Brain works and has been used for real.** The GTK app runs on Gemini 3.8 Flash (via `agy`, or the Gemini API directly), with the full Joplin backlog in context. In its first full day of real use (before 2026-10-14) it was about **75% usable**: morning planning, back-and-forth task picking, and moving things around later in the day all worked. That day ran on the pre-span core; Phases 1–2 below have changed the core and the prompt since.
-- **Phases 1–2 are implemented and pass the live eval.** On 2026-10-14 the full Frontier eval scored 26/26 (13 scenarios × 2) on gemini-3.8-flash-low through `agy`. Reading the replies turned up one quality problem the checks can't see: the model pushed the chronically deferred backlog item after almost every change. The backlog rule now limits that to planning moments (unprompted mentions dropped from 9/13 to 2/10, both on a newly free day off).
-- **The Telegram bridge and the Joplin sync note are built but not yet tried in real use.**
-- **Nothing records what actually happened.** The app helps make a plan but never learns whether it was followed. `StateDatabase.record_task_deferred` and `record_task_completed` exist but nothing calls them.
-- **There is no SLM brain yet.** The LiteRT transport works mechanically. Earlier SLM experiments ran Gemma through essentially the frontier prompt, which does not work.
+Both brains run on one shared core, and both are measured with simulated users: Gemini, through `agy`, role-plays the user with hidden goals across 13 multi-turn scenarios built from real use, then judges the outcome. Raw reports are in `docs/eval_reports/sim/` (gitignored).
+
+| Brain | Goals met | Deterministic checks | Judge: accuracy / understanding / clarity / efficiency / tone (of 5) | Time per reply |
+|---|---|---|---|---|
+| Frontier (gemini-3.8-flash-low via agy) | **0.98** | 12/13 | 4.5 / 4.3 / 4.9 / 4.5 / 4.8 | ~9 s |
+| SLM (Gemma 4 E4B on the laptop's iGPU), round 4 | **0.93** | 11/13 | 4.5 / 3.5 / 4.4 / 3.3 / 4.3 | ~14 s |
+
+The SLM went from 0.39 to 0.94 on the hardest scenario (the user's real Sunday conversation) over four rounds. Each fix came from reading transcripts and the judge's notes.
+
+The first real day of use (before 2026-10-14) was about 75% usable, on the old core. Everything below has changed since.
 
 ---
 
-## Phase 0: Restructure (done)
+## Done
 
-- Merged the practical branch into the trunk. `feat/longterm-slm-architecture` contained only docs, now archived.
-- Split `conversation.py` into the shared tool API (`plan_tools.py`) and the `FrontierBrain` (`brains/frontier.py`). Behaviour unchanged, verified by replaying a scripted conversation through the old and new code.
-- Consolidated docs: `AGENTS.md`, this roadmap, `docs/SLM_BRAIN.md`, and an archive.
+### Phase 0: Restructure
+- **One trunk.** The practical branch was merged in. The SLM branch held only docs, which are now archived.
+- **The core split.** The shared tool API (`plan_tools.py`) is separated from the brains (`brains/`).
+
+### Phase 1: Event spans on a solar canvas
+- **The canvas** is 48 thirties from the sunrise thirty into the next morning, DST-safe. Blocks hold only physical facts.
+- **Spans.** Work, sleep, calendar events, tasks and activities are all `EventSpan`s, kept in a global store (so spans can cross midnight) with tombstones. Old block-based plans migrate once on startup.
+- **Routines** (default work and sleep) apply on configured **work days only**, with deterministic ids, so a day off always wins.
+- **Sync** is last-write-wins per item, and covers spans, days, decisions, conversations, profile, memory and energy.
+
+### Phase 2: Clock-time tools and a clean Frontier prompt
+- **Tools:**
+  - `add_event` (with `alongside`, `push_later`)
+  - `update_event` (start, end, duration, shift, `push_later`, `to_day`)
+  - `remove_event`, `swap_events`, `clear_time`, `find_open_time`, `list_schedule`, `resolve_calendar_event`
+  - Every one takes a `day` argument.
+- **One text grammar** for all models: `CALL tool {json}`.
+- **The Frontier prompt** has no block numbers, no arithmetic lessons, no fixed daylight/dark rules and no "lock in" step. It is rebuilt every turn and lists schedules one item per line.
+
+### Phase 3: Closing the loop (first version)
+- **`log_outcome`** records done, partial or skipped:
+  - Reported or estimated times are shown on the schedule; the original plan is kept for statistics.
+  - Finished tasks are checked off in Joplin (this needs `[joplin] api_token`).
+  - Skips count as deferrals.
+  - Moving a done or skipped item to another day keeps the record and plans a fresh copy.
+- **`review_day`** lists items with no outcome yet and suggests rollovers. Both brains are told about anything waiting for an outcome.
+- **Telegram check-ins:** "did you get to X, or are you still on it?" after a planned item ends.
+- **`log_energy`.**
+
+### Phase 4: Learning (first version)
+- **`stats.py`** computes:
+  - completion rates
+  - real versus planned duration per activity (reliable times only)
+  - completion by part of the day and by energy level
+  - chronically deferred tasks
+- **The facts reach both brains** through `get_statistics`, the Frontier prompt, and the SLM's suggestion scoring.
+- **Assistant memory** (`remember`/`forget`) and **a user profile** (habits, near- and long-term goals, preferences, observations):
+  - Both are shown to the Frontier Brain every turn.
+  - You can view and edit both in the desktop app (menu → Profile & Memory).
+- **`week_overview`**, plus any-day tools, for planning beyond one day.
+
+### Conversations
+- **Stored per diurnal day.** A day reopens its latest conversation, and the desktop app and Telegram share it.
+- **Starting fresh:** "New conversation" in the app, `/new` in Telegram. The app also has a picker for the day's conversations.
+- **History tools** for both brains: `search_history`, `list_conversations`, `read_conversation`.
+
+### Backlog and connectors
+- **Joplin parsing:**
+  - keeps headings and nesting
+  - **"someday" sections** (Probation and similar) are visible but never pushed
+  - stable task ids
+  - completion keeps the item's indentation
+- **Media wishlists** from Goodreads (RSS), Letterboxd (public pages) and Serializd (its web app's API), with no logins.
+- **Google calendars through GNOME Online Accounts:**
+  - recurring events expanded
+  - real time zones
+  - all-day events and birthdays skipped
+  - your RSVP decides invites
+  - other people's calendars need a decision
+
+### SLM brain (see `docs/SLM_BRAIN.md`)
+- **Gemma parses; Python does the rest.** One parse per message, in a long-lived session that reuses the KV cache: about 12 s for the first message and about 3.5 s after that in the benchmark. The context window is 8k tokens, with a safe budget and a fresh session if a call fails.
+- **Python handles:**
+  - references ("it", "the first X", "the 9 PM one")
+  - loose times ("7", "later this morning", "after work")
+  - relative placement and sliding, swaps, moves to other days
+  - conflict options
+  - a scored backlog with Gemma picking the best few
+  - dialog acts (yes/no/option N)
+  - repairing misfiled fields, retrying actions that depend on later ones
+  - guards against invented changes or unasked sleep/work changes
+  - plain-word errors
+- **A verified voice:** Gemma rewrites short replies; Python keeps every time and title.
+
+### Clients
+- **Desktop app:**
+  - chat beside the schedule (hideable)
+  - multi-thirty items collapsed into cards, with concurrent items shown together
+  - the "now" highlight and the sun position update live
+  - availability counts only thirties still ahead
+  - other days can be viewed and edited, each with its own conversation
+- **Telegram bridge:**
+  - locked to your chat, with `--check`
+  - continues the desktop conversation, with `/new`
+  - check-ins and "starts now" notifications
 
 ---
 
-## Phase 1: Event Spans on a Solar Canvas (implemented)
+## Next
 
-- **Canvas:** 48 `ThirtyBlock`s starting at the thirty that contains sunrise and running 24 hours into the next morning, spaced in absolute time (DST-safe). Blocks carry only physical facts. This also fixed a latent bug: the old midnight-to-midnight blocks, shown sunrise-first, gave the "after midnight" thirties timestamps from the *previous* night.
-- **Spans:** work, sleep, calendar events, tasks and activities are all `EventSpan`s in real clock time. Occupancy, budgets and the GUI's collapsed cards are derived from them.
-- **Store:** spans are stored globally (not per day), so a sleep span crossing midnight belongs to both days. Day metadata and calendar attend/decline decisions have their own tables. Old block-kind snapshots are migrated once on startup.
-- **Routines:** default work and sleep from config are created once per day, with deterministic ids and the oldest possible timestamp, so a day off or an edit on any device always wins over a default.
-- **Calendar:** events are fetched fresh for both calendar dates the diurnal day touches. Accepted events are firm, and unanswered invites are tentative until the user decides. The old builder dropped pending invites and stopped refreshing the calendar as soon as a day had been saved.
-- **Sync:** per-item last-write-wins with deletions synced as tombstones. The old pull overwrote local days with the remote ones regardless of age. Old v1 payloads are still imported, but only for days this device never touched.
-
-## Phase 2: Clock-Time Tools and a Clean Frontier Prompt (implemented)
-
-- **Tools** (`plan_tools.py`): `add_event`, `update_event` (start, end, duration, or a `shift` like "+1 hour"), `remove_event`, `clear_time`, `find_open_time`, `list_schedule`, `resolve_calendar_event`, `finalize_day`. Times are clock strings and durations are phrases; `clock.py` does all parsing and math. Overlaps are refused with a clear explanation, firm calendar items are never overwritten, and activities may sit on top of work or sleep.
-- **Grammar:** a single text format for all transports: `CALL tool_name {json arguments}`.
-- **Prompt:** no block numbers, no arithmetic lessons, no fixed daylight/dark activity rules. It is rebuilt every turn from the live schedule.
-- **Turn loop:** up to 3 rounds. The model sees tool results after lookups, refusals or an empty reply, and a change claimed without any calls triggers one correction.
-- **Transports:** the Gemini API retries 429 and 5xx responses, both transports now pass tool results to the model, and empty message parts are dropped (they caused HTTP 400s).
-
-### Open items from Phases 1–2
-- Rerun the Frontier eval (`python3 -m tests.frontier_eval --repeat 2`, through `agy` by default) before merging any prompt or tool change. Add scenarios from real use, especially multi-turn days. Consider an automated judge pass for tone (e.g. nagging, verbosity) alongside the deterministic checks.
-- `agy` is a coding agent, not just a model endpoint, so the engine runs it with `--sandbox` in an empty directory (`~/.cache/thirties/agy-workspace`). Each call costs about 12.6k input tokens of agy's own agent prompt, and may show up in Antigravity's conversation history. A plain model endpoint would be cleaner once the subscription offers one.
-- Consider native function calling on the Gemini API path.
-- Ask the user whether replies should count time in thirties ("4 chunks"), as the old prompt insisted, or in hours. The new prompt allows either.
-- GUI: a work span interrupted by an appointment renders as two cards. Consider one card with the appointment inside.
-
----
-
-## Phase 3: Close the Loop: What Actually Happened
-
-**Why:** AGENTS.md §2.2 is the heart of the mission. An assistant that never learns whether the plan happened is just a planner.
-
-**Scope:**
-- Every scheduled span gets a status: planned, done, partly done, skipped, or moved.
-- Capturing outcomes, with as little effort from the user as possible:
-  - in conversation ("finished the taxes around 4"), via a `log_outcome` tool;
-  - a checkbox in the GTK app, and `/done` in Telegram;
-  - an end-of-day (or next-morning) review the brain starts itself: "Here's what was planned; what happened?"
-- Record the reported actual start and end when given. When only a finish time is known, store what was reported and leave inferring the start to Phase 4. Do not invent precision.
-- Write completions back to the task source (`JoplinEngine.complete_task` exists).
-- **Rollover engine** (deterministic): for each unfinished item, Python proposes a destination (tomorrow, later this week, or back to the backlog, or drop it) from deadlines, deferral count and recurrence. The brain presents the whole batch for one-shot confirmation. The user never reschedules items one by one.
-- Increment deferral counts for real, so the "chronically deferred" handling the prompt already has is driven by true data.
-
-**Done when:** yesterday's unfinished items appear the next morning as a single batch proposal, and completion and deferral history is persisted and synced.
-
----
-
-## Phase 4: Learn from History
-
-**Scope:**
-- Statistics computed in Python: actual vs planned duration by task and category, completion rate by time of day, deferral patterns, realistic daily capacity.
-- An estimate of actual start time when only a completion time was reported, using that history.
-- Statistics are handed to brains as precomputed facts ("composing sessions usually run about 1.5x what you plan"). The model never computes them.
-- Proposals use them: realistic durations, and a warning when a plan exceeds demonstrated capacity.
-
----
-
-## Phase 5: SLM Brain (research track)
-
-See `docs/SLM_BRAIN.md`. The brain itself depends on Phases 1–2 (it needs the clock-time span tools). Eval harness work can start in parallel at any time.
-
----
-
-## Continuous and Parallel Work
-
-- **Real-use feedback is the top input.** After each day of real use, record what broke or was annoying, and turn it into eval scenarios and roadmap items. *Open question for the user: what was the missing 25% on the first test day?*
-- **Frontier eval set:** a small set of replayable multi-turn "real day" scenarios (drawn from real use) that run against the Frontier Brain before prompt or tool changes are merged.
-- **Telegram:** connect it and use it for a day (`docs/TELEGRAM_SETUP.md`).
-- **Connector abstraction (Anti-Pattern 1):** a `TaskSource` interface (Joplin is the first implementation) and a `CalendarSource` interface (EDS first; CalDAV/Google later). Put the Joplin sync note behind a `SyncTransport` interface so state sync is not permanently tied to Joplin.
-- **Housekeeping:**
-  - `pyproject.toml` dependencies are stale: `astral` is unused, and `litert-lm-api` should be optional.
-  - `inference.py` hard-codes `~/dev/Thirties` paths when finding the host runner.
-  - There are unused imports across `thirties_core`.
-  - DST fall-back hour: Python compares same-zone datetimes by wall time, so overlap checks can misjudge spans inside the repeated 1–2 AM hour. Constructors are safe; a full fix is to compare in UTC everywhere.
+1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
+2. **SLM understanding and efficiency** (judge scores 3.3–3.5):
+   - Multi-part messages still drop a part now and then. Measure per action with `tests/slm_parse_eval.py`, and add a "did I cover everything in the message?" check in Python (look for nouns from the message that matched no action).
+   - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
+3. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).
+4. **Statistics in planning:** use real durations from history when proposing how long things take, and warn when a plan exceeds the capacity you've actually shown.
+5. **Conversation summaries** when a conversation ends, so history search works on summaries instead of raw messages.
+6. **Calendar refinements:**
+   - remember "not mine" decisions per recurring series, not per occurrence
+   - creating events back in Google Calendar (write access through EDS)
+7. **Connector abstraction (Anti-Pattern 1):** `TaskSource`, `CalendarSource` and `SyncTransport` interfaces. The user mentioned "a cloud location with much more storage" as another configurable option, probably a sync or storage transport; waiting on the user to say what it is.
+8. **Weekly patterns:** different routines per weekday (work hours, sleep).
+9. **Housekeeping:**
+   - `pyproject.toml` dependencies are stale (`astral` is unused; `litert-lm-api` should be optional)
+   - `inference.py` hard-codes `~/dev/Thirties` runner paths
+   - unused imports
+   - the DST fall-back hour edge case: same-zone comparisons use wall time
+   - the desktop app's periodic refresh runs on the UI thread
