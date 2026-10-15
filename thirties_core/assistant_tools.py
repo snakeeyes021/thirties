@@ -120,6 +120,12 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "week_overview",
+        "description": "A day-by-day summary of a week: what's planned, what got done, and free time. Read-only.",
+        "parameters": {"start_day": "First day (default: today).", "days": "How many days (default 7)."},
+        "required": [],
+    },
+    {
         "name": "search_backlog",
         "description": "Find backlog tasks by keywords. Read-only.",
         "parameters": {"query": "Words to look for."},
@@ -128,7 +134,7 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
-                       "get_statistics", "search_backlog"}
+                       "get_statistics", "search_backlog", "week_overview"}
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -398,6 +404,32 @@ class AssistantTools:
         facts = self.statistics_facts(n)
         return "\n".join(f"- {f}" for f in facts) if facts else "Not enough history yet for statistics."
 
+    def week_overview(self, start_day: Any = None, days: Any = 7, **_: Any) -> str:
+        if not self.pt.scheduler:
+            raise ToolError("No schedule store available.")
+        today = self._today()
+        first = parse_day(start_day, today) if start_day else today
+        try:
+            count = max(1, min(14, int(str(days))))
+        except ValueError:
+            count = 7
+        lines = []
+        for offset in range(count):
+            d = first + timedelta(days=offset)
+            plan = d == self.pt.day_plan.target_date and self.pt.day_plan or self.pt.scheduler.build_day_plan(d)[0]
+            items = [s for s in plan.spans_in_view() if not s.is_envelope and not s.tentative]
+            done = sum(1 for s in items if s.status == SpanStatus.DONE)
+            work = next((s for s in plan.active_spans() if s.category == SpanCategory.WORK), None)
+            free = sum((b - a).total_seconds() for a, b in self.pt.open_windows_for(plan)
+                       if (b - a).total_seconds() >= 1800 and a.hour >= 6) / 3600
+            head = f"{d.strftime('%a %b %d')}: " + (f"work {format_clock(work.start_dt)}–{format_clock(work.end_dt)}; "
+                                                    if work else "no work; ")
+            head += f"{len(items)} planned" + (f", {done} done" if done else "") + f"; ~{free:.0f}h free"
+            if items:
+                head += " — " + ", ".join(s.title for s in items[:6]) + ("…" if len(items) > 6 else "")
+            lines.append(head)
+        return "\n".join(lines)
+
     def search_backlog(self, query: str, **_: Any) -> str:
         found = rank_tasks(self.s.tasks, str(query))
         if not found:
@@ -417,6 +449,7 @@ class AssistantTools:
             "read_conversation": self.read_conversation,
             "get_statistics": self.get_statistics,
             "search_backlog": self.search_backlog,
+            "week_overview": self.week_overview,
         }
 
 

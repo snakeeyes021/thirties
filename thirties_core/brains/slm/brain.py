@@ -826,6 +826,9 @@ class SlmBrain:
     def _do_question(self, a: Action) -> Tuple[str, bool]:
         topic = (a.get("topic") or "").lower()
         day = a.get("day")
+        if "week" in topic:
+            ok, out = self._run("week_overview", {})
+            return "Your week:\n" + "\n".join(f"- {l}" for l in out.splitlines()), False
         if any(w in topic for w in ("free", "open", "available", "time left")):
             start, end = self._window_for(topic)
             args = {"after": format_clock(start), "before": format_clock(end)} if not day else {}

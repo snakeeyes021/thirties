@@ -88,6 +88,16 @@ class TestAnyDay(ToolsTestCase):
         self.assertNotIn("Move NAS", [s.title for s in self.t.day_plan.spans])
         self.assertEqual(occupant(self.sched.build_day_plan(DAY + timedelta(days=1))[0], "09:00", 1), "Move NAS")
 
+    def test_week_overview(self) -> None:
+        self.t.execute("add_event", {"title": "Piano", "start": "10:00 AM", "duration": "1 hour", "day": "Saturday"})
+        out = self.t.execute("week_overview", {})
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 7)
+        self.assertTrue(lines[0].startswith("Thu Oct 15: work 8:30 AM–4:00 PM"), lines[0])
+        sat = next(l for l in lines if l.startswith("Sat"))
+        self.assertIn("no work; 1 planned", sat)
+        self.assertIn("Piano", sat)
+
     def test_list_another_day_and_weekend_has_no_work(self) -> None:
         saturday = self.t.execute("list_schedule", {"day": "Saturday"})
         self.assertIn("[Saturday, October 17]", saturday)
