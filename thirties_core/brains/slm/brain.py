@@ -406,7 +406,7 @@ class SlmBrain:
         if not self.state.proposal:
             return None
         lowered = message.lower().strip()
-        m = re.search(r"\b(?:option|number|#)\s*(\d)\b|^\s*(\d)\s*[.!]?\s*$", lowered)
+        m = re.search(r"\b(?:option|number|#)\s*(\d)\b|^\s*(\d)\s*(?:[.!),:]|$|\s+(?:please|works|sounds|is good|then|and|also))", lowered)
         if m:
             return Action("choose", {"option": int(m.group(1) or m.group(2))})
         m = re.search(r"\bthe (first|second|third|1st|2nd|3rd) (?:one|option)\b|^\s*(first|second|third) one\b", lowered)

@@ -131,6 +131,13 @@ class TestSchedulingActions(SlmTestCase):
         self.assertNotIn("replace_overlaps", out)
         self.assertNotIn("[id", out)
 
+    def test_option_number_with_more_requests(self):
+        self.say("gym 5:30 to 6:30", {"type": "add", "title": "Gym", "start": "5:30", "end": "6:30"})
+        out = self.say("2. Also add 30 minutes of travel time at 7:30",
+                       {"type": "add", "title": "Travel", "start": "7:30", "duration": "30 minutes"})
+        self.assertIn("Added Gym: 6:30 PM", out)
+        self.assertIn("Added Travel", out)
+
     def test_conflict_offers_options_and_choice_applies(self):
         out = self.say("gym 5:30 to 6:30", {"type": "add", "title": "Gym", "start": "5:30", "end": "6:30"})
         self.assertIn("would overlap Dentist", out)
