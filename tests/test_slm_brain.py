@@ -222,6 +222,13 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.assertTrue(out.startswith("Here's today:"), out)
         self.assertIn("- 7:00 PM – 8:00 PM: Dinner", out)
 
+    def test_answering_when_completes_the_pending_add(self):
+        out = self.say("I want a walk soon", {"type": "add", "title": "Walk", "duration": "30 minutes"})
+        self.assertEqual(out, "When should I put Walk?")
+        out = self.say("5 pm. how much free time do I have before bed?", {"type": "chat"})
+        self.assertIn("Added Walk: 5:00 PM – 5:30 PM", out)
+        self.assertIn("You're free", out)
+
     def test_unparseable_output_falls_back(self):
         out = self.say("hmm", "sorry I can't do JSON")
         self.assertEqual(out, "Happy to help!")
@@ -230,7 +237,8 @@ class TestProposalsAndOutcomes(SlmTestCase):
 class TestVoice(SlmTestCase):
 
     def test_natural_rewrite_is_used_when_facts_survive(self):
-        self.rt.voice_replies.append("Done! Walk is set for 5:00 PM – 5:30 PM. You're free after that.")
+        self.rt.voice_replies.append("Done! Walk is set for 5:00 PM – 5:30 PM. You're still free 5:30 PM – 6:00 PM "
+                                     "and 6:30 PM – 11:00 PM.")
         out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
         self.assertTrue(out.startswith("Done! Walk is set"), out)
 

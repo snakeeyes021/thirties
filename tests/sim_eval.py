@@ -494,7 +494,8 @@ def main() -> None:
     ap.add_argument("--frontier-model", default="gemini-3.8-flash-low")
     ap.add_argument("--label", default="")
     args = ap.parse_args()
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.WARNING, format="      [%(name)s] %(message)s")
+    logging.getLogger("thirties_core.brains.slm.brain").setLevel(logging.INFO)
 
     cfg = load_config()
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp()) / "s.sqlite"), MockCalendarEngine([]))

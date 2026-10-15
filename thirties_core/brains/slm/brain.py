@@ -34,8 +34,10 @@ logger = logging.getLogger(__name__)
 PRONOUNS = {"it", "that", "this", "them", "those", "the thing", "that one", "this one"}
 ENVELOPE_WORDS = {"work": SpanCategory.WORK, "job": SpanCategory.WORK, "shift": SpanCategory.WORK,
                   "sleep": SpanCategory.SLEEP, "bed": SpanCategory.SLEEP, "bedtime": SpanCategory.SLEEP}
-CHAT_SYSTEM = ("You are Thirties, a warm, concise personal planning assistant. Reply to the user in one or two "
-               "short sentences. Do not claim to have changed their schedule. Do not invent plans.")
+CHAT_SYSTEM = ("You are Thirties, a warm, concise personal planning assistant that can see and change the user's "
+               "schedule. Reply in one or two short sentences. Never say you lack access to their schedule. Do not "
+               "claim to have changed anything and do not invent plans; if they seem to want a change or information, "
+               "ask them to say it plainly.")
 
 
 @dataclass
@@ -43,13 +45,16 @@ class DialogState:
     last_ids: List[str] = field(default_factory=list)       # what "it" refers to
     proposal: List[Dict[str, Any]] = field(default_factory=list)  # add_event argument dicts awaiting yes/no
     proposal_kind: str = ""                                  # "plan" (all) or "options" (pick one)
+    awaiting_time: Dict[str, Any] = field(default_factory=dict)  # an add we asked "when?" about
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"last_ids": self.last_ids, "proposal": self.proposal, "proposal_kind": self.proposal_kind}
+        return {"last_ids": self.last_ids, "proposal": self.proposal, "proposal_kind": self.proposal_kind,
+                "awaiting_time": self.awaiting_time}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DialogState":
-        return cls(list(data.get("last_ids", [])), list(data.get("proposal", [])), data.get("proposal_kind", ""))
+        return cls(list(data.get("last_ids", [])), list(data.get("proposal", [])), data.get("proposal_kind", ""),
+                   dict(data.get("awaiting_time", {})))
 
 
 class SlmBrain:
@@ -107,9 +112,7 @@ class SlmBrain:
             return draft
         def norm(times):
             return {t.replace(" ", "").upper() for t in times}
-        required = norm(t for line in draft.splitlines() if not line.lower().startswith(("still free", "free"))
-                        for t in self._TIME_RE.findall(line))
-        allowed = norm(self._TIME_RE.findall(draft))
+        required = allowed = norm(self._TIME_RE.findall(draft))
         produced = norm(self._TIME_RE.findall(out))
         if not required <= produced or not produced <= allowed:
             logger.info("[SlmBrain] voice changed the times; using the draft")
@@ -192,6 +195,8 @@ class SlmBrain:
         return ""
 
     def _pending_text(self) -> Optional[str]:
+        if self.state.awaiting_time:
+            return f"a time for {self.state.awaiting_time.get('title')} (answer with an add action)"
         if not self.state.proposal:
             return None
         items = "; ".join(f"{p['title']} at {p['start']}" for p in self.state.proposal)
@@ -364,11 +369,31 @@ class SlmBrain:
                               r"schedule look)\b.*\b(day|schedule|plan|today|tonight|tomorrow|list)\b|"
                               r"\b(clean|full|whole) (list|day|schedule)\b", re.IGNORECASE)
 
+    _TIME_IN_TEXT = re.compile(r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon|now|right now)\b", re.IGNORECASE)
+
     def _execute(self, actions: List[Action], message: str) -> str:
         actions = self._sanity(actions, message)
-        if all(a.type == "chat" for a in actions) and self._SHOW_DAY_RE.search(message):
-            day = "tomorrow" if "tomorrow" in message.lower() else None
-            actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
+        waiting = self.state.awaiting_time
+        if waiting and not any(a.type in ("add", "move", "remove") for a in actions):
+            m = self._TIME_IN_TEXT.search(message)
+            if m:
+                actions = [Action("add", {**waiting, "start": m.group(1)})] + [a for a in actions if a.type != "chat"]
+        elif waiting:
+            for a in actions:  # the answer often comes back as an add without the title
+                if a.type == "add" and not a.get("title"):
+                    a.fields["title"] = waiting.get("title")
+        if all(a.type == "chat" for a in actions):
+            lowered = message.lower()
+            day = "tomorrow" if "tomorrow" in lowered else None
+            if re.search(r"\b(free|open|available|time left|left before|room)\b", lowered) and "?" in message:
+                actions = [Action("question", {"topic": "free time " + ("tonight" if "tonight" in lowered or "bed" in lowered else ""),
+                                               **({"day": day} if day else {})})]
+            elif self._SHOW_DAY_RE.search(message):
+                actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
+        # Also answer a free-time question asked alongside other requests
+        if re.search(r"\bhow much (free )?time\b|\bwhen am i free\b|\bfree time\b", message.lower()) and \
+                not any(a.type == "question" for a in actions):
+            actions = actions + [Action("question", {"topic": "free time tonight"})]
         if not actions:
             return self._chat(message)
         lines: List[str] = []
@@ -420,7 +445,10 @@ class SlmBrain:
         anchor_ref = a.get("after") or a.get("before")
         if not a.get("start") and not anchor_ref:
             self.state.proposal, self.state.proposal_kind = [], ""
+            self.state.awaiting_time = {k: v for k, v in a.fields.items() if k in ("title", "duration", "day", "alongside")}
+            self.state.awaiting_time.setdefault("title", title)
             return f"When should I put {title}?", False
+        self.state.awaiting_time = {}
         saved = self.tools.day_plan
         try:
             self.tools.day_plan = self.tools.plan_for(day)
