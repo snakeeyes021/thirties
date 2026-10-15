@@ -57,6 +57,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "task_id": "Backlog task ID when scheduling a backlog task.",
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
             "alongside": "true if it happens at the same time as something else (e.g. an audiobook during dinner).",
+            "push_later": "true to make room by sliding the planned activities that follow it later, in order.",
             "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
         },
         "required": ["title", "start"],
@@ -72,6 +73,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "shift": "Move the whole item, keeping its length: '+1 hour' is later, '-30 minutes' is earlier.",
             "title": "New title.",
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
+            "push_later": "true to slide the planned activities that follow it later instead of overlapping them.",
             "day": "The day the item is on (default: the day being planned).",
         },
         "required": ["event"],
@@ -81,6 +83,13 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Take an item off the schedule (including work or sleep, e.g. for a day off).",
         "parameters": {"event": "The item's id (or its exact title).", "day": "The day the item is on (default: the day being planned)."},
         "required": ["event"],
+    },
+    {
+        "name": "swap_events",
+        "description": "Swap two planned items. Back-to-back items trade places in order; others trade start times.",
+        "parameters": {"first": "One item's id or title.", "second": "The other item's id or title.",
+                       "day": "The day they're on (default: the day being planned)."},
+        "required": ["first", "second"],
     },
     {
         "name": "clear_time",
@@ -326,6 +335,36 @@ class PlanTools:
             )
         return [self._carve(s, span.start_dt, span.end_dt) for s in conflicts]
 
+    def _movable(self, span: EventSpan) -> bool:
+        return not span.is_envelope and span.source != "calendar" and not span.tentative
+
+    def _push_following(self, anchor: EventSpan) -> List[str]:
+        """Slide planned activities that collide with ``anchor`` (and each other) later, keeping order."""
+        cursor = anchor.end_dt
+        moved: List[Tuple[EventSpan, timedelta]] = []
+        followers = sorted((s for s in self.day_plan.active_spans()
+                            if s.id != anchor.id and self._movable(s) and s.end_dt > anchor.start_dt
+                            and s.start_dt >= anchor.start_dt - timedelta(minutes=1)), key=lambda s: s.start_dt)
+        for span in followers:
+            if span.start_dt >= cursor:
+                break
+            delta = cursor - span.start_dt
+            moved.append((span, delta))
+            cursor = span.end_dt + delta
+        for span, delta in moved:
+            new_start, new_end = span.start_dt + delta, span.end_dt + delta
+            firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
+                    if c.id != span.id and (c.is_firm or c.source == "calendar")]
+            if firm:
+                raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
+                                f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
+        notes = []
+        for span, delta in moved:
+            span.start_dt, span.end_dt = span.start_dt + delta, span.end_dt + delta
+            self._persist(span)
+            notes.append(f"{span.title} now {format_clock(span.start_dt)} – {format_clock(span.end_dt)}")
+        return notes
+
     def _save_plan_after_change(self) -> None:
         if self.day_plan.is_finalized:
             # A finalized plan that changes is no longer final.
@@ -349,6 +388,7 @@ class PlanTools:
         task_id: Optional[str] = None,
         replace_overlaps: Any = False,
         alongside: Any = False,
+        push_later: Any = False,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -370,7 +410,15 @@ class PlanTools:
             raise ToolError("Give an end time or a duration.")
 
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
-        notes = [] if _as_bool(alongside) else self._place(span, _as_bool(replace_overlaps))
+        if _as_bool(alongside):
+            notes = []
+        elif _as_bool(push_later) and not span.is_envelope:
+            firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt) if c.is_firm or c.source == "calendar"]
+            if firm:
+                raise ToolError(f"{span.title} would overlap {firm[0].title}, a fixed calendar commitment.")
+            notes = self._push_following(span)
+        else:
+            notes = self._place(span, _as_bool(replace_overlaps))
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
@@ -387,6 +435,7 @@ class PlanTools:
         shift: Any = None,
         title: Optional[str] = None,
         replace_overlaps: Any = False,
+        push_later: Any = False,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
@@ -412,7 +461,17 @@ class PlanTools:
 
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
-        notes = self._place(moved, _as_bool(replace_overlaps))
+        if _as_bool(push_later) and not span.is_envelope:
+            notes = []
+            span_backup = (span.start_dt, span.end_dt)
+            span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
+            try:
+                notes = self._push_following(span)
+            except ToolError:
+                span.start_dt, span.end_dt = span_backup
+                raise
+        else:
+            notes = self._place(moved, _as_bool(replace_overlaps))
         span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
         if span.source == "routine":
             span.source = "user"
@@ -421,6 +480,39 @@ class PlanTools:
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
         return f"Changed {before} → {self.describe(span)}.{extra}"
+
+    def swap_events(self, first: Any, second: Any, **_: Any) -> str:
+        a, b = self._find_span(first), self._find_span(second)
+        if a.id == b.id:
+            raise ToolError("Those are the same item.")
+        for span in (a, b):
+            if not self._movable(span):
+                raise ToolError(f"{span.title} can't be moved here.")
+        a, b = sorted((a, b), key=lambda s: s.start_dt)
+        between = [s for s in self.day_plan.active_spans()
+                   if self._movable(s) and s.id not in (a.id, b.id) and a.end_dt <= s.start_dt < b.start_dt]
+        if not between and b.start_dt - a.end_dt <= timedelta(minutes=1):
+            # Back to back: b goes first, a right after it, filling the same stretch.
+            start = a.start_dt
+            b_len, a_len = b.end_dt - b.start_dt, a.end_dt - a.start_dt
+            b.start_dt, b.end_dt = start, start + b_len
+            a.start_dt, a.end_dt = b.end_dt, b.end_dt + a_len
+        else:
+            a_len, b_len = a.end_dt - a.start_dt, b.end_dt - b.start_dt
+            a_start, b_start = a.start_dt, b.start_dt
+            a.start_dt, a.end_dt = b_start, b_start + a_len
+            b.start_dt, b.end_dt = a_start, a_start + b_len
+            for span in (a, b):
+                clash = [s for s in self._conflicts(span) if s.id not in (a.id, b.id)]
+                if clash:
+                    a.start_dt, a.end_dt, b.start_dt, b.end_dt = a_start, a_start + a_len, b_start, b_start + b_len
+                    raise ToolError(f"Swapping would make {span.title} overlap {clash[0].title}.")
+        for span in (a, b):
+            self._persist(span)
+        self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        self._save_plan_after_change()
+        return f"Swapped: {self.describe(b)}; {self.describe(a)}." if b.start_dt < a.start_dt else \
+            f"Swapped: {self.describe(a)}; {self.describe(b)}."
 
     def remove_event(self, event: Any, **_: Any) -> str:
         span = self._find_span(event)
@@ -548,6 +640,7 @@ class PlanTools:
             "add_event": self.add_event,
             "update_event": self.update_event,
             "remove_event": self.remove_event,
+            "swap_events": self.swap_events,
             "clear_time": self.clear_time,
             "find_open_time": self.find_open_time,
             "list_schedule": self.list_schedule,

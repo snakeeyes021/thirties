@@ -74,12 +74,27 @@ def resolve_clock(text: str, day_start: datetime, after: Optional[datetime] = No
 _DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(hours|hour|hrs|hr|h|minutes|minute|mins|min|m)(?![a-z])", re.IGNORECASE)
 
 
+_WORD_NUMBERS = {"a": "1", "an": "1", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+                 "seven": "7", "eight": "8", "nine": "9", "ten": "10", "couple": "2", "a couple of": "2",
+                 "a couple": "2", "half an": "0.5", "half a": "0.5"}
+
+
+def _normalize_duration_words(raw: str) -> str:
+    raw = re.sub(r"\b(\d+(?:\.\d+)?)\s*(?:chunks?|thirties|thirtys|blocks?)\b", lambda m: f"{float(m.group(1)) * 30:g} minutes", raw)
+    raw = re.sub(r"\b(?:a )?half(?: an)? hour\b", "30 minutes", raw)
+    raw = re.sub(r"\bhour and a half\b", "1.5 hours", raw)
+    for words, num in sorted(_WORD_NUMBERS.items(), key=lambda kv: -len(kv[0])):
+        raw = re.sub(rf"\b{words}\b(?=\s+(?:hours?|hrs?|minutes?|mins?|chunks?|thirties|blocks?))", num, raw)
+    raw = re.sub(r"\b(\d+(?:\.\d+)?)\s*(?:chunks?|thirties|thirtys|blocks?)\b", lambda m: f"{float(m.group(1)) * 30:g} minutes", raw)
+    return re.sub(r"\b(?:at least|about|around|roughly|maybe|like|or so|ish)\b", "", raw).strip()
+
+
 def parse_duration_minutes(value) -> int:
-    """Parse '2 hours', '90 min', '1h30m', '1.5 hours' or a bare number of minutes."""
+    """Parse '2 hours', '90 min', '1h30m', '1.5 hours', '3 chunks', 'an hour', 'half an hour' or minutes."""
     if isinstance(value, (int, float)):
         minutes = float(value)
     else:
-        raw = str(value).strip().lower()
+        raw = _normalize_duration_words(str(value).strip().lower())
         if re.fullmatch(r"\d+(?:\.\d+)?", raw):
             minutes = float(raw)
         else:

@@ -59,6 +59,7 @@ class ConversationManager:
             active_notes=active_notes,
         )
         self.conversation: Optional[Conversation] = None
+        self._followed_latest: Optional[str] = None
         if services:
             conv = services.conversations.get(conversation_id) if conversation_id else None
             self._load(conv or services.conversations.latest_for_day(day_plan.target_date))
@@ -74,6 +75,15 @@ class ConversationManager:
         self.brain.reset()
         if conv:
             self.brain.messages = [self.brain.messages[0]] + list(conv.messages)
+        self._note_if_latest()
+
+    def _note_if_latest(self) -> None:
+        """Remember whether we're on the day's newest conversation (refresh then follows newer ones)."""
+        if self._store is None or self.conversation is None:
+            return
+        latest = self._store.latest_for_day(self.day_plan.target_date)
+        if latest and latest.id == self.conversation.id:
+            self._followed_latest = latest.id
 
     def _save(self) -> None:
         if self._store is None:
@@ -82,6 +92,7 @@ class ConversationManager:
             self.conversation = self._store.create(self.day_plan.target_date)
         self.conversation.messages = [m for m in self.brain.messages if m.get("role") != "system"]
         self._store.save(self.conversation)
+        self._note_if_latest()
 
     def history(self) -> List[Dict[str, str]]:
         """The visible transcript of the current conversation: user and assistant text only."""
@@ -104,6 +115,8 @@ class ConversationManager:
         if conv is None:
             return False
         self._load(conv)
+        latest = self._store.latest_for_day(self.day_plan.target_date)
+        self._followed_latest = conv.id if latest and latest.id == conv.id else None
         return True
 
     def refresh(self) -> None:
@@ -119,10 +132,18 @@ class ConversationManager:
         self.tools.ambiguous_events = list(pending)
         self.tools._other_days.clear()
         if self._store:
-            latest = self._store.latest_for_day(plan.target_date)
-            if latest and (self.conversation is None or latest.id != self.conversation.id
-                           or latest.updated_at > self.conversation.updated_at):
-                self._load(latest)
+            day_convs = self._store.for_day(plan.target_date)
+            latest = day_convs[-1] if day_convs else None
+            current = next((c for c in day_convs if self.conversation and c.id == self.conversation.id), None)
+            if current is None or (self.conversation.id == self._followed_latest
+                                   and latest and latest.id != current.id):
+                # Follow the day's newest conversation (e.g. /new from Telegram), unless the user
+                # deliberately switched to an older one here.
+                if latest:
+                    self._load(latest)
+            elif current.updated_at > self.conversation.updated_at:
+                self._load(current)  # same conversation, continued elsewhere
+            self._note_if_latest()
 
     def add_assistant_message(self, text: str) -> None:
         """Record something the assistant said on its own (e.g. a Telegram check-in)."""
@@ -188,7 +209,10 @@ class ConversationManager:
 
             self.messages.append({"role": "user", "content": user_text})
             self.messages.append({"role": "assistant", "content": reply})
+            self._save()
             return reply
 
 
-        return self.brain.respond(user_text)
+        reply = self.brain.respond(user_text)
+        self._save()
+        return reply

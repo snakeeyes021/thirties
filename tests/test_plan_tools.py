@@ -118,6 +118,61 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertEqual(occupant(plan, "16:00"), "Work")
 
 
+class TestInsertAndSwap(unittest.TestCase):
+
+    def day(self) -> PlanTools:
+        t = tools_for([event("dentist", "21:30", "22:00", "Late call")])
+        t.execute("remove_event", {"event": "Work"})
+        for title, start, end in [("Upgrades", "1:00 PM", "2:00 PM"), ("Shower", "2:00 PM", "2:30 PM"),
+                                  ("Chores", "2:30 PM", "3:30 PM"), ("Reading", "5:00 PM", "6:00 PM")]:
+            t.execute("add_event", {"title": title, "start": start, "end": end})
+        return t
+
+    def test_insert_slides_following_items_later(self) -> None:
+        t = self.day()
+        out = t.execute("add_event", {"title": "Lunch", "start": "1:00 PM", "duration": "30 min", "push_later": True})
+        self.assertIn("Upgrades now 1:30 PM – 2:30 PM", out)
+        self.assertEqual(occupant(t.day_plan, "13:00"), "Lunch")
+        self.assertEqual(occupant(t.day_plan, "14:30"), "Shower")
+        self.assertEqual(occupant(t.day_plan, "15:30"), "Chores")
+        self.assertEqual(occupant(t.day_plan, "17:00"), "Reading")  # the gap absorbed the slide
+
+    def test_slide_stops_before_fixed_commitments(self) -> None:
+        t = tools_for([event("call", "15:00", "15:30", "Call")])
+        t.execute("remove_event", {"event": "Work"})
+        t.execute("add_event", {"title": "Upgrades", "start": "2:00 PM", "end": "3:00 PM"})
+        out = t.execute("add_event", {"title": "Lunch", "start": "2:00 PM", "duration": "30 min", "push_later": True})
+        self.assertTrue(out.startswith(NOT_DONE) and "Call" in out, out)
+        self.assertEqual(occupant(t.day_plan, "14:00"), "Upgrades")
+
+    def test_lengthening_an_item_can_push(self) -> None:
+        t = self.day()
+        t.execute("update_event", {"event": "Upgrades", "end": "2:30 PM", "push_later": True})
+        self.assertEqual(occupant(t.day_plan, "14:00"), "Upgrades")
+        self.assertEqual(occupant(t.day_plan, "14:30"), "Shower")
+
+    def test_swap_back_to_back_items_trades_order(self) -> None:
+        t = self.day()
+        out = t.execute("swap_events", {"first": "Upgrades", "second": "Shower"})
+        self.assertTrue(out.startswith("Swapped"), out)
+        self.assertEqual(occupant(t.day_plan, "13:00"), "Shower")
+        self.assertEqual(occupant(t.day_plan, "13:30"), "Upgrades")
+        self.assertEqual(occupant(t.day_plan, "14:00"), "Upgrades")
+        self.assertEqual(occupant(t.day_plan, "14:30"), "Chores")
+
+    def test_swap_apart_items_trades_start_times(self) -> None:
+        t = self.day()
+        t.execute("swap_events", {"first": "Upgrades", "second": "Reading"})
+        self.assertEqual(occupant(t.day_plan, "13:00"), "Reading")
+        self.assertEqual(occupant(t.day_plan, "17:00"), "Upgrades")
+
+    def test_swap_refuses_when_lengths_would_collide(self) -> None:
+        t = self.day()
+        out = t.execute("swap_events", {"first": "Shower", "second": "Reading"})  # Reading is 1h, Chores follows Shower
+        self.assertTrue(out.startswith(NOT_DONE) and "Chores" in out, out)
+        self.assertEqual(occupant(t.day_plan, "14:00"), "Shower")
+
+
 class TestRemoveAndClear(unittest.TestCase):
 
     def test_day_off_removes_work_only(self) -> None:

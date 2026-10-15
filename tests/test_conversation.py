@@ -143,6 +143,35 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(len(self.engine.call_history), 3)
 
 
+class TestPersistence(ConversationTestCase):
+
+    def test_turns_survive_a_new_manager(self) -> None:
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        engine = MockInferenceEngine([reply("Sure thing.")])
+        first = ConversationManager(plan, [], pending, sched, inference_engine=engine, active_notes=[])
+        first.send_user_message("plan my evening")
+        again = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        self.assertEqual(again.history(), [{"role": "user", "content": "plan my evening"},
+                                           {"role": "assistant", "content": "Sure thing."}])
+
+    def test_refresh_follows_new_conversations_but_keeps_a_chosen_old_one(self) -> None:
+        sched = make_scheduler()
+        engine = MockInferenceEngine()
+        desk = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        desk.send_user_message("morning planning")
+        morning = desk.conversation.id
+        phone = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        phone.new_conversation()
+        phone.send_user_message("evening from the phone")
+        desk.refresh()
+        self.assertEqual(desk.history()[0]["content"], "evening from the phone")  # followed the new one
+        desk.switch_conversation(morning)
+        phone.send_user_message("more from the phone")
+        desk.refresh()
+        self.assertEqual(desk.conversation.id, morning)  # kept the deliberate choice
+
+
 class TestSlashCommands(ConversationTestCase):
 
     def test_night_and_reset(self) -> None:
