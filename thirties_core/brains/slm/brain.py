@@ -229,7 +229,18 @@ class SlmBrain:
                     near: Optional[datetime] = None) -> datetime:
         """A clock time on the planned day; adds AM/PM sensibly when the user left it out."""
         plan = self.tools.day_plan
-        raw = str(text).strip().lower()
+        raw = str(text).strip().lower().replace("in the ", "").replace("this ", "")
+        named = {"early morning": "7:00", "morning": "9:00", "mid morning": "10:00", "mid-morning": "10:00",
+                 "late morning": "10:30", "lunch": "12:00", "lunchtime": "12:00", "midday": "12:00",
+                 "early afternoon": "13:00", "afternoon": "14:00", "mid afternoon": "15:00", "mid-afternoon": "15:00",
+                 "late afternoon": "16:30", "evening": "18:00", "early evening": "17:30", "late evening": "21:00",
+                 "tonight": "19:00", "night": "20:00", "bedtime": "22:00"}
+        if raw in named:
+            raw = named[raw]
+        elif raw in ("after work", "when work ends", "after my shift"):
+            work = next((s for s in self.tools.day_plan.active_spans() if s.category == SpanCategory.WORK), None)
+            if work:
+                return work.end_dt
         if raw in ("now", "right now", "asap", "next"):
             now = self._now()
             return now.replace(minute=0 if now.minute < 15 else (30 if now.minute < 45 else 0), second=0,

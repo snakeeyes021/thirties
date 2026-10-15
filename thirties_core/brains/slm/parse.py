@@ -77,6 +77,7 @@ oh shoot, work went til 4:30 => {"actions":[{"type":"move","target":"work","end"
 I'm starting work at 10 today => {"actions":[{"type":"move","target":"work","start":"10"}]}
 push the email to tomorrow at 9 => {"actions":[{"type":"move","target":"email","to_day":"tomorrow","start":"9"}]}
 I took the day off => {"actions":[{"type":"remove","target":"work"}]}
+took the day off! piano 10 to 12, then lunch with Sam at 12:30 for an hour => {"actions":[{"type":"remove","target":"work"},{"type":"add","title":"Piano","start":"10","end":"12"},{"type":"add","title":"Lunch with Sam","start":"12:30","duration":"an hour"}]}
 cancel composing and do laundry at 7:30 for an hour => {"actions":[{"type":"remove","target":"composing"},{"type":"add","title":"Laundry","start":"7:30","duration":"1 hour"}]}
 dinner 6 to 7, and I'll listen to Project Hail Mary while I eat => {"actions":[{"type":"add","title":"Dinner","start":"6","end":"7"},{"type":"add","title":"Project Hail Mary","start":"6","end":"7","alongside":true}]}
 finished the taxes around 4 => {"actions":[{"type":"outcome","target":"taxes","status":"done","finished":"4"}]}
