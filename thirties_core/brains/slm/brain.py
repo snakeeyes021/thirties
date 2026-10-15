@@ -184,11 +184,11 @@ class SlmBrain:
         now = self._now()
         lines = []
         for s in self.tools.day_plan.spans_in_view():
-            if self._is_today() and s.end_dt <= now and not s.is_envelope:
+            if self._is_today() and s.end_dt <= now - timedelta(hours=1) and not s.is_envelope:
                 continue
             note = " (unconfirmed invite)" if s.tentative else ""
             lines.append(f"{s.title} {format_clock(s.start_dt)}-{format_clock(s.end_dt)}{note}")
-        return lines[:14]
+        return lines[:10]
 
     def _last_assistant(self) -> str:
         for m in reversed(self.messages[:-1]):
@@ -207,7 +207,7 @@ class SlmBrain:
 
     def _parse(self, message: str) -> List[Action]:
         now = self._now()
-        related = [t.title for t in rank_tasks([t for t in self.tasks if not t.someday], message, limit=5)]
+        related = [t.title for t in rank_tasks([t for t in self.tasks if not t.someday], message, limit=3)]
         last = self.tools.day_plan.get_span(self.state.last_ids[0]) if self.state.last_ids else None
         context = build_context(
             now_text=now.strftime("%A ") + format_clock(now),

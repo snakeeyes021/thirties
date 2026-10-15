@@ -129,7 +129,7 @@ def build_context(now_text: str, schedule_lines: List[str], last_assistant: str,
     if last_item:
         parts.append(f"Last item mentioned: {last_item}")
     if last_assistant:
-        said = last_assistant if len(last_assistant) <= 300 else last_assistant[:297] + "..."
+        said = last_assistant if len(last_assistant) <= 160 else last_assistant[:157] + "..."
         parts.append(f'Assistant just said: "{said}"')
     if pending:
         parts.append(f"Waiting for the user's answer about: {pending}")
