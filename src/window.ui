@@ -4,8 +4,10 @@
   <requires lib="Adw" version="1.0"/>
   <template class="ThirtiesWindow" parent="AdwApplicationWindow">
     <property name="title" translatable="yes">Thirties</property>
-    <property name="default-width">860</property>
-    <property name="default-height">740</property>
+    <property name="default-width">1240</property>
+    <property name="default-height">800</property>
+    <property name="width-request">360</property>
+    <property name="height-request">480</property>
     <property name="content">
       <object class="AdwToolbarView">
         <child type="top">
@@ -48,8 +50,8 @@
               </object>
             </child>
             <child type="title">
-              <object class="AdwViewSwitcherTitle" id="view_switcher_title">
-                <property name="stack">view_stack</property>
+              <object class="AdwWindowTitle" id="window_title">
+                <property name="title" translatable="yes">Thirties</property>
               </object>
             </child>
             <child type="end">
@@ -60,18 +62,45 @@
                 <property name="menu-model">primary_menu</property>
               </object>
             </child>
+            <child type="end">
+              <object class="GtkToggleButton" id="chat_toggle_btn">
+                <property name="icon-name">sidebar-show-right-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Show or Hide Chat (F9)</property>
+                <property name="active">True</property>
+              </object>
+            </child>
           </object>
         </child>
         <property name="content">
-          <object class="AdwViewStack" id="view_stack">
+          <!-- Schedule on the left, chat on the right: equal halves when wide,
+               chat overlaid over the schedule when narrow. -->
+          <object class="AdwOverlaySplitView" id="split_view">
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
+            <property name="sidebar-position">end</property>
+            <property name="sidebar-width-fraction">0.5</property>
+            <property name="min-sidebar-width">340</property>
+            <property name="max-sidebar-width">4000</property>
+            <property name="show-sidebar" bind-source="chat_toggle_btn" bind-property="active" bind-flags="sync-create|bidirectional"/>
           </object>
         </property>
       </object>
     </property>
+    <child>
+      <object class="AdwBreakpoint">
+        <condition>max-width: 760sp</condition>
+        <setter object="split_view" property="collapsed">True</setter>
+        <setter object="split_view" property="sidebar-width-fraction">1.0</setter>
+      </object>
+    </child>
   </template>
   <menu id="primary_menu">
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Profile &amp; _Memory</attribute>
+        <attribute name="action">win.profile-memory</attribute>
+      </item>
+    </section>
     <section>
       <item>
         <attribute name="label" translatable="yes">_Preferences</attribute>

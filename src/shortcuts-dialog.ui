@@ -6,6 +6,12 @@
         <property name="title" translatable="yes">Shortcuts</property>
         <child>
           <object class="AdwShortcutsItem">
+            <property name="title" translatable="yes" context="shortcut window">Show or Hide Chat</property>
+            <property name="action-name">win.toggle-chat</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem">
             <property name="title" translatable="yes" context="shortcut window">Show Shortcuts</property>
             <property name="action-name">app.shortcuts</property>
           </object>
