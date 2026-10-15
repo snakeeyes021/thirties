@@ -9,7 +9,7 @@
 ## Where We Are
 
 - **Frontier Brain works and has been used for real.** The GTK app runs on Gemini 3.8 Flash (via `agy`, or the Gemini API directly), with the full Joplin backlog in context. In its first full day of real use (before 2026-10-14) it was about **75% usable**: morning planning, back-and-forth task picking, and moving things around later in the day all worked. That day ran on the pre-span core; Phases 1–2 below have changed the core and the prompt since.
-- **Phases 1–2 are implemented; first live check passed.** Unit tests are green, and the Frontier eval's checks are verified with scripted ideal behaviour. On 2026-10-14 a single live pass, with the free quota split across gemini-3.7-flash and gemini-3.6-flash, scored 10/10 on the 10 scenarios that ran, after relaxing one over-strict check. The other 3 hit API errors (overload, timeout, quota). Still to do: a full run with repeats on gemini-3.8-flash, the model actually used day to day.
+- **Phases 1–2 are implemented and pass the live eval.** On 2026-10-14 the full Frontier eval scored 26/26 (13 scenarios × 2) on gemini-3.8-flash-low through `agy`. Reading the replies turned up one quality problem the checks can't see: the model pushed the chronically deferred backlog item after almost every change. The backlog rule now limits that to planning moments (unprompted mentions dropped from 9/13 to 2/10, both on a newly free day off).
 - **The Telegram bridge and the Joplin sync note are built but not yet tried in real use.**
 - **Nothing records what actually happened.** The app helps make a plan but never learns whether it was followed. `StateDatabase.record_task_deferred` and `record_task_completed` exist but nothing calls them.
 - **There is no SLM brain yet.** The LiteRT transport works mechanically. Earlier SLM experiments ran Gemma through essentially the frontier prompt, which does not work.
@@ -42,7 +42,7 @@
 - **Transports:** the Gemini API retries 429 and 5xx responses, both transports now pass tool results to the model, and empty message parts are dropped (they caused HTTP 400s).
 
 ### Open items from Phases 1–2
-- **Run the full live Frontier eval on gemini-3.8-flash** with `python3 -m tests.frontier_eval --repeat 2`. It now goes through `agy` on the user's subscription by default. Use `--engine api` for the free-tier key, which allows only about 20 requests per model per day. The first live check also saw the model claim a change without making a call once; the correction step caught it. There is no live baseline from the old core: that attempt hit the API quota.
+- Rerun the Frontier eval (`python3 -m tests.frontier_eval --repeat 2`, through `agy` by default) before merging any prompt or tool change. Add scenarios from real use, especially multi-turn days. Consider an automated judge pass for tone (e.g. nagging, verbosity) alongside the deterministic checks.
 - `agy` is a coding agent, not just a model endpoint, so the engine runs it with `--sandbox` in an empty directory (`~/.cache/thirties/agy-workspace`). Each call costs about 12.6k input tokens of agy's own agent prompt, and may show up in Antigravity's conversation history. A plain model endpoint would be cleaner once the subscription offers one.
 - Consider native function calling on the Gemini API path.
 - Ask the user whether replies should count time in thirties ("4 chunks"), as the old prompt insisted, or in hours. The new prompt allows either.
