@@ -773,7 +773,7 @@ class SlmBrain:
             m = re.search(r"put off (\d+) times", out)
             if m and int(m.group(1)) >= 3:
                 text += f" That's {m.group(1)} times now. Want to try just 30 minutes of it, break it down, or drop it?"
-        return text, True
+        return text, False  # recorded, but the free time didn't change
 
     def _apply_proposals(self, items: List[Dict[str, Any]]) -> Tuple[str, bool]:
         lines, changed = [], False
