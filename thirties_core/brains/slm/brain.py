@@ -839,11 +839,25 @@ class SlmBrain:
         if "week" in topic:
             ok, out = self._run("week_overview", {})
             return "Your week:\n" + "\n".join(f"- {l}" for l in out.splitlines()), False
-        if any(w in topic for w in ("free", "open", "available", "time left")):
-            start, end = self._window_for(topic)
-            args = {"after": format_clock(start), "before": format_clock(end)} if not day else {}
-            ok, out = self._run("find_open_time", {**args, **({"day": day} if day else {})})
-            return (out.replace("Free: ", "You're free ") if ok else out), False
+        if any(w in topic for w in ("free", "open", "available", "time left", "packed", "busy", "room")):
+            saved = self.tools.day_plan
+            try:
+                self.tools.day_plan = self.tools.plan_for(day)
+                start, end = self._window_for(topic) if not day else (self.tools.day_plan.day_start, self.tools.day_plan.day_end)
+                windows = [(a, b) for a, b in self.tools.open_windows(after=start, before=end) if b - a >= timedelta(minutes=15)]
+            finally:
+                self.tools.day_plan = saved
+            if not windows:
+                return "You're fully booked for that stretch; nothing is open.", False
+
+            def length(a, b) -> str:
+                m = int((b - a).total_seconds() // 60)
+                h, mm = divmod(m, 60)
+                return (f"{h} hour{'s' if h != 1 else ''}" if h else "") + (" and " if h and mm else "") + (f"{mm} minutes" if mm else "")
+            if len(windows) == 1:
+                a, b = windows[0]
+                return f"You're free from {format_clock(a)} to {format_clock(b)} ({length(a, b)}).", False
+            return "You're free:\n" + "\n".join(f"- {format_clock(a)} – {format_clock(b)} ({length(a, b)})" for a, b in windows), False
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:
