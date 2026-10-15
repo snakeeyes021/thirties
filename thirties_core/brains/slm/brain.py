@@ -153,6 +153,7 @@ class SlmBrain:
         if len(self.messages) > 1 and not self.state.last_ids and not self.state.proposal:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
+        self._message = user_text
         actions = self._parse(user_text)
         logger.info("[SlmBrain] actions: %s", [(a.type, a.fields) for a in actions])
         try:
@@ -224,6 +225,10 @@ class SlmBrain:
         """A clock time on the planned day; adds AM/PM sensibly when the user left it out."""
         plan = self.tools.day_plan
         raw = str(text).strip().lower()
+        if raw in ("now", "right now", "asap", "next"):
+            now = self._now()
+            return now.replace(minute=0 if now.minute < 15 else (30 if now.minute < 45 else 0), second=0,
+                               microsecond=0) + (timedelta(hours=1) if now.minute >= 45 else timedelta())
         try:
             parsed = parse_clock(raw)
             candidates_t = [parsed]
@@ -509,6 +514,14 @@ class SlmBrain:
         if not found:
             return None, f"I don't see {ref or 'that'} on the schedule."
         if len(found) > 1:
+            found = sorted(found, key=lambda s: s.start_dt)
+            said = getattr(self, "_message", "").lower()
+            ordinal = next((v for k, v in self.ORDINALS.items() if re.search(rf"\b{k}\b", said)), None)
+            if ordinal is not None and (ordinal == -1 or ordinal < len(found)):
+                return found[ordinal], ""
+            recent = [s for s in found if s.id in self.state.last_ids]
+            if len(recent) == 1:
+                return recent[0], ""
             options = "; ".join(f"{s.title} at {format_clock(s.start_dt)}" for s in found[:4])
             return None, f"Which one do you mean: {options}?"
         return found[0], ""

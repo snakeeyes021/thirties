@@ -131,6 +131,17 @@ class TestSchedulingActions(SlmTestCase):
         self.assertEqual(occupant(self.m.day_plan, "20:00"), "Upgrades")
         self.assertEqual(occupant(self.m.day_plan, "20:30"), "Shower")
 
+    def test_ordinal_in_message_settles_ambiguity_and_thirties_work(self):
+        self.say("upgrades at 7 and again at 9", {"type": "add", "title": "Upgrades", "start": "7", "duration": "30 minutes"},
+                 {"type": "add", "title": "Upgrades", "start": "9", "duration": "30 minutes"})
+        out = self.say("make that first upgrades block 3 thirties",
+                       {"type": "move", "target": "upgrades", "duration": "3 thirties"})
+        self.assertIn("Moved Upgrades to 7:00 PM – 8:30 PM", out)
+
+    def test_start_now(self):
+        out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
+        self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour
+
     def test_invented_add_is_dropped_and_missing_move_becomes_add(self):
         out = self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"},
                        {"type": "add", "title": "Inspiration for Natalie", "start": "8", "duration": "1 hour"})

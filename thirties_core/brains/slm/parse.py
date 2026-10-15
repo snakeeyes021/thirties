@@ -69,6 +69,8 @@ chat: anything else (thanks, greetings, small talk).
 Rules: copy times and durations exactly as written ("7:30", "2 hours"); never calculate new times. "Push back/later/after" is shift "+..."; "earlier/sooner" is shift "-...". One message can hold several actions, in order.
 Examples:
 put 2 hours of composing at 5pm => {"actions":[{"type":"add","title":"Composing","start":"5pm","duration":"2 hours"}]}
+3 thirties of upgrades first, then 2 chunks of email => {"actions":[{"type":"add","title":"Upgrades","start":"now","duration":"3 thirties"},{"type":"add","title":"Email","after":"upgrades","duration":"2 chunks"}]}
+make the first upgrades block 3 thirties => {"actions":[{"type":"move","target":"first upgrades","duration":"3 thirties"}]}
 push it back an hour => {"actions":[{"type":"move","target":"it","shift":"+1 hour"}]}
 oh shoot, work went til 4:30 => {"actions":[{"type":"move","target":"work","end":"4:30"}]}
 I'm starting work at 10 today => {"actions":[{"type":"move","target":"work","start":"10"}]}
