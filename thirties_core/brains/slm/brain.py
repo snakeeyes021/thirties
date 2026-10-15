@@ -376,6 +376,9 @@ class SlmBrain:
             changed = changed or did_change
         if not lines:
             return self._chat(message)
+        # Report what happened first, then ask whatever is still open.
+        questions = [l for l in lines if l.rstrip().endswith("?") and "\n" not in l]
+        lines = [l for l in lines if l not in questions] + questions
         if changed and not self.state.proposal and not any(l.rstrip().endswith("?") for l in lines):
             free = self._free_summary()
             if free:
