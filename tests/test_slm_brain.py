@@ -13,7 +13,7 @@ from thirties_core.models import TaskItem
 
 TASKS = [
     TaskItem(id="t1", source_notebook="1. Tasks", title="Costco customer service", parent_note_title="Errands/Admin",
-             parent_note_id="n1", section="Active"),
+             parent_note_id="n1", section="Active", is_checkbox_item=True),
     TaskItem(id="t2", source_notebook="1. Tasks", title="Message Brad about a weekend trip",
              parent_note_title="Errands/Admin", parent_note_id="n1", section="Probation", someday=True),
     TaskItem(id="t3", source_notebook="3. Creative", title="Text search for Natalie's piece",

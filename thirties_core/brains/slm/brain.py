@@ -658,7 +658,7 @@ class SlmBrain:
         if task.parent_task_id:
             score -= 0.5  # prefer whole tasks over sub-steps
         if not task.is_checkbox_item and not task.id.startswith("media:"):
-            score -= 1.0  # a whole note ("Assorted Quickies") is a bucket, not an action
+            score -= 0.5  # a whole note ("Assorted Quickies") is usually a bucket, not an action
         if "media" in task.tags or task.id.startswith("media:"):
             score -= 1.5 if not (topic_words & {"watch", "read", "relax", "movi", "show", "book"}) else -1.0
         return score
