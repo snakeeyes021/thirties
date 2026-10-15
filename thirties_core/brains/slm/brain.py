@@ -415,6 +415,9 @@ class SlmBrain:
 
     _YES_RE = re.compile(r"^\s*(yes|yeah|yep|yup|sure|ok|okay|sounds good|perfect|great|do it|go for it|please do|"
                          r"all of them|all of these|both|let'?s do (it|that|those)|yes please)\b", re.IGNORECASE)
+    _ALL_YES_RE = re.compile(r"\b(let'?s do (all|them|those|these|it|that)|do (them|those|these) all|all of (them|those|these)|"
+                             r"(those|these|that|it) (all )?(sounds?|looks?) (good|great|fine|perfect)|sounds? good|looks? good|"
+                             r"works for me|(those|these) work)\b", re.IGNORECASE)
     _NO_RE = re.compile(r"^\s*(no|nah|nope|not really|neither|none of (those|them|these)|pass|skip)\b", re.IGNORECASE)
     _ORDINAL_WORDS = {"first": 1, "1st": 1, "one": 1, "second": 2, "2nd": 2, "two": 2, "third": 3, "3rd": 3, "three": 3}
 
@@ -456,6 +459,18 @@ class SlmBrain:
             return [a for a in keep if a.type != "question"] + [suggest] + [a for a in keep if a.type == "question"]
         return actions
 
+    def _accept_readds(self, actions: List[Action]) -> List[Action]:
+        """Adding items we just proposed means taking them as proposed, at the proposed times."""
+        if not self.state.proposal or self.state.proposal_kind != "plan":
+            return actions
+        by_title = {p["title"].lower(): p for p in self.state.proposal}
+        readds = [a for a in actions if a.type == "add" and (a.get("title") or "").lower() in by_title]
+        if not readds:
+            return actions
+        chosen = [by_title[(a.get("title") or "").lower()] for a in readds]
+        rest = [a for a in actions if a not in readds and a.type not in ("confirm", "choose")]
+        return [Action("accept", {"items": chosen})] + rest
+
     def _dialog_act(self, message: str) -> Optional[Action]:
         """Answers to our own pending question: yes / no / which option."""
         if not self.state.proposal:
@@ -473,6 +488,8 @@ class SlmBrain:
             return Action("reject", {})
         if self._YES_RE.search(lowered) and len(lowered) < 60:
             return Action("confirm", {})
+        if self._ALL_YES_RE.search(lowered) and not re.search(r"\b(but|except|instead|swap|not|don'?t|no)\b", lowered):
+            return Action("confirm", {})
         return None
 
     def _execute(self, actions: List[Action], message: str) -> str:
@@ -484,6 +501,7 @@ class SlmBrain:
                                and a.type != "chat"]
         actions = self._sanity(actions, message)
         actions = self._route(actions, message)
+        actions = self._accept_readds(actions)
         waiting = self.state.awaiting_time
         if waiting and not any(a.type in ("add", "move", "remove") for a in actions):
             m = self._TIME_IN_TEXT.search(message)
@@ -503,7 +521,7 @@ class SlmBrain:
                 actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
         # Also answer a free-time question asked alongside other requests
         if re.search(r"\bhow much (free )?time\b|\bwhen am i free\b|\bfree time\b", message.lower()) and \
-                not any(a.type == "question" for a in actions):
+                not any(a.type in ("question", "suggest") for a in actions):
             tonight = bool(re.search(r"\b(tonight|this evening|before bed|bedtime)\b", message.lower()))
             actions = actions + [Action("question", {"topic": "free time" + (" tonight" if tonight else ""),
                                                      "day": None})]
@@ -516,6 +534,7 @@ class SlmBrain:
             "outcome": self._do_outcome,
             "confirm": self._do_confirm, "reject": self._do_reject, "choose": self._do_choose,
             "suggest": self._do_suggest, "question": self._do_question, "remember": self._do_remember,
+            "accept": lambda a: self._apply_proposals(a.get("items")),
             "profile": self._do_profile, "energy": self._do_energy,
         }
         retry: List[Action] = []
@@ -923,7 +942,7 @@ class SlmBrain:
         if any(w in t for w in ("tonight", "evening", "after dinner", "night")):
             start = datetime.combine(day, time(17, 0), tzinfo=tz)
         elif "afternoon" in t:
-            start, end = datetime.combine(day, time(12, 0), tzinfo=tz), datetime.combine(day, time(17, 0), tzinfo=tz)
+            start, end = datetime.combine(day, time(12, 0), tzinfo=tz), datetime.combine(day, time(18, 0), tzinfo=tz)
         elif "morning" in t:
             end = datetime.combine(day, time(12, 0), tzinfo=tz)
         if self._is_today():

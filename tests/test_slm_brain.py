@@ -330,6 +330,19 @@ class TestProposalsAndOutcomes(SlmTestCase):
         out = self.say("sure", {"type": "confirm"})
         self.assertTrue(out.startswith("Done:"), out)
 
+    def test_readding_proposed_items_takes_them_as_proposed(self):
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        out = self.say("fill up my free time this evening until 9 from the backlog", {"type": "suggest", "topic": "evening"})
+        self.assertNotIn("You're free", out)
+        proposal = list(self.brain.state.proposal)
+        out = self.say("those sound good, let's do all of them. show me the evening",
+                       *[{"type": "add", "title": p["title"], "start": p["start"], "duration": "30 minutes"} for p in proposal],
+                       {"type": "question", "topic": "schedule"})
+        self.assertTrue(out.startswith("Done:"), out)
+        self.assertNotIn("Added", out)
+        first = next(s for s in self.m.day_plan.spans if s.title == proposal[0]["title"])
+        self.assertEqual(first.duration_minutes, 60)
+
     def test_you_pick_makes_the_plan(self):
         self.rt.pick_replies.append('{"picks": [1]}')
         out = self.say("idk, just pick whatever and put together a schedule for my evening",
