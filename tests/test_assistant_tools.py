@@ -111,6 +111,15 @@ class TestAnyDay(ToolsTestCase):
         out = self.t.execute("update_event", {"event": "Call", "to_day": "Saturday"})
         self.assertIn("Saturday, October 17, 4:00 PM", out)
 
+    def test_moving_a_skipped_item_keeps_the_record(self) -> None:
+        self.t.execute("add_event", {"title": "Email recruiter", "start": "3:00 PM", "duration": "30 min"})
+        self.t.execute("log_outcome", {"event": "Email recruiter", "status": "skipped"})
+        out = self.t.execute("update_event", {"event": "Email recruiter", "to_day": "tomorrow", "start": "9:00 AM"})
+        self.assertIn("today's record stays", out)
+        today = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Email recruiter")
+        tomorrow = next(s for s in self.sched.build_day_plan(DAY + timedelta(days=1))[0].spans if s.title == "Email recruiter")
+        self.assertEqual((today.status, tomorrow.status), (SpanStatus.SKIPPED, SpanStatus.PLANNED))
+
     def test_list_another_day_and_weekend_has_no_work(self) -> None:
         saturday = self.t.execute("list_schedule", {"day": "Saturday"})
         self.assertIn("[Saturday, October 17]", saturday)

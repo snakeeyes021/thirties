@@ -34,7 +34,7 @@ from thirties_core.clock import (
     parse_shift_minutes,
     resolve_clock,
 )
-from thirties_core.models import DayPlan, EventSpan, SpanCategory, new_span_id
+from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus, new_span_id
 from thirties_core.scheduler import DeterministicScheduler
 
 logger = logging.getLogger(__name__)
@@ -509,6 +509,14 @@ class PlanTools:
         finally:
             self.day_plan = source_plan
         before = self.describe(span)
+        if span.status != SpanStatus.PLANNED:
+            # Keep today's record (done/skipped) as history; plan a fresh copy on the new day.
+            moved.id = new_span_id()
+            target_plan.spans.append(moved)
+            target_plan.spans.sort(key=lambda s: s.start_dt)
+            self._persist(moved)
+            return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
+                    f"{format_clock(new_start)} – {format_clock(new_end)} (today's record stays).")
         source_plan.spans = [s for s in source_plan.spans if s.id != span.id]
         span.title, span.start_dt, span.end_dt, span.source = moved.title, new_start, new_end, "user"
         target_plan.spans.append(span)
