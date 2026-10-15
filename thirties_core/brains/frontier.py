@@ -278,12 +278,16 @@ RULES
             )
             if not needs_follow_up or round_index == MAX_ROUNDS - 1:
                 break
+            if any(r.startswith(NOT_DONE) for r in results):
+                reply = ""  # the draft was written before the refusal; don't show it
 
         delta = self.tools.compute_delta(snapshot_before, self.tools.capture_snapshot())
         if self._claims_change(reply) and delta.total_changes == 0:
             logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
             reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
         if not reply.strip():
-            reply = " ".join(last_results) if last_results else "Understood."
+            reply = " ".join(
+                f"I couldn't do that: {r[len(NOT_DONE) + 2:]}" if r.startswith(NOT_DONE) else r for r in last_results
+            ) or "Understood."
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply

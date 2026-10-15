@@ -101,6 +101,14 @@ class TestTurnLoop(ConversationTestCase):
         self.assertIn("only fit", out)
         self.assertNotIn("Gym", [s.title for s in self.manager.day_plan.spans])
 
+    def test_stale_draft_is_not_shown_after_a_refusal(self) -> None:
+        self.manager = self.make_manager(events=[event("dentist", "15:00", "16:00", "Dentist")])
+        self.engine.set_next_response(reply('All set!\nCALL add_event {"title": "Gym", "start": "3:00 PM", "duration": "1 hour"}'))
+        self.engine.set_next_response(reply(""))
+        out = self.manager.send_user_message("gym at 3")
+        self.assertNotIn("All set", out)
+        self.assertTrue(out.startswith("I couldn't do that:") and "Dentist" in out, out)
+
     def test_claim_without_calls_triggers_one_correction(self) -> None:
         self.engine.set_next_response(reply("I've scheduled your walk."))
         self.engine.set_next_response(reply('CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
