@@ -24,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 from tests.interactive_eval import EvalSession, InteractiveEvaluator, detect_anomalies
 from tests.run_eval_harness import FastHybridInferenceEngine, PersistentGemmaEngine
 from thirties_core.astronomy import set_debug_time
-from thirties_core.conversation import ACTION_CLAIM_PATTERN
+from thirties_core.brains.frontier import ACTION_CLAIM_PATTERN
 from thirties_core.models import BlockKind
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

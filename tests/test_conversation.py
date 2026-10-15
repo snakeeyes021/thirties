@@ -168,13 +168,13 @@ class TestConversation(unittest.TestCase):
         b12.label = "Dentist Appointment"
 
         # Attempt to modify block 12 without force_calendar
-        out = self.manager.modify_blocks(start_block=12, end_block=12, label="Gaming")
+        out = self.manager.tools.modify_blocks(start_block=12, end_block=12, label="Gaming")
         self.assertIn("Cannot modify block(s) [12]: locked by calendar event", out)
         self.assertEqual(b12.label, "Dentist Appointment")
         self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
 
         # Attempt to clear block 12 without force_calendar
-        out_clear = self.manager.clear_blocks(start_block=12, end_block=12)
+        out_clear = self.manager.tools.clear_blocks(start_block=12, end_block=12)
         self.assertIn("0 blocks", out_clear)
         self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
 
@@ -241,7 +241,7 @@ class TestConversation(unittest.TestCase):
         self.manager.ambiguous_events.append(e2)
         self.assertEqual(len(self.manager.ambiguous_events), 2)
 
-        out = self.manager.resolve_event(event_id="e_doc", action="attend")
+        out = self.manager.tools.resolve_event(event_id="e_doc", action="attend")
         self.assertIn("Event e_doc resolved: locked as busy calendar block", out)
         self.assertEqual(len(self.manager.ambiguous_events), 1)
         self.assertEqual(self.manager.ambiguous_events[0].id, "e_dentist")
@@ -281,7 +281,7 @@ class TestConversation(unittest.TestCase):
         self.manager.execute_tool("modify_blocks", {"start_block": 24, "end_block": 27, "label": "Game Night"})
         self.manager.execute_tool("modify_blocks", {"start_block": 28, "end_block": 28, "label": "Composing"})
 
-        prompt = self.manager._build_system_prompt()
+        prompt = self.manager.brain.build_system_prompt()
         self.assertIn("CURRENTLY SCHEDULED TASKS & COMMITMENTS:", prompt)
         self.assertIn("Game Night", prompt)
         self.assertIn("Composing", prompt)
@@ -326,13 +326,13 @@ class TestConversation(unittest.TestCase):
                 "tool_calls": [],
             }
         ])
-        self.manager.inference_engine = mock_engine
+        self.manager.brain.inference_engine = mock_engine
         reply = self.manager.send_user_message("Can you check blocks 1 to 5?")
         self.assertEqual(reply, "I have verified blocks 1 to 5 are open.")
 
 
     def test_modify_blocks_with_clock_times(self) -> None:
-        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK", clear_existing_envelope=True)
+        out = self.manager.tools.modify_blocks(start_time="7am", end_time="3pm", kind="WORK", clear_existing_envelope=True)
         self.assertIn("Blocks 1–16", out)
         self.assertIn("16 chunks", out)
         self.assertIn("7:00 AM to 3:00 PM", out)
@@ -343,16 +343,16 @@ class TestConversation(unittest.TestCase):
 
     def test_clear_and_inspect_blocks_with_clock_times(self) -> None:
         # First assign tasks to blocks 28 to 30
-        self.manager.modify_blocks(start_block=28, end_block=30, label="Deep Work")
+        self.manager.tools.modify_blocks(start_block=28, end_block=30, label="Deep Work")
         self.assertTrue(self.plan.get_logical_block(28).is_assigned)
 
         # Inspect using clock times (8:30 PM to 10:00 PM corresponds to blocks 28 to 30)
-        insp_out = self.manager.inspect_blocks(start_time="8:30 PM", end_time="10:00 PM")
+        insp_out = self.manager.tools.inspect_blocks(start_time="8:30 PM", end_time="10:00 PM")
         self.assertIn("Block 28", insp_out)
         self.assertIn("Block 30", insp_out)
 
         # Clear using clock times
-        clear_out = self.manager.clear_blocks(start_time="8:30 PM", end_time="10:00 PM")
+        clear_out = self.manager.tools.clear_blocks(start_time="8:30 PM", end_time="10:00 PM")
         self.assertIn("3 blocks", clear_out)
         self.assertIn("Blocks 28–30", clear_out)
         self.assertFalse(self.plan.get_logical_block(28).is_assigned)
@@ -378,7 +378,7 @@ class TestConversation(unittest.TestCase):
                 "tool_calls": [],
             }
         ])
-        self.manager.inference_engine = mock_engine
+        self.manager.brain.inference_engine = mock_engine
         reply = self.manager.send_user_message("I actually did have work though, from 7 to 3")
         self.assertEqual(
             reply,
@@ -391,14 +391,14 @@ class TestConversation(unittest.TestCase):
 
     def test_clear_blocks_all_preserves_work_and_sleep(self) -> None:
         # Assign task inside work (block 10)
-        self.manager.modify_blocks(start_block=10, end_block=10, label="Work Task", task_id="task_work")
+        self.manager.tools.modify_blocks(start_block=10, end_block=10, label="Work Task", task_id="task_work")
         # Assign daylight task (block 21: 5:00 PM - 5:30 PM, before sunset)
-        self.manager.modify_blocks(start_block=21, end_block=21, label="Outdoor Walk", task_id="task_walk")
+        self.manager.tools.modify_blocks(start_block=21, end_block=21, label="Outdoor Walk", task_id="task_walk")
         # Assign dark task (block 25: 7:00 PM - 7:30 PM, after sunset)
-        self.manager.modify_blocks(start_block=25, end_block=25, label="Dorico Composing", task_id="task_music")
+        self.manager.tools.modify_blocks(start_block=25, end_block=25, label="Dorico Composing", task_id="task_music")
 
         # Clear kind = ALL
-        out = self.manager.clear_blocks(clear_kind="ALL")
+        out = self.manager.tools.clear_blocks(clear_kind="ALL")
         self.assertIn("Cleared all scheduled tasks and custom events", out)
 
         # Daylight discretionary block 21 is cleared back to daylight discretionary
@@ -428,7 +428,7 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
         
         # Modify work without explicitly passing clear_existing_envelope
-        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK")
+        out = self.manager.tools.modify_blocks(start_time="7am", end_time="3pm", kind="WORK")
         self.assertIn("Blocks 1–16", out)
 
         # Blocks 1-16 are work
@@ -459,7 +459,7 @@ class TestConversation(unittest.TestCase):
                 ],
             }
         ])
-        self.manager.inference_engine = mock_engine
+        self.manager.brain.inference_engine = mock_engine
         reply = self.manager.send_user_message("Please clear all my tasks.")
         
         # Verify reflection turn happened by inspecting message history
@@ -481,7 +481,7 @@ class TestConversation(unittest.TestCase):
                 "tool_calls": [],
             }
         ])
-        self.manager.inference_engine = mock_engine
+        self.manager.brain.inference_engine = mock_engine
         reply = self.manager.send_user_message("Please clear all my tasks.")
         
         # Final verifier guard intercepts the hallucination
@@ -496,12 +496,12 @@ class TestConversation(unittest.TestCase):
         try:
             # Plan is for 2026-10-09 (Friday)
             self.manager.day_plan.target_date = date(2026, 10, 9)
-            prompt = self.manager._build_system_prompt()
+            prompt = self.manager.brain.build_system_prompt()
             self.assertIn("PLANNING DATE: Today (Friday, October 09, 2026)", prompt)
 
             # Plan is for 2026-10-10 (Saturday) -> Not diurnal today!
             self.manager.day_plan.target_date = date(2026, 10, 10)
-            prompt_future = self.manager._build_system_prompt()
+            prompt_future = self.manager.brain.build_system_prompt()
             self.assertIn("PLANNING DATE: Saturday, October 10, 2026", prompt_future)
             self.assertNotIn("PLANNING DATE: Today", prompt_future)
         finally:
@@ -557,9 +557,9 @@ class TestConversation(unittest.TestCase):
                 "todo_completed": 0,
             },
         ]
-        self.manager.tasks = tasks
-        self.manager.active_notes = active_notes
-        prompt = self.manager._build_system_prompt()
+        self.manager.brain.tasks = tasks
+        self.manager.brain.active_notes = active_notes
+        prompt = self.manager.brain.build_system_prompt()
         self.assertIn("CHRONICALLY DEFERRED ITEMS", prompt)
         self.assertIn("File 2025 Tax Return", prompt)
         self.assertIn("[CHRONIC DEFERRAL: 4x]", prompt)

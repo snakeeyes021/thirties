@@ -28,7 +28,9 @@ if str(REPO_ROOT) not in sys.path:
 from thirties_core.astronomy import get_current_time, get_diurnal_date, get_solar_phases, set_debug_time
 from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
-from thirties_core.conversation import ACTION_CLAIM_PATTERN, ConversationManager, PlanSnapshot, StateDelta
+from thirties_core.brains.frontier import ACTION_CLAIM_PATTERN
+from thirties_core.conversation import ConversationManager
+from thirties_core.plan_tools import PlanSnapshot, StateDelta
 from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine, parse_model_directives
 from thirties_core.models import BlockKind, DayPlan, TaskItem, ThirtyBlock
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
@@ -373,7 +375,7 @@ class InteractiveEvaluator:
         conv.messages = list(session.messages)
 
         # Snapshot before
-        snap_before = conv._capture_plan_snapshot()
+        snap_before = conv.tools.capture_snapshot()
         msg_count_before = len(conv.messages)
 
         # Execute turn
@@ -382,8 +384,8 @@ class InteractiveEvaluator:
         turn_duration = round(time.time() - t0, 2)
 
         # Snapshot after
-        snap_after = conv._capture_plan_snapshot()
-        delta = conv._compute_state_delta(snap_before, snap_after)
+        snap_after = conv.tools.capture_snapshot()
+        delta = conv.tools.compute_delta(snap_before, snap_after)
 
         # Extract executed tools from newly added messages
         executed_tools = []

@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional, Set
 
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import ThirtiesConfig, load_config
-from thirties_core.conversation import ConversationManager, get_current_time
+from thirties_core.astronomy import get_current_time
+from thirties_core.conversation import ConversationManager
 from thirties_core.inference import InferenceEngine, get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
 from thirties_core.models import BlockKind, DayPlan, ThirtyBlock

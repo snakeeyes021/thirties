@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from thirties_core.config import TelegramConfig, ThirtiesConfig
-from thirties_core.conversation import MockInferenceEngine
+from thirties_core.inference import MockInferenceEngine
 from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 from thirties_core.telegram_bridge import TelegramClient, ThirtiesTelegramBridge
