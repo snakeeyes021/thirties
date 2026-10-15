@@ -138,6 +138,12 @@ class TestSchedulingActions(SlmTestCase):
                        {"type": "move", "target": "upgrades", "duration": "3 thirties"})
         self.assertIn("Moved Upgrades to 7:00 PM – 8:30 PM", out)
 
+    def test_clock_time_settles_ambiguity(self):
+        self.say("upgrades at 7 and again at 9", {"type": "add", "title": "Upgrades", "start": "7", "duration": "30 minutes"},
+                 {"type": "add", "title": "Upgrades", "start": "9", "duration": "30 minutes"})
+        out = self.say("the 9 PM one should end at 10", {"type": "move", "target": "upgrades", "end": "10"})
+        self.assertIn("Moved Upgrades to 9:00 PM – 10:00 PM", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

@@ -519,6 +519,13 @@ class SlmBrain:
             ordinal = next((v for k, v in self.ORDINALS.items() if re.search(rf"\b{k}\b", said)), None)
             if ordinal is not None and (ordinal == -1 or ordinal < len(found)):
                 return found[ordinal], ""
+            for text in (ref, said):
+                for m in re.finditer(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?", text or ""):
+                    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+                    at_time = [s for s in found if s.start_dt.minute == minute
+                               and s.start_dt.hour % 12 == hour % 12]
+                    if len(at_time) == 1:
+                        return at_time[0], ""
             recent = [s for s in found if s.id in self.state.last_ids]
             if len(recent) == 1:
                 return recent[0], ""
