@@ -1033,8 +1033,10 @@ class SlmBrain:
             lowered = wording.lower()
             start, end = plan.day_start, plan.day_end
             label = day or "today"
+            whole_day = bool(re.search(r"\b(whole|entire|full|complete|all)\s+(day|schedule|list)\b|\ball day\b|"
+                                       r"\bthrough (tonight|the evening|the night)\b|\bonward\b", lowered))
             for part in ("morning", "afternoon", "evening", "tonight"):
-                if part in lowered:
+                if part in lowered and not whole_day:
                     start, end = self._window_for(part) if not day else (start, end)
                     label = f"the {part}" if part != "tonight" else "tonight"
                     if self._is_today() and part in ("evening", "tonight"):

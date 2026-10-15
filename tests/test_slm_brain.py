@@ -221,6 +221,13 @@ class TestSchedulingActions(SlmTestCase):
         self.assertNotIn("Sleep", out)
         self.assertNotIn("daylight", out)
 
+    def test_whole_day_wins_over_part_words(self):
+        self.say("reading at 7", {"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"})
+        out = self.say("show me the whole day starting from the morning", {"type": "question", "topic": "schedule"})
+        self.assertTrue(out.startswith("Here's today:"), out)
+        self.assertIn("Work", out)
+        self.assertIn("Reading", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour
