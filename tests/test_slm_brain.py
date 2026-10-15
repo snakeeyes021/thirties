@@ -193,6 +193,14 @@ class TestSchedulingActions(SlmTestCase):
         self.assertIn("Added Piano: 7:00 PM – 9:00 PM", out)
         self.assertIn("Added Lunch with Sam", out)
 
+    def test_unknown_duration_is_guessed_so_chains_still_work(self):
+        out = self.say("dinner at 6:30 then laundry then reading after laundry",
+                       {"type": "add", "title": "Dinner", "start": "6:30", "duration": "1 hour"},
+                       {"type": "add", "title": "Laundry", "after": "dinner", "duration": "unknown"},
+                       {"type": "add", "title": "Reading", "after": "laundry", "duration": "1 hour"})
+        self.assertIn("Added Laundry: 7:30 PM – 8:30 PM (1h). (I guessed an hour", out)
+        self.assertIn("Added Reading: 8:30 PM – 9:30 PM", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

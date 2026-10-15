@@ -516,6 +516,12 @@ class SlmBrain:
             self.state.awaiting_time.setdefault("title", title)
             return f"When should I put {title}?", False
         self.state.awaiting_time = {}
+        guessed = False
+        if a.get("duration"):
+            try:
+                parse_duration_minutes(a.get("duration"))
+            except ClockError:
+                a.fields["duration"], guessed = "60 minutes", True  # "unknown", "a while": guess and say so
         saved = self.tools.day_plan
         try:
             self.tools.day_plan = self.tools.plan_for(day)
@@ -561,6 +567,8 @@ class SlmBrain:
             span = self._span_from_result(out, day)
             self._remember(span)
             text = self._added_line(out)
+            if guessed:
+                text += " (I guessed an hour; tell me if it's different.)"
             slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
             if slid:
                 text += "\nTo make room: " + "; ".join(slid) + "."
