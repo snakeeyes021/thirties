@@ -15,6 +15,8 @@ import os
 import re
 import shutil
 import subprocess
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -23,6 +25,26 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple
 from thirties_core.config import InferenceConfig, ThirtiesConfig
 
 logger = logging.getLogger(__name__)
+
+
+def split_thinking_level(model: str) -> Tuple[str, Optional[str]]:
+    """Split agy-style 'gemini-3.8-flash-low' into ('gemini-3.8-flash', 'low')."""
+    for level in ("low", "medium", "high"):
+        if model.endswith(f"-{level}"):
+            return model[: -len(level) - 1], level
+    return model, None
+
+
+def message_text(msg: Dict[str, Any]) -> str:
+    """Render one transcript message as plain text for text-only transports.
+
+    Tool results are included so the model can see what its tool calls did.
+    """
+    role = msg.get("role", "")
+    content = msg.get("content", "") or ""
+    if role == "tool":
+        return f"[Result of {msg.get('name', 'tool')}]\n{content}"
+    return content
 
 
 def get_host_home() -> Path:
@@ -141,6 +163,8 @@ class AntigravityInferenceEngine:
                 turn_lines.append(f"User: {content}")
             elif role == "assistant":
                 turn_lines.append(f"Assistant: {content}")
+            elif role == "tool":
+                turn_lines.append(message_text(msg))
 
         dialogue = "\n\n".join(turn_lines)
         if system_prompt:
@@ -223,10 +247,13 @@ class GeminiInferenceEngine:
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
         self.config = config or ThirtiesConfig()
         self.inf_cfg: InferenceConfig = self.config.inference
-        self.model = self.inf_cfg.gemini_model or "gemini-3.8-flash-medium"
+        # Config names follow agy's "<model>-<thinking level>" convention; the REST API
+        # takes the level as a separate parameter.
+        self.model, self.thinking_level = split_thinking_level(self.inf_cfg.gemini_model or "gemini-3.8-flash-medium")
         self.api_key = self.inf_cfg.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
         self.temperature = self.inf_cfg.temperature
         self.timeout = self.inf_cfg.timeout_seconds
+        self.max_retries = 4
 
     def is_available(self) -> bool:
         """Return True if an API key is configured."""
@@ -242,41 +269,47 @@ class GeminiInferenceEngine:
             raise RuntimeError("Gemini API key is not configured.")
 
         system_instruction = None
-        contents = []
+        contents: List[Dict[str, Any]] = []
 
         for msg in messages:
             role = msg.get("role", "")
-            content = msg.get("content", "")
             if role == "system":
-                system_instruction = {"parts": [{"text": content}]}
-            elif role in ("user", "assistant"):
-                gemini_role = "user" if role == "user" else "model"
-                contents.append({
-                    "role": gemini_role,
-                    "parts": [{"text": content}],
-                })
+                system_instruction = {"parts": [{"text": msg.get("content", "")}]}
+                continue
+            text = message_text(msg)
+            if not text.strip():
+                continue  # the API rejects empty parts
+            gemini_role = "model" if role == "assistant" else "user"
+            if contents and contents[-1]["role"] == gemini_role:
+                contents[-1]["parts"].append({"text": text})
+            else:
+                contents.append({"role": gemini_role, "parts": [{"text": text}]})
 
+        generation_config: Dict[str, Any] = {"temperature": self.temperature}
+        if self.thinking_level:
+            generation_config["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
         payload: Dict[str, Any] = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": self.temperature,
-            },
+            "generationConfig": generation_config,
         }
         if system_instruction:
             payload["system_instruction"] = system_instruction
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         data_bytes = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=data_bytes,
-            headers={"Content-Type": "application/json", "User-Agent": "Thirties/0.1"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Thirties/0.1",
+                "x-goog-api-key": self.api_key,
+            },
             method="POST",
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                resp_json = json.loads(resp.read().decode("utf-8"))
+            resp_json = self._post_with_retries(req)
 
             raw_text = ""
             candidates = resp_json.get("candidates", [])
@@ -297,6 +330,23 @@ class GeminiInferenceEngine:
                 "content": f"Encountered an error communicating with Gemini API: {e}",
                 "tool_calls": [],
             }
+
+
+    def _post_with_retries(self, req: urllib.request.Request) -> Dict[str, Any]:
+        """POST to the API, retrying rate limits and transient server errors with backoff."""
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code not in (429, 500, 502, 503, 504) or attempt == self.max_retries:
+                    detail = e.read().decode("utf-8", "replace")[:300]
+                    raise RuntimeError(f"HTTP {e.code}: {detail}") from e
+                delay = min(60.0, 5.0 * (2 ** attempt))
+                logger.warning("Gemini API returned %s; retrying in %.0fs (attempt %d/%d).",
+                               e.code, delay, attempt + 1, self.max_retries)
+                time.sleep(delay)
+        raise RuntimeError("unreachable")
 
 
 class LiteRTInferenceEngine:
