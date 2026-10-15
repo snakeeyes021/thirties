@@ -115,6 +115,22 @@ class TestSchedulingActions(SlmTestCase):
         self.assertIn("Added Email the recruiter: 8:00 PM – 9:00 PM", out)
         self.assertIn("Reading now 9:00 PM – 10:00 PM", out)
 
+    def test_actions_that_depend_on_later_ones_are_retried(self):
+        self.say("natalie listening 9 to 10", {"type": "add", "title": "Natalie listening", "start": "9", "end": "10"})
+        out = self.say("email recruiter 9 to 10 and push the natalie listening to 10 to 11",
+                       {"type": "add", "title": "Email recruiter", "start": "9", "end": "10"},
+                       {"type": "move", "target": "natalie listening", "start": "10", "end": "11"})
+        self.assertIn("Moved Natalie listening to 10:00 PM – 11:00 PM", out)
+        self.assertIn("Added Email recruiter: 9:00 PM – 10:00 PM", out)
+        self.assertNotIn("overlap", out)
+
+    def test_tool_errors_are_humane(self):
+        self.say("reading 8 to 9", {"type": "add", "title": "Reading", "start": "8", "end": "9"})
+        self.say("tv 9 to 10", {"type": "add", "title": "TV", "start": "9", "end": "10"})
+        out = self.say("move reading to 9", {"type": "move", "target": "reading", "start": "9", "end": "10"})
+        self.assertNotIn("replace_overlaps", out)
+        self.assertNotIn("[id", out)
+
     def test_conflict_offers_options_and_choice_applies(self):
         out = self.say("gym 5:30 to 6:30", {"type": "add", "title": "Gym", "start": "5:30", "end": "6:30"})
         self.assertIn("would overlap Dentist", out)
@@ -256,21 +272,29 @@ class TestProposalsAndOutcomes(SlmTestCase):
 
 class TestVoice(SlmTestCase):
 
-    def test_natural_rewrite_is_used_when_facts_survive(self):
-        self.rt.voice_replies.append("Done! Walk is set for 5:00 PM – 5:30 PM. You're still free 5:30 PM – 6:00 PM "
-                                     "and 6:30 PM – 11:00 PM.")
-        out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
-        self.assertTrue(out.startswith("Done! Walk is set"), out)
+    def setUp(self):
+        super().setUp()
+        self.say("taxes 8 to 9", {"type": "add", "title": "Taxes", "start": "8", "end": "9"})
 
-    def test_rewrite_that_changes_a_time_is_rejected(self):
-        self.rt.voice_replies.append("Done! Walk is set for 6:00 PM.")
-        out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
-        self.assertIn("Added Walk: 5:00 PM – 5:30 PM", out)
+    def test_natural_rewrite_is_used_when_facts_survive(self):
+        self.rt.voice_replies.append("Woohoo, Taxes is done! Nice work.")
+        out = self.say("did the taxes", {"type": "outcome", "target": "taxes", "status": "done"})
+        self.assertEqual(out, "Woohoo, Taxes is done! Nice work.")
 
     def test_rewrite_that_drops_a_title_is_rejected(self):
-        self.rt.voice_replies.append("All set for 5:00 PM – 5:30 PM!")
+        self.rt.voice_replies.append("Nice work, all done!")
+        out = self.say("did the taxes", {"type": "outcome", "target": "taxes", "status": "done"})
+        self.assertEqual(out, "Nice work: Taxes is done.")
+
+    def test_rewrite_that_changes_a_time_is_rejected(self):
+        self.rt.voice_replies.append("You're open from 4:30 PM to 7:00 PM!")
+        out = self.say("when am I free tonight?", {"type": "question", "topic": "free time tonight"})
+        self.assertNotIn("7:00 PM!", out)
+
+    def test_long_replies_skip_the_rewrite(self):
         out = self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 minutes"})
-        self.assertIn("Added Walk", out)
+        self.assertTrue(out.startswith("Added Walk"), out)
+        self.assertEqual(self.rt.voice.seen, [])
 
 
 class TestParsingHelpers(unittest.TestCase):

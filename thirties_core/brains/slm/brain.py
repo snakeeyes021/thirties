@@ -103,6 +103,8 @@ class SlmBrain:
         """Natural wording from the model; facts guaranteed by checking them against the draft."""
         if not draft.strip() or not self._voice_enabled():
             return draft
+        if "\n" in draft.strip() or len(draft) > 180:
+            return draft  # long replies cost ~15s to rewrite on an iGPU; their template is clear enough
         try:
             out = self.voice.ask(f'User said: "{user_text[:300]}"\nDRAFT:\n{draft}').strip().strip('"')
         except Exception as e:
@@ -337,9 +339,19 @@ class SlmBrain:
                     best = (overlap, t)
         return best[1] if best else None
 
+    @staticmethod
+    def _humane(error: str) -> str:
+        """Tool errors are written for models; keep the fact, drop the instructions and ids."""
+        error = re.sub(r"\s*\[id [0-9a-z:@.-]+\]", "", error)
+        error = re.sub(r"\s*Ask the user, then retry.*$", "", error)
+        error = re.sub(r"\s*\(\d+h(?: \d+m)?\)|\s*\(\d+m\)", "", error)
+        return error.strip()
+
     def _run(self, name: str, args: Dict[str, Any]) -> Tuple[bool, str]:
         out = self.tools.execute(name, args)
-        return (not out.startswith(NOT_DONE), out[len(NOT_DONE) + 2:] if out.startswith(NOT_DONE) else out)
+        if out.startswith(NOT_DONE):
+            return False, self._humane(out[len(NOT_DONE) + 2:])
+        return True, out
 
     # --- 3. execution ---
 
@@ -444,11 +456,25 @@ class SlmBrain:
             "suggest": self._do_suggest, "question": self._do_question, "remember": self._do_remember,
             "profile": self._do_profile, "energy": self._do_energy,
         }
+        retry: List[Action] = []
         for action in actions:
             if action.type == "chat":
                 if len(actions) == 1:
                     return self._chat(message)
                 continue
+            snapshot = self.state.to_dict()
+            text, did_change = handlers[action.type](action)
+            failed = action.type in ("add", "move", "swap") and not did_change and \
+                any(k in text for k in ("would overlap", "I don't see", "couldn't"))
+            if failed and len(actions) > 1:
+                # It may depend on something later in the same message; try again at the end.
+                self.state = DialogState.from_dict(snapshot)
+                retry.append(action)
+                continue
+            if text:
+                lines.append(text)
+            changed = changed or did_change
+        for action in retry:
             text, did_change = handlers[action.type](action)
             if text:
                 lines.append(text)
