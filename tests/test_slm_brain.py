@@ -156,8 +156,8 @@ class TestSchedulingActions(SlmTestCase):
         self.assertIn("10:00 PM – 11:00 PM", out)
 
     def test_time_of_day_words(self):
-        out = self.say("piano this evening for an hour", {"type": "add", "title": "Piano", "start": "this evening", "duration": "an hour"})
-        self.assertIn("6:00 PM – 7:00 PM", out)
+        out = self.say("piano late afternoon for an hour", {"type": "add", "title": "Piano", "start": "late afternoon", "duration": "an hour"})
+        self.assertIn("4:30 PM – 5:30 PM", out)
         self.say("x", {"type": "move", "target": "work", "end": "4:00"})
         out = self.say("walk after work", {"type": "add", "title": "Walk", "start": "after work", "duration": "30 min"})
         self.assertIn("Walk", out)
