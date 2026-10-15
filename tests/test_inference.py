@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +29,8 @@ class TestInference(unittest.TestCase):
 
     def test_litert_availability_detection(self) -> None:
         engine = LiteRTInferenceEngine()
+        if not engine.is_available():
+            self.skipTest("No LiteRT-LM runtime or Gemma model installed on this machine.")
         self.assertTrue(engine.is_available())
 
     def test_modify_blocks_directive_parsing(self) -> None:
@@ -35,7 +38,8 @@ class TestInference(unittest.TestCase):
         mock_session = MagicMock()
         mock_session.send_message.return_value = """MODIFY_BLOCKS: 24 | label=Writing Session
 Sure, I scheduled that for you."""
-        with patch.object(engine, "_ensure_initialized"), patch.object(engine, "_conv_session", mock_session):
+        with patch.dict(sys.modules, {"litert_lm": MagicMock()}), \
+                patch.object(engine, "_ensure_initialized"), patch.object(engine, "_conv_session", mock_session):
             res = engine.chat([{"role": "user", "content": "Please allocate block 24 to Writing Session"}])
             self.assertEqual(res["content"], "Sure, I scheduled that for you.")
             self.assertEqual(len(res["tool_calls"]), 1)
@@ -48,7 +52,8 @@ Sure, I scheduled that for you."""
         mock_session = MagicMock()
         mock_session.send_message.return_value = """MODIFY_BLOCKS: 28-31 | label=Composing Session
 Allocated 2 hours of composing."""
-        with patch.object(engine, "_ensure_initialized"), patch.object(engine, "_conv_session", mock_session):
+        with patch.dict(sys.modules, {"litert_lm": MagicMock()}), \
+                patch.object(engine, "_ensure_initialized"), patch.object(engine, "_conv_session", mock_session):
             res = engine.chat([{"role": "user", "content": "I want to compose from 28 to 31"}])
             self.assertEqual(res["content"], "Allocated 2 hours of composing.")
             self.assertEqual(len(res["tool_calls"]), 1)
@@ -186,7 +191,8 @@ INSPECT_BLOCKS: 10:00 AM - 12:00 PM"""
         # 3. LiteRT backend
         cfg_litert = ThirtiesConfig()
         cfg_litert.inference.backend = "litert"
-        engine_litert = get_inference_engine(cfg_litert)
+        with patch.object(LiteRTInferenceEngine, "is_available", return_value=True):
+            engine_litert = get_inference_engine(cfg_litert)
         self.assertIsInstance(engine_litert, LiteRTInferenceEngine)
 
         # 4. Mock backend
