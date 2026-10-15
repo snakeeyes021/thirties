@@ -113,6 +113,19 @@ Here is the sync data:
         self._sync_from(laptop.state_db, desktop.state_db)
         self.assertIsNone(occupant(desktop.build_day_plan(DAY)[0], "10:00"))
 
+    def test_assistant_state_syncs(self) -> None:
+        from thirties_core.memory import ConversationStore, MemoryStore, ProfileStore
+        laptop, desktop = make_scheduler(), make_scheduler()
+        conv = ConversationStore(laptop.state_db).create(DAY)
+        conv.messages = [{"role": "user", "content": "plan my evening"}]
+        ConversationStore(laptop.state_db).save(conv)
+        ProfileStore(laptop.state_db).append("Near-term goals", "Finish Natalie's piece by December")
+        MemoryStore(laptop.state_db).add("Probation items are maybes")
+        self._sync_from(laptop.state_db, desktop.state_db)
+        self.assertEqual(ConversationStore(desktop.state_db).latest_for_day(DAY).messages[0]["content"], "plan my evening")
+        self.assertIn("Natalie", ProfileStore(desktop.state_db).sections()["Near-term goals"])
+        self.assertEqual([n.text for n in MemoryStore(desktop.state_db).notes()], ["Probation items are maybes"])
+
     def test_day_off_beats_a_device_that_never_saw_the_day(self) -> None:
         laptop, desktop = make_scheduler(), make_scheduler()
         laptop_plan, _ = laptop.build_day_plan(DAY)

@@ -6,6 +6,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import load_config
+from thirties_core.backlog import load_backlog
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
@@ -38,8 +39,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.current_date = self._get_active_diurnal_date()
 
         # Ingest backlog tasks & notes from Joplin
-        self.backlog_tasks = self.joplin_engine.fetch_tasks()
-        self.active_notes = self.joplin_engine.fetch_active_notes()
+        self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
 
         # Inference backend (Gemini via Antigravity, LiteRT, or Mock)

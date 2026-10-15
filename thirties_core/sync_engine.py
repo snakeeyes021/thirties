@@ -121,6 +121,8 @@ class SyncEngine:
         span_records = self.state_db.get_span_records()
         day_meta = [asdict(m) for m in self.state_db.get_all_day_meta()]
         decisions = self.state_db.get_event_decision_records()
+        stores = self._stores()
+        assistant_state = {name: store.all_records() for name, store in stores.items()}
 
         # 2. Task History & Analytics
         task_histories = self.state_db.get_all_task_histories()
@@ -138,6 +140,7 @@ class SyncEngine:
             "spans": span_records,
             "day_meta": day_meta,
             "event_decisions": decisions,
+            "assistant_state": assistant_state,
             "analytics": {
                 "task_history": task_dict,
             },
@@ -201,6 +204,9 @@ class SyncEngine:
         for record in payload.get("event_decisions", []):
             merged_schedules_count += self.state_db.merge_event_decision(record)
         merged_schedules_count += self._merge_legacy_schedules(payload.get("schedules", {}))
+        for name, store in self._stores().items():
+            for record in payload.get("assistant_state", {}).get(name, []):
+                merged_schedules_count += store.merge_record(record)
 
         # 2. Merge Task History & Analytics (union-max counters)
         remote_tasks = payload.get("analytics", {}).get("task_history", {})
@@ -263,6 +269,15 @@ class SyncEngine:
         )
         logger.info(result_msg)
         return True, result_msg
+
+    def _stores(self) -> Dict[str, Any]:
+        from thirties_core.memory import ConversationStore, EnergyLog, MemoryStore, ProfileStore
+        return {
+            "conversations": ConversationStore(self.state_db),
+            "profile": ProfileStore(self.state_db),
+            "memory": MemoryStore(self.state_db),
+            "energy": EnergyLog(self.state_db),
+        }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:
         """Import days from a pre-span (v1) payload, only for days this device has never touched."""

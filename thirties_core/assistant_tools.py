@@ -131,19 +131,30 @@ ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "re
                        "get_statistics", "search_backlog"}
 
 
+_STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
+              "it", "is", "do", "that", "this", "i", "me", "up", "out", "from", "by", "or"}
+
+
 def _words(text: str) -> List[str]:
-    return [w for w in re.findall(r"[a-z0-9']+", text.lower()) if len(w) > 1]
+    return [w for w in re.findall(r"[a-z0-9']+", text.lower()) if len(w) > 1 and w not in _STOPWORDS]
+
+
+def _stem(word: str) -> str:
+    for suffix in ("ing", "es", "s", "ed"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
 
 
 def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskItem]:
     """Backlog tasks most relevant to a query (keyword overlap with title, note, notebook and section)."""
-    q = set(_words(query))
+    q = {_stem(w) for w in _words(query)}
     if not q:
         return []
     scored = []
     for t in tasks:
-        title = set(_words(t.title))
-        context = set(_words(f"{t.parent_note_title or ''} {t.section} {t.source_notebook}"))
+        title = {_stem(w) for w in _words(t.title)}
+        context = {_stem(w) for w in _words(f"{t.parent_note_title or ''} {t.section} {t.source_notebook}")}
         score = 3 * len(q & title) + len(q & context)
         if score:
             scored.append((score, -len(t.title), t))
@@ -182,14 +193,21 @@ class AssistantTools:
         exact = [t for t in self.s.tasks if t.id == ref or t.title.lower() == ref.lower()]
         if exact:
             return exact[0]
+        q = {_stem(w) for w in _words(ref)}
+
+        def overlap(t: TaskItem) -> int:
+            return len(q & {_stem(w) for w in _words(t.title)})
+
         ranked = rank_tasks(self.s.tasks, ref, limit=2)
-        if len(ranked) == 1 or (ranked and len(set(_words(ref)) & set(_words(ranked[0].title))) >= 2):
+        if not ranked or overlap(ranked[0]) == 0:
+            return None
+        if len(ranked) == 1 or overlap(ranked[0]) > overlap(ranked[1]):
             return ranked[0]
         return None
 
     def _complete_backlog_task(self, task: TaskItem) -> str:
         if self._db:
-            self._db.record_task_completed(task.id)
+            self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
         if self.s.joplin is None:
             return "(not checked off in Joplin: no Joplin connection)"
         ok, msg = self.s.joplin.complete_task(task)

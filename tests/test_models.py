@@ -89,3 +89,17 @@ class TestTaskItem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAvailability(unittest.TestCase):
+
+    def test_only_future_thirties_count(self) -> None:
+        _, plan, _ = build_day()
+        plan.spans.append(EventSpan("a", "Dinner", at("17:00"), at("18:00"), SpanCategory.ACTIVITY))
+        whole_day = plan.availability()
+        later = plan.availability(at("16:40"))
+        # From 4:40 PM the daylight left outside work is 4:30-6:30 PM (4 thirties), two of them planned
+        self.assertEqual((later["daylight_total"], later["daylight_open"]), (4, 2))
+        self.assertGreater(whole_day["daylight_total"], later["daylight_total"])
+        # The 7:00-7:30 AM thirty (before sunrise, so dark) has already passed
+        self.assertEqual(later["dark_total"], whole_day["dark_total"] - 1)

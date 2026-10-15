@@ -348,8 +348,11 @@ class StateDatabase:
     def record_task_completed(self, task_id: str, completed_date: Optional[date] = None) -> None:
         comp_str = (completed_date or date.today()).isoformat()
         with self._get_connection() as conn:
-            conn.execute("UPDATE task_history SET completed_date = ? WHERE task_id = ?", (comp_str, task_id))
-            conn.commit()
+            conn.execute("""
+            INSERT INTO task_history (task_id, first_scheduled_date, last_scheduled_date, completed_date)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET completed_date = excluded.completed_date
+            """, (task_id, comp_str, comp_str, comp_str))
 
     def get_all_task_histories(self) -> List[TaskHistoryRecord]:
         with self._get_connection() as conn:

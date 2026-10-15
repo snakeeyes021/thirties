@@ -129,8 +129,8 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
     def test_now_command(self):
         plan = self.bridge.conv_manager.day_plan
         first = plan.blocks[0]
-        plan.spans.append(EventSpan("dw", "Deep Work Code Review", first.start_dt, first.end_dt + timedelta(minutes=30),
-                                    SpanCategory.ACTIVITY))
+        self.scheduler.state_db.upsert_span(EventSpan("dw", "Deep Work Code Review", first.start_dt,
+                                                      first.end_dt + timedelta(minutes=30), SpanCategory.ACTIVITY))
         with patch.object(self.bridge, "_get_current_time", return_value=first.start_dt + timedelta(minutes=5)):
             self.bridge.handle_message(chat_id=1001, text="/now")
         self.bridge.client.send_message.assert_called_once()
@@ -146,6 +146,26 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.assertIn("Schedule for", msg)
         self.assertIn("8:30 AM – 4:00 PM: Work", msg)
         self.assertNotIn("Block", msg)
+
+    def test_check_in_after_a_planned_item_ends(self):
+        plan = self.bridge.conv_manager.day_plan
+        start = plan.blocks[2].start_dt
+        self.scheduler.state_db.upsert_span(EventSpan("tx", "Taxes", start, start + timedelta(minutes=60), SpanCategory.TASK))
+        self.bridge.conv_manager.refresh()
+        self.bridge.active_chats = {1001}
+        with patch.object(self.bridge, "_get_current_time", return_value=start + timedelta(minutes=75)):
+            self.bridge._maybe_check_in()
+            self.bridge._maybe_check_in()  # asked only once
+        self.bridge.client.send_message.assert_called_once()
+        self.assertIn("did you get to *Taxes*", self.bridge.client.send_message.call_args[0][1])
+        self.assertIn("did you get to Taxes", self.bridge.conv_manager.history()[-1]["content"])
+
+    def test_new_command_starts_fresh_conversation(self):
+        self.bridge.conv_manager.add_assistant_message("earlier")
+        first = self.bridge.conv_manager.conversation.id
+        self.bridge.handle_message(chat_id=1001, text="/new")
+        self.assertEqual(self.bridge.conv_manager.history(), [])
+        self.assertNotEqual(self.bridge.conv_manager.conversation and self.bridge.conv_manager.conversation.id, first)
 
     def test_sync_command(self):
         self.bridge.handle_message(chat_id=1001, text="/sync")

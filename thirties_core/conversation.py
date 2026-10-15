@@ -106,6 +106,24 @@ class ConversationManager:
         self._load(conv)
         return True
 
+    def refresh(self) -> None:
+        """Reload the day and the current conversation from storage.
+
+        Another client (the desktop app or the Telegram bridge) may have changed the
+        schedule or continued the conversation since this one last looked.
+        """
+        if self.scheduler is None:
+            return
+        plan, pending = self.scheduler.build_day_plan(self.day_plan.target_date)
+        self.tools.day_plan = plan
+        self.tools.ambiguous_events = list(pending)
+        self.tools._other_days.clear()
+        if self._store:
+            latest = self._store.latest_for_day(plan.target_date)
+            if latest and (self.conversation is None or latest.id != self.conversation.id
+                           or latest.updated_at > self.conversation.updated_at):
+                self._load(latest)
+
     def add_assistant_message(self, text: str) -> None:
         """Record something the assistant said on its own (e.g. a Telegram check-in)."""
         self.brain.messages.append({"role": "assistant", "content": text})

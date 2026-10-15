@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Set
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import ThirtiesConfig, load_config
 from thirties_core.astronomy import get_current_time
+from thirties_core.backlog import load_backlog
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import InferenceEngine, get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
@@ -186,9 +187,7 @@ class ThirtiesTelegramBridge:
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
         self.current_date: date = self._get_active_diurnal_date()
 
-        self.backlog_tasks = self.joplin_engine.fetch_tasks()
-        self.active_notes = self.joplin_engine.fetch_active_notes()
-        self.scheduler.attach_history_to_tasks(self.backlog_tasks)
+        self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
 
         # Startup sync pull
         if self.config.sync.enabled and self.config.sync.auto_pull_on_startup:
@@ -211,6 +210,7 @@ class ThirtiesTelegramBridge:
         )
 
         self.last_notified_block_index: Optional[int] = None
+        self.checked_in_span_ids: Set[str] = set()
         self.running = False
         self._notifier_thread: Optional[threading.Thread] = None
 
@@ -245,9 +245,7 @@ class ThirtiesTelegramBridge:
         if today != self.current_date:
             logger.info("Diurnal date rolled over from %s to %s. Reloading day plan.", self.current_date, today)
             self.current_date = today
-            self.backlog_tasks = self.joplin_engine.fetch_tasks()
-            self.active_notes = self.joplin_engine.fetch_active_notes()
-            self.scheduler.attach_history_to_tasks(self.backlog_tasks)
+            self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
             plan, ambiguous = self.scheduler.build_day_plan(today)
             self.conv_manager = ConversationManager(
                 day_plan=plan,
@@ -286,6 +284,7 @@ class ThirtiesTelegramBridge:
 
         self.active_chats.add(chat_id)
         self._check_and_refresh_date()
+        self.conv_manager.refresh()
 
         # Command Dispatch
         if text.startswith("/"):
@@ -299,7 +298,7 @@ class ThirtiesTelegramBridge:
                 self._cmd_day(chat_id)
             elif cmd == "/sync":
                 self._cmd_sync(chat_id)
-            elif cmd == "/clear":
+            elif cmd in ("/new", "/clear"):
                 self._cmd_clear(chat_id)
             elif cmd == "/status":
                 self._cmd_status(chat_id)
@@ -340,7 +339,7 @@ class ThirtiesTelegramBridge:
             "• `/now` – What's happening now, and time until sleep\n"
             "• `/day` – Today's schedule\n"
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
-            "• `/clear` – Clear conversation context (start fresh)\n"
+            "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
             "• `/status` – System, model, and sync status\n"
             "• `/help` – Show this guide\n\n"
             "💬 *Conversation*:\n"
@@ -418,17 +417,8 @@ class ThirtiesTelegramBridge:
             self.client.send_message(chat_id, f"❌ *Sync Error*: `{e}`", parse_mode="Markdown")
 
     def _cmd_clear(self, chat_id: int) -> None:
-        plan, ambiguous = self.scheduler.build_day_plan(self.current_date)
-        self.conv_manager = ConversationManager(
-            day_plan=plan,
-            tasks=self.backlog_tasks,
-            ambiguous_events=ambiguous,
-            scheduler=self.scheduler,
-            joplin_engine=self.joplin_engine,
-            inference_engine=self.inference_engine,
-            active_notes=self.active_notes,
-        )
-        self.client.send_message(chat_id, "🧹 Conversation context cleared and re-initialized with fresh schedule.", parse_mode="Markdown")
+        self.conv_manager.new_conversation()
+        self.client.send_message(chat_id, "🆕 Started a new conversation. What's next?")
 
     def _cmd_status(self, chat_id: int) -> None:
         inf_name = type(self.inference_engine).__name__
@@ -460,6 +450,7 @@ class ThirtiesTelegramBridge:
                     break
 
                 self._check_and_refresh_date()
+                self._maybe_check_in()
                 curr = self._get_current_block()
                 if not curr:
                     continue
@@ -492,6 +483,31 @@ class ThirtiesTelegramBridge:
 
             except Exception as e:
                 logger.error("Error in block transition notifier loop: %s", e)
+
+    def _maybe_check_in(self) -> None:
+        """After a planned activity ends with no outcome recorded, ask about it once."""
+        cfg = self.config.assistant
+        if not (cfg.checkins and self.active_chats):
+            return
+        now = self._get_current_time()
+        grace = timedelta(minutes=cfg.checkin_after_minutes)
+        plan = self.conv_manager.day_plan
+        due = [s for s in plan.active_spans()
+               if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.status.value == "planned"
+               and s.id not in self.checked_in_span_ids
+               and s.end_dt + grace <= now < s.end_dt + timedelta(hours=2)]
+        if not due:
+            return
+        span = due[-1]
+        self.checked_in_span_ids.update(s.id for s in due)
+        following = next((s for s in plan.active_spans()
+                          if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.covers(now)), None)
+        question = f"👋 Just checking in: did you get to *{span.title}*"
+        question += f", or are you still on it? (Next up: {following.title}.)" if following else "?"
+        self.conv_manager.refresh()
+        self.conv_manager.add_assistant_message(question.replace("*", ""))
+        for chat_id in list(self.active_chats):
+            self.client.send_message(chat_id, question, parse_mode="Markdown")
 
     def start(self) -> None:
         """Start the polling listener and transition notifier."""
