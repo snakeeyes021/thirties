@@ -1,8 +1,10 @@
-"""On-device inference engine using Google LiteRT-LM.
+"""Inference engine protocol and backend implementations for Thirties.
 
-Runs quantized Gemma models (.litertlm) directly on-device with GPU acceleration
-and automatic CPU fallback. Strictly self-contained without external daemons.
-Supports both in-process execution and host GPU execution from Flatpak sandbox.
+Supports:
+- Antigravity CLI bridge (Gemini 3.8 Flash via agy host tool)
+- Direct Google Gemini REST API (Gemini 3.8 Flash via API key)
+- Google LiteRT-LM (on-device local Gemma 4B on GPU/CPU)
+- MockInferenceEngine (deterministic unit testing)
 """
 
 from __future__ import annotations
@@ -13,8 +15,10 @@ import os
 import re
 import shutil
 import subprocess
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 from thirties_core.config import InferenceConfig, ThirtiesConfig
 
@@ -38,6 +42,57 @@ def get_host_home() -> Path:
     return Path.home()
 
 
+def find_agy_binary(custom_path: Optional[str] = None) -> Optional[str]:
+    """Locate the agy CLI binary on host or in environment."""
+    if custom_path:
+        expanded = Path(os.path.expanduser(custom_path))
+        if expanded.is_file() and os.access(expanded, os.X_OK):
+            return str(expanded)
+        if shutil.which(custom_path):
+            return custom_path
+
+    which_agy = shutil.which("agy")
+    if which_agy:
+        return which_agy
+
+    host_home = get_host_home()
+    candidates = [
+        Path.home() / ".local" / "bin" / "agy",
+        host_home / ".local" / "bin" / "agy",
+        Path("/usr/local/bin/agy"),
+        Path("/usr/bin/agy"),
+    ]
+    for h in (Path.home(), host_home):
+        if str(h).startswith("/home/"):
+            candidates.append(Path("/var") / h.relative_to("/") / ".local" / "bin" / "agy")
+        elif str(h).startswith("/var/home/"):
+            candidates.append(Path("/home") / h.relative_to("/var/home") / ".local" / "bin" / "agy")
+
+    for c in candidates:
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
+
+    # If inside Flatpak, check on host via flatpak-spawn
+    if Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID")):
+        for host_candidate in [
+            str(host_home / ".local" / "bin" / "agy"),
+            "/usr/local/bin/agy",
+            "/usr/bin/agy",
+        ]:
+            try:
+                res = subprocess.run(
+                    ["flatpak-spawn", "--host", "test", "-x", host_candidate],
+                    capture_output=True,
+                    timeout=2,
+                )
+                if res.returncode == 0:
+                    return host_candidate
+            except Exception:
+                pass
+
+    return None
+
+
 class InferenceEngine(Protocol):
     """Protocol for LLM inference backends."""
 
@@ -56,6 +111,192 @@ class InferenceEngine(Protocol):
         }
         """
         ...
+
+
+class AntigravityInferenceEngine:
+    """Dispatches conversation turns to Gemini (e.g. Gemini 3.8 Flash) via the Antigravity CLI."""
+
+    def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
+        self.config = config or ThirtiesConfig()
+        self.inf_cfg: InferenceConfig = self.config.inference
+        self.model = self.inf_cfg.gemini_model or "gemini-3.8-flash-medium"
+        self.custom_agy_path = self.inf_cfg.agy_path
+        self.timeout = self.inf_cfg.timeout_seconds
+
+    def is_available(self) -> bool:
+        """Return True if agy binary is discoverable and executable."""
+        return find_agy_binary(self.custom_agy_path) is not None
+
+    def _format_prompt(self, messages: List[Dict[str, Any]]) -> str:
+        """Format message history into a clear prompt for agy non-interactive print mode."""
+        system_prompt = None
+        turn_lines = []
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "system":
+                system_prompt = content
+            elif role == "user":
+                turn_lines.append(f"User: {content}")
+            elif role == "assistant":
+                turn_lines.append(f"Assistant: {content}")
+
+        dialogue = "\n\n".join(turn_lines)
+        if system_prompt:
+            return f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION HISTORY:\n{dialogue}\n\nAssistant:"
+        return f"{dialogue}\n\nAssistant:"
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Execute chat turn against Antigravity CLI with Gemini model."""
+        agy_bin = find_agy_binary(self.custom_agy_path)
+        if not agy_bin:
+            raise RuntimeError("Antigravity CLI (agy) binary not found.")
+
+        prompt_text = self._format_prompt(messages)
+        is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
+
+        cmd = [
+            agy_bin,
+            "--print", prompt_text,
+            "--output-format", "json",
+            "--model", self.model,
+            "--disable-slash-commands",
+        ]
+        if is_flatpak:
+            cmd = ["flatpak-spawn", "--host"] + cmd
+
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)
+            return {
+                "role": "assistant",
+                "content": "The Antigravity assistant timed out waiting for a response.",
+                "tool_calls": [],
+            }
+        except Exception as e:
+            logger.error("Failed executing Antigravity CLI: %s", e)
+            return {
+                "role": "assistant",
+                "content": f"Failed invoking Antigravity CLI: {e}",
+                "tool_calls": [],
+            }
+
+        raw_output = res.stdout
+        raw_reply = ""
+        if res.returncode == 0 and raw_output.strip():
+            try:
+                data = json.loads(raw_output)
+                raw_reply = data.get("response", "")
+            except Exception:
+                raw_reply = raw_output
+        else:
+            err_msg = res.stderr or raw_output or "Unknown CLI failure"
+            logger.error("Antigravity CLI returned exit code %s: %s", res.returncode, err_msg)
+            return {
+                "role": "assistant",
+                "content": f"Error contacting model via Antigravity CLI: {err_msg}",
+                "tool_calls": [],
+            }
+
+        clean_text, tool_calls = parse_model_directives(raw_reply)
+        return {
+            "role": "assistant",
+            "content": clean_text,
+            "tool_calls": tool_calls,
+        }
+
+
+class GeminiInferenceEngine:
+    """Dispatches conversation turns directly to the Google Gemini REST API."""
+
+    def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
+        self.config = config or ThirtiesConfig()
+        self.inf_cfg: InferenceConfig = self.config.inference
+        self.model = self.inf_cfg.gemini_model or "gemini-3.8-flash-medium"
+        self.api_key = self.inf_cfg.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        self.temperature = self.inf_cfg.temperature
+        self.timeout = self.inf_cfg.timeout_seconds
+
+    def is_available(self) -> bool:
+        """Return True if an API key is configured."""
+        return bool(self.api_key and self.api_key.strip())
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Execute chat turn directly against Google Gemini REST API."""
+        if not self.is_available():
+            raise RuntimeError("Gemini API key is not configured.")
+
+        system_instruction = None
+        contents = []
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "system":
+                system_instruction = {"parts": [{"text": content}]}
+            elif role in ("user", "assistant"):
+                gemini_role = "user" if role == "user" else "model"
+                contents.append({
+                    "role": gemini_role,
+                    "parts": [{"text": content}],
+                })
+
+        payload: Dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": self.temperature,
+            },
+        }
+        if system_instruction:
+            payload["system_instruction"] = system_instruction
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        data_bytes = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={"Content-Type": "application/json", "User-Agent": "Thirties/0.1"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                resp_json = json.loads(resp.read().decode("utf-8"))
+
+            raw_text = ""
+            candidates = resp_json.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                raw_text = "".join(p.get("text", "") for p in parts)
+
+            clean_text, tool_calls = parse_model_directives(raw_text)
+            return {
+                "role": "assistant",
+                "content": clean_text,
+                "tool_calls": tool_calls,
+            }
+        except Exception as e:
+            logger.error("Gemini API request failed: %s", e)
+            return {
+                "role": "assistant",
+                "content": f"Encountered an error communicating with Gemini API: {e}",
+                "tool_calls": [],
+            }
 
 
 class LiteRTInferenceEngine:
@@ -105,7 +346,6 @@ class LiteRTInferenceEngine:
         is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
 
         if is_flatpak:
-            # Ensure host-accessible copy of runner.py exists in shared XDG data dir
             xdg_share = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "thirties"
             xdg_share.mkdir(parents=True, exist_ok=True)
             shared_runner = xdg_share / "runner.py"
@@ -201,7 +441,6 @@ class LiteRTInferenceEngine:
 
         logger.info("Initializing LiteRT-LM from %s", model_path)
         try:
-            # Try GPU acceleration first (e.g. Vulkan / NVIDIA RTX / AMD / Intel)
             self._engine_instance = litert_lm.Engine(
                 str(model_path),
                 backend=litert_lm.Backend.GPU(),
@@ -248,56 +487,60 @@ class LiteRTInferenceEngine:
                 self._ensure_initialized()
                 raw_reply = str(self._conv_session.send_message(last_user_msg)).strip()
             except Exception as e:
-                logger.error("In-process inference error: %s", e)
-                return {"role": "assistant", "content": f"Inference notice: {e}", "tool_calls": []}
-        elif host_runner:
-            cmd: List[str] = []
-            msg_json = json.dumps(messages)
-            if shutil.which("flatpak-spawn") and (os.environ.get("FLATPAK_ID") or not os.path.exists(host_runner["python"])):
-                cmd = ["flatpak-spawn", "--host", host_runner["python"], host_runner["script"], "--messages", msg_json]
-            else:
-                cmd = [host_runner["python"], host_runner["script"], "--messages", msg_json]
+                logger.warning("In-process LiteRT inference failed: %s; falling back to host runner.", e)
+                has_litert = False
 
+        if not has_litert and host_runner:
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                stdout = proc.stdout
-                if "---THIRTIES_RESPONSE_START---" in stdout and "---THIRTIES_RESPONSE_END---" in stdout:
-                    start_idx = stdout.find("---THIRTIES_RESPONSE_START---") + len("---THIRTIES_RESPONSE_START---")
-                    end_idx = stdout.find("---THIRTIES_RESPONSE_END---")
-                    raw_reply = stdout[start_idx:end_idx].strip()
+                is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
+                cmd = [
+                    host_runner["python"],
+                    host_runner["script"],
+                    "--prompt",
+                    last_user_msg,
+                ]
+                if is_flatpak:
+                    cmd = ["flatpak-spawn", "--host"] + cmd
+
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                if res.returncode == 0:
+                    raw_stdout = res.stdout
+                    marker_start = "---THIRTIES_RESPONSE_START---"
+                    marker_end = "---THIRTIES_RESPONSE_END---"
+                    if marker_start in raw_stdout and marker_end in raw_stdout:
+                        s_idx = raw_stdout.find(marker_start) + len(marker_start)
+                        e_idx = raw_stdout.find(marker_end)
+                        raw_reply = raw_stdout[s_idx:e_idx].strip()
+                    else:
+                        raw_reply = raw_stdout.strip()
                 else:
-                    raw_reply = stdout.strip() or proc.stderr.strip()
-            except Exception as e:
-                logger.error("Host runner execution error: %s", e)
-                return {"role": "assistant", "content": f"Inference runner error: {e}", "tool_calls": []}
-        else:
-            return {"role": "assistant", "content": "LiteRT-LM model runner not available.", "tool_calls": []}
+                    logger.error("Host runner exited with code %s: %s", res.returncode, res.stderr)
+            except Exception as runner_err:
+                logger.error("Host runner execution failed: %s", runner_err)
 
-        cleaned_content, tool_calls = parse_model_directives(raw_reply)
-        if tool_calls:
-            logger.info("[Inference] Extracted tool directives from model: %s", [c["name"] for c in tool_calls])
+        if not raw_reply:
+            raw_reply = "I'm ready to help you plan your day. Let me know what you'd like to work on!"
 
+        clean_text, tool_calls = parse_model_directives(raw_reply)
         return {
             "role": "assistant",
-            "content": cleaned_content,
+            "content": clean_text,
             "tool_calls": tool_calls,
         }
 
 
-def _parse_modify_attributes(rest: str) -> dict[str, Any]:
+def _parse_modify_attributes(attr_str: str) -> dict[str, Any]:
     args: dict[str, Any] = {}
-    if not rest:
-        return args
-    rest = rest.strip()
+    rest = attr_str.strip()
 
-    km = re.search(r"\bkind=([A-Za-z_]+)\b", rest, re.IGNORECASE)
+    km = re.search(r"\bkind=([a-zA-Z_]+)", rest, re.IGNORECASE)
     if km:
         args["kind"] = km.group(1).upper()
         rest = rest[:km.start()] + " " + rest[km.end():]
 
-    lm = re.search(r"\blocked=(true|false)\b", rest, re.IGNORECASE)
+    lm = re.search(r"\b(?:is_)?locked=(true|false)\b", rest, re.IGNORECASE)
     if lm:
-        args["is_locked"] = (lm.group(1).lower() == "true")
+        args["is_locked"] = lm.group(1).lower() == "true"
         rest = rest[:lm.start()] + " " + rest[lm.end():]
 
     tm = re.search(r"\btask_id=([^\s|]+)", rest, re.IGNORECASE)
@@ -327,7 +570,6 @@ def _parse_modify_attributes(rest: str) -> dict[str, Any]:
 
 
 def _parse_range_or_time(target_str: str) -> dict[str, Any]:
-    """Parse a target specifier into either block numbers or clock time bounds."""
     target = target_str.strip()
     if not target:
         return {}
@@ -346,10 +588,7 @@ def _parse_range_or_time(target_str: str) -> dict[str, Any]:
 
 
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
-    """Extract explicit tool directives emitted by model text and return cleaned reply and tool calls.
-    
-    Supports multiple directives per turn in order of occurrence.
-    """
+    """Extract explicit tool directives emitted by model text and return cleaned reply and tool calls."""
     tool_calls: list[dict[str, Any]] = []
     clean_lines: list[str] = []
 
@@ -359,7 +598,7 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
             clean_lines.append(line)
             continue
 
-        # 1. MODIFY_BLOCKS (accepts block numbers or clock times)
+        # 1. MODIFY_BLOCKS
         mod_m = re.match(r"^MODIFY_BLOCKS?:\s*([^|\n]+)?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
         if mod_m:
             target_str = (mod_m.group(1) or "").strip()
@@ -474,6 +713,9 @@ class MockInferenceEngine:
     def set_next_response(self, response: Dict[str, Any]) -> None:
         self.responses.append(response)
 
+    def is_available(self) -> bool:
+        return True
+
     def chat(
         self,
         messages: List[Dict[str, Any]],
@@ -544,3 +786,44 @@ class MockInferenceEngine:
             "content": "I'm ready to help you plan your Thirties today.",
             "tool_calls": [],
         }
+
+
+def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEngine:
+    """Factory creating the appropriate inference engine backend based on configuration."""
+    cfg = config or ThirtiesConfig()
+    backend = (cfg.inference.backend or "gemini").lower()
+
+    if backend in ("gemini", "antigravity"):
+        agy = AntigravityInferenceEngine(cfg)
+        if agy.is_available():
+            logger.info("Using Antigravity CLI inference backend (model: %s).", agy.model)
+            return agy
+
+        gemini_api = GeminiInferenceEngine(cfg)
+        if gemini_api.is_available():
+            logger.info("Using direct Gemini API inference backend (model: %s).", gemini_api.model)
+            return gemini_api
+
+        logger.warning(
+            "Configured backend is '%s', but neither agy CLI nor GEMINI_API_KEY is available. "
+            "Checking LiteRT fallback.",
+            backend,
+        )
+        litert = LiteRTInferenceEngine(cfg)
+        if litert.is_available():
+            return litert
+        return MockInferenceEngine()
+
+    elif backend == "litert":
+        litert = LiteRTInferenceEngine(cfg)
+        if litert.is_available():
+            return litert
+        logger.warning("LiteRT backend requested but unavailable. Falling back to Mock.")
+        return MockInferenceEngine()
+
+    elif backend == "mock":
+        return MockInferenceEngine()
+
+    else:
+        logger.warning("Unknown backend '%s'. Falling back to Mock.", backend)
+        return MockInferenceEngine()

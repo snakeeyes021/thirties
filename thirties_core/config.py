@@ -51,9 +51,33 @@ class CalendarConfig:
 
 @dataclass
 class InferenceConfig:
-    backend: str = "litert"
+    backend: str = "gemini"  # Options: "gemini", "antigravity", "litert", "mock"
+    gemini_model: str = "gemini-3.8-flash-low"
+    gemini_api_key: str = ""
+    agy_path: Optional[str] = None
     litert_model_path: str = "~/.local/share/thirties/models/gemma-4-e2b.litertlm"
     temperature: float = 0.2
+    timeout_seconds: float = 60.0
+
+
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    allowed_chat_ids: List[int] = field(default_factory=list)
+    notify_block_transitions: bool = True
+    poll_interval_seconds: float = 2.0
+
+
+@dataclass
+class SyncConfig:
+    enabled: bool = True
+    notebook_name: str = "Archive"
+    sync_subfolder: str = "Thirties_System"
+    sync_note_title: str = "Thirties_State_Sync"
+    device_id: Optional[str] = None
+    auto_push_on_change: bool = True
+    auto_pull_on_startup: bool = True
 
 
 @dataclass
@@ -62,6 +86,8 @@ class ThirtiesConfig:
     joplin: JoplinConfig = field(default_factory=JoplinConfig)
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+    sync: SyncConfig = field(default_factory=SyncConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     def resolve_joplin_db_path(self) -> Optional[Path]:
         """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
@@ -86,7 +112,10 @@ class ThirtiesConfig:
         """Return the path to Thirties local state database."""
         data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
         state_dir = data_home / "thirties"
-        state_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         return state_dir / "state.sqlite"
 
 
@@ -113,10 +142,14 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     joplin_data = data.get("joplin", {})
     calendar_data = data.get("calendar", {})
     inference_data = data.get("inference", {})
+    sync_data = data.get("sync", {})
+    telegram_data = data.get("telegram", {})
 
     return ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),
         joplin=JoplinConfig(**joplin_data) if joplin_data else JoplinConfig(),
         calendar=CalendarConfig(**calendar_data) if calendar_data else CalendarConfig(),
         inference=InferenceConfig(**inference_data) if inference_data else InferenceConfig(),
+        sync=SyncConfig(**sync_data) if sync_data else SyncConfig(),
+        telegram=TelegramConfig(**telegram_data) if telegram_data else TelegramConfig(),
     )

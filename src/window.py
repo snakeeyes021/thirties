@@ -1,16 +1,20 @@
 """Main application window for Thirties."""
 
+import logging
 from datetime import date, timedelta
 from gi.repository import Adw, GLib, Gtk
 
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import load_config
 from thirties_core.conversation import ConversationManager
-from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
+from thirties_core.inference import get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
 from thirties_core.scheduler import DeterministicScheduler
+from thirties_core.sync_engine import SyncEngine
 from thirties.views.chat_panel import ChatPanel
 from thirties.views.day_view import DayView
+
+logger = logging.getLogger(__name__)
 
 
 @Gtk.Template(resource_path='/tech/redfoxlabs/Thirties/window.ui')
@@ -33,13 +37,27 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.joplin_engine = JoplinEngine(self.config)
         self.current_date = self._get_active_diurnal_date()
 
-        # Ingest backlog tasks from Joplin
+        # Ingest backlog tasks & notes from Joplin
         self.backlog_tasks = self.joplin_engine.fetch_tasks()
+        self.active_notes = self.joplin_engine.fetch_active_notes()
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
 
-        # Inference backend
-        litert_engine = LiteRTInferenceEngine(self.config)
-        self.inference_engine = litert_engine if litert_engine.is_available() else MockInferenceEngine()
+        # Inference backend (Gemini via Antigravity, LiteRT, or Mock)
+        self.inference_engine = get_inference_engine(self.config)
+
+        # Joplin cross-device synchronization engine
+        self.sync_engine = SyncEngine(
+            config=self.config,
+            state_db=self.scheduler.state_db,
+            joplin_engine=self.joplin_engine,
+        )
+        if self.config.sync.enabled and self.config.sync.auto_pull_on_startup:
+            try:
+                ok, msg = self.sync_engine.pull()
+                if ok:
+                    logger.info("Startup sync pull: %s", msg)
+            except Exception as e:
+                logger.warning("Startup sync pull failed (continuing normally): %s", e)
 
         # 1. Schedule View (DayView)
         self.day_view = DayView()
@@ -59,6 +77,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             scheduler=self.scheduler,
             joplin_engine=self.joplin_engine,
             inference_engine=self.inference_engine,
+            active_notes=self.active_notes,
         )
 
         self.chat_panel = ChatPanel(
@@ -104,6 +123,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             scheduler=self.scheduler,
             joplin_engine=self.joplin_engine,
             inference_engine=self.inference_engine,
+            active_notes=self.active_notes,
         )
         self.chat_panel.set_conversation_manager(
             self.conv_manager,
@@ -117,6 +137,11 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     def _on_plan_updated(self, plan) -> None:
         """Triggered when tool calls (allocate block, resolve event) modify the plan."""
         self.day_view.refresh_plan(plan)
+        if self.config.sync.enabled and self.config.sync.auto_push_on_change:
+            try:
+                self.sync_engine.push()
+            except Exception as e:
+                logger.debug("Auto-push sync failed: %s", e)
 
     def _on_prev_day(self, _btn: Gtk.Button) -> None:
         self._load_day(self.current_date - timedelta(days=1))

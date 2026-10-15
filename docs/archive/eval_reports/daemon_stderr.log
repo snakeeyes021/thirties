@@ -1,0 +1,96 @@
+WARNING: Logging before InitGoogle() is written to STDERR
+W0000 00:00:1791615055.943521      37 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1791615055.943594      37 litert_lm_loader.cc:479] TFLite model for type: tf_lite_prefill_decode not found. Skipping.
+I0000 00:00:1791615055.943599      37 litert_executor_utils.cc:447] Build ModelResources for Artisan Text Decoder.
+W0000 00:00:1791615055.943739      37 litert_lm_loader.cc:514] TFLite model type: tf_lite_prefill_decode not found for backend constraints. Skipping.
+W0000 00:00:1791615055.943762      37 litert_lm_loader.cc:514] TFLite model type: tf_lite_vision_encoder not found for backend constraints. Skipping.
+W0000 00:00:1791615055.943766      37 litert_lm_loader.cc:514] TFLite model type: tf_lite_audio_encoder_hw not found for backend constraints. Skipping.
+W0000 00:00:1791615055.943770      37 litert_lm_loader.cc:532] TFLite model type: tf_lite_prefill_decode not found for prefer activation type. Use system's default backend activation type. System's default activation type for Text decoder is fp16. Vision encoder and audio encoder default is fp32.
+W0000 00:00:1791615055.943774      37 litert_lm_loader.cc:532] TFLite model type: tf_lite_vision_encoder not found for prefer activation type. Use system's default backend activation type. System's default activation type for Text decoder is fp16. Vision encoder and audio encoder default is fp32.
+W0000 00:00:1791615055.943778      37 litert_lm_loader.cc:532] TFLite model type: tf_lite_audio_encoder_hw not found for prefer activation type. Use system's default backend activation type. System's default activation type for Text decoder is fp16. Vision encoder and audio encoder default is fp32.
+W0000 00:00:1791615055.943771      38 litert_lm_loader.cc:391] Section not found: SP_Tokenizer
+W0000 00:00:1791615055.944003      37 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1791615055.944014      37 litert_lm_loader.cc:479] TFLite model for type: tf_lite_end_of_vision not found. Skipping.
+I0000 00:00:1791615055.944023      37 llm_gpu_artisan_executor.cc:310] LlmGpuArtisanExecutor::Create with the following config: 
+I0000 00:00:1791615055.944027      37 llm_gpu_artisan_executor.cc:311]   LlmExecutorSettings: backend: GPU_ARTISAN
+backend_config:
+num_output_candidates: 1
+wait_for_weight_uploads: false
+num_decode_steps_per_sync: 1
+sequence_batch_size: 0
+supported_lora_ranks: vector of 0 elements: []
+max_top_k: 64
+enable_decode_logits: false
+enable_external_embeddings: false
+use_submodel: false
+prefer_texture_weights: true
+set_enable_host_mapped_pointer: true
+disallow_8bit_convs: true
+
+max_tokens: 4096
+activation_data_type: Not set
+max_num_images: 0
+lora_rank: 0
+pad_token_id: -1
+cache_dir: 
+cache_file: Not set
+litert_dispatch_lib_dir: Not set
+model_assets: model_path: /var/home/matt/.local/share/thirties/models/gemma-4-E4B-it-gpu.litertlm
+fake_weights_mode: FAKE_WEIGHTS_NONE
+
+advanced_settings: prefill_batch_sizes: []
+num_output_candidates: 1
+configure_magic_numbers: true
+verify_magic_numbers: false
+clear_kv_cache_before_prefill: true
+num_logits_to_print_after_decode: 0
+gpu_madvise_original_shared_tensors: true
+gpu_enable_metal_residency_set: false
+is_benchmark: false
+enable_profiling: false
+preferred_device_substr: 
+num_threads_to_upload: -1
+num_threads_to_compile: -1
+convert_weights_on_gpu: true
+wait_for_weights_conversion_complete_in_benchmark: true
+optimize_shader_compilation: true
+cache_compiled_shaders_only: false
+share_constant_tensors: true
+sampler_handles_input: true
+allow_src_quantized_fc_conv_ops: true
+hint_waiting_for_completion: false
+gpu_context_low_priority: Not set
+enable_speculative_decoding: false
+disable_delegate_clustering: true
+hint_kernel_batch_size: Not set
+error_on_invalid_sampled_token_id: false
+
+diffusion_config: Not set
+I0000 00:00:1791615055.944054      37 gpu_model_info_generator.cc:32] CalculationsPrecision::F16
+I0000 00:00:1791615055.944057      37 gpu_model_info_generator.cc:43] Prefer Texture Weights
+I0000 00:00:1791615055.944061      37 gpu_model_info_generator.cc:47] Enable Host Mapped Pointer
+I0000 00:00:1791615055.944071      37 gpu_model_info_generator.cc:51] Fast Tuning
+I0000 00:00:1791615055.944084      37 gpu_model_info_generator.cc:55] No Winograd
+I0000 00:00:1791615055.944087      37 gpu_model_info_generator.cc:59] Disallow 8bit convs
+Authorization required, but no authorization protocol specified
+
+Authorization required, but no authorization protocol specified
+
+Authorization required, but no authorization protocol specified
+
+Warning: maxDynamicUniformBuffersPerPipelineLayout artificially reduced from 507904 to 16 to fit dynamic offset allocation limit.
+Warning: maxDynamicStorageBuffersPerPipelineLayout artificially reduced from 507904 to 16 to fit dynamic offset allocation limit.
+I0000 00:00:1791615056.190127      37 environment.cc:532] Selected adapter: NVIDIA GeForce RTX 3080 Ti Laptop GPU, arch=ampere, vendor=nvidia, backend=Vulkan, adapterType=Discrete GPU
+INFO: [environment.cc:36] Creating LiteRT environment with options
+WARNING: [npu_registry.cc:34] NPU accelerator could not be loaded and registered: kLiteRtStatusErrorNotFound.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x555ddfb51bf0, name=GPU WebGPU
+INFO: [gpu_registry.cc:113] Statically linked GPU accelerator registered.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x555ddeb87bd0, name=CpuAccelerator
+INFO: [cpu_registry.cc:75] XNNPACK CPU accelerator registered.
+W0000 00:00:1791615058.192110      37 mel_filterbank.cc:137] Missing 10 bands  starting at 0 in mel-frequency design. Perhaps too many channels or not enough frequency resolution in spectrum. (fft_length: 257 sample_rate: 16000 mel_channel_count: 128 lower_frequency_limit: 0 upper_frequency_limit: 8000
+INFO: [environment.cc:36] Creating LiteRT environment with options
+WARNING: [npu_registry.cc:34] NPU accelerator could not be loaded and registered: kLiteRtStatusErrorNotFound.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x555dd9a1e790, name=GPU WebGPU
+INFO: [gpu_registry.cc:113] Statically linked GPU accelerator registered.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x555dd9929d80, name=CpuAccelerator
+INFO: [cpu_registry.cc:75] XNNPACK CPU accelerator registered.

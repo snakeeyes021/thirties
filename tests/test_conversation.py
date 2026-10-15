@@ -507,6 +507,70 @@ class TestConversation(unittest.TestCase):
         finally:
             set_debug_time(None)
 
+    def test_enriched_joplin_backlog_prompt_ingestion(self) -> None:
+        from thirties_core.models import TaskItem
+        tasks = [
+            TaskItem(
+                id="t_def",
+                source_notebook="1. Tasks > Taxes",
+                title="File 2025 Tax Return",
+                deferred_count=4,
+            ),
+            TaskItem(
+                id="t_creat",
+                source_notebook="3. Creative > Music > Dorico",
+                title="Compose String Quartet Mvt 2",
+                parent_note_title="Current Commissions",
+                parent_note_id="note_comm",
+                deferred_count=1,
+            ),
+            TaskItem(
+                id="t_chore",
+                source_notebook="4. Media > Podcasts",
+                title="Download History Episode",
+                deferred_count=0,
+            ),
+        ]
+        active_notes = [
+            {
+                "id": "note_taxes",
+                "source_notebook": "1. Tasks > Taxes",
+                "title": "Taxes 2025",
+                "body": "Need receipts and W2",
+                "is_todo": True,
+                "todo_completed": 0,
+            },
+            {
+                "id": "note_comm",
+                "source_notebook": "3. Creative > Music > Dorico",
+                "title": "Current Commissions",
+                "body": "- [ ] Compose String Quartet Mvt 2",
+                "is_todo": False,
+                "todo_completed": 0,
+            },
+            {
+                "id": "note_shop",
+                "source_notebook": "1. Tasks",
+                "title": "Shopping List",
+                "body": "- [ ] Two suits\n- [ ] NAS upgrade",
+                "is_todo": True,
+                "todo_completed": 0,
+            },
+        ]
+        self.manager.tasks = tasks
+        self.manager.active_notes = active_notes
+        prompt = self.manager._build_system_prompt()
+        self.assertIn("CHRONICALLY DEFERRED ITEMS", prompt)
+        self.assertIn("File 2025 Tax Return", prompt)
+        self.assertIn("[CHRONIC DEFERRAL: 4x]", prompt)
+        self.assertIn("=== NOTEBOOK: 1. Tasks ===", prompt)
+        self.assertIn("=== NOTEBOOK: 3. Creative > Music > Dorico ===", prompt)
+        self.assertIn("Shopping List", prompt)
+        self.assertIn("Reference / Purchasing Wishlist", prompt)
+        self.assertIn("Current Commissions", prompt)
+        self.assertIn("Compose String Quartet Mvt 2", prompt)
+        self.assertIn("TAXONOMIC AWARENESS", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
