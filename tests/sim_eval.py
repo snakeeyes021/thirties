@@ -339,7 +339,12 @@ def make_llm(model: str) -> Callable[[str], str]:
     engine = AntigravityInferenceEngine(cfg)
 
     def ask(prompt: str) -> str:
-        return engine.chat([{"role": "user", "content": prompt}]).get("content", "")
+        for attempt in range(3):  # agy occasionally returns nothing or an error; try again
+            out = engine.chat([{"role": "user", "content": prompt}]).get("content", "")
+            if out.strip() and not out.startswith(("Error contacting model", "Failed invoking", "The Antigravity assistant timed out")):
+                return out
+            time_mod.sleep(5 * (attempt + 1))
+        return out
     return ask
 
 
