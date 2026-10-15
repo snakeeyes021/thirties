@@ -2,16 +2,15 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-14.
+> Last revised: 2026-10-14 (after Phases 1–2).
 
 ---
 
 ## Where We Are
 
-- **Frontier Brain works and has been used for real.** The GTK app runs on Gemini 3.8 Flash (via `agy`, or the Gemini API directly), with the full Joplin backlog in context. In its first full day of real use (before 2026-10-14) it was about **75% usable**: morning planning, back-and-forth task picking, and moving things around later in the day all worked.
+- **Frontier Brain works and has been used for real.** The GTK app runs on Gemini 3.8 Flash (via `agy`, or the Gemini API directly), with the full Joplin backlog in context. In its first full day of real use (before 2026-10-14) it was about **75% usable**: morning planning, back-and-forth task picking, and moving things around later in the day all worked. That day ran on the pre-span core; Phases 1–2 below have changed the core and the prompt since.
+- **Phases 1–2 are implemented but not yet validated against a live model.** Unit tests are green and the Frontier eval's checks are verified with scripted ideal behaviour. A live run is pending (see "Open items from Phases 1–2").
 - **The Telegram bridge and the Joplin sync note are built but not yet tried in real use.**
-- **The core still uses container block kinds.** `BlockKind.WORK` and `BlockKind.SLEEP` are block types rather than events placed on the solar canvas (Anti-Pattern 3), and the model reads and writes block numbers.
-- **The Frontier prompt still contains things AGENTS.md rules out**: block arithmetic lessons, hard-coded backward-scheduling rules, and fixed "creative work goes in daylight, admin goes in dark" mappings (contradicting §2.3).
 - **Nothing records what actually happened.** The app helps make a plan but never learns whether it was followed. `StateDatabase.record_task_deferred` and `record_task_completed` exist but nothing calls them.
 - **There is no SLM brain yet.** The LiteRT transport works mechanically. Earlier SLM experiments ran Gemma through essentially the frontier prompt, which does not work.
 
@@ -25,34 +24,30 @@
 
 ---
 
-## Phase 1: Event Spans on a Solar Canvas (shared core)
+## Phase 1: Event Spans on a Solar Canvas (implemented)
 
-**Why:** Anti-Pattern 3. Treating Work and Sleep as block kinds is what makes "oh shoot, it went til 4:30" dangerous: changing work can rewrite other blocks, and sleep can jump. The fix is a data-model fix, and both brains need it.
+- **Canvas:** 48 `ThirtyBlock`s starting at the thirty that contains sunrise and running 24 hours into the next morning, spaced in absolute time (DST-safe). Blocks carry only physical facts. This also fixed a latent bug: the old midnight-to-midnight blocks, shown sunrise-first, gave the "after midnight" thirties timestamps from the *previous* night.
+- **Spans:** work, sleep, calendar events, tasks and activities are all `EventSpan`s in real clock time. Occupancy, budgets and the GUI's collapsed cards are derived from them.
+- **Store:** spans are stored globally (not per day), so a sleep span crossing midnight belongs to both days. Day metadata and calendar attend/decline decisions have their own tables. Old block-kind snapshots are migrated once on startup.
+- **Routines:** default work and sleep from config are created once per day, with deterministic ids and the oldest possible timestamp, so a day off or an edit on any device always wins over a default.
+- **Calendar:** events are fetched fresh for both calendar dates the diurnal day touches. Accepted events are firm, and unanswered invites are tentative until the user decides. The old builder dropped pending invites and stopped refreshing the calendar as soon as a day had been saved.
+- **Sync:** per-item last-write-wins with deletions synced as tombstones. The old pull overwrote local days with the remote ones regardless of age. Old v1 payloads are still imported, but only for days this device never touched.
 
-**Scope:**
-- Blocks carry only physical facts: index, clock span, daylight vs dark (twilight flag optional). They never change kind because of user activity.
-- Everything the user does is an `EventSpan`: title, start, end, category (work, sleep, appointment, task, routine, ...), source (calendar, Joplin, user), optional task id, firmness (hard calendar commitment vs movable), and status (see Phase 3).
-- Block occupancy, daylight and dark budgets, and the GUI's collapsed banners are *derived* from spans, never stored as block state.
-- Overlaps are detected in Python. Tools report conflicts back to the brain instead of silently overwriting or skipping blocks.
-- Persistence: a spans table in `StateDatabase`, a migration from `day_snapshots`, and an updated sync payload.
-- The GTK views render spans; Work and Sleep become collapsible banners as before.
+## Phase 2: Clock-Time Tools and a Clean Frontier Prompt (implemented)
 
-**Done when:** extending work to 4:30 changes exactly one span and nothing else; sleep cannot move unless explicitly changed; no core code branches on `BlockKind.WORK` or `BlockKind.SLEEP`; and the unit tests cover overlap, cross-midnight spans and envelope edits.
+- **Tools** (`plan_tools.py`): `add_event`, `update_event` (start, end, duration, or a `shift` like "+1 hour"), `remove_event`, `clear_time`, `find_open_time`, `list_schedule`, `resolve_calendar_event`, `finalize_day`. Times are clock strings and durations are phrases; `clock.py` does all parsing and math. Overlaps are refused with a clear explanation, firm calendar items are never overwritten, and activities may sit on top of work or sleep.
+- **Grammar:** a single text format for all transports: `CALL tool_name {json arguments}`.
+- **Prompt:** no block numbers, no arithmetic lessons, no fixed daylight/dark activity rules. It is rebuilt every turn from the live schedule.
+- **Turn loop:** up to 3 rounds. The model sees tool results after lookups, refusals or an empty reply, and a change claimed without any calls triggers one correction.
+- **Transports:** the Gemini API retries 429 and 5xx responses, both transports now pass tool results to the model, and empty message parts are dropped (they caused HTTP 400s).
 
----
-
-## Phase 2: Clock-Time Tools and a Clean Frontier Prompt
-
-**Why:** Anti-Pattern 2. The model should never see or produce block numbers or do duration math.
-
-**Scope:**
-- Replace the block primitives in `PlanTools` with span tools in clock time, for example: `list_day`, `add_event(title, start, end | duration)`, `update_event(id, start?, end?, shift_minutes?)`, `remove_event(id)`, `find_open_time(duration, after?, before?, daylight?)`, `resolve_calendar_event`, `finalize_day`. Relative edits ("push it back an hour", "make lunch 15 min earlier") are computed in Python from `shift_minutes`.
-- Tool results describe outcomes in clock times and durations, and include any conflicts.
-- Strip from the Frontier prompt: block numbering, arithmetic lessons, fixed backward-scheduling recipes, and the daylight/dark activity mappings. Keep the user's actual communication preferences (clock times first; check with the user whether chunk counts should stay).
-- Prefer native function calling where the transport supports it (Gemini API). Keep the text-directive grammar only where it is needed (`agy` CLI), and make it clock-time only.
-- Retire `_detect_discrepancy`'s block-number regexes once replies no longer quote block numbers.
-
-**Done when:** the prompt contains no arithmetic or block-index instructions; a replay of real multi-turn days (Phase 2 eval set below) passes; and the unit tests are green.
+### Open items from Phases 1–2
+- **Run the live Frontier eval** (`python3 -m tests.frontier_eval --repeat 2`) and fix what it finds. It needs about 35 requests per run. The free API tier allows only 20 requests per day per model, and the `agy` installed on the dev machine is too old ("no longer supported"; it needs `agy update` and a fresh login). There is no live baseline from the old core either: the attempt hit the quota.
+- **Check the `agy` transport flags.** `AntigravityInferenceEngine` passes `--output-format json --model ... --disable-slash-commands`, which the agy 1.x on the dev machine rejects. Confirm what the daily-driver machine's agy accepts.
+- **Fix the direct-API default model name.** The config default `gemini-3.8-flash-low` is agy naming. The API engine now splits off the thinking level, but the factory still prefers agy whenever the binary exists, even if it is broken.
+- Consider native function calling on the Gemini API path.
+- Ask the user whether replies should count time in thirties ("4 chunks"), as the old prompt insisted, or in hours. The new prompt allows either.
+- GUI: a work span interrupted by an appointment renders as two cards. Consider one card with the appointment inside.
 
 ---
 
@@ -100,5 +95,5 @@ See `docs/SLM_BRAIN.md`. The brain itself depends on Phases 1–2 (it needs the 
 - **Housekeeping:**
   - `pyproject.toml` dependencies are stale: `astral` is unused, and `litert-lm-api` should be optional.
   - `inference.py` hard-codes `~/dev/Thirties` paths when finding the host runner.
-  - `models.py` defines `ThirtyBlock.is_open` twice.
   - There are unused imports across `thirties_core`.
+  - DST fall-back hour: Python compares same-zone datetimes by wall time, so overlap checks can misjudge spans inside the repeated 1–2 AM hour. Constructors are safe; a full fix is to compare in UTC everywhere.

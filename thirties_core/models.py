@@ -1,73 +1,77 @@
-"""Core domain models for Thirties diurnal planning system."""
+"""Core domain models for the Thirties diurnal planning system.
+
+Two layers, kept strictly apart (AGENTS.md, Anti-Pattern 3):
+
+- The **solar canvas**: 48 ``ThirtyBlock``s for a diurnal day, starting at the
+  thirty that contains sunrise. Blocks carry only physical facts (clock span,
+  daylight or dark) and never change because of what the user does.
+- **Event spans**: everything the user does or commits to (work, sleep,
+  appointments, tasks, activities) is an ``EventSpan`` in real clock time,
+  placed on top of the canvas. Spans may cross midnight and may extend past
+  the canvas edges.
+
+Occupancy, open-time budgets and the grouped views in clients are all derived
+from spans; nothing about user activity is stored on blocks.
+"""
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import asdict, dataclass, field
-import re
-from datetime import date, datetime, time
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 
-class BlockKind(str, Enum):
-    """Categorization of a 30-minute block interval."""
-    SLEEP = "sleep"
+class SpanCategory(str, Enum):
+    """What kind of thing an event span is."""
     WORK = "work"
-    BUSY_CALENDAR = "busy_calendar"
-    AMBIGUOUS_CALENDAR = "ambiguous_calendar"
-    DAYLIGHT_DISCRETIONARY = "daylight_discretionary"
-    DARK_DISCRETIONARY = "dark_discretionary"
-    ASSIGNED = "assigned"
+    SLEEP = "sleep"
+    CALENDAR = "calendar"  # comes from a calendar connector
+    TASK = "task"          # linked to a backlog task
+    ACTIVITY = "activity"  # anything else the user plans (lunch, gym, travel)
+
+
+class SpanStatus(str, Enum):
+    """What actually happened to a planned span."""
+    PLANNED = "planned"
+    DONE = "done"
+    PARTIAL = "partial"
+    SKIPPED = "skipped"
+
+
+def new_span_id() -> str:
+    return uuid.uuid4().hex[:12]
 
 
 @dataclass
 class ThirtyBlock:
-    """Represents a discrete 30-minute interval within a 24-hour cycle.
-    
-    Index runs from 0 (00:00 - 00:30) to 47 (23:30 - 24:00).
+    """One 30-minute interval of the solar canvas.
+
+    ``index`` is the position within the diurnal day: 0 is the thirty that
+    contains sunrise, 47 is the last thirty before the next day's canvas.
     """
     index: int
     start_dt: datetime
     end_dt: datetime
     is_sunlight: bool
-    kind: BlockKind
     is_twilight: bool = False
-    assigned_task_id: Optional[str] = None
-    label: str = ""
-    is_locked: bool = False
-    source_event_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not (0 <= self.index <= 47):
             raise ValueError(f"Block index must be in range [0, 47], got {self.index}")
-        if self.start_dt >= self.end_dt:
+        # Compare instants: same-zone comparison uses wall time and gets the DST fall-back hour wrong.
+        if self.start_dt.timestamp() >= self.end_dt.timestamp():
             raise ValueError(f"Block start_dt ({self.start_dt}) must be before end_dt ({self.end_dt})")
-        if isinstance(self.kind, str) and not isinstance(self.kind, BlockKind):
-            self.kind = BlockKind(self.kind)
+
+    @property
+    def number(self) -> int:
+        """1-based position shown to people (#01 is the sunrise thirty)."""
+        return self.index + 1
 
     @property
     def duration_seconds(self) -> float:
-        return (self.end_dt - self.start_dt).total_seconds()
-
-    @property
-    def is_discretionary(self) -> bool:
-        """True if this block is within discretionary (non-work, non-sleep) diurnal time."""
-        return self.kind in (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY)
-
-    @property
-    def is_open(self) -> bool:
-        """True if this block is discretionary and has no assigned tasks or events."""
-        return self.is_discretionary and not self.is_assigned
-
-    @property
-    def is_assigned(self) -> bool:
-        """True if this block has an active user task or event assigned to it."""
-        return bool(self.assigned_task_id or (self.label and self.label not in ("Work", "Sleep")) or self.kind == BlockKind.ASSIGNED)
-
-    @property
-    def is_open(self) -> bool:
-        """True if this block is an open, unallocated discretionary block."""
-        return self.kind in (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY) and not self.is_assigned and not self.source_event_id
+        return self.end_dt.timestamp() - self.start_dt.timestamp()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -76,11 +80,6 @@ class ThirtyBlock:
             "end_dt": self.end_dt.isoformat(),
             "is_sunlight": self.is_sunlight,
             "is_twilight": self.is_twilight,
-            "kind": self.kind.value,
-            "assigned_task_id": self.assigned_task_id,
-            "label": self.label,
-            "is_locked": self.is_locked,
-            "source_event_id": self.source_event_id,
         }
 
     @classmethod
@@ -90,12 +89,80 @@ class ThirtyBlock:
             start_dt=datetime.fromisoformat(data["start_dt"]),
             end_dt=datetime.fromisoformat(data["end_dt"]),
             is_sunlight=data["is_sunlight"],
-            kind=BlockKind(data["kind"]),
             is_twilight=data.get("is_twilight", False),
-            assigned_task_id=data.get("assigned_task_id"),
-            label=data.get("label", ""),
-            is_locked=data.get("is_locked", False),
+        )
+
+
+@dataclass
+class EventSpan:
+    """Something placed on the canvas, in real clock time."""
+    id: str
+    title: str
+    start_dt: datetime
+    end_dt: datetime
+    category: SpanCategory
+    source: str = "user"  # "user", "routine" (defaults from config), or "calendar"
+    task_id: Optional[str] = None
+    source_event_id: Optional[str] = None
+    is_firm: bool = False    # a hard commitment (accepted calendar event): never moved or overlapped without force
+    tentative: bool = False  # an unconfirmed calendar invite awaiting the user's decision
+    status: SpanStatus = SpanStatus.PLANNED
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if self.start_dt.timestamp() >= self.end_dt.timestamp():
+            raise ValueError(f"Span '{self.title}' must start before it ends ({self.start_dt} >= {self.end_dt})")
+        if isinstance(self.category, str) and not isinstance(self.category, SpanCategory):
+            self.category = SpanCategory(self.category)
+        if isinstance(self.status, str) and not isinstance(self.status, SpanStatus):
+            self.status = SpanStatus(self.status)
+
+    @property
+    def duration_minutes(self) -> int:
+        return int((self.end_dt.timestamp() - self.start_dt.timestamp()) // 60)
+
+    @property
+    def is_envelope(self) -> bool:
+        """Work and sleep are long backdrops that other spans may sit on top of."""
+        return self.category in (SpanCategory.WORK, SpanCategory.SLEEP)
+
+    def overlaps(self, start: datetime, end: datetime) -> bool:
+        return self.start_dt < end and start < self.end_dt
+
+    def covers(self, t: datetime) -> bool:
+        return self.start_dt <= t < self.end_dt
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start_dt": self.start_dt.isoformat(),
+            "end_dt": self.end_dt.isoformat(),
+            "category": self.category.value,
+            "source": self.source,
+            "task_id": self.task_id,
+            "source_event_id": self.source_event_id,
+            "is_firm": self.is_firm,
+            "tentative": self.tentative,
+            "status": self.status.value,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> EventSpan:
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            start_dt=datetime.fromisoformat(data["start_dt"]),
+            end_dt=datetime.fromisoformat(data["end_dt"]),
+            category=SpanCategory(data["category"]),
+            source=data.get("source", "user"),
+            task_id=data.get("task_id"),
             source_event_id=data.get("source_event_id"),
+            is_firm=data.get("is_firm", False),
+            tentative=data.get("tentative", False),
+            status=SpanStatus(data.get("status", "planned")),
+            notes=data.get("notes", ""),
         )
 
 
@@ -121,123 +188,120 @@ class TaskItem:
         return cls(**data)
 
 
+# Which span is shown for a thirty when several overlap: the most specific wins.
+_DISPLAY_PRIORITY = {
+    SpanCategory.CALENDAR: 0,
+    SpanCategory.TASK: 1,
+    SpanCategory.ACTIVITY: 1,
+    SpanCategory.WORK: 2,
+    SpanCategory.SLEEP: 3,
+}
+
+
 @dataclass
 class DayPlan:
-    """The diurnal plan for a single calendar date."""
+    """One diurnal day: the solar canvas plus the spans that touch it."""
     target_date: date
     blocks: List[ThirtyBlock]
     sunrise: datetime
     sunset: datetime
-    daylight_available_count: int = 0
-    dark_available_count: int = 0
+    spans: List[EventSpan] = field(default_factory=list)
     is_finalized: bool = False
     notes: str = ""
 
-    def get_logical_block(self, logical_index: int) -> ThirtyBlock:
-        """Retrieve block by 1-based user-logical day index (1 to 48, starting at Sunrise)."""
-        if not (1 <= logical_index <= 48):
-            raise IndexError(f"Logical block index must be between 1 and 48, got {logical_index}")
-        sunrise_idx = next((b.index for b in self.blocks if b.is_sunlight), 14)
-        clock_idx = (sunrise_idx + logical_index - 1) % 48
-        return self.get_block(clock_idx)
+    # --- canvas ---
 
-    def get_logical_index(self, block: ThirtyBlock) -> int:
-        """Return 1-based logical index (1 to 48) for a block relative to Sunrise."""
-        sunrise_idx = next((b.index for b in self.blocks if b.is_sunlight), 14)
-        return (block.index - sunrise_idx) % 48 + 1
+    @property
+    def day_start(self) -> datetime:
+        return self.blocks[0].start_dt
+
+    @property
+    def day_end(self) -> datetime:
+        return self.blocks[-1].end_dt
 
     def get_block(self, index: int) -> ThirtyBlock:
-        if not (0 <= index <= 47):
+        if not (0 <= index < len(self.blocks)):
             raise IndexError(f"Block index out of bounds: {index}")
-        if index < len(self.blocks) and self.blocks[index].index == index:
-            return self.blocks[index]
-        for b in self.blocks:
-            if b.index == index:
-                return b
-        raise IndexError(f"Block {index} not found in DayPlan")
+        return self.blocks[index]
 
-    def time_str_to_logical_block(self, time_str: str, is_end: bool = False) -> Optional[int]:
-        """Convert a natural time string (e.g. '7am', '07:00', '3pm', '15:30') to a 1-based logical block."""
-        clean = time_str.strip().lower()
-        m = re.match(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", clean)
-        if not m:
+    def block_at(self, t: datetime) -> Optional[ThirtyBlock]:
+        return next((b for b in self.blocks if b.start_dt <= t < b.end_dt), None)
+
+    # --- spans ---
+
+    def get_span(self, span_id: str) -> Optional[EventSpan]:
+        return next((s for s in self.spans if s.id == span_id), None)
+
+    def active_spans(self) -> List[EventSpan]:
+        """Spans that occupy time (unconfirmed invites do not)."""
+        return [s for s in self.spans if not s.tentative]
+
+    def spans_overlapping(self, start: datetime, end: datetime, include_tentative: bool = False) -> List[EventSpan]:
+        pool = self.spans if include_tentative else self.active_spans()
+        return sorted((s for s in pool if s.overlaps(start, end)), key=lambda s: s.start_dt)
+
+    def spans_in_view(self) -> List[EventSpan]:
+        """All spans touching this day's canvas, in start order."""
+        return self.spans_overlapping(self.day_start, self.day_end, include_tentative=True)
+
+    def display_span(self, block: ThirtyBlock) -> Optional[EventSpan]:
+        """The single span to show for a thirty: activities and appointments sit on top of work and sleep."""
+        occupants = self.spans_overlapping(block.start_dt, block.end_dt)
+        if not occupants:
             return None
-        h = int(m.group(1))
-        mins = int(m.group(2) or 0)
-        meridiem = m.group(3)
+        return min(occupants, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt))
 
-        if meridiem == "pm" and h < 12:
-            h += 12
-        elif meridiem == "am" and h == 12:
-            h = 0
-        elif not meridiem and h < 7:  # heuristic: times like 3 without am/pm are usually afternoon
-            h += 12
+    def is_open(self, block: ThirtyBlock) -> bool:
+        return not self.spans_overlapping(block.start_dt, block.end_dt)
 
-        target_time = time(h, mins)
-        # 1. Exact boundary match on clock time
-        for b in self.blocks:
-            if is_end:
-                if b.end_dt.time() == target_time:
-                    return self.get_logical_index(b)
-            else:
-                if b.start_dt.time() == target_time:
-                    return self.get_logical_index(b)
+    def _in_envelope(self, block: ThirtyBlock) -> bool:
+        return any(s.is_envelope for s in self.spans_overlapping(block.start_dt, block.end_dt))
 
-        # 2. Fallback to interval inclusion (using datetime)
-        target_dt = datetime.combine(self.target_date, target_time, tzinfo=self.sunrise.tzinfo)
-        for b in self.blocks:
-            if is_end:
-                if b.start_dt < target_dt <= b.end_dt:
-                    return self.get_logical_index(b)
-            else:
-                if b.start_dt <= target_dt < b.end_dt:
-                    return self.get_logical_index(b)
-        return None
+    # --- budgets (derived, never stored) ---
+
+    @property
+    def daylight_available_count(self) -> int:
+        return sum(1 for b in self.blocks if b.is_sunlight and self.is_open(b))
+
+    @property
+    def dark_available_count(self) -> int:
+        return sum(1 for b in self.blocks if not b.is_sunlight and self.is_open(b))
 
     @property
     def daylight_discretionary_total(self) -> int:
-        """Total daylight blocks not occupied by work or sleep."""
-        return sum(1 for b in self.blocks if b.is_sunlight and b.kind not in (BlockKind.WORK, BlockKind.SLEEP))
+        """Daylight thirties outside work and sleep."""
+        return sum(1 for b in self.blocks if b.is_sunlight and not self._in_envelope(b))
 
     @property
     def dark_discretionary_total(self) -> int:
-        """Total dark blocks not occupied by work or sleep."""
-        return sum(1 for b in self.blocks if not b.is_sunlight and b.kind not in (BlockKind.WORK, BlockKind.SLEEP))
+        """Dark thirties outside work and sleep."""
+        return sum(1 for b in self.blocks if not b.is_sunlight and not self._in_envelope(b))
 
-    def recalculate_counts(self) -> None:
-        """Deterministically tally available discretionary blocks."""
-        daylight = 0
-        dark = 0
-        for block in self.blocks:
-            if block.is_open:
-                if block.kind == BlockKind.DAYLIGHT_DISCRETIONARY or block.is_sunlight:
-                    daylight += 1
-                else:
-                    dark += 1
-        self.daylight_available_count = daylight
-        self.dark_available_count = dark
+    # --- serialization ---
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "schema": 2,
             "target_date": self.target_date.isoformat(),
             "blocks": [b.to_dict() for b in self.blocks],
             "sunrise": self.sunrise.isoformat(),
             "sunset": self.sunset.isoformat(),
-            "daylight_available_count": self.daylight_available_count,
-            "dark_available_count": self.dark_available_count,
+            "spans": [s.to_dict() for s in self.spans],
             "is_finalized": self.is_finalized,
             "notes": self.notes,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> DayPlan:
+        if "spans" not in data:
+            from thirties_core.legacy import plan_from_legacy_dict
+            return plan_from_legacy_dict(data)
         return cls(
             target_date=date.fromisoformat(data["target_date"]),
             blocks=[ThirtyBlock.from_dict(b) for b in data["blocks"]],
             sunrise=datetime.fromisoformat(data["sunrise"]),
             sunset=datetime.fromisoformat(data["sunset"]),
-            daylight_available_count=data.get("daylight_available_count", 0),
-            dark_available_count=data.get("dark_available_count", 0),
+            spans=[EventSpan.from_dict(s) for s in data.get("spans", [])],
             is_finalized=data.get("is_finalized", False),
             notes=data.get("notes", ""),
         )

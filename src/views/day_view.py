@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from gi.repository import Gtk, Adw
 
 from thirties_core.astronomy import get_current_time
-from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+from thirties_core.models import DayPlan, EventSpan, ThirtyBlock
 from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget
 from thirties.widgets.solar_arc import SolarArcWidget
 
@@ -109,47 +109,32 @@ class DayView(Gtk.Box):
             self.list_box.remove(child)
 
         now = get_current_time(day_plan.sunrise.tzinfo)
-        now_idx = -1
-        for b in day_plan.blocks:
-            if b.start_dt <= now < b.end_dt:
-                now_idx = b.index
-                break
+        current = day_plan.block_at(now)
+        now_idx = current.index if current else -1
 
-        # Natural Day Flow: Start day at sunrise (Block #01)
-        sunrise_idx = next((b.index for b in day_plan.blocks if b.is_sunlight), 14)
+        # Thirties under the same work or sleep span collapse into one card.
+        run_span: EventSpan | None = None
+        run: list[tuple[ThirtyBlock, int]] = []
 
-        ordered_items: list[tuple[ThirtyBlock, int]] = [
-            (day_plan.get_block((sunrise_idx + i) % 48), i + 1) for i in range(48)
-        ]
-
-        # Group contiguous locked Sleep and Work blocks
-        current_run: list[tuple[ThirtyBlock, int]] = []
-        current_kind: BlockKind | None = None
-
-        def flush_run():
-            nonlocal current_run, current_kind
-            if not current_run:
-                return
-            if current_kind in (BlockKind.SLEEP, BlockKind.WORK) and len(current_run) > 1:
-                self.list_box.append(GroupedBlockWidget(current_run, now_block_idx=now_idx))
+        def flush_run() -> None:
+            nonlocal run, run_span
+            if run_span is not None and len(run) > 1:
+                self.list_box.append(GroupedBlockWidget(run_span, run, now_block_idx=now_idx))
             else:
-                for b, disp_idx in current_run:
-                    self.list_box.append(BlockWidget(b, is_current=(b.index == now_idx), display_index=disp_idx))
-            current_run = []
-            current_kind = None
+                for b, disp_idx in run:
+                    self.list_box.append(BlockWidget(b, span=run_span, is_current=(b.index == now_idx), display_index=disp_idx))
+            run, run_span = [], None
 
-        for block, disp_idx in ordered_items:
-            is_collapsible = block.is_locked and block.kind in (BlockKind.SLEEP, BlockKind.WORK)
-
-            if is_collapsible:
-                if current_kind == block.kind:
-                    current_run.append((block, disp_idx))
-                else:
-                    flush_run()
-                    current_kind = block.kind
-                    current_run = [(block, disp_idx)]
+        for block in day_plan.blocks:
+            span = day_plan.display_span(block)
+            if span is not None and span.is_envelope:
+                if run_span is not None and span.id == run_span.id:
+                    run.append((block, block.number))
+                    continue
+                flush_run()
+                run_span, run = span, [(block, block.number)]
             else:
                 flush_run()
-                self.list_box.append(BlockWidget(block, is_current=(block.index == now_idx), display_index=disp_idx))
+                self.list_box.append(BlockWidget(block, span=span, is_current=(block.index == now_idx), display_index=block.number))
 
         flush_run()

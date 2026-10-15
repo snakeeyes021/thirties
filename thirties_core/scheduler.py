@@ -1,8 +1,10 @@
-"""Deterministic time budgeting and rolling schedule allocation engine.
+"""Deterministic schedule state: the span store and the day builder.
 
-Overlays astronomical solar events, sleep windows, work intervals, and
-calendar commitments to produce strict integer counts of available
-Daylight and Dark Thirties. Tracks task rollover and staleness in state.sqlite.
+``StateDatabase`` persists event spans (globally, not per day, so spans that
+cross midnight belong to every day they touch), per-day metadata, calendar
+decisions, task history and sync bookkeeping. ``DeterministicScheduler``
+assembles a ``DayPlan`` for a diurnal date from the solar canvas, stored spans,
+default routines from config, and fresh calendar events.
 """
 
 from __future__ import annotations
@@ -10,10 +12,11 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from thirties_core.astronomy import build_base_thirties, get_solar_phases
@@ -21,12 +24,23 @@ from thirties_core.calendar_engine import (
     CalendarEngine,
     CalendarEvent,
     EDSCalendarEngine,
-    map_events_to_blocks,
+    events_to_spans,
 )
 from thirties_core.config import ThirtiesConfig
-from thirties_core.models import BlockKind, DayPlan, TaskItem, ThirtyBlock
+from thirties_core.models import DayPlan, EventSpan, SpanCategory, TaskItem
 
 logger = logging.getLogger(__name__)
+
+
+ROUTINE_TIMESTAMP = "1970-01-01T00:00:00+00:00"
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _utc_iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 @dataclass
@@ -43,8 +57,17 @@ class TaskHistoryRecord:
         return self.deferred_count >= 3
 
 
+@dataclass
+class DayMeta:
+    plan_date: str
+    is_finalized: bool = False
+    notes: str = ""
+    routines_applied: bool = False
+    updated_at: str = ""
+
+
 class StateDatabase:
-    """Local SQLite state database storing task rollover history and day snapshots."""
+    """Local SQLite store for spans, day metadata, calendar decisions and task history."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         if db_path is None:
@@ -54,15 +77,22 @@ class StateDatabase:
             self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        self.migrate_legacy_snapshots()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        """A connection that commits on success, rolls back on error, and always closes."""
         conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.executescript("""
             CREATE TABLE IF NOT EXISTS task_history (
                 task_id TEXT PRIMARY KEY,
                 first_scheduled_date TEXT NOT NULL,
@@ -71,21 +101,194 @@ class StateDatabase:
                 completed_date TEXT,
                 allocated_thirties INTEGER DEFAULT 0
             );
-            """)
-            conn.execute("""
+            -- Pre-span plans; read once by migrate_legacy_snapshots, never written.
             CREATE TABLE IF NOT EXISTS day_snapshots (
                 plan_date TEXT PRIMARY KEY,
                 plan_json TEXT NOT NULL,
                 is_finalized INTEGER DEFAULT 0
             );
-            """)
-            conn.execute("""
             CREATE TABLE IF NOT EXISTS sync_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS spans (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                start_utc TEXT NOT NULL,
+                end_utc TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS spans_by_time ON spans (start_utc, end_utc);
+            CREATE TABLE IF NOT EXISTS day_meta (
+                plan_date TEXT PRIMARY KEY,
+                is_finalized INTEGER NOT NULL DEFAULT 0,
+                notes TEXT NOT NULL DEFAULT '',
+                routines_applied INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS event_decisions (
+                event_id TEXT PRIMARY KEY,
+                decision TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """)
-            conn.commit()
+
+    # --- spans ---
+
+    def upsert_span(self, span: EventSpan, updated_at: Optional[str] = None) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
+            VALUES (?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                data = excluded.data, start_utc = excluded.start_utc, end_utc = excluded.end_utc,
+                updated_at = excluded.updated_at, deleted = 0
+            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
+                  updated_at or utc_now_iso()))
+
+    def insert_span_if_absent(self, span: EventSpan, updated_at: str) -> None:
+        """Insert a span unless a row with its id exists (live or deleted)."""
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT OR IGNORE INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt), updated_at))
+
+    def delete_span(self, span_id: str, updated_at: Optional[str] = None) -> None:
+        """Soft-delete, so the deletion can sync to other devices."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE spans SET deleted = 1, updated_at = ? WHERE id = ?",
+                         (updated_at or utc_now_iso(), span_id))
+
+    def get_spans_between(self, start: datetime, end: datetime) -> List[EventSpan]:
+        """Live spans overlapping [start, end)."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT data FROM spans WHERE deleted = 0 AND start_utc < ? AND end_utc > ? ORDER BY start_utc",
+                (_utc_iso(end), _utc_iso(start)),
+            ).fetchall()
+        return [EventSpan.from_dict(json.loads(r["data"])) for r in rows]
+
+    def get_span_records(self) -> List[Dict[str, Any]]:
+        """Every span row including deletions, for sync."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT id, data, updated_at, deleted FROM spans").fetchall()
+        return [{"id": r["id"], "data": json.loads(r["data"]), "updated_at": r["updated_at"],
+                 "deleted": bool(r["deleted"])} for r in rows]
+
+    def merge_span_record(self, record: Dict[str, Any]) -> bool:
+        """Last-write-wins merge of one synced span row. Returns True if local state changed."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT updated_at FROM spans WHERE id = ?", (record["id"],)).fetchone()
+            if row and row["updated_at"] >= record["updated_at"]:
+                return False
+            span = EventSpan.from_dict(record["data"])
+            conn.execute("""
+            INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                data = excluded.data, start_utc = excluded.start_utc, end_utc = excluded.end_utc,
+                updated_at = excluded.updated_at, deleted = excluded.deleted
+            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
+                  record["updated_at"], int(record.get("deleted", False))))
+            return True
+
+    # --- day metadata ---
+
+    def get_day_meta(self, plan_date: date) -> DayMeta:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM day_meta WHERE plan_date = ?", (plan_date.isoformat(),)).fetchone()
+        if not row:
+            return DayMeta(plan_date=plan_date.isoformat())
+        return DayMeta(row["plan_date"], bool(row["is_finalized"]), row["notes"],
+                       bool(row["routines_applied"]), row["updated_at"])
+
+    def save_day_meta(self, meta: DayMeta, updated_at: Optional[str] = None) -> None:
+        meta.updated_at = updated_at or utc_now_iso()
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO day_meta (plan_date, is_finalized, notes, routines_applied, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(plan_date) DO UPDATE SET
+                is_finalized = excluded.is_finalized, notes = excluded.notes,
+                routines_applied = excluded.routines_applied, updated_at = excluded.updated_at
+            """, (meta.plan_date, int(meta.is_finalized), meta.notes, int(meta.routines_applied), meta.updated_at))
+
+    def get_all_day_meta(self) -> List[DayMeta]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM day_meta").fetchall()
+        return [DayMeta(r["plan_date"], bool(r["is_finalized"]), r["notes"], bool(r["routines_applied"]),
+                        r["updated_at"]) for r in rows]
+
+    def merge_day_meta(self, meta: DayMeta) -> bool:
+        local = self.get_day_meta(date.fromisoformat(meta.plan_date))
+        if local.updated_at and local.updated_at >= meta.updated_at:
+            return False
+        self.save_day_meta(meta, updated_at=meta.updated_at)
+        return True
+
+    # --- calendar decisions ---
+
+    def set_event_decision(self, event_id: str, decision: str, updated_at: Optional[str] = None) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+            INSERT INTO event_decisions (event_id, decision, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at
+            """, (event_id, decision, updated_at or utc_now_iso()))
+
+    def get_event_decisions(self) -> Dict[str, str]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT event_id, decision FROM event_decisions").fetchall()
+        return {r["event_id"]: r["decision"] for r in rows}
+
+    def get_event_decision_records(self) -> List[Dict[str, str]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM event_decisions").fetchall()
+        return [dict(r) for r in rows]
+
+    def merge_event_decision(self, record: Dict[str, str]) -> bool:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT updated_at FROM event_decisions WHERE event_id = ?",
+                               (record["event_id"],)).fetchone()
+        if row and row["updated_at"] >= record["updated_at"]:
+            return False
+        self.set_event_decision(record["event_id"], record["decision"], updated_at=record["updated_at"])
+        return True
+
+    # --- legacy migration ---
+
+    def migrate_legacy_snapshots(self) -> int:
+        """Convert pre-span day snapshots into spans once. Returns the number of days migrated."""
+        if self.get_sync_meta("legacy_snapshots_migrated") == "1":
+            return 0
+        from thirties_core.legacy import legacy_spans_and_decisions
+
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT plan_date, plan_json, is_finalized FROM day_snapshots").fetchall()
+        migrated = 0
+        for row in rows:
+            try:
+                data = json.loads(row["plan_json"])
+                if "spans" in data:
+                    continue
+                spans, decisions = legacy_spans_and_decisions(data)
+            except Exception as e:
+                logger.warning("Skipping unreadable legacy snapshot %s: %s", row["plan_date"], e)
+                continue
+            for span in spans:
+                self.upsert_span(span)
+            for event_id, decision in decisions.items():
+                self.set_event_decision(event_id, decision)
+            self.save_day_meta(DayMeta(row["plan_date"], bool(row["is_finalized"]), data.get("notes", ""),
+                                       routines_applied=True))
+            migrated += 1
+        self.set_sync_meta("legacy_snapshots_migrated", "1")
+        if migrated:
+            logger.info("Migrated %d legacy day snapshots to event spans.", migrated)
+        return migrated
+
+    # --- task history ---
 
     def get_task_history(self, task_id: str) -> Optional[TaskHistoryRecord]:
         with self._get_connection() as conn:
@@ -148,30 +351,6 @@ class StateDatabase:
             conn.execute("UPDATE task_history SET completed_date = ? WHERE task_id = ?", (comp_str, task_id))
             conn.commit()
 
-    def save_day_snapshot(self, plan: DayPlan) -> None:
-        date_str = plan.target_date.isoformat()
-        payload = json.dumps(plan.to_dict())
-        with self._get_connection() as conn:
-            conn.execute("""
-            INSERT INTO day_snapshots (plan_date, plan_json, is_finalized)
-            VALUES (?, ?, ?)
-            ON CONFLICT(plan_date) DO UPDATE SET
-                plan_json = excluded.plan_json,
-                is_finalized = excluded.is_finalized
-            """, (date_str, payload, int(plan.is_finalized)))
-            conn.commit()
-
-    def get_day_snapshot(self, plan_date: date) -> Optional[DayPlan]:
-        date_str = plan_date.isoformat()
-        with self._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT plan_json FROM day_snapshots WHERE plan_date = ?", (date_str,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            data = json.loads(row["plan_json"])
-            return DayPlan.from_dict(data)
-
     def get_all_task_histories(self) -> List[TaskHistoryRecord]:
         with self._get_connection() as conn:
             cur = conn.cursor()
@@ -212,26 +391,6 @@ class StateDatabase:
             ))
             conn.commit()
 
-    def get_all_day_snapshots(self, limit: int = 30) -> List[Tuple[str, str, int]]:
-        with self._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT plan_date, plan_json, is_finalized FROM day_snapshots ORDER BY plan_date DESC LIMIT ?",
-                (limit,),
-            )
-            return [(row["plan_date"], row["plan_json"], row["is_finalized"]) for row in cur.fetchall()]
-
-    def save_raw_day_snapshot(self, plan_date_str: str, plan_json: str, is_finalized: int = 0) -> None:
-        with self._get_connection() as conn:
-            conn.execute("""
-            INSERT INTO day_snapshots (plan_date, plan_json, is_finalized)
-            VALUES (?, ?, ?)
-            ON CONFLICT(plan_date) DO UPDATE SET
-                plan_json = excluded.plan_json,
-                is_finalized = excluded.is_finalized
-            """, (plan_date_str, plan_json, is_finalized))
-            conn.commit()
-
     def get_sync_meta(self, key: str) -> Optional[str]:
         with self._get_connection() as conn:
             cur = conn.cursor()
@@ -249,8 +408,14 @@ class StateDatabase:
             conn.commit()
 
 
+def _thirty_to_time(thirty: int) -> time:
+    """Config thirty index (0 = midnight, 17 = 8:30 AM) to a clock time."""
+    thirty %= 48
+    return time(thirty // 2, 30 * (thirty % 2))
+
+
 class DeterministicScheduler:
-    """Applies hard constraints onto base astronomical blocks and budgets time."""
+    """Assembles DayPlans from the solar canvas, stored spans, routines and the calendar."""
 
     def __init__(
         self,
@@ -262,84 +427,98 @@ class DeterministicScheduler:
         self.state_db = state_db or StateDatabase()
         self.calendar_engine = calendar_engine or EDSCalendarEngine(self.config)
 
-    def _apply_sleep_and_work_blocks(self, blocks: List[ThirtyBlock]) -> None:
+    @property
+    def tz(self) -> ZoneInfo:
+        return ZoneInfo(self.config.general.timezone)
+
+    def routine_spans(self, target_date: date) -> List[EventSpan]:
+        """Default work and sleep for a diurnal date, from config.
+
+        Work runs from work_start_thirty through the end of work_end_thirty on
+        target_date. Sleep is the night of target_date: from sleep_start_thirty
+        until sleep_end_thirty the following morning.
+        """
         gen = self.config.general
-        w_start = gen.work_start_thirty
-        w_end = gen.work_end_thirty
-        s_start = gen.sleep_start_thirty
-        s_end = gen.sleep_end_thirty
+        tz = self.tz
+        work_start = datetime.combine(target_date, _thirty_to_time(gen.work_start_thirty), tzinfo=tz)
+        work_end = datetime.combine(target_date, _thirty_to_time(gen.work_end_thirty + 1), tzinfo=tz)
+        if work_end <= work_start:
+            work_end += timedelta(days=1)
 
-        for block in blocks:
-            idx = block.index
+        sleep_start_t = _thirty_to_time(gen.sleep_start_thirty)
+        sleep_day = target_date if sleep_start_t >= time(12, 0) else target_date + timedelta(days=1)
+        sleep_start = datetime.combine(sleep_day, sleep_start_t, tzinfo=tz)
+        sleep_end = datetime.combine(sleep_day, _thirty_to_time(gen.sleep_end_thirty), tzinfo=tz)
+        if sleep_end <= sleep_start:
+            sleep_end += timedelta(days=1)
 
-            # Sleep window (spans across midnight, e.g. 46..47 and 0..13)
-            is_sleep = False
-            if s_start > s_end:
-                if idx >= s_start or idx < s_end:
-                    is_sleep = True
-            else:
-                if s_start <= idx < s_end:
-                    is_sleep = True
+        # Deterministic ids, so devices that both materialize a day produce the same spans.
+        day = target_date.isoformat()
+        return [
+            EventSpan(f"routine-{day}-work", "Work", work_start, work_end, SpanCategory.WORK, source="routine"),
+            EventSpan(f"routine-{day}-sleep", "Sleep", sleep_start, sleep_end, SpanCategory.SLEEP, source="routine"),
+        ]
 
-            if is_sleep:
-                block.kind = BlockKind.SLEEP
-                block.label = "Sleep"
-                block.is_locked = True
-                continue
+    def ensure_routines(self, target_date: date) -> None:
+        """Materialize default work and sleep for a date once; later edits are never overwritten."""
+        meta = self.state_db.get_day_meta(target_date)
+        if meta.routines_applied:
+            return
+        for span in self.routine_spans(target_date):
+            # The oldest possible timestamp: any real edit or deletion, on any device, wins over a default.
+            self.state_db.insert_span_if_absent(span, updated_at=ROUTINE_TIMESTAMP)
+        meta.routines_applied = True
+        self.state_db.save_day_meta(meta)
 
-            # Work window (e.g. 17..31)
-            if w_start <= idx <= w_end:
-                block.kind = BlockKind.WORK
-                block.label = "Work"
-                block.is_locked = True
-                continue
+    def fetch_calendar_events(self, plan: DayPlan) -> List[CalendarEvent]:
+        """Calendar events overlapping the diurnal day (which spans two calendar dates)."""
+        events: Dict[str, CalendarEvent] = {}
+        for d in (plan.day_start.date(), plan.day_end.date()):
+            try:
+                fetched = self.calendar_engine.fetch_events_for_day(d, self.tz)
+            except Exception as e:
+                logger.warning("Calendar fetch failed for %s: %s", d, e)
+                fetched = []
+            for e in fetched:
+                if e.overlaps_interval(plan.day_start, plan.day_end):
+                    events[e.id] = e
+        return list(events.values())
 
     def build_day_plan(
         self,
         target_date: date,
         events: Optional[List[CalendarEvent]] = None,
     ) -> Tuple[DayPlan, List[CalendarEvent]]:
-        """Construct a deterministic DayPlan overlaid with solar, sleep, work, and calendar bounds."""
+        """Build the DayPlan for a diurnal date and return it with calendar invites awaiting a decision."""
         gen = self.config.general
-        tz = ZoneInfo(gen.timezone)
-
-        # Check if saved snapshot exists with user allocations
-        saved_plan = self.state_db.get_day_snapshot(target_date)
-        if saved_plan:
-            return saved_plan, []
-
-        # 1. Base astronomical 48 blocks
+        tz = self.tz
         phases = get_solar_phases(gen.latitude, gen.longitude, target_date, tz)
-        blocks = build_base_thirties(gen.latitude, gen.longitude, target_date, tz)
-
-        # 2. Overlay Sleep & Work
-        self._apply_sleep_and_work_blocks(blocks)
-
-        # 3. Ingest Calendar Events
-        if events is None:
-            events = self.calendar_engine.fetch_events_for_day(target_date, tz)
-
-        ambiguous_events = map_events_to_blocks(blocks, events)
-
-        # 4. Assemble Plan and recalculate exact integer tallies
         plan = DayPlan(
             target_date=target_date,
-            blocks=blocks,
+            blocks=build_base_thirties(gen.latitude, gen.longitude, target_date, tz),
             sunrise=phases["sunrise"],
             sunset=phases["sunset"],
         )
-        plan.recalculate_counts()
 
-        return plan, ambiguous_events
+        # The previous night's sleep can reach into this morning's canvas.
+        self.ensure_routines(target_date - timedelta(days=1))
+        self.ensure_routines(target_date)
+        plan.spans = self.state_db.get_spans_between(plan.day_start, plan.day_end)
+
+        if events is None:
+            events = self.fetch_calendar_events(plan)
+        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions())
+        plan.spans.extend(s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end))
+        plan.spans.sort(key=lambda s: s.start_dt)
+
+        meta = self.state_db.get_day_meta(target_date)
+        plan.is_finalized = meta.is_finalized
+        plan.notes = meta.notes
+        return plan, pending
 
     def build_rolling_schedule(self, start_date: date, days: int = 7) -> List[DayPlan]:
-        """Generate rolling multi-day budget plans."""
-        plans: List[DayPlan] = []
-        for offset in range(days):
-            current_date = start_date + timedelta(days=offset)
-            plan, _ = self.build_day_plan(current_date)
-            plans.append(plan)
-        return plans
+        """Generate plans for several consecutive days."""
+        return [self.build_day_plan(start_date + timedelta(days=offset))[0] for offset in range(days)]
 
     def attach_history_to_tasks(self, tasks: List[TaskItem]) -> None:
         """Enrich task items with deferred counts from state database."""
@@ -348,14 +527,18 @@ class DeterministicScheduler:
             if rec:
                 task.deferred_count = rec.deferred_count
 
-    def finalize_day_plan(self, plan: DayPlan) -> None:
-        """Lock in day schedule and record task allocations."""
+    def finalize_day_plan(self, plan: DayPlan, notes: Optional[str] = None) -> None:
+        """Lock in the day and record how many thirties each task was given."""
         plan.is_finalized = True
-        for block in plan.blocks:
-            if block.assigned_task_id:
+        if notes:
+            plan.notes = notes
+        for span in plan.spans:
+            if span.task_id and span.overlaps(plan.day_start, plan.day_end):
                 self.state_db.record_task_allocation(
-                    task_id=block.assigned_task_id,
+                    task_id=span.task_id,
                     plan_date=plan.target_date,
-                    count=1,
+                    count=max(1, span.duration_minutes // 30),
                 )
-        self.state_db.save_day_snapshot(plan)
+        meta = self.state_db.get_day_meta(plan.target_date)
+        meta.is_finalized, meta.notes = True, plan.notes
+        self.state_db.save_day_meta(meta)

@@ -55,35 +55,18 @@ def at(hhmm: str, day_offset: int = 0) -> datetime:
 def occupancy(plan, t: datetime) -> Tuple[str, str]:
     """Return (category, title) of what occupies instant t; ("open", "") if free.
 
-    Categories: work, sleep, calendar, activity, open, outside (t not on this plan).
+    Categories: work, sleep, calendar, activity (tasks count as activities), open,
+    outside (t is not on this day's canvas).
     """
-    if hasattr(plan, "spans"):
-        if not (plan.blocks[0].start_dt <= t < plan.blocks[-1].end_dt):
-            return ("outside", "")
-        covering = [s for s in plan.spans if s.start_dt <= t < s.end_dt and not getattr(s, "tentative", False)]
-        if not covering:
-            return ("open", "")
-        # Prefer the most specific thing: activities and calendar items sit on top of work/sleep
-        rank = {"calendar": 0, "task": 1, "activity": 1, "work": 2, "sleep": 3}
-        s = sorted(covering, key=lambda s: rank.get(s.category.value, 1))[0]
-        cat = "activity" if s.category.value == "task" else s.category.value
-        return (cat, s.title)
-
-    from thirties_core.models import BlockKind
-    block = next((b for b in plan.blocks if b.start_dt <= t < b.end_dt), None)
-    if block is None:
+    if not (plan.day_start <= t < plan.day_end):
         return ("outside", "")
-    if block.kind == BlockKind.BUSY_CALENDAR:
-        return ("calendar", block.label)
-    if block.label and block.label not in ("Work", "Sleep"):
-        return ("activity", block.label)
-    if block.kind == BlockKind.WORK:
-        return ("work", "Work")
-    if block.kind == BlockKind.SLEEP:
-        return ("sleep", "Sleep")
-    if block.kind == BlockKind.AMBIGUOUS_CALENDAR:
+    block = plan.block_at(t)
+    covering = [s for s in plan.spans_overlapping(t, t + timedelta(minutes=1))]
+    if not covering or block is None:
         return ("open", "")
-    return ("open", "")
+    s = min(covering, key=lambda s: {"calendar": 0, "task": 1, "activity": 1, "work": 2, "sleep": 3}[s.category.value])
+    cat = "activity" if s.category.value == "task" else s.category.value
+    return (cat, s.title)
 
 
 Check = Callable[["Run"], Optional[str]]  # returns None if OK, else a failure message
@@ -186,7 +169,7 @@ SCENARIOS: List[Scenario] = [
     Scenario(
         "push_back", "Relative shift of an existing activity.",
         now="09:00",
-        setup=[("modify_blocks", {"start_time": "5:00 PM", "end_time": "7:00 PM", "label": "Composing"})],
+        setup=[("add_event", {"title": "Composing", "start": "5:00 PM", "end": "7:00 PM"})],
         turns=["push composing back an hour"],
         checks=[occupied_by("17:15", "open"), occupied_by("18:15", "activity", "compos"),
                 occupied_by("19:45", "activity", "compos"), occupied_by("20:15", "open"),
@@ -223,7 +206,7 @@ SCENARIOS: List[Scenario] = [
     Scenario(
         "cancel_and_replace", "Remove one activity and add another in one message.",
         now="09:00",
-        setup=[("modify_blocks", {"start_time": "5:00 PM", "end_time": "7:00 PM", "label": "Composing"})],
+        setup=[("add_event", {"title": "Composing", "start": "5:00 PM", "end": "7:00 PM"})],
         turns=["actually cancel composing, and put laundry at 7:30 for an hour instead"],
         checks=[occupied_by("17:30", "open"), occupied_by("18:30", "open"), occupied_by("19:45", "activity", "laundry"),
                 occupied_by("20:15", "activity", "laundry"), occupied_by("20:45", "open")],
@@ -266,7 +249,8 @@ class Run:
     seconds: float = 0.0
 
 
-def run_scenario(scn: Scenario, model: str) -> Run:
+def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
+    """Run one scenario. ``engine`` overrides the live Gemini engine (used to test the checks themselves)."""
     run = Run(scn)
     set_debug_time(at(scn.now))
     try:
@@ -282,7 +266,7 @@ def run_scenario(scn: Scenario, model: str) -> Run:
         ]
         mgr = ConversationManager(
             day_plan=plan, tasks=tasks, ambiguous_events=ambiguous, scheduler=sched,
-            inference_engine=GeminiInferenceEngine(cfg), active_notes=[],
+            inference_engine=engine or GeminiInferenceEngine(cfg), active_notes=[],
         )
         for tool, args in scn.setup:
             mgr.execute_tool(tool, args)

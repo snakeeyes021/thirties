@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from thirties_core.config import TelegramConfig, ThirtiesConfig
 from thirties_core.inference import MockInferenceEngine
-from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+from thirties_core.models import EventSpan, SpanCategory
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 from thirties_core.telegram_bridge import TelegramClient, ThirtiesTelegramBridge
 
@@ -127,25 +127,25 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.assertIn("Thirties Mobile Planning Assistant", args[1])
 
     def test_now_command(self):
-        b1 = self.bridge.conv_manager.day_plan.get_logical_block(1)
-        if b1:
-            b1.label = "Deep Work Code Review"
-            with patch.object(self.bridge, "_get_current_time", return_value=b1.start_dt + timedelta(minutes=5)):
-                self.bridge.handle_message(chat_id=1001, text="/now")
-                self.bridge.client.send_message.assert_called_once()
-                args, _ = self.bridge.client.send_message.call_args
-                msg = args[1]
-                self.assertIn("Current Block", msg)
-                self.assertIn("Deep Work Code Review", msg)
-                self.assertIn("Time Remaining", msg)
+        plan = self.bridge.conv_manager.day_plan
+        first = plan.blocks[0]
+        plan.spans.append(EventSpan("dw", "Deep Work Code Review", first.start_dt, first.end_dt + timedelta(minutes=30),
+                                    SpanCategory.ACTIVITY))
+        with patch.object(self.bridge, "_get_current_time", return_value=first.start_dt + timedelta(minutes=5)):
+            self.bridge.handle_message(chat_id=1001, text="/now")
+        self.bridge.client.send_message.assert_called_once()
+        msg = self.bridge.client.send_message.call_args[0][1]
+        self.assertIn("Deep Work Code Review", msg)
+        self.assertIn("Left in this thirty*: 25 minutes", msg)
+        self.assertIn("Until sleep", msg)
 
     def test_day_command(self):
         self.bridge.handle_message(chat_id=1001, text="/day")
         self.bridge.client.send_message.assert_called_once()
-        args, kwargs = self.bridge.client.send_message.call_args
-        msg = args[1]
+        msg = self.bridge.client.send_message.call_args[0][1]
         self.assertIn("Schedule for", msg)
-        self.assertIn("Block", msg)
+        self.assertIn("8:30 AM – 4:00 PM: Work", msg)
+        self.assertNotIn("Block", msg)
 
     def test_sync_command(self):
         self.bridge.handle_message(chat_id=1001, text="/sync")

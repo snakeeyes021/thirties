@@ -58,13 +58,13 @@ The model sees the top 3–5 candidates with short reasons ("due in 5 days", "de
 For this brain, the harness *is* the development process. We do not tweak prompts by feel.
 
 ### 4.1. What exists
-- `tests/run_eval_harness.py`: combinatorial scenario generation (personas, messy communication styles, task loads, calendar conflicts) and a persistent GPU daemon with crash isolation. This provides **breadth**.
+- `tests/legacy_slm/run_eval_harness.py` (block-based, does not run; mine it): combinatorial scenario generation (personas, messy communication styles, task loads, calendar conflicts) and a persistent GPU daemon with crash isolation. This provides **breadth**.
 - `tests/interactive_eval.py`: turn-by-turn stepping with real state deltas, checks of claims against reality, and scorecards. **The judge is an agent (or a human) stepping through the session.** This provides **depth**.
-- `tests/run_qualitative_battery.py`: 25 curated scenarios. Its built-in scoring is keyword matching that starts every turn at 5/5. Its "25/25, 98%" result does not measure quality and should not be cited.
+- `tests/legacy_slm/run_qualitative_battery.py`: 25 curated scenarios. Its built-in scoring is keyword matching that starts every turn at 5/5. Its "25/25, 98%" result does not measure quality and should not be cited.
 
 ### 4.2. Plan
 1. **Reconcile the harnesses.** Feed scenarios from the combinatorial generator (`--seed`, `--count`) or the curated set into the stepping engine, so batch and interactive runs share the same delta tracking and scoring.
-2. **Frontier reference.** Run every scenario through the Frontier Brain as well. Compare the final schedule state (span by span, after Phase 1). Agreement is a cheap automatic signal. Disagreements go to the agent judge, which also decides when the Frontier answer is the wrong one.
+2. **Frontier reference.** Run every scenario through the Frontier Brain as well. Compare the final schedule state span by span (`tests/frontier_eval.py` shows the deterministic checks). Agreement is a cheap automatic signal. Disagreements go to the agent judge, which also decides when the Frontier answer is the wrong one.
 3. **Per-stage evals.** Because the pipeline has separate stages, test each one alone on labelled utterances: router accuracy, slot accuracy, time-resolution accuracy. The Frontier model can produce labels at scale, and the agent judge spot-checks them. This is the main payoff of the pipeline design: failures point at a specific stage.
 4. **Tiers.**
    - Tier 1: about 10 fast regression scenarios with mock engines, run on every commit.

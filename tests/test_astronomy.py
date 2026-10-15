@@ -1,12 +1,11 @@
 """Unit tests for thirties_core.astronomy."""
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from datetime import datetime
 from thirties_core.astronomy import build_base_thirties, create_base_day_plan, get_diurnal_date, get_solar_phases
-from thirties_core.models import BlockKind
 
 
 class TestAstronomy(unittest.TestCase):
@@ -49,20 +48,24 @@ class TestAstronomy(unittest.TestCase):
             if i > 0:
                 self.assertEqual(block.start_dt, blocks[i - 1].end_dt)
 
-        # Noon block (index 24: 12:00 - 12:30) must be sunlight
-        noon_block = blocks[24]
-        self.assertTrue(noon_block.is_sunlight)
-        self.assertEqual(noon_block.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
+        # The canvas starts at the thirty containing sunrise and runs 24 hours
+        sunrise = get_solar_phases(self.lat, self.lon, self.test_date, self.tz)["sunrise"]
+        self.assertLessEqual(blocks[0].start_dt, sunrise)
+        self.assertLess(sunrise, blocks[0].end_dt)
+        self.assertEqual(blocks[-1].end_dt - blocks[0].start_dt, timedelta(hours=24))
 
-        # Midnight block (index 0: 00:00 - 00:30) must be dark
-        midnight_block = blocks[0]
-        self.assertFalse(midnight_block.is_sunlight)
-        self.assertEqual(midnight_block.kind, BlockKind.DARK_DISCRETIONARY)
+        # Midday is daylight; the last thirty is dark and falls on the next calendar date
+        midday = next(b for b in blocks if b.start_dt.hour == 12 and b.start_dt.minute == 0)
+        self.assertTrue(midday.is_sunlight)
+        self.assertFalse(blocks[47].is_sunlight)
+        self.assertEqual(blocks[47].start_dt.date(), self.test_date + timedelta(days=1))
 
-        # Late night block (index 47: 23:30 - 24:00) must be dark
-        late_block = blocks[47]
-        self.assertFalse(late_block.is_sunlight)
-        self.assertEqual(late_block.kind, BlockKind.DARK_DISCRETIONARY)
+    def test_canvas_is_dst_safe(self) -> None:
+        # DST ends in the early morning of Nov 1, 2026: still 48 thirties of exactly 30 minutes
+        blocks = build_base_thirties(self.lat, self.lon, date(2026, 10, 31), self.tz)
+        self.assertEqual(len(blocks), 48)
+        for b in blocks:
+            self.assertEqual(b.duration_seconds, 1800.0)
 
     def test_seasonal_daylight_variation(self) -> None:
         summer_date = date(2026, 6, 21)

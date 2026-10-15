@@ -197,22 +197,25 @@ Thirties/
 │   ├── astronomy.py                   # NOAA solar equations & diurnal dates
 │   ├── brains/                        # Model-specific layer: prompts & turn logic
 │   │   └── frontier.py                # FrontierBrain: single rich prompt for Gemini
-│   ├── calendar_engine.py             # Calendar connector (EDS & mock)
+│   ├── calendar_engine.py             # Calendar connector (EDS & mock); events -> spans
+│   ├── clock.py                       # Clock-time & duration parsing: the model says "4:30 PM", Python does the math
 │   ├── config.py                      # TOML configuration & dataclasses
 │   ├── conversation.py                # ConversationManager: client entry point, wires tools to a brain
 │   ├── inference.py                   # Model transports (agy CLI, Gemini API, LiteRT, Mock) & directive parser
 │   ├── joplin_engine.py               # Joplin connector (SQLite read, REST write)
-│   ├── models.py                      # Domain models (ThirtyBlock, DayPlan, TaskItem)
-│   ├── plan_tools.py                  # PlanTools: the shared schedule tool API & invariants
+│   ├── legacy.py                      # Converts pre-span (block-kind) saved plans into spans
+│   ├── models.py                      # Solar canvas (ThirtyBlock), EventSpan, DayPlan, TaskItem
+│   ├── plan_tools.py                  # PlanTools: the shared clock-time tool API & invariants
 │   ├── runner.py                      # Host-side LiteRT runner (used from the Flatpak sandbox)
-│   ├── scheduler.py                   # Deterministic scheduler & SQLite StateDatabase
+│   ├── scheduler.py                   # Span store (StateDatabase) & day builder (DeterministicScheduler)
 │   ├── sync_engine.py                 # Cross-device state sync via a Joplin note
 │   └── telegram_bridge.py             # Temporary headless mobile Telegram bot & notifier
 └── tests/                             # Unit tests & evaluation harnesses
     ├── test_*.py                      # Standard unit test suite
-    ├── run_eval_harness.py            # Combinatorial multi-persona stress matrix (scenario breadth)
+    ├── fixtures.py                    # Shared test fixtures (a scheduler on a temp DB for a fixed day)
+    ├── frontier_eval.py               # Live-model "real day" scenarios, checked deterministically on the schedule
     ├── interactive_eval.py            # Turn-by-turn stepping with state deltas; an agent or human is the judge
-    └── run_qualitative_battery.py     # 25 curated scenarios; its built-in scoring is keyword-based, not a real judge
+    └── legacy_slm/                    # Pre-span SLM harnesses: source material only, they do not run
 ```
 
 ### 6.2. Common Execution Commands
@@ -224,11 +227,13 @@ python3 -m unittest discover tests
 # 2. Run Headless Mobile Bridge (Temporary Telegram daemon)
 python3 -m thirties_core.telegram_bridge
 
-# 3. Step through an evaluation session (start / step / grade / finish, or an interactive REPL)
-python3 -m tests.interactive_eval repl --no-gpu
+# 3. Frontier Brain eval against a live model (needs GEMINI_API_KEY; ~35 requests per run)
+python3 -m tests.frontier_eval
 
-# 4. Run Desktop GTK Application
-python3 src/main.py
+# 4. Step through an evaluation session (start / step / grade / finish, or an interactive REPL)
+python3 -m tests.interactive_eval repl --no-gpu
 ```
+
+The desktop app is built with meson and installs `src/` as the `thirties` package (build it with GNOME Builder or `flatpak-builder` using `tech.redfoxlabs.Thirties.json`). `python3 src/main.py` does not work directly because of the package-relative imports.
 
 Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commit only curated summaries, never raw transcripts or SQLite files.

@@ -1,149 +1,90 @@
 """Unit tests for thirties_core.models."""
 
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
-from thirties_core.models import BlockKind, DayPlan, TaskItem, ThirtyBlock
+from tests.fixtures import DAY, TZ, at, build_day
+from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus, TaskItem, ThirtyBlock
 
 
-class TestModels(unittest.TestCase):
+class TestThirtyBlock(unittest.TestCase):
 
-    def setUp(self) -> None:
-        self.tz = timezone.utc
-        self.now = datetime(2026, 10, 8, 8, 0, tzinfo=self.tz)
-        self.end = self.now + timedelta(minutes=30)
+    def test_valid_block(self) -> None:
+        b = ThirtyBlock(index=0, start_dt=at("07:00"), end_dt=at("07:30"), is_sunlight=False, is_twilight=True)
+        self.assertEqual(b.number, 1)
+        self.assertEqual(b.duration_seconds, 1800.0)
 
-    def test_thirty_block_valid(self) -> None:
-        block = ThirtyBlock(
-            index=16,
-            start_dt=self.now,
-            end_dt=self.end,
-            is_sunlight=True,
-            kind=BlockKind.DAYLIGHT_DISCRETIONARY,
-            label="Focus Time",
-        )
-        self.assertEqual(block.index, 16)
-        self.assertEqual(block.duration_seconds, 1800.0)
-        self.assertTrue(block.is_sunlight)
-        self.assertTrue(block.is_discretionary)
-        self.assertEqual(block.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-
-    def test_thirty_block_invalid_index(self) -> None:
+    def test_invalid_index_and_times(self) -> None:
         with self.assertRaises(ValueError):
-            ThirtyBlock(
-                index=-1,
-                start_dt=self.now,
-                end_dt=self.end,
-                is_sunlight=False,
-                kind=BlockKind.DARK_DISCRETIONARY,
-            )
+            ThirtyBlock(index=48, start_dt=at("07:00"), end_dt=at("07:30"), is_sunlight=True)
         with self.assertRaises(ValueError):
-            ThirtyBlock(
-                index=48,
-                start_dt=self.now,
-                end_dt=self.end,
-                is_sunlight=False,
-                kind=BlockKind.DARK_DISCRETIONARY,
-            )
+            ThirtyBlock(index=1, start_dt=at("07:30"), end_dt=at("07:00"), is_sunlight=True)
 
-    def test_thirty_block_invalid_dates(self) -> None:
+    def test_dict_roundtrip(self) -> None:
+        b = ThirtyBlock(index=3, start_dt=at("08:30"), end_dt=at("09:00"), is_sunlight=True)
+        self.assertEqual(ThirtyBlock.from_dict(b.to_dict()), b)
+
+
+class TestEventSpan(unittest.TestCase):
+
+    def test_overlap_and_cover(self) -> None:
+        s = EventSpan("x", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY)
+        self.assertTrue(s.overlaps(at("17:30"), at("19:00")))
+        self.assertFalse(s.overlaps(at("18:00"), at("19:00")))  # touching is not overlapping
+        self.assertTrue(s.covers(at("17:00")))
+        self.assertFalse(s.covers(at("18:00")))
+        self.assertEqual(s.duration_minutes, 60)
+
+    def test_cross_midnight_and_roundtrip(self) -> None:
+        s = EventSpan("s", "Sleep", at("23:00"), at("07:00", 1), "sleep", status="done")
+        self.assertEqual(s.category, SpanCategory.SLEEP)
+        self.assertEqual(s.status, SpanStatus.DONE)
+        self.assertTrue(s.is_envelope)
+        self.assertEqual(s.duration_minutes, 480)
+        self.assertEqual(EventSpan.from_dict(s.to_dict()), s)
+
+    def test_rejects_backwards_span(self) -> None:
         with self.assertRaises(ValueError):
-            ThirtyBlock(
-                index=0,
-                start_dt=self.end,
-                end_dt=self.now,  # start after end
-                is_sunlight=False,
-                kind=BlockKind.SLEEP,
-            )
+            EventSpan("x", "Bad", at("18:00"), at("17:00"), SpanCategory.ACTIVITY)
 
-    def test_thirty_block_dict_roundtrip(self) -> None:
-        original = ThirtyBlock(
-            index=20,
-            start_dt=self.now,
-            end_dt=self.end,
-            is_sunlight=True,
-            is_twilight=False,
-            kind=BlockKind.ASSIGNED,
-            assigned_task_id="task-123",
-            label="Dorico Compose",
-            is_locked=True,
-            source_event_id="cal-abc",
-        )
-        data = original.to_dict()
-        restored = ThirtyBlock.from_dict(data)
-        self.assertEqual(original, restored)
 
-    def test_task_item(self) -> None:
-        task = TaskItem(
-            id="note-abc",
-            source_notebook="3. Creative",
-            title="Compose bridge in Dorico",
-            description="Work on 8 bars of development",
-            is_checkbox_item=True,
-            parent_note_title="Composition Sketchbook",
-            estimated_thirties=2,
-            deferred_count=1,
-            tags=["music", "creative"],
-        )
-        self.assertEqual(task.estimated_thirties, 2)
-        self.assertEqual(task.deferred_count, 1)
-        self.assertTrue(task.is_checkbox_item)
+class TestDayPlan(unittest.TestCase):
 
-        data = task.to_dict()
-        restored = TaskItem.from_dict(data)
-        self.assertEqual(task, restored)
+    def test_display_priority_and_budgets(self) -> None:
+        _, plan, _ = build_day()
+        work = next(s for s in plan.spans if s.category == SpanCategory.WORK)
+        gym = EventSpan("g", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY)
+        meeting = EventSpan("m", "Standup", at("09:00"), at("09:30"), SpanCategory.ACTIVITY)
+        open_daylight_before = plan.daylight_available_count
+        plan.spans += [gym, meeting]
 
-    def test_day_plan_counts_and_lookup(self) -> None:
-        base_time = datetime(2026, 10, 8, 0, 0, tzinfo=self.tz)
-        blocks = []
-        for i in range(48):
-            b_start = base_time + timedelta(minutes=30 * i)
-            b_end = b_start + timedelta(minutes=30)
-            is_sun = 14 <= i <= 34  # arbitrary mock daytime
-            if i < 14:
-                kind = BlockKind.SLEEP if i < 14 else BlockKind.DARK_DISCRETIONARY
-            elif 14 <= i < 17:
-                kind = BlockKind.DAYLIGHT_DISCRETIONARY
-            elif 17 <= i <= 31:
-                kind = BlockKind.WORK
-            elif 32 <= i <= 34:
-                kind = BlockKind.DAYLIGHT_DISCRETIONARY
-            elif 35 <= i <= 45:
-                kind = BlockKind.DARK_DISCRETIONARY
-            else:
-                kind = BlockKind.SLEEP
-            blocks.append(ThirtyBlock(
-                index=i,
-                start_dt=b_start,
-                end_dt=b_end,
-                is_sunlight=is_sun,
-                kind=kind,
-            ))
+        # An activity inside work is what is shown for that thirty
+        self.assertEqual(plan.display_span(plan.block_at(at("09:00"))).title, "Standup")
+        self.assertEqual(plan.display_span(plan.block_at(at("10:00"))).id, work.id)
+        self.assertIsNone(plan.display_span(plan.block_at(at("16:30"))))
+        # Gym took two open daylight thirties (5:00-6:00 PM, sunset ~6:31); the standup sits inside work
+        self.assertEqual(plan.daylight_available_count, open_daylight_before - 2)
 
-        plan = DayPlan(
-            target_date=date(2026, 10, 8),
-            blocks=blocks,
-            sunrise=base_time + timedelta(hours=7),
-            sunset=base_time + timedelta(hours=18),
-        )
-        plan.recalculate_counts()
+    def test_tentative_spans_do_not_occupy_time(self) -> None:
+        _, plan, _ = build_day()
+        plan.spans.append(EventSpan("i", "Invite", at("19:00"), at("20:00"), SpanCategory.CALENDAR,
+                                    source="calendar", tentative=True))
+        self.assertTrue(plan.is_open(plan.block_at(at("19:00"))))
+        self.assertIn("Invite", [s.title for s in plan.spans_in_view()])
 
-        # Daylight discretionary: 14, 15, 16 (3 blocks) + 32, 33, 34 (3 blocks) = 6 blocks
-        self.assertEqual(plan.daylight_available_count, 6)
-        # Dark discretionary: 35 through 45 = 11 blocks
-        self.assertEqual(plan.dark_available_count, 11)
+    def test_dict_roundtrip(self) -> None:
+        _, plan, _ = build_day()
+        again = DayPlan.from_dict(plan.to_dict())
+        self.assertEqual(again.target_date, DAY)
+        self.assertEqual(again.spans, plan.spans)
+        self.assertEqual(again.blocks, plan.blocks)
 
-        self.assertEqual(plan.get_block(0).kind, BlockKind.SLEEP)
-        self.assertEqual(plan.get_block(20).kind, BlockKind.WORK)
-        self.assertEqual(plan.get_block(32).kind, BlockKind.DAYLIGHT_DISCRETIONARY)
 
-        # Roundtrip serialization
-        plan_dict = plan.to_dict()
-        restored_plan = DayPlan.from_dict(plan_dict)
-        self.assertEqual(plan.target_date, restored_plan.target_date)
-        self.assertEqual(plan.daylight_available_count, restored_plan.daylight_available_count)
-        self.assertEqual(plan.dark_available_count, restored_plan.dark_available_count)
-        self.assertEqual(len(restored_plan.blocks), 48)
+class TestTaskItem(unittest.TestCase):
+
+    def test_roundtrip(self) -> None:
+        t = TaskItem(id="t1", source_notebook="1. Tasks", title="Taxes", deferred_count=2, tags=["admin"])
+        self.assertEqual(TaskItem.from_dict(t.to_dict()), t)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """Cross-device schedule and analytics synchronization engine via Joplin notes.
 
 Leverages Joplin's encrypted cloud sync transport to synchronize:
-- Daily schedules (DayPlan block allocations and finalizations)
+- Event spans, per-day metadata (finalized, notes) and calendar decisions,
+  merged item by item with last-write-wins
 - Task rollover history and completion statistics
 - Conversational continuity and assistant memory summaries
 
@@ -24,13 +25,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.config import SyncConfig, ThirtiesConfig
 from thirties_core.joplin_engine import JoplinEngine
-from thirties_core.scheduler import StateDatabase, TaskHistoryRecord
+from thirties_core.scheduler import DayMeta, StateDatabase, TaskHistoryRecord
 
 logger = logging.getLogger(__name__)
 
 SYNC_PAYLOAD_START = "<!-- THIRTIES_SYNC_PAYLOAD_START -->"
 SYNC_PAYLOAD_END = "<!-- THIRTIES_SYNC_PAYLOAD_END -->"
-SYNC_SCHEMA = "thirties.sync.v1"
+SYNC_SCHEMA = "thirties.sync.v2"
+LEGACY_SYNC_SCHEMA = "thirties.sync.v1"
 
 
 def encode_payload(payload: Dict[str, Any]) -> str:
@@ -115,15 +117,10 @@ class SyncEngine:
         device_id = self.get_or_create_device_id()
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # 1. Schedules (up to 30 recent snapshots)
-        schedules: Dict[str, Any] = {}
-        snapshots = self.state_db.get_all_day_snapshots(limit=30)
-        for plan_date, plan_json, is_finalized in snapshots:
-            schedules[plan_date] = {
-                "plan_json": plan_json,
-                "is_finalized": bool(is_finalized),
-                "updated_at": now_iso,
-            }
+        # 1. Schedule state, item by item (including deletions) so merges are per item
+        span_records = self.state_db.get_span_records()
+        day_meta = [asdict(m) for m in self.state_db.get_all_day_meta()]
+        decisions = self.state_db.get_event_decision_records()
 
         # 2. Task History & Analytics
         task_histories = self.state_db.get_all_task_histories()
@@ -137,8 +134,10 @@ class SyncEngine:
             "$schema": SYNC_SCHEMA,
             "device_id": device_id,
             "timestamp": now_iso,
-            "version": 1,
-            "schedules": schedules,
+            "version": 2,
+            "spans": span_records,
+            "day_meta": day_meta,
+            "event_decisions": decisions,
             "analytics": {
                 "task_history": task_dict,
             },
@@ -186,27 +185,22 @@ class SyncEngine:
 
         body = note_data.get("body", "")
         payload = decode_payload(body)
-        if not payload or payload.get("$schema") != SYNC_SCHEMA:
+        if not payload or payload.get("$schema") not in (SYNC_SCHEMA, LEGACY_SYNC_SCHEMA):
             return False, "Sync note does not contain a valid Thirties sync payload."
 
         remote_device_id = payload.get("device_id", "unknown")
         remote_timestamp = payload.get("timestamp", "")
         local_device_id = self.get_or_create_device_id()
 
-        # 1. Merge Schedules (Last-Write-Wins by plan_date)
-        remote_schedules = payload.get("schedules", {})
+        # 1. Merge schedule state (last-write-wins per span, day and decision)
         merged_schedules_count = 0
-        for plan_date, s_data in remote_schedules.items():
-            plan_json = s_data.get("plan_json")
-            if not plan_json:
-                continue
-            is_finalized = int(s_data.get("is_finalized", 0))
-            self.state_db.save_raw_day_snapshot(
-                plan_date_str=plan_date,
-                plan_json=plan_json,
-                is_finalized=is_finalized,
-            )
-            merged_schedules_count += 1
+        for record in payload.get("spans", []):
+            merged_schedules_count += self.state_db.merge_span_record(record)
+        for meta in payload.get("day_meta", []):
+            merged_schedules_count += self.state_db.merge_day_meta(DayMeta(**meta))
+        for record in payload.get("event_decisions", []):
+            merged_schedules_count += self.state_db.merge_event_decision(record)
+        merged_schedules_count += self._merge_legacy_schedules(payload.get("schedules", {}))
 
         # 2. Merge Task History & Analytics (union-max counters)
         remote_tasks = payload.get("analytics", {}).get("task_history", {})
@@ -264,11 +258,34 @@ class SyncEngine:
 
         self.state_db.set_sync_meta("last_pull_timestamp", remote_timestamp)
         result_msg = (
-            f"Successfully pulled and merged {merged_schedules_count} schedules and "
+            f"Successfully pulled and merged {merged_schedules_count} schedule changes and "
             f"{merged_tasks_count} tasks from device '{remote_device_id}'."
         )
         logger.info(result_msg)
         return True, result_msg
+
+    def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:
+        """Import days from a pre-span (v1) payload, only for days this device has never touched."""
+        from thirties_core.legacy import legacy_spans_and_decisions
+
+        merged = 0
+        for plan_date, s_data in schedules.items():
+            if self.state_db.get_day_meta(datetime.fromisoformat(plan_date).date()).updated_at:
+                continue
+            try:
+                data = json.loads(s_data.get("plan_json", ""))
+                spans, decisions = legacy_spans_and_decisions(data)
+            except Exception as e:
+                logger.warning("Skipping unreadable legacy synced day %s: %s", plan_date, e)
+                continue
+            for span in spans:
+                self.state_db.upsert_span(span)
+            for event_id, decision in decisions.items():
+                self.state_db.set_event_decision(event_id, decision)
+            self.state_db.save_day_meta(DayMeta(plan_date, bool(s_data.get("is_finalized")), data.get("notes", ""),
+                                                routines_applied=True))
+            merged += 1
+        return merged
 
     def sync(self) -> Tuple[bool, str]:
         """Perform bi-directional sync (pull remote changes first, then push local merged state)."""

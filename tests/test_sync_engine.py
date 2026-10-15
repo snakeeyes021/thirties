@@ -7,9 +7,14 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from tests.fixtures import DAY, at, make_scheduler, occupant
+from tests.test_scheduler import _legacy_plan_dict
 from thirties_core.config import ThirtiesConfig
-from thirties_core.scheduler import StateDatabase, TaskHistoryRecord
+from thirties_core.models import EventSpan, SpanCategory
+from thirties_core.plan_tools import PlanTools
+from thirties_core.scheduler import DayMeta, StateDatabase, TaskHistoryRecord
 from thirties_core.sync_engine import (
+    LEGACY_SYNC_SCHEMA,
     SYNC_SCHEMA,
     SyncEngine,
     decode_payload,
@@ -60,20 +65,73 @@ Here is the sync data:
         self.assertEqual(decoded["device_id"], "fallback-device")
 
     def test_export_sync_payload(self) -> None:
-        # Populate state db with task history and a day snapshot
         self.state_db.record_task_allocation("task-abc", date(2026, 10, 10), count=2)
         self.state_db.record_task_deferred("task-abc")
-        self.state_db.save_raw_day_snapshot("2026-10-10", '{"target_date": "2026-10-10"}', is_finalized=1)
+        self.state_db.upsert_span(EventSpan("g", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY))
+        self.state_db.delete_span("g")
+        self.state_db.save_day_meta(DayMeta(DAY.isoformat(), is_finalized=True))
+        self.state_db.set_event_decision("e1", "attend")
 
-        engine = SyncEngine(config=self.config, state_db=self.state_db)
-        payload = engine.export_sync_payload()
+        payload = SyncEngine(config=self.config, state_db=self.state_db).export_sync_payload()
 
         self.assertEqual(payload["$schema"], SYNC_SCHEMA)
         self.assertEqual(payload["device_id"], "test-device-1")
-        self.assertIn("2026-10-10", payload["schedules"])
-        self.assertTrue(payload["schedules"]["2026-10-10"]["is_finalized"])
-        self.assertIn("task-abc", payload["analytics"]["task_history"])
+        self.assertEqual([(r["id"], r["deleted"]) for r in payload["spans"]], [("g", True)])
+        self.assertTrue(payload["day_meta"][0]["is_finalized"])
+        self.assertEqual(payload["event_decisions"][0]["event_id"], "e1")
         self.assertEqual(payload["analytics"]["task_history"]["task-abc"]["deferred_count"], 1)
+
+    def _sync_from(self, source_db: StateDatabase, target_db: StateDatabase) -> None:
+        """Push from one device's database and pull into another's through a fake Joplin note."""
+        note = {}
+        joplin = MagicMock()
+        joplin.upsert_sync_note.side_effect = lambda **kw: (note.update(body=kw["note_body"]), (True, "ok"))[1]
+        joplin.get_sync_note_body.side_effect = lambda **kw: {"body": note.get("body", "")}
+        SyncEngine(config=self.config, state_db=source_db, joplin_engine=joplin).push()
+        ok, msg = SyncEngine(config=self.config, state_db=target_db, joplin_engine=joplin).pull()
+        self.assertTrue(ok, msg)
+
+    def test_two_devices_converge(self) -> None:
+        laptop, desktop = make_scheduler(), make_scheduler()
+        laptop_plan, _ = laptop.build_day_plan(DAY)
+        desktop.build_day_plan(DAY)  # both devices materialized the same default day
+
+        tools = PlanTools(laptop_plan, [], laptop)
+        tools.execute("update_event", {"event": "Work", "end": "4:30 PM"})
+        tools.execute("add_event", {"title": "Gym", "start": "5:00 PM", "duration": "1 hour"})
+        self._sync_from(laptop.state_db, desktop.state_db)
+
+        desktop_plan, _ = desktop.build_day_plan(DAY)
+        self.assertEqual(occupant(desktop_plan, "16:00"), "Work")
+        self.assertEqual(occupant(desktop_plan, "17:00"), "Gym")
+        self.assertEqual(sum(s.category == SpanCategory.WORK for s in desktop_plan.spans), 1)
+
+        # A deletion on the desktop reaches the laptop, and stale data can't bring it back
+        PlanTools(desktop_plan, [], desktop).execute("remove_event", {"event": "Work"})
+        self._sync_from(desktop.state_db, laptop.state_db)
+        self.assertIsNone(occupant(laptop.build_day_plan(DAY)[0], "10:00"))
+        self._sync_from(laptop.state_db, desktop.state_db)
+        self.assertIsNone(occupant(desktop.build_day_plan(DAY)[0], "10:00"))
+
+    def test_day_off_beats_a_device_that_never_saw_the_day(self) -> None:
+        laptop, desktop = make_scheduler(), make_scheduler()
+        laptop_plan, _ = laptop.build_day_plan(DAY)
+        PlanTools(laptop_plan, [], laptop).execute("remove_event", {"event": "Work"})
+        desktop.build_day_plan(DAY)  # desktop materializes default work later in wall time
+        self._sync_from(desktop.state_db, laptop.state_db)
+        self.assertIsNone(occupant(laptop.build_day_plan(DAY)[0], "10:00"))
+
+    def test_legacy_v1_payload_imports_untouched_days(self) -> None:
+        payload = {
+            "$schema": LEGACY_SYNC_SCHEMA, "device_id": "old-laptop", "timestamp": "2026-10-10T15:30:00Z",
+            "schedules": {DAY.isoformat(): {"plan_json": json.dumps(_legacy_plan_dict()), "is_finalized": 1}},
+        }
+        joplin = MagicMock()
+        joplin.get_sync_note_body.return_value = {"body": encode_payload(payload)}
+        ok, _ = SyncEngine(config=self.config, state_db=self.state_db, joplin_engine=joplin).pull()
+        self.assertTrue(ok)
+        titles = {s.title for s in self.state_db.get_spans_between(at("07:00"), at("07:00", 1))}
+        self.assertEqual(titles, {"Work", "Sleep", "Composing"})
 
     def test_push_sync(self) -> None:
         mock_joplin = MagicMock()
@@ -114,13 +172,15 @@ Here is the sync data:
             "$schema": SYNC_SCHEMA,
             "device_id": "device-laptop-b",
             "timestamp": "2026-10-10T15:30:00Z",
-            "version": 1,
-            "schedules": {
-                "2026-10-11": {
-                    "plan_json": '{"target_date": "2026-10-11", "blocks": []}',
-                    "is_finalized": 1,
-                }
-            },
+            "version": 2,
+            "spans": [{
+                "id": "g",
+                "data": EventSpan("g", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY).to_dict(),
+                "updated_at": "2026-10-10T15:00:00+00:00",
+                "deleted": False,
+            }],
+            "day_meta": [{"plan_date": DAY.isoformat(), "is_finalized": True, "notes": "",
+                          "routines_applied": True, "updated_at": "2026-10-10T15:00:00+00:00"}],
             "analytics": {
                 "task_history": {
                     "task-1": {
@@ -175,10 +235,9 @@ Here is the sync data:
         self.assertIsNotNone(t2)
         self.assertEqual(t2.completed_date, "2026-10-10")
 
-        # Verify schedule snapshot added
-        snapshots = self.state_db.get_all_day_snapshots()
-        dates = [s[0] for s in snapshots]
-        self.assertIn("2026-10-11", dates)
+        # Verify schedule state merged
+        self.assertEqual([sp.title for sp in self.state_db.get_spans_between(at("17:00"), at("18:00"))], ["Gym"])
+        self.assertTrue(self.state_db.get_day_meta(DAY).is_finalized)
 
         # Verify conversation summaries merged
         summaries_json = self.state_db.get_sync_meta("recent_conversation_summaries")

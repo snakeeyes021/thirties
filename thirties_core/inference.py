@@ -579,182 +579,45 @@ class LiteRTInferenceEngine:
         }
 
 
-def _parse_modify_attributes(attr_str: str) -> dict[str, Any]:
-    args: dict[str, Any] = {}
-    rest = attr_str.strip()
-
-    km = re.search(r"\bkind=([a-zA-Z_]+)", rest, re.IGNORECASE)
-    if km:
-        args["kind"] = km.group(1).upper()
-        rest = rest[:km.start()] + " " + rest[km.end():]
-
-    lm = re.search(r"\b(?:is_)?locked=(true|false)\b", rest, re.IGNORECASE)
-    if lm:
-        args["is_locked"] = lm.group(1).lower() == "true"
-        rest = rest[:lm.start()] + " " + rest[lm.end():]
-
-    tm = re.search(r"\btask_id=([^\s|]+)", rest, re.IGNORECASE)
-    if tm:
-        args["task_id"] = tm.group(1).strip()
-        rest = rest[:tm.start()] + " " + rest[tm.end():]
-
-    stm = re.search(r"\bstart_time=([^\s|]+)", rest, re.IGNORECASE)
-    if stm:
-        args["start_time"] = stm.group(1).strip()
-        rest = rest[:stm.start()] + " " + rest[stm.end():]
-
-    etm = re.search(r"\bend_time=([^\s|]+)", rest, re.IGNORECASE)
-    if etm:
-        args["end_time"] = etm.group(1).strip()
-        rest = rest[:etm.start()] + " " + rest[etm.end():]
-
-    label_m = re.search(r"\blabel=\s*([^|]+)", rest, re.IGNORECASE)
-    if label_m:
-        lbl = label_m.group(1).strip()
-    else:
-        lbl = re.sub(r"^[|\s]+|[|\s]+$", "", rest).strip()
-
-    if lbl:
-        args["label"] = lbl
-    return args
-
-
-def _parse_range_or_time(target_str: str) -> dict[str, Any]:
-    target = target_str.strip()
-    if not target:
-        return {}
-    if re.search(r":|\d\s*(?:am|pm)\b", target, re.IGNORECASE):
-        parts = re.split(r"\s*(?:-|–|—|\bto\b|\bthrough\b)\s*", target, flags=re.IGNORECASE)
-        if len(parts) >= 2:
-            return {"start_time": parts[0].strip(), "end_time": parts[1].strip()}
-        else:
-            return {"start_time": parts[0].strip(), "end_time": parts[0].strip()}
-    m = re.match(r"^(\d{1,2})(?:\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d{1,2}))?$", target, re.IGNORECASE)
-    if m:
-        s_idx = int(m.group(1))
-        e_idx = int(m.group(2)) if m.group(2) else s_idx
-        return {"start_block": s_idx, "end_block": e_idx}
-    return {}
+_CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\{.*\})?\s*$")
 
 
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
-    """Extract explicit tool directives emitted by model text and return cleaned reply and tool calls."""
-    tool_calls: list[dict[str, Any]] = []
-    clean_lines: list[str] = []
+    """Extract tool calls from a text reply and return (visible_text, tool_calls).
 
-    for line in str(raw_reply).splitlines():
-        trimmed = line.strip()
-        if not trimmed:
-            clean_lines.append(line)
+    Text transports express a tool call as one line: ``CALL tool_name {json arguments}``.
+    Every such line is extracted in order and removed from the text shown to the
+    user. A line whose arguments are not valid JSON becomes a call with a
+    ``_parse_error`` argument, so the tool layer can report it back to the model
+    instead of the call silently vanishing.
+    """
+    visible: list[str] = []
+    calls: list[dict[str, Any]] = []
+    for line in (raw_reply or "").splitlines():
+        stripped = line.strip().strip("`")
+        m = _CALL_LINE_RE.match(stripped)
+        if not m:
+            visible.append(line)
             continue
-
-        # 1. MODIFY_BLOCKS
-        mod_m = re.match(r"^MODIFY_BLOCKS?:\s*([^|\n]+)?(?:\s*\|\s*(.*))?$", trimmed, re.IGNORECASE)
-        if mod_m:
-            target_str = (mod_m.group(1) or "").strip()
-            rest = mod_m.group(2) or ""
-            parsed_range = _parse_range_or_time(target_str)
-            attrs = _parse_modify_attributes(rest)
-            args = {
-                "start_block": parsed_range.get("start_block"),
-                "end_block": parsed_range.get("end_block"),
-                "start_time": parsed_range.get("start_time") or attrs.get("start_time"),
-                "end_time": parsed_range.get("end_time") or attrs.get("end_time"),
-                "kind": attrs.get("kind"),
-                "label": attrs.get("label"),
-                "task_id": attrs.get("task_id"),
-                "is_locked": attrs.get("is_locked"),
-            }
-            args = {k: v for k, v in args.items() if v is not None}
-            call_id = f"modify_call_{parsed_range.get('start_block') or parsed_range.get('start_time') or len(tool_calls)}_{len(tool_calls)}"
-            tool_calls.append({
-                "id": call_id,
-                "name": "modify_blocks",
-                "arguments": args,
-            })
-            continue
-
-        # 2. CLEAR_BLOCKS
-        clr_kind_m = re.match(r"^CLEAR_BLOCKS?:\s*(WORK|SLEEP|ALL|TASKS|EVENTS)\b", trimmed, re.IGNORECASE)
-        if clr_kind_m:
-            target_k = clr_kind_m.group(1).upper()
-            tool_calls.append({
-                "id": f"clear_blocks_call_{len(tool_calls)}",
-                "name": "clear_blocks",
-                "arguments": {"clear_kind": target_k, "clear_all_work": (target_k == "WORK")},
-            })
-            continue
-
-        clr_target_m = re.match(r"^CLEAR_BLOCKS?:\s*([^|\n]+)", trimmed, re.IGNORECASE)
-        if clr_target_m:
-            target_str = clr_target_m.group(1).strip()
-            parsed_range = _parse_range_or_time(target_str)
-            if parsed_range:
-                args = {
-                    "start_block": parsed_range.get("start_block"),
-                    "end_block": parsed_range.get("end_block"),
-                    "start_time": parsed_range.get("start_time"),
-                    "end_time": parsed_range.get("end_time"),
-                    "clear_all_work": False,
-                }
-                args = {k: v for k, v in args.items() if v is not None}
-                tool_calls.append({
-                    "id": f"clear_blocks_call_{len(tool_calls)}",
-                    "name": "clear_blocks",
-                    "arguments": args,
-                })
-                continue
-
-        # 3. RESOLVE_EVENT
-        res_m = re.match(r"^RESOLVE_EVENT:\s*([^|\n]+)\s*\|\s*(attend|decline)\b", trimmed, re.IGNORECASE)
-        if res_m:
-            ev_id = res_m.group(1).strip()
-            action_val = res_m.group(2).strip().lower()
-            tool_calls.append({
-                "id": f"resolve_call_{ev_id}_{len(tool_calls)}",
-                "name": "resolve_event",
-                "arguments": {"event_id": ev_id, "action": action_val},
-            })
-            continue
-
-        # 4. INSPECT_BLOCKS
-        insp_m = re.match(r"^INSPECT_BLOCKS?:\s*([^|\n]+)", trimmed, re.IGNORECASE)
-        if insp_m:
-            target_str = insp_m.group(1).strip()
-            parsed_range = _parse_range_or_time(target_str)
-            args = {
-                "start_block": parsed_range.get("start_block"),
-                "end_block": parsed_range.get("end_block"),
-                "start_time": parsed_range.get("start_time"),
-                "end_time": parsed_range.get("end_time"),
-            }
-            args = {k: v for k, v in args.items() if v is not None}
-            tool_calls.append({
-                "id": f"inspect_blocks_call_{len(tool_calls)}",
-                "name": "inspect_blocks",
-                "arguments": args,
-            })
-            continue
-
-        # 5. FINALIZE_PLAN
-        fin_m = re.match(r"^FINALIZE_(?:DAY_)?PLAN(?:\s*\|\s*(.*))?", trimmed, re.IGNORECASE)
-        if fin_m:
-            notes = fin_m.group(1).strip() if fin_m.group(1) else "Plan agreed in chat."
-            tool_calls.append({
-                "id": f"finalize_call_{len(tool_calls)}",
-                "name": "finalize_day_plan",
-                "arguments": {"notes": notes},
-            })
-            continue
-
-        clean_lines.append(line)
-
-    clean_text = "\n".join(clean_lines).strip()
-    return clean_text, tool_calls
+        name, arg_text = m.group(1), m.group(2)
+        try:
+            args = json.loads(arg_text) if arg_text else {}
+            if not isinstance(args, dict):
+                raise ValueError("arguments must be a JSON object")
+        except ValueError as e:
+            args = {"_parse_error": f"could not read the arguments {arg_text!r}: {e}"}
+        calls.append({"id": f"call_{len(calls) + 1}", "name": name, "arguments": args})
+    text = "\n".join(visible)
+    text = re.sub(r"```(?:\w+)?\s*```", "", text)  # code fences left empty by removed calls
+    return re.sub(r"\n{3,}", "\n\n", text).strip(), calls
 
 
 class MockInferenceEngine:
-    """Mock inference engine for deterministic unit testing."""
+    """Scripted inference engine for deterministic tests.
+
+    Returns queued responses in order; once the queue is empty it replies with
+    plain text and no tool calls.
+    """
 
     def __init__(self, responses: Optional[List[Dict[str, Any]]] = None) -> None:
         self.responses: List[Dict[str, Any]] = list(responses) if responses else []
@@ -771,66 +634,9 @@ class MockInferenceEngine:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        self.call_history.append(messages)
-
+        self.call_history.append(list(messages))
         if self.responses:
             return self.responses.pop(0)
-
-        last_msg = messages[-1]["content"].lower() if messages else ""
-
-        if "dorico" in last_msg:
-            match = re.search(r"\b(\d{1,2})\b", last_msg)
-            idx = int(match.group(1)) if match else 19
-            return {
-                "role": "assistant",
-                "content": f"I allocated block {idx} to Dorico Compose.",
-                "tool_calls": [
-                    {
-                        "id": "call_1",
-                        "name": "modify_blocks",
-                        "arguments": {
-                            "start_block": idx,
-                            "end_block": idx,
-                            "label": "Dorico Compose",
-                        },
-                    }
-                ],
-            }
-
-        if "attending" in last_msg or "yes" in last_msg:
-            return {
-                "role": "assistant",
-                "content": "Marked doctor appointment as attending.",
-                "tool_calls": [
-                    {
-                        "id": "call_2",
-                        "name": "resolve_event",
-                        "arguments": {
-                            "event_id": "e_doc",
-                            "action": "attend",
-                        },
-                    }
-                ],
-            }
-
-        if "work" in last_msg and "7am" in last_msg and "3pm" in last_msg:
-            return {
-                "role": "assistant",
-                "content": "Work is now scheduled from 7:00 AM to 3:00 PM (Blocks 1–16) for 16 chunks.",
-                "tool_calls": [
-                    {
-                        "id": "call_work",
-                        "name": "modify_blocks",
-                        "arguments": {
-                            "start_block": 1,
-                            "end_block": 16,
-                            "kind": "WORK",
-                            "is_locked": True,
-                        },
-                    }
-                ],
-            }
-
         return {
             "role": "assistant",
             "content": "I'm ready to help you plan your Thirties today.",

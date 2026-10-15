@@ -1,152 +1,161 @@
-"""Unit tests for thirties_core.scheduler."""
+"""Unit tests for thirties_core.scheduler: the span store and the day builder."""
 
+import json
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
-from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
-from thirties_core.config import ThirtiesConfig
-from thirties_core.models import BlockKind, TaskItem
-from thirties_core.scheduler import DeterministicScheduler, StateDatabase
+from tests.fixtures import DAY, at, build_day, event, make_scheduler, occupant
+from thirties_core.models import EventSpan, SpanCategory, TaskItem
+from thirties_core.scheduler import ROUTINE_TIMESTAMP, DayMeta, StateDatabase
 
 
-class TestScheduler(unittest.TestCase):
+class TestStateDatabase(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "test_state.sqlite"
-        self.state_db = StateDatabase(self.db_path)
+        self.db = StateDatabase(Path(tempfile.mkdtemp()) / "state.sqlite")
 
-        self.cfg = ThirtiesConfig()
-        self.mock_cal = MockCalendarEngine()
-        self.scheduler = DeterministicScheduler(
-            config=self.cfg,
-            state_db=self.state_db,
-            calendar_engine=self.mock_cal,
-        )
-        self.target_date = date(2026, 10, 8)
-        self.tz = ZoneInfo(self.cfg.general.timezone)
+    def test_task_history_and_decomposition(self) -> None:
+        self.db.record_task_allocation("t1", DAY, count=2)
+        rec = self.db.get_task_history("t1")
+        self.assertEqual((rec.allocated_thirties, rec.deferred_count), (2, 0))
+        for expected in (1, 2):
+            self.assertEqual(self.db.record_task_deferred("t1"), expected)
+        self.assertFalse(self.db.get_task_history("t1").needs_decomposition)
+        self.assertEqual(self.db.record_task_deferred("t1"), 3)
+        self.assertTrue(self.db.get_task_history("t1").needs_decomposition)
 
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
+    def test_span_store_queries_and_soft_delete(self) -> None:
+        sleep = EventSpan("s", "Sleep", at("23:00"), at("07:00", 1), SpanCategory.SLEEP)
+        gym = EventSpan("g", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY)
+        self.db.upsert_span(sleep)
+        self.db.upsert_span(gym)
+        # A span crossing midnight is found from either calendar date
+        self.assertEqual([s.id for s in self.db.get_spans_between(at("00:00", 1), at("06:00", 1))], ["s"])
+        self.assertEqual([s.id for s in self.db.get_spans_between(at("16:00"), at("23:30"))], ["g", "s"])
+        self.db.delete_span("g")
+        self.assertEqual([s.id for s in self.db.get_spans_between(at("16:00"), at("18:00"))], [])
+        self.assertTrue(next(r for r in self.db.get_span_records() if r["id"] == "g")["deleted"])
 
-    def test_state_db_task_history_and_decomposition(self) -> None:
-        task_id = "task_music_1"
-        self.state_db.record_task_allocation(task_id, self.target_date, count=2)
-        rec = self.state_db.get_task_history(task_id)
-        self.assertIsNotNone(rec)
-        self.assertEqual(rec.allocated_thirties, 2)
-        self.assertEqual(rec.deferred_count, 0)
-        self.assertFalse(rec.needs_decomposition)
+    def test_span_merge_is_last_write_wins(self) -> None:
+        gym = EventSpan("g", "Gym", at("17:00"), at("18:00"), SpanCategory.ACTIVITY)
+        self.db.upsert_span(gym, updated_at="2026-10-15T12:00:00+00:00")
+        older = {"id": "g", "data": {**gym.to_dict(), "title": "Old"}, "updated_at": "2026-10-15T11:00:00+00:00", "deleted": False}
+        newer = {"id": "g", "data": {**gym.to_dict(), "title": "New"}, "updated_at": "2026-10-15T13:00:00+00:00", "deleted": False}
+        self.assertFalse(self.db.merge_span_record(older))
+        self.assertEqual(self.db.get_spans_between(at("17:00"), at("18:00"))[0].title, "Gym")
+        self.assertTrue(self.db.merge_span_record(newer))
+        self.assertEqual(self.db.get_spans_between(at("17:00"), at("18:00"))[0].title, "New")
 
-        # Defer 1st time
-        c1 = self.state_db.record_task_deferred(task_id)
-        self.assertEqual(c1, 1)
+    def test_day_meta_and_decisions(self) -> None:
+        self.assertFalse(self.db.get_day_meta(DAY).is_finalized)
+        self.db.save_day_meta(DayMeta(DAY.isoformat(), is_finalized=True, notes="good day"))
+        self.assertEqual(self.db.get_day_meta(DAY).notes, "good day")
+        self.db.set_event_decision("e1", "attend")
+        self.assertEqual(self.db.get_event_decisions(), {"e1": "attend"})
 
-        # Defer 2nd time
-        c2 = self.state_db.record_task_deferred(task_id)
-        self.assertEqual(c2, 2)
-        self.assertFalse(self.state_db.get_task_history(task_id).needs_decomposition)
+    def test_legacy_snapshots_migrate_once(self) -> None:
+        legacy = _legacy_plan_dict()
+        with self.db._get_connection() as conn:
+            conn.execute("INSERT INTO day_snapshots VALUES (?, ?, 1)", (DAY.isoformat(), json.dumps(legacy)))
+        self.db.set_sync_meta("legacy_snapshots_migrated", "0")
+        self.assertEqual(self.db.migrate_legacy_snapshots(), 1)
+        self.assertEqual(self.db.migrate_legacy_snapshots(), 0)
 
-        # Defer 3rd time -> triggers needs_decomposition!
-        c3 = self.state_db.record_task_deferred(task_id)
-        self.assertEqual(c3, 3)
-        self.assertTrue(self.state_db.get_task_history(task_id).needs_decomposition)
+        spans = {s.title: s for s in self.db.get_spans_between(at("07:00"), at("07:00", 1))}
+        self.assertEqual((spans["Work"].start_dt, spans["Work"].end_dt), (at("08:30"), at("16:00")))
+        # Old after-midnight blocks carried the wrong date; sleep now runs into the next morning
+        self.assertEqual((spans["Sleep"].start_dt, spans["Sleep"].end_dt), (at("23:00"), at("07:00", 1)))
+        self.assertEqual((spans["Composing"].start_dt, spans["Composing"].end_dt), (at("17:00"), at("18:00")))
+        self.assertEqual(self.db.get_event_decisions(), {"dentist": "attend"})
+        self.assertTrue(self.db.get_day_meta(DAY).is_finalized)
 
-    def test_state_db_snapshot_save_and_retrieve(self) -> None:
-        plan, _ = self.scheduler.build_day_plan(self.target_date)
-        plan.notes = "Testing day snapshot"
-        self.state_db.save_day_snapshot(plan)
 
-        restored = self.state_db.get_day_snapshot(self.target_date)
-        self.assertIsNotNone(restored)
-        self.assertEqual(restored.target_date, self.target_date)
-        self.assertEqual(restored.notes, "Testing day snapshot")
-        self.assertEqual(len(restored.blocks), 48)
+def _legacy_plan_dict() -> dict:
+    """A pre-span plan: midnight-to-midnight blocks with kinds and labels."""
+    blocks = []
+    for i in range(48):
+        start = at("00:00") + timedelta(minutes=30 * i)
+        kind, label, event_id = "daylight_discretionary" if 15 <= i <= 36 else "dark_discretionary", "", None
+        if i >= 46 or i < 14:
+            kind, label = "sleep", "Sleep"
+        elif 17 <= i <= 31:
+            kind, label = "work", "Work"
+        if i in (34, 35):
+            label = "Composing"
+        if i == 30:
+            kind, label, event_id = "busy_calendar", "Dentist", "dentist"
+        blocks.append({"index": i, "start_dt": start.isoformat(), "end_dt": (start + timedelta(minutes=30)).isoformat(),
+                       "is_sunlight": 15 <= i <= 36, "kind": kind, "label": label, "source_event_id": event_id})
+    return {"target_date": DAY.isoformat(), "blocks": blocks, "sunrise": at("07:17").isoformat(),
+            "sunset": at("18:31").isoformat(), "is_finalized": True, "notes": ""}
 
-    def test_deterministic_grid_math_and_tallies(self) -> None:
-        plan, ambiguous = self.scheduler.build_day_plan(self.target_date)
 
-        self.assertEqual(len(plan.blocks), 48)
-        self.assertEqual(len(ambiguous), 0)
+class TestDeterministicScheduler(unittest.TestCase):
 
-        # Sleep blocks:
-        # sleep_start=46 (11:00 PM), sleep_end=14 (07:00 AM)
-        # Blocks 46, 47, and 0..13 are sleep (total 16 blocks = 8 hours)
-        sleep_blocks = [b for b in plan.blocks if b.kind == BlockKind.SLEEP]
-        self.assertEqual(len(sleep_blocks), 16)
-        for b in sleep_blocks:
-            self.assertTrue(b.is_locked)
+    def test_default_routines(self) -> None:
+        _, plan, pending = build_day()
+        self.assertEqual(pending, [])
+        self.assertEqual(plan.day_start, at("07:00"))
+        self.assertEqual(plan.day_end, at("07:00", 1))
+        self.assertEqual(occupant(plan, "08:30"), "Work")
+        self.assertEqual(occupant(plan, "15:30"), "Work")
+        self.assertIsNone(occupant(plan, "16:00"))
+        self.assertEqual(occupant(plan, "23:00"), "Sleep")
+        self.assertEqual(occupant(plan, "06:30", 1), "Sleep")
+        self.assertIsNone(occupant(plan, "07:00"))
 
-        # Work blocks:
-        # work_start=17 (08:30 AM), work_end=31 (03:30 PM)
-        # Blocks 17..31 inclusive (total 15 blocks = 7.5 hours)
-        work_blocks = [b for b in plan.blocks if b.kind == BlockKind.WORK]
-        self.assertEqual(len(work_blocks), 15)
-        for b in work_blocks:
-            self.assertTrue(b.is_locked)
+    def test_routines_are_materialized_once_and_edits_stick(self) -> None:
+        sched, plan, _ = build_day()
+        work = next(s for s in plan.spans if s.category == SpanCategory.WORK)
+        self.assertEqual(next(r for r in sched.state_db.get_span_records() if r["id"] == work.id)["updated_at"],
+                         ROUTINE_TIMESTAMP)
+        sched.state_db.delete_span(work.id)  # day off
+        plan2, _ = sched.build_day_plan(DAY)
+        self.assertNotIn(SpanCategory.WORK, [s.category for s in plan2.spans])
 
-        # Exact integer counts check:
-        # Total blocks must sum to 48
-        total = (
-            len(sleep_blocks)
-            + len(work_blocks)
-            + plan.daylight_available_count
-            + plan.dark_available_count
-        )
-        self.assertEqual(total, 48)
+    def test_routine_ids_are_deterministic_across_devices(self) -> None:
+        _, plan_a, _ = build_day()
+        _, plan_b, _ = build_day()
+        self.assertEqual(sorted(s.id for s in plan_a.spans), sorted(s.id for s in plan_b.spans))
 
-        # In October in Arlington (sunrise ~7:10 AM, sunset ~6:41 PM):
-        # Work finishes at 3:30 PM (block 31). Blocks 32..36 are Daylight discretionary!
-        self.assertGreater(plan.daylight_available_count, 0)
-        self.assertGreater(plan.dark_available_count, 0)
+    def test_calendar_spans_are_fresh_and_decisions_persist(self) -> None:
+        sched = make_scheduler([event("dentist", "15:00", "16:00", "Dentist"),
+                                event("dinner", "19:00", "21:00", "Team dinner", invite=True)])
+        plan, pending = sched.build_day_plan(DAY)
+        self.assertEqual([e.id for e in pending], ["dinner"])
+        self.assertEqual(occupant(plan, "15:00"), "Dentist")
+        self.assertIsNone(occupant(plan, "19:00"))  # unconfirmed invites don't occupy time
+        sched.state_db.set_event_decision("dinner", "attend")
+        plan2, pending2 = sched.build_day_plan(DAY)
+        self.assertEqual(pending2, [])
+        self.assertEqual(occupant(plan2, "19:00"), "Team dinner")
 
-    def test_calendar_overlay_adjusts_discretionary_tallies(self) -> None:
-        # Baseline plan without calendar
-        base_plan, _ = self.scheduler.build_day_plan(self.target_date)
-        base_daylight = base_plan.daylight_available_count
+    def test_late_night_calendar_event_on_next_date_is_included(self) -> None:
+        late = event("flight", "01:00", "02:00", "Red-eye")
+        late.start_dt += timedelta(days=1)
+        late.end_dt += timedelta(days=1)
+        sched = make_scheduler([late])
+        plan, _ = sched.build_day_plan(DAY)
+        self.assertEqual(occupant(plan, "01:00", 1), "Red-eye")
 
-        # Add 1-hour event at 4:00 PM (blocks 32 and 33, which are Daylight discretionary)
-        ev = CalendarEvent(
-            id="ev_choir",
-            summary="Choir Rehearsal",
-            start_dt=datetime(2026, 10, 8, 16, 0, tzinfo=self.tz),
-            end_dt=datetime(2026, 10, 8, 17, 0, tzinfo=self.tz),
-            response_status="accepted",
-        )
-        self.mock_cal.add_event(ev)
+    def test_finalize_records_task_allocation(self) -> None:
+        sched, plan, _ = build_day()
+        plan.spans.append(EventSpan("t", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK, task_id="t_taxes"))
+        sched.finalize_day_plan(plan, notes="locked")
+        self.assertTrue(sched.state_db.get_day_meta(DAY).is_finalized)
+        self.assertEqual(sched.state_db.get_task_history("t_taxes").allocated_thirties, 2)
+        self.assertTrue(sched.build_day_plan(DAY)[0].is_finalized)
 
-        plan_with_ev, _ = self.scheduler.build_day_plan(self.target_date)
-
-        # Blocks 32 and 33 must now be BUSY_CALENDAR
-        self.assertEqual(plan_with_ev.get_block(32).kind, BlockKind.BUSY_CALENDAR)
-        self.assertEqual(plan_with_ev.get_block(33).kind, BlockKind.BUSY_CALENDAR)
-
-        # Daylight discretionary count must decrease by exactly 2 blocks
-        self.assertEqual(plan_with_ev.daylight_available_count, base_daylight - 2)
-
-    def test_rolling_7_day_schedule(self) -> None:
-        plans = self.scheduler.build_rolling_schedule(self.target_date, days=7)
-        self.assertEqual(len(plans), 7)
-        for p in plans:
-            self.assertEqual(len(p.blocks), 48)
-            self.assertGreater(p.daylight_available_count, 0)
-            self.assertGreater(p.dark_available_count, 0)
-
-    def test_attach_history_to_tasks(self) -> None:
-        t1 = TaskItem(id="t1", source_notebook="1. Tasks", title="Task 1")
-        t2 = TaskItem(id="t2", source_notebook="1. Tasks", title="Task 2")
-
-        # Defer t2 three times
-        self.state_db.record_task_deferred("t2")
-        self.state_db.record_task_deferred("t2")
-        self.state_db.record_task_deferred("t2")
-
-        self.scheduler.attach_history_to_tasks([t1, t2])
-        self.assertEqual(t1.deferred_count, 0)
-        self.assertEqual(t2.deferred_count, 3)
+    def test_rolling_schedule_and_task_history(self) -> None:
+        sched = make_scheduler()
+        plans = sched.build_rolling_schedule(DAY, days=3)
+        self.assertEqual([p.target_date for p in plans], [DAY + timedelta(days=i) for i in range(3)])
+        sched.state_db.record_task_deferred("t1")
+        tasks = [TaskItem(id="t1", source_notebook="1. Tasks", title="Taxes")]
+        sched.attach_history_to_tasks(tasks)
+        self.assertEqual(tasks[0].deferred_count, 1)
 
 
 if __name__ == "__main__":

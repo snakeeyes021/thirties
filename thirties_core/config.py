@@ -15,9 +15,9 @@ class GeneralConfig:
     longitude: float = -77.1067
     timezone: str = "America/New_York"
     work_start_thirty: int = 17   # 08:30 AM
-    work_end_thirty: int = 31     # 03:30 PM
+    work_end_thirty: int = 31     # last work thirty starts 3:30 PM, so work ends 4:00 PM
     sleep_start_thirty: int = 46  # 11:00 PM
-    sleep_end_thirty: int = 14    # 07:00 AM
+    sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
 
 
 @dataclass

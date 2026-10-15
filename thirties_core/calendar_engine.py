@@ -1,8 +1,8 @@
 """Calendar synchronization engine using GNOME Online Accounts / Evolution Data Server (EDS).
 
 Discovers calendars configured in the desktop environment, extracts events for
-the diurnal cycle, maps them to discrete 30-minute blocks, and identifies
-ambiguous commitments for conversational resolution.
+the diurnal cycle, turns them into event spans, and identifies invites that
+still need the user's decision.
 """
 
 from __future__ import annotations
@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 from zoneinfo import ZoneInfo
 
 from thirties_core.config import CalendarConfig, ThirtiesConfig
-from thirties_core.models import BlockKind, ThirtyBlock
+from thirties_core.models import EventSpan, SpanCategory
 
 logger = logging.getLogger(__name__)
 
@@ -39,41 +39,40 @@ class CalendarEvent:
         return max(self.start_dt, start) < min(self.end_dt, end)
 
 
-def map_events_to_blocks(
-    blocks: List[ThirtyBlock],
+def events_to_spans(
     events: List[CalendarEvent],
-) -> List[CalendarEvent]:
-    """Overlay calendar events onto Thirty blocks.
-    
-    Returns the list of ambiguous events that require user clarification.
+    decisions: Optional[Dict[str, str]] = None,
+) -> Tuple[List[EventSpan], List[CalendarEvent]]:
+    """Turn calendar events into spans, applying the user's attend/decline decisions.
+
+    Returns (spans, pending): accepted events become firm spans; invites the user
+    has not decided on become tentative spans and are also returned as pending.
+    Declined events (in the calendar or by decision) are dropped.
     """
-    ambiguous_events: List[CalendarEvent] = []
+    decisions = decisions or {}
+    spans: List[EventSpan] = []
+    pending: List[CalendarEvent] = []
 
     for event in events:
-        if event.response_status == "declined":
+        if event.response_status == "declined" or decisions.get(event.id) == "decline":
             continue
+        is_invite = event.is_ambiguous or event.response_status in ("tentative", "needsAction")
+        tentative = is_invite and decisions.get(event.id) != "attend"
+        if tentative:
+            pending.append(event)
+        spans.append(EventSpan(
+            id=f"cal:{event.id}",
+            title=event.summary,
+            start_dt=event.start_dt,
+            end_dt=event.end_dt,
+            category=SpanCategory.CALENDAR,
+            source="calendar",
+            source_event_id=event.id,
+            is_firm=not tentative,
+            tentative=tentative,
+        ))
 
-        if event.is_ambiguous or event.response_status in ("tentative", "needsAction"):
-            if event not in ambiguous_events:
-                ambiguous_events.append(event)
-
-            for block in blocks:
-                if event.overlaps_interval(block.start_dt, block.end_dt):
-                    # Only mark ambiguous if not already locked as busy
-                    if block.kind != BlockKind.BUSY_CALENDAR:
-                        block.kind = BlockKind.AMBIGUOUS_CALENDAR
-                        block.label = event.summary
-                        block.source_event_id = event.id
-        else:
-            # Hard calendar block
-            for block in blocks:
-                if event.overlaps_interval(block.start_dt, block.end_dt):
-                    block.kind = BlockKind.BUSY_CALENDAR
-                    block.label = event.summary
-                    block.source_event_id = event.id
-                    block.is_locked = True
-
-    return ambiguous_events
+    return spans, pending
 
 
 class CalendarEngine(Protocol):

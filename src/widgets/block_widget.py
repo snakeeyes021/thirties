@@ -4,15 +4,22 @@ from __future__ import annotations
 
 from gi.repository import Gtk, Adw, Pango
 
-from thirties_core.models import BlockKind, ThirtyBlock
+from thirties_core.models import EventSpan, SpanCategory, ThirtyBlock
 
 
 class BlockWidget(Gtk.Box):
     """Visual pill representing a single Thirty block."""
 
-    def __init__(self, block: ThirtyBlock, is_current: bool = False, display_index: int = -1) -> None:
+    def __init__(
+        self,
+        block: ThirtyBlock,
+        span: EventSpan | None = None,
+        is_current: bool = False,
+        display_index: int = -1,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.block = block
+        self.span = span
         self.is_current = is_current
         self.display_index = display_index
 
@@ -79,89 +86,65 @@ class BlockWidget(Gtk.Box):
         if badge:
             self.append(badge)
 
+    @property
+    def _is_assigned(self) -> bool:
+        return self.span is not None and not self.span.is_envelope
+
     def _get_icon_name(self) -> str:
-        kind = self.block.kind
-        if kind == BlockKind.SLEEP:
-            return "night-light-symbolic"
-        elif kind == BlockKind.WORK:
-            return "view-grid-symbolic"
-        elif kind == BlockKind.BUSY_CALENDAR:
-            return "x-office-calendar-symbolic"
-        elif kind == BlockKind.AMBIGUOUS_CALENDAR:
-            return "dialog-question-symbolic"
-        elif self.block.is_assigned:
-            return "starred-symbolic"
-        else:
+        span = self.span
+        if span is None:
             if self.block.is_sunlight:
                 return "weather-clear-symbolic"
-            elif self.block.is_twilight:
+            if self.block.is_twilight:
                 return "weather-few-clouds-symbolic"
-            else:
-                return "weather-clear-night-symbolic"
+            return "weather-clear-night-symbolic"
+        return {
+            SpanCategory.SLEEP: "night-light-symbolic",
+            SpanCategory.WORK: "view-grid-symbolic",
+            SpanCategory.CALENDAR: "x-office-calendar-symbolic",
+        }.get(span.category, "starred-symbolic")
 
     def _get_display_title(self) -> str:
-        if self.block.label:
-            return self.block.label
-
-        kind = self.block.kind
-        if kind == BlockKind.SLEEP:
-            return "Sleep"
-        elif kind == BlockKind.WORK:
-            return "Work"
-        elif kind == BlockKind.DAYLIGHT_DISCRETIONARY:
-            return "Open Daylight Thirty"
-        elif kind == BlockKind.DARK_DISCRETIONARY:
-            return "Open Dark Thirty"
-        elif self.block.is_assigned:
-            return "Assigned Task"
-        elif kind == BlockKind.AMBIGUOUS_CALENDAR:
-            return "Unconfirmed Event"
-        return "Discretionary"
+        if self.span is not None:
+            return self.span.title
+        return "Open Daylight Thirty" if self.block.is_sunlight else "Open Dark Thirty"
 
     def _build_status_badge(self) -> Gtk.Widget | None:
-        if self.block.kind == BlockKind.AMBIGUOUS_CALENDAR:
-            pill = Gtk.Label(label="Needs Action")
-            pill.add_css_class("badge-warning")
-            return pill
-        elif self.block.is_assigned:
-            pill = Gtk.Label(label="Allocated")
+        if self._is_assigned:
+            pill = Gtk.Label(label="Planned")
             pill.add_css_class("badge-assigned")
             return pill
-        elif self.is_current:
+        if self.is_current:
             pill = Gtk.Label(label="Now")
             pill.add_css_class("badge-current")
             return pill
         return None
 
     def _apply_styling(self) -> None:
-        if self.block.is_sunlight:
-            self.add_css_class("block-sunlight")
-        else:
-            self.add_css_class("block-dark")
-
-        if self.block.is_locked:
+        self.add_css_class("block-sunlight" if self.block.is_sunlight else "block-dark")
+        if self.span is not None and (self.span.is_envelope or self.span.is_firm):
             self.add_css_class("block-locked")
-
-        if self.block.is_assigned:
+        if self._is_assigned:
             self.add_css_class("block-assigned")
-
         if self.is_current:
             self.add_css_class("block-current")
 
 
 class GroupedBlockWidget(Gtk.Box):
-    """Consolidated card for contiguous locked blocks (Sleep or Work) with optional drilldown."""
+    """Consolidated card for the thirties under one work or sleep span, with optional drilldown."""
 
     def __init__(
         self,
+        span: EventSpan,
         blocks_with_indices: list[tuple[ThirtyBlock, int]],
         now_block_idx: int = -1,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.span = span
         self.items = blocks_with_indices
         self.blocks = [b for b, _ in blocks_with_indices]
         self.indices = [idx for _, idx in blocks_with_indices]
-        self.kind = self.blocks[0].kind
+        self.is_sleep = span.category == SpanCategory.SLEEP
         self.now_block_idx = now_block_idx
         self.is_current = any(b.index == self.now_block_idx for b in self.blocks)
 
@@ -198,7 +181,7 @@ class GroupedBlockWidget(Gtk.Box):
         header_row.append(count_pill)
 
         # 2. Icon
-        icon_name = "night-light-symbolic" if self.kind == BlockKind.SLEEP else "view-grid-symbolic"
+        icon_name = "night-light-symbolic" if self.is_sleep else "view-grid-symbolic"
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.set_pixel_size(20)
         header_row.append(icon)
@@ -207,14 +190,14 @@ class GroupedBlockWidget(Gtk.Box):
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         title_box.set_hexpand(True)
 
-        title_text = "Sleep Window" if self.kind == BlockKind.SLEEP else "Work Schedule"
+        title_text = self.span.title
         title_lbl = Gtk.Label(label=title_text)
         title_lbl.add_css_class("heading")
         title_lbl.set_xalign(0.0)
 
-        start_str = self.blocks[0].start_dt.strftime("%I:%M %p").lstrip("0")
-        end_str = self.blocks[-1].end_dt.strftime("%I:%M %p").lstrip("0")
-        total_hours = len(self.blocks) * 0.5
+        start_str = self.span.start_dt.strftime("%I:%M %p").lstrip("0")
+        end_str = self.span.end_dt.strftime("%I:%M %p").lstrip("0")
+        total_hours = self.span.duration_minutes / 60
         range_lbl = Gtk.Label(label=f"{start_str} – {end_str} ({total_hours:.1f} hours, {len(self.blocks)} Thirties)")
         range_lbl.add_css_class("caption")
         range_lbl.add_css_class("dim-label")
@@ -251,7 +234,7 @@ class GroupedBlockWidget(Gtk.Box):
 
         for b, disp_idx in self.items:
             is_cur = (b.index == self.now_block_idx)
-            sub_list.append(BlockWidget(b, is_current=is_cur, display_index=disp_idx))
+            sub_list.append(BlockWidget(b, span=self.span, is_current=is_cur, display_index=disp_idx))
 
         self.revealer.set_child(sub_list)
         self.append(self.revealer)

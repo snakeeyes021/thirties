@@ -29,7 +29,8 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import InferenceEngine, get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
-from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+from thirties_core.clock import format_clock, format_duration
+from thirties_core.models import SpanCategory, ThirtyBlock
 from thirties_core.scheduler import DeterministicScheduler
 from thirties_core.sync_engine import SyncEngine
 
@@ -356,73 +357,48 @@ class ThirtiesTelegramBridge:
 
     def _cmd_now(self, chat_id: int) -> None:
         now = self._get_current_time()
-        blocks = self.conv_manager.day_plan.blocks
+        plan = self.conv_manager.day_plan
         curr = self._get_current_block()
 
         if not curr:
             self.client.send_message(
                 chat_id,
-                f"🕒 *Current Time*: {now.strftime('%I:%M %p')}\n\nOutside scheduled diurnal bounds for today.",
+                f"🕒 *Current Time*: {format_clock(now)}\n\nOutside today's diurnal day.",
                 parse_mode="Markdown",
             )
             return
 
-        idx = self.conv_manager.day_plan.get_logical_index(curr)
-        remaining_secs = max(0, int((curr.end_dt - now).total_seconds()))
-        rem_mins = remaining_secs // 60
+        span = plan.display_span(curr)
+        rem_mins = max(0, int((curr.end_dt - now).total_seconds())) // 60
+        doing = f"{span.title} (until {format_clock(span.end_dt)})" if span else "Open time"
 
-        first_sleep = next((b for b in blocks if b.kind == BlockKind.SLEEP), None)
+        sleep = next((s for s in plan.active_spans()
+                      if s.category == SpanCategory.SLEEP and s.start_dt > now), None)
         sleep_str = ""
-        if first_sleep:
-            sleep_idx = self.conv_manager.day_plan.get_logical_index(first_sleep)
-            if idx is not None and sleep_idx is not None and sleep_idx >= idx:
-                sleep_str = f"\n🌙 *Blocks until sleep*: {sleep_idx - idx} chunks (Sleep at {first_sleep.start_dt.strftime('%I:%M %p')})"
-
-        kind_desc = curr.kind.name.replace("_", " ").title()
-        label = curr.label or "(Unassigned / Discretionary)"
+        if sleep:
+            until = int((sleep.start_dt - now).total_seconds() // 60)
+            sleep_str = f"\n🌙 *Until sleep*: {format_duration(until)} (sleep at {format_clock(sleep.start_dt)})"
 
         msg = (
-            f"🕒 *Current Block*: **Block {idx}**\n"
-            f"⏱️ *Time*: {curr.start_dt.strftime('%I:%M %p')} – {curr.end_dt.strftime('%I:%M %p')}\n"
-            f"🏷️ *Type*: {kind_desc}\n"
-            f"📝 *Task*: {label}\n"
-            f"⏳ *Time Remaining in Block*: {rem_mins} minutes"
+            f"🕒 *Now*: {format_clock(now)} (thirty #{curr.number:02d}, {format_clock(curr.start_dt)} – {format_clock(curr.end_dt)})\n"
+            f"📝 *Doing*: {doing}\n"
+            f"⏳ *Left in this thirty*: {rem_mins} minutes"
             f"{sleep_str}"
         )
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
     def _cmd_day(self, chat_id: int) -> None:
         plan = self.conv_manager.day_plan
+        now = self._get_current_time()
         lines = [f"📅 *Schedule for {self.current_date.strftime('%A, %b %d')}*\n"]
-
-        curr_b = self._get_current_block()
-        curr_idx = plan.get_logical_index(curr_b) if curr_b else None
-
-        groups: List[tuple[int, int, ThirtyBlock]] = []
-        for b in plan.blocks:
-            idx = plan.get_logical_index(b)
-            if not idx:
-                continue
-            if groups and groups[-1][2].kind == b.kind and groups[-1][2].label == b.label:
-                start_i, _, first_b = groups[-1]
-                groups[-1] = (start_i, idx, first_b)
-            else:
-                groups.append((idx, idx, b))
-
-        for start_i, end_i, b in groups:
-            s_time = b.start_dt.strftime("%I:%M %p")
-            end_b = plan.get_logical_block(end_i) or b
-            e_time = end_b.end_dt.strftime("%I:%M %p")
-            range_str = f"Block {start_i}" if start_i == end_i else f"Blocks {start_i}–{end_i}"
-
-            is_active = (curr_idx is not None and start_i <= curr_idx <= end_i)
-            marker = "👉 " if is_active else "• "
-
-            lbl = f" – {b.label}" if b.label else ""
-            lines.append(f"{marker}*{range_str}* ({s_time}–{e_time}): {b.kind.name.replace('_', ' ').title()}{lbl}")
-
-        msg = "\n".join(lines)
-        self.client.send_message(chat_id, msg, parse_mode="Markdown")
+        spans = plan.spans_in_view()
+        if not spans:
+            lines.append("Nothing scheduled.")
+        for span in spans:
+            marker = "👉 " if span.covers(now) else "• "
+            note = " (unconfirmed)" if span.tentative else ""
+            lines.append(f"{marker}{format_clock(span.start_dt)} – {format_clock(span.end_dt)}: {span.title}{note}")
+        self.client.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 
     def _cmd_sync(self, chat_id: int) -> None:
         self.client.send_chat_action(chat_id, "typing")
@@ -482,9 +458,7 @@ class ThirtiesTelegramBridge:
                 if not curr:
                     continue
 
-                curr_idx = self.conv_manager.day_plan.get_logical_index(curr)
-                if curr_idx is None:
-                    continue
+                curr_idx = curr.index
 
                 if self.last_notified_block_index is None:
                     # Initial startup anchor
@@ -492,26 +466,20 @@ class ThirtiesTelegramBridge:
                     continue
 
                 if curr_idx != self.last_notified_block_index:
-                    logger.info("Block transition detected: Block %s -> Block %s", self.last_notified_block_index, curr_idx)
+                    logger.info("Thirty transition detected: #%s -> #%s", self.last_notified_block_index, curr.number)
                     self.last_notified_block_index = curr_idx
 
                     if self.config.telegram.notify_block_transitions and self.active_chats:
-                        s_time = curr.start_dt.strftime("%I:%M %p")
-                        e_time = curr.end_dt.strftime("%I:%M %p")
-                        kind_str = curr.kind.name.replace("_", " ").title()
-                        task_str = curr.label or "Discretionary / Unassigned"
-
-                        if curr.kind == BlockKind.SLEEP:
-                            buzz_msg = (
-                                f"🌙 *Bedtime: Block {curr_idx}* ({s_time} – {e_time})\n\n"
-                                f"Your scheduled sleep block has begun. Wind down and rest well!"
-                            )
+                        span = self.conv_manager.day_plan.display_span(curr)
+                        s_time, e_time = format_clock(curr.start_dt), format_clock(curr.end_dt)
+                        if span and span.category == SpanCategory.SLEEP and span.start_dt >= curr.start_dt:
+                            buzz_msg = f"🌙 *Bedtime* ({s_time})\n\nYour sleep starts now. Wind down and rest well!"
+                        elif span and span.start_dt >= curr.start_dt:
+                            buzz_msg = f"🔔 *{span.title}* starts now ({s_time} – {format_clock(span.end_dt)})"
+                        elif span:
+                            continue  # still inside something already announced
                         else:
-                            buzz_msg = (
-                                f"🔔 *Block {curr_idx}* ({s_time} – {e_time})\n"
-                                f"🏷️ *Type*: {kind_str}\n"
-                                f"📝 *Task*: {task_str}"
-                            )
+                            buzz_msg = f"🔔 *Open time* ({s_time} – {e_time})"
 
                         for chat_id in list(self.active_chats):
                             self.client.send_message(chat_id, buzz_msg, parse_mode="Markdown")

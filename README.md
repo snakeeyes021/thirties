@@ -22,9 +22,11 @@ Steps 1–2 work today (about 75% usable in the first real day). Steps 3–4 are
 ## Running
 
 ```bash
-python3 -m unittest discover tests      # unit tests
-python3 src/main.py                     # GTK desktop app
+python3 -m unittest discover tests        # unit tests
+python3 -m tests.frontier_eval            # live-model eval (needs GEMINI_API_KEY)
 python3 -m thirties_core.telegram_bridge  # headless Telegram bridge (temporary mobile client)
 ```
+
+The GTK desktop app is built with meson (GNOME Builder, or `flatpak-builder` with `tech.redfoxlabs.Thirties.json`).
 
 Configuration lives in `~/.config/thirties/config.toml`.
