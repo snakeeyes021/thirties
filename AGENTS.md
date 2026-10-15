@@ -194,26 +194,33 @@ Thirties/
 │   ├── views/                         # DayView, ChatPanel
 │   └── widgets/                       # BlockWidget, SolarArc
 ├── thirties_core/                     # Pure Python core: zero GUI imports
+│   ├── assistant_tools.py             # Outcomes, review/rollover, memory, profile, history, statistics tools
 │   ├── astronomy.py                   # NOAA solar equations & diurnal dates
+│   ├── backlog.py                     # One loader for every task source (Joplin, media wishlists)
 │   ├── brains/                        # Model-specific layer: prompts & turn logic
-│   │   └── frontier.py                # FrontierBrain: single rich prompt for Gemini
-│   ├── calendar_engine.py             # Calendar connector (EDS & mock); events -> spans
+│   │   ├── frontier.py                # FrontierBrain: single rich prompt for Gemini
+│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (runtime, parse, brain)
+│   ├── calendar_engine.py             # Calendars via EDS / GNOME Online Accounts; events -> spans
 │   ├── clock.py                       # Clock-time & duration parsing: the model says "4:30 PM", Python does the math
 │   ├── config.py                      # TOML configuration & dataclasses
 │   ├── conversation.py                # ConversationManager: client entry point, wires tools to a brain
 │   ├── inference.py                   # Model transports (agy CLI, Gemini API, LiteRT, Mock) & directive parser
 │   ├── joplin_engine.py               # Joplin connector (SQLite read, REST write)
 │   ├── legacy.py                      # Converts pre-span (block-kind) saved plans into spans
+│   ├── media_sources.py               # Goodreads / Letterboxd / Serializd wishlists (public, no login)
+│   ├── memory.py                      # Conversations (per day), user profile, memory notes, energy log
 │   ├── models.py                      # Solar canvas (ThirtyBlock), EventSpan, DayPlan, TaskItem
 │   ├── plan_tools.py                  # PlanTools: the shared clock-time tool API & invariants
 │   ├── runner.py                      # Host-side LiteRT runner (used from the Flatpak sandbox)
 │   ├── scheduler.py                   # Span store (StateDatabase) & day builder (DeterministicScheduler)
+│   ├── stats.py                       # Statistics from what actually happened, as plain facts
 │   ├── sync_engine.py                 # Cross-device state sync via a Joplin note
 │   └── telegram_bridge.py             # Temporary headless mobile Telegram bot & notifier
 └── tests/                             # Unit tests & evaluation harnesses
     ├── test_*.py                      # Standard unit test suite
     ├── fixtures.py                    # Shared test fixtures (a scheduler on a temp DB for a fixed day)
     ├── frontier_eval.py               # Live-model "real day" scenarios, checked deterministically on the schedule
+    ├── sim_eval.py                    # Gemini role-plays the user (hidden goals) vs either brain, then judges
     ├── interactive_eval.py            # Turn-by-turn stepping with state deltas; an agent or human is the judge
     └── legacy_slm/                    # Pre-span SLM harnesses: source material only, they do not run
 ```
@@ -230,7 +237,10 @@ python3 -m thirties_core.telegram_bridge
 # 3. Frontier Brain eval against a live model (needs GEMINI_API_KEY; ~35 requests per run)
 python3 -m tests.frontier_eval
 
-# 4. Step through an evaluation session (start / step / grade / finish, or an interactive REPL)
+# 4. Simulated-user eval of either or both brains (needs agy; SLM needs the LiteRT venv)
+~/.local/share/thirties/venv/bin/python -m tests.sim_eval --brain both
+
+# 5. Step through an evaluation session (start / step / grade / finish, or an interactive REPL)
 python3 -m tests.interactive_eval repl --no-gpu
 ```
 

@@ -12,6 +12,21 @@ work_start_thirty = 17
 work_end_thirty = 31
 sleep_start_thirty = 46   # 11:00 PM
 sleep_end_thirty = 14     # sleep ends at 7:00 AM
+work_days = ["mon", "tue", "wed", "thu", "fri"]   # other days start without work
+
+[assistant]
+# "frontier": a large model (Gemini) with one rich prompt.
+# "slm": on-device Gemma 4 through LiteRT-LM (see docs/SLM_BRAIN.md; needs litert-lm-api and a model file).
+brain = "frontier"
+slm_voice = true          # SLM: natural wording, with every time and title verified
+checkins = true           # Telegram: "did you get to X?" after a planned item ends
+checkin_after_minutes = 10
+
+[calendar]
+# Calendars come from GNOME Online Accounts (Settings > Online Accounts > Google > Calendar).
+# include_calendars = []                              # names or uids; empty means all enabled calendars
+exclude_calendars = ["Birthdays & Anniversaries"]
+# default_ignore_secondary = true                     # ignore calendars that aren't yours (e.g. a partner's)
 
 [inference]
 # "gemini" uses the agy CLI (your Antigravity / Google AI subscription) when it is
@@ -27,8 +42,11 @@ allowed_chat_ids = []      # your chat ID; the bot shows it to you on /start
 notify_block_transitions = true
 
 [joplin]
-# Needed only for [sync]. Joplin > Settings > Web Clipper > Advanced options > Authorization token.
+# Needed to check finished tasks off in Joplin, and for [sync].
+# Joplin > Settings > Web Clipper: enable it, then copy the authorization token.
 api_token = ""
+# Headings whose checklist items are "someday/maybe": visible to the assistant, never pushed.
+someday_sections = ["Probation", "Someday", "Maybe", "Someday/Maybe", "Backburner"]
 
 [sync]
 # Syncs Thirties state between computers through a note in Joplin.

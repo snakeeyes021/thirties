@@ -40,7 +40,9 @@ python3 -m thirties_core.telegram_bridge
 
 - `/day`: today's schedule. `/now`: what's happening now and time until sleep.
 - "work went til 4:30", "put 2 hours of composing at 5pm", "push composing back an hour", "what should I do this evening?"
-- `/clear` starts a fresh conversation; `/status` shows the backend.
+- The bot continues the same conversation as the desktop app for that day. `/new` starts a fresh one (the desktop app follows it). `/status` shows the backend.
+- Tell it what happened ("finished the taxes around 4", "didn't get to the email"): outcomes are recorded, and finished Joplin tasks are checked off if `[joplin] api_token` is set.
+- After a planned item ends with no outcome, the bot asks once: "did you get to X, or are you still on it?" (`[assistant] checkins = false` turns that off).
 - Every 30 minutes the bot sends a notification when something starts (set `notify_block_transitions = false` to turn that off).
 
 ## 5. Keep it running (optional)
