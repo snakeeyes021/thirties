@@ -204,6 +204,7 @@ class PlanTools:
         self.services = services
         self.assistant = AssistantTools(self, services) if services else None
         self._other_days: Dict[Any, DayPlan] = {}
+        self.successful_changes = 0  # every tool call that changed something, on any day or store
 
     # ------------------------------------------------------------------
     # Helpers
@@ -692,6 +693,8 @@ class PlanTools:
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
             result = handler(**args)
+            if name not in READ_ONLY_TOOLS:
+                self.successful_changes += 1
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
             return result

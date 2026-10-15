@@ -124,6 +124,12 @@ class TestTurnLoop(ConversationTestCase):
         out = self.manager.send_user_message("walk at 5")
         self.assertIn("wasn't able to change", out)
 
+    def test_changes_to_other_days_are_not_mistaken_for_no_change(self) -> None:
+        self.engine.set_next_response(reply("I've added the NAS move tomorrow at 9.\n"
+                                            'CALL add_event {"title": "Move NAS", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow"}'))
+        out = self.manager.send_user_message("NAS tomorrow at 9")
+        self.assertEqual(out, "I've added the NAS move tomorrow at 9.")
+
     def test_suggestion_without_changes_passes_through(self) -> None:
         self.engine.set_next_response(reply("How about composing from 5 to 7?"))
         out = self.manager.send_user_message("what should I do tonight?")

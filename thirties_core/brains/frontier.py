@@ -278,6 +278,7 @@ RULES
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         snapshot_before = self.tools.capture_snapshot()
+        changes_before = self.tools.successful_changes
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
 
@@ -302,9 +303,9 @@ RULES
             if results:
                 last_results = results
 
-            delta = self.tools.compute_delta(snapshot_before, self.tools.capture_snapshot())
+            changed = self.tools.successful_changes - changes_before
             if not calls:
-                if self._claims_change(content) and delta.total_changes == 0 and not reflected:
+                if self._claims_change(content) and changed == 0 and not reflected:
                     reflected = True
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
                     self.messages.append({"role": "user", "content": (
@@ -323,8 +324,7 @@ RULES
             if any(r.startswith(NOT_DONE) for r in results):
                 reply = ""  # the draft was written before the refusal; don't show it
 
-        delta = self.tools.compute_delta(snapshot_before, self.tools.capture_snapshot())
-        if self._claims_change(reply) and delta.total_changes == 0:
+        if self._claims_change(reply) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
             reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
         if not reply.strip():
