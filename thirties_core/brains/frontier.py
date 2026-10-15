@@ -277,7 +277,6 @@ RULES
     def respond(self, user_text: str) -> str:
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
-        snapshot_before = self.tools.capture_snapshot()
         changes_before = self.tools.successful_changes
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
