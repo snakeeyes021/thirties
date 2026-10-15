@@ -194,6 +194,12 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.assertIn("Security Note", args[1])
         self.assertIn("777", args[1])
 
+        # Once bound, any other chat is refused
+        bridge.client.reset_mock()
+        bridge.handle_message(chat_id=888, text="what's on my schedule?")
+        self.assertIn("Unauthorized", bridge.client.send_message.call_args[0][1])
+        self.assertNotIn(888, bridge.active_chats)
+
 
 if __name__ == "__main__":
     unittest.main()

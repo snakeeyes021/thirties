@@ -90,7 +90,7 @@ See `docs/SLM_BRAIN.md`. The brain itself depends on Phases 1–2 (it needs the 
 
 - **Real-use feedback is the top input.** After each day of real use, record what broke or was annoying, and turn it into eval scenarios and roadmap items. *Open question for the user: what was the missing 25% on the first test day?*
 - **Frontier eval set:** a small set of replayable multi-turn "real day" scenarios (drawn from real use) that run against the Frontier Brain before prompt or tool changes are merged.
-- **Telegram:** connect it and use it for a day.
+- **Telegram:** connect it and use it for a day (`docs/TELEGRAM_SETUP.md`). Note: on a free Gemini key, ~20 requests/day is only about 10 messages.
 - **Connector abstraction (Anti-Pattern 1):** a `TaskSource` interface (Joplin is the first implementation) and a `CalendarSource` interface (EDS first; CalDAV/Google later). Put the Joplin sync note behind a `SyncTransport` interface so state sync is not permanently tied to Joplin.
 - **Housekeeping:**
   - `pyproject.toml` dependencies are stale: `astral` is unused, and `litert-lm-api` should be optional.

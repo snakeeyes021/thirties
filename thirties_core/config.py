@@ -51,7 +51,7 @@ class CalendarConfig:
 
 @dataclass
 class InferenceConfig:
-    backend: str = "gemini"  # Options: "gemini", "antigravity", "litert", "mock"
+    backend: str = "gemini"  # "gemini" (agy if installed, else the API), "gemini_api", "antigravity", "litert", "mock"
     gemini_model: str = "gemini-3.8-flash-low"
     gemini_api_key: str = ""
     agy_path: Optional[str] = None

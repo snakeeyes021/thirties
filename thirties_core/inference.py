@@ -675,6 +675,13 @@ def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEn
             return litert
         return MockInferenceEngine()
 
+    elif backend in ("gemini_api", "gemini-api"):
+        gemini_api = GeminiInferenceEngine(cfg)
+        if gemini_api.is_available():
+            return gemini_api
+        logger.warning("Gemini API backend requested but no gemini_api_key / GEMINI_API_KEY is set. Falling back to Mock.")
+        return MockInferenceEngine()
+
     elif backend == "litert":
         litert = LiteRTInferenceEngine(cfg)
         if litert.is_available():

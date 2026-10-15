@@ -182,6 +182,7 @@ class ThirtiesTelegramBridge:
         )
 
         self.allowed_chat_ids: Set[int] = set(self.config.telegram.allowed_chat_ids)
+        self.auto_bound_chat_id: Optional[int] = None
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
         self.current_date: date = self._get_active_diurnal_date()
 
@@ -263,8 +264,18 @@ class ThirtiesTelegramBridge:
         """Process incoming message from a chat."""
         text = text.strip()
 
+        # With no allowed_chat_ids configured, the first chat to message the bot claims it
+        # for the lifetime of this process; everyone else is refused.
+        if not self.allowed_chat_ids:
+            self.allowed_chat_ids = {chat_id}
+            self.auto_bound_chat_id = chat_id
+            logger.warning(
+                "No telegram.allowed_chat_ids configured: bound this bot to chat %s until restart. "
+                "Add allowed_chat_ids = [%s] to config.toml to make that permanent.", chat_id, chat_id,
+            )
+
         # Authorization check
-        if self.allowed_chat_ids and chat_id not in self.allowed_chat_ids:
+        if chat_id not in self.allowed_chat_ids:
             logger.warning("Unauthorized access attempt from chat_id %s", chat_id)
             self.client.send_message(
                 chat_id,
@@ -272,11 +283,6 @@ class ThirtiesTelegramBridge:
                 parse_mode="Markdown",
             )
             return
-
-        # If no allowed_chat_ids were specified in config, allow and register the first chat
-        if not self.allowed_chat_ids and chat_id not in self.active_chats:
-            self.active_chats.add(chat_id)
-            logger.info("Automatically registered active chat ID: %s", chat_id)
 
         self.active_chats.add(chat_id)
         self._check_and_refresh_date()
@@ -329,10 +335,10 @@ class ThirtiesTelegramBridge:
     def _cmd_help(self, chat_id: int) -> None:
         msg = (
             "🤖 *Thirties Mobile Planning Assistant*\n\n"
-            "Powered by Gemini 3.8 Flash & Joplin State Sync.\n\n"
+            "Powered by Gemini & your Joplin backlog.\n\n"
             "📋 *Commands*:\n"
-            "• `/now` – Current block, active task, and countdown\n"
-            "• `/day` – Overview of today's 30-minute block schedule\n"
+            "• `/now` – What's happening now, and time until sleep\n"
+            "• `/day` – Today's schedule\n"
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/clear` – Clear conversation context (start fresh)\n"
             "• `/status` – System, model, and sync status\n"
@@ -343,13 +349,13 @@ class ThirtiesTelegramBridge:
             "• _\"Move my workout to 3:30pm\"_\n"
             "• _\"What do I have remaining in my backlog?\"_\n"
         )
-        if not self.allowed_chat_ids:
+        if self.auto_bound_chat_id == chat_id:
             msg += (
                 f"\n🔒 *Security Note*:\n"
-                f"Your Chat ID is `{chat_id}`.\n"
-                f"Add it to `~/.config/thirties/config.toml` to lock down this bot:\n"
+                f"This bot is now bound to your chat (ID `{chat_id}`) until the bridge restarts.\n"
+                f"Add it to `~/.config/thirties/config.toml` to make that permanent:\n"
                 f"```toml\n"
-                f"[telegram]\\n"
+                f"[telegram]\n"
                 f"allowed_chat_ids = [{chat_id}]\n"
                 f"```"
             )
@@ -497,7 +503,7 @@ class ThirtiesTelegramBridge:
         print(f"🚀 Thirties Telegram Bridge Running as @{bot_user}!")
         print(f"📱 Open Telegram on your phone and send /start to @{bot_user}")
         if not self.allowed_chat_ids:
-            print("⚠️  No allowed_chat_ids set: will auto-bind first user.")
+            print("⚠️  No allowed_chat_ids set: the first chat to message the bot will be bound to it.")
         print("=======================================================\\n")
 
         self.running = True
@@ -534,6 +540,68 @@ class ThirtiesTelegramBridge:
         logger.info("Thirties Telegram Bridge stopped.")
 
 
+def check_setup(cfg: ThirtiesConfig) -> bool:
+    """Print a checklist of everything the bridge needs. Returns True if it can run."""
+    from thirties_core.config import get_default_config_path
+    from thirties_core.inference import AntigravityInferenceEngine, GeminiInferenceEngine
+
+    ok = True
+
+    def line(passed: Optional[bool], label: str, detail: str = "") -> None:
+        mark = {True: "✅", False: "❌", None: "⚠️ "}[passed]
+        print(f"{mark} {label}{': ' + detail if detail else ''}")
+
+    path = get_default_config_path()
+    line(path.is_file() or None, "Config file", str(path) if path.is_file() else f"{path} not found (using defaults)")
+
+    token = cfg.telegram.bot_token.strip()
+    if not token:
+        ok = False
+        line(False, "Bot token", "set [telegram] bot_token (get one from @BotFather)")
+    else:
+        try:
+            me = TelegramClient(token).get_me()
+            line(True, "Bot token", f"connected as @{me.get('username', '?')}")
+        except Exception as e:
+            ok = False
+            line(False, "Bot token", f"Telegram rejected it: {e}")
+
+    if cfg.telegram.allowed_chat_ids:
+        line(True, "Allowed chats", ", ".join(str(c) for c in cfg.telegram.allowed_chat_ids))
+    else:
+        line(None, "Allowed chats", "none yet: the first chat to message the bot gets bound until restart")
+
+    engine = get_inference_engine(cfg)
+    name = type(engine).__name__
+    if isinstance(engine, GeminiInferenceEngine):
+        try:
+            reply = engine.chat([{"role": "user", "content": "Reply with the single word: ready"}])
+            passed = "ready" in reply.get("content", "").lower()
+            ok = ok and passed
+            line(passed, "Model", f"{name} ({engine.model}) replied: {reply.get('content', '')[:80]!r}")
+        except Exception as e:
+            ok = False
+            line(False, "Model", f"{name}: {e}")
+    elif isinstance(engine, AntigravityInferenceEngine):
+        line(None, "Model", f"{name} via agy ({engine.model}); not test-called. If replies fail, set "
+             "[inference] backend = \"gemini_api\" and gemini_api_key")
+    else:
+        ok = False
+        line(False, "Model", f"{name}: no working model backend. Set [inference] backend = \"gemini_api\" and gemini_api_key")
+
+    joplin_db = cfg.resolve_joplin_db_path()
+    line(bool(joplin_db) or None, "Joplin backlog", str(joplin_db) if joplin_db else "database not found; the assistant will have no backlog")
+    if cfg.sync.enabled:
+        has_token = bool(cfg.joplin.api_token)
+        line(has_token or None, "Joplin sync", "enabled" if has_token else
+             "enabled but [joplin] api_token is empty; set it, or set [sync] enabled = false")
+
+    gen = cfg.general
+    line(None, "Location", f"lat {gen.latitude}, lon {gen.longitude}, {gen.timezone} (sunrise/sunset come from this)")
+    print("\nReady to run." if ok else "\nFix the ❌ items above, then run --check again.")
+    return ok
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -544,6 +612,7 @@ def main() -> None:
     parser.add_argument("--token", type=str, default="", help="Telegram Bot Token")
     parser.add_argument("--config", type=str, default="", help="Path to config.toml")
     parser.add_argument("--no-notify", action="store_true", help="Disable proactive block buzzes")
+    parser.add_argument("--check", action="store_true", help="Check the setup (token, model, Joplin, location) and exit")
     args = parser.parse_args()
 
     cfg = load_config(args.config if args.config else None)
@@ -551,6 +620,8 @@ def main() -> None:
         cfg.telegram.bot_token = args.token
     if args.no_notify:
         cfg.telegram.notify_block_transitions = False
+    if args.check:
+        sys.exit(0 if check_setup(cfg) else 1)
 
     bridge = ThirtiesTelegramBridge(config=cfg)
 

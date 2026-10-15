@@ -166,6 +166,12 @@ class TestTransports(unittest.TestCase):
             cfg.inference.gemini_api_key = "test_key"
             self.assertIsInstance(get_inference_engine(cfg), GeminiInferenceEngine)
 
+        cfg_api = ThirtiesConfig()
+        cfg_api.inference.backend = "gemini_api"
+        cfg_api.inference.gemini_api_key = "test_key"
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
+            self.assertIsInstance(get_inference_engine(cfg_api), GeminiInferenceEngine)
+
         cfg_litert = ThirtiesConfig()
         cfg_litert.inference.backend = "litert"
         with patch.object(LiteRTInferenceEngine, "is_available", return_value=True):

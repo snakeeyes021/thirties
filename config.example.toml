@@ -1,0 +1,36 @@
+# Thirties configuration. Copy to ~/.config/thirties/config.toml and `chmod 600` it:
+# it holds secrets (bot token, API keys).
+
+[general]
+# Sunrise and sunset are computed from this. Use your own location and timezone.
+latitude = 38.8799
+longitude = -77.1067
+timezone = "America/New_York"
+# Default work and sleep, as half-hour indexes from midnight (17 = 8:30 AM).
+# work_end_thirty is the LAST work thirty (31 = 3:30-4:00 PM, so work ends at 4:00 PM).
+work_start_thirty = 17
+work_end_thirty = 31
+sleep_start_thirty = 46   # 11:00 PM
+sleep_end_thirty = 14     # sleep ends at 7:00 AM
+
+[inference]
+# "gemini_api" calls the Gemini API directly with gemini_api_key.
+# "gemini" prefers the agy CLI when it is installed, and falls back to the API.
+backend = "gemini_api"
+gemini_model = "gemini-3.8-flash-low"
+gemini_api_key = ""        # https://aistudio.google.com/apikey
+
+[telegram]
+enabled = true
+bot_token = ""             # from @BotFather
+allowed_chat_ids = []      # your chat ID; the bot shows it to you on /start
+notify_block_transitions = true
+
+[joplin]
+# Needed only for [sync]. Joplin > Settings > Web Clipper > Advanced options > Authorization token.
+api_token = ""
+
+[sync]
+# Syncs Thirties state between computers through a note in Joplin.
+# Leave off unless you run Thirties on more than one computer.
+enabled = false

@@ -1,0 +1,60 @@
+# Telegram Setup
+
+The Telegram bridge is a temporary mobile client (AGENTS.md, Anti-Pattern 1): a small program on your computer that relays messages between a private Telegram bot and Thirties. Your phone only runs Telegram; the computer does the work, so it must be on and online whenever you want to use the bot.
+
+## 1. Create the bot (phone)
+
+1. In Telegram, open a chat with **@BotFather** (blue checkmark).
+2. Send `/newbot`. Give it a display name (e.g. "Thirties"), then a username ending in `bot` (e.g. `matt_thirties_bot`).
+3. BotFather replies with a **token** like `123456789:AA...`. Treat it like a password: anyone with it controls the bot.
+
+## 2. Configure (computer)
+
+Edit `~/.config/thirties/config.toml` (template: `config.example.toml`; keep the file `chmod 600`):
+
+- `[telegram] bot_token`: the token from BotFather.
+- `[inference] gemini_api_key`: from https://aistudio.google.com/apikey. The free tier allows only about 20 requests per model per day, and each message costs 1–3, so expect roughly 10 messages a day on a free key.
+- `[general] latitude`, `longitude`, `timezone`: your location, so sunrise and sunset are right.
+- Leave `[sync] enabled = false` unless you run Thirties on more than one computer.
+
+Then check everything:
+
+```bash
+cd ~/dev/thirties
+python3 -m thirties_core.telegram_bridge --check
+```
+
+The check makes one real model call to confirm the key works.
+
+## 3. First run and lock-down
+
+```bash
+python3 -m thirties_core.telegram_bridge
+```
+
+1. On your phone, search for the bot's username and send `/start`.
+2. The bot binds itself to your chat and shows your **chat ID**. Any other chat is refused, but only until the bridge restarts.
+3. Make that permanent: stop the bridge (Ctrl+C), set `allowed_chat_ids = [<your chat id>]` under `[telegram]`, and start it again.
+
+## 4. Try it
+
+- `/day`: today's schedule. `/now`: what's happening now and time until sleep.
+- "work went til 4:30", "put 2 hours of composing at 5pm", "push composing back an hour", "what should I do this evening?"
+- `/clear` starts a fresh conversation; `/status` shows the backend.
+- Every 30 minutes the bot sends a notification when something starts (set `notify_block_transitions = false` to turn that off).
+
+## 5. Keep it running (optional)
+
+```bash
+cp contrib/thirties-telegram.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now thirties-telegram
+journalctl --user -u thirties-telegram -f      # logs
+```
+
+User services stop when you log out, unless you run `loginctl enable-linger $USER`.
+
+## Notes
+
+- The GTK app and the bridge share the same local state, so changes made from your phone show up in the desktop app after you reload the day.
+- The bot sends your Joplin backlog and schedule to Gemini, the same as the desktop app.

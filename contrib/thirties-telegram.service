@@ -1,0 +1,21 @@
+# systemd user service for the Thirties Telegram bridge.
+# Install:  cp contrib/thirties-telegram.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload
+#           systemctl --user enable --now thirties-telegram
+# Logs:     journalctl --user -u thirties-telegram -f
+# Adjust WorkingDirectory if the repository lives elsewhere.
+
+[Unit]
+Description=Thirties Telegram bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/dev/thirties
+ExecStart=/usr/bin/python3 -m thirties_core.telegram_bridge
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
