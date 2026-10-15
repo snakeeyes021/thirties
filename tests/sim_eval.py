@@ -452,10 +452,16 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
                 run.end_reason = message
                 break
             run.transcript.append(("user", message, 0.0))
+            runtime = getattr(run.manager.brain, "_runtime", None)
+            calls_before = len(runtime.calls) if runtime is not None else 0
             start = time_mod.time()
             reply = run.manager.send_user_message(message)
             run.transcript.append(("assistant", reply, round(time_mod.time() - start, 1)))
-            print(f"    U: {message[:160]}\n    A ({run.transcript[-1][2]}s): {reply[:300]}", flush=True)
+            runtime = getattr(run.manager.brain, "_runtime", None)
+            breakdown = ""
+            if runtime is not None:
+                breakdown = " [" + ", ".join(f"{c['kind']} {c['seconds']}s" for c in runtime.calls[calls_before:]) + "]"
+            print(f"    U: {message[:160]}\n    A ({run.transcript[-1][2]}s{breakdown}): {reply[:300]}", flush=True)
         else:
             run.end_reason = "turn limit"
         for check in scn.checks:

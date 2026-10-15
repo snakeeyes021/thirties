@@ -160,7 +160,8 @@ class ParserSession:
             out = self.runtime._text(self._conv.send_message(user)).strip()
             self._used += len(user) + len(out)
             elapsed = time.time() - start
-        self.runtime.calls.append({"kind": "parse", "seconds": round(elapsed, 2), "prompt_chars": len(user)})
+        kind = "parse" if self.system.startswith("You convert") else ("pick" if self.system.startswith("You help") else "voice")
+        self.runtime.calls.append({"kind": kind, "seconds": round(elapsed, 2), "prompt_chars": len(user)})
         return out
 
     def warm(self) -> None:
