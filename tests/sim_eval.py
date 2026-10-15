@@ -323,7 +323,7 @@ SCENARIOS: List[SimScenario] = [
         goals=["Have the shower come before the assistant upgrades.",
                "Add 30 minutes of lunch at 1 PM, with everything after it sliding later.",
                "Ask to see the afternoon as a clean list."],
-        checks=[order("lunch", "shower", "upgrade", "chore"), has_item("lunch", ("12:30", "13:30"))],
+        checks=[order("shower", "upgrade", "chore"), order("lunch", "upgrade"), has_item("lunch", ("12:30", "13:30"))],
     ),
 ]
 
