@@ -5,6 +5,7 @@ import unittest
 from tests.fixtures import at
 from thirties_core.clock import (
     ClockError,
+    agenda_lines,
     format_clock,
     format_duration,
     parse_clock,
@@ -57,6 +58,23 @@ class TestClock(unittest.TestCase):
         self.assertEqual(format_duration(150), "2h 30m")
         self.assertEqual(format_duration(45), "45m")
         self.assertEqual(format_duration(120), "2h")
+
+    def test_agenda_lines_show_end_times_only_where_not_implied(self) -> None:
+        items = [(at("16:00"), at("17:00"), "Feed cat", ""),
+                 (at("17:00"), at("17:30"), "Wash car", ""),
+                 (at("18:00"), at("19:00"), "Dinner", ""),
+                 (at("18:00"), at("19:00"), "Audiobook", ""),
+                 (at("19:00"), at("21:00"), "Team dinner", "unconfirmed")]
+        self.assertEqual(agenda_lines(items), [
+            "- 4:00 PM – Feed cat",
+            "- 5:00 PM – Wash car (until 5:30 PM)",
+            "- 6:00 PM – Dinner",
+            "- 6:00 PM – Audiobook",
+            "- 7:00 PM – Team dinner (unconfirmed, until 9:00 PM)",
+        ])
+        nested = [(at("08:30"), at("16:00"), "Work", ""), (at("10:00"), at("11:00"), "Meeting", "")]
+        self.assertEqual(agenda_lines(nested, numbered=True),
+                         ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting (until 11:00 AM)"])
 
 
 if __name__ == "__main__":

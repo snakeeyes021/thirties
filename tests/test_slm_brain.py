@@ -217,7 +217,7 @@ class TestSchedulingActions(SlmTestCase):
         self.say("reading at 7", {"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"})
         out = self.say("show me a clean list of the evening", {"type": "question", "topic": "schedule"})
         self.assertTrue(out.startswith("Here's the evening:"), out)
-        self.assertIn("- 7:00 PM – 8:00 PM: Reading", out)
+        self.assertIn("- 7:00 PM – Reading (until 8:00 PM)", out)
         self.assertNotIn("Sleep", out)
         self.assertNotIn("daylight", out)
 
@@ -255,7 +255,9 @@ class TestProposalsAndOutcomes(SlmTestCase):
         first_two = [l for l in out.splitlines() if l[:2] in ("1.", "2.")]
         self.assertEqual(len(first_two), 2)
         out = self.say("yes please", {"type": "confirm"})
-        self.assertEqual(out.count("Added "), 2)
+        self.assertTrue(out.startswith("Done:\n"), out)
+        self.assertEqual(len([l for l in out.splitlines() if l.startswith("- ")]), 2, out)
+        self.assertNotIn("(1h)", out)
 
     def test_replies_to_a_proposal_are_read_deterministically(self):
         self.rt.pick_replies.append('{"picks": [1, 2]}')
@@ -306,7 +308,16 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
         out = self.say("can you show me the whole day as a clean list now?", {"type": "chat"})
         self.assertTrue(out.startswith("Here's today:"), out)
-        self.assertIn("- 7:00 PM – 8:00 PM: Dinner", out)
+        self.assertIn("- 7:00 PM – Dinner (until 8:00 PM)", out)
+
+    def test_answers_in_chunks_when_the_user_counts_in_chunks(self):
+        out = self.say("when am I free tonight?", {"type": "question", "topic": "free time tonight"})
+        self.assertNotIn("chunk", out)
+        out = self.say("where can I fit something that takes three chunks tonight?",
+                       {"type": "question", "topic": "free time tonight"})
+        self.assertRegex(out, r"\(\d+ chunks\)")
+        out = self.say("meeting at 8, three chunks", {"type": "add", "title": "Meeting", "start": "8", "duration": "3 chunks"})
+        self.assertIn("Added Meeting: 8:00 PM – 9:30 PM (3 chunks).", out)
 
     def test_answering_when_completes_the_pending_add(self):
         out = self.say("I want a walk soon", {"type": "add", "title": "Walk", "duration": "30 minutes"})

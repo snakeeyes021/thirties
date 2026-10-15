@@ -40,7 +40,8 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
   - `remove_event`, `swap_events`, `clear_time`, `find_open_time`, `list_schedule`, `resolve_calendar_event`
   - Every one takes a `day` argument.
 - **One text grammar** for all models: `CALL tool {json}`.
-- **The Frontier prompt** has no block numbers, no arithmetic lessons, no fixed daylight/dark rules and no "lock in" step. It is rebuilt every turn and lists schedules one item per line.
+- **The Frontier prompt** has no block numbers, no arithmetic lessons, no fixed daylight/dark rules and no "lock in" step. It is rebuilt every turn.
+- **Reply style, for both brains:** answer in the user's terms, with only what the reply needs. If the user counts in chunks, answer in chunks ("three open chunks at 4:00 PM"). A plan is listed by start time ("- 4:00 PM – Feed cat"), with an end time only where it isn't implied (`clock.agenda_lines`). The sim's `fill_afternoon` and `fits_in_chunks` scenarios check this.
 
 ### Phase 3: Closing the loop (first version)
 - **`log_outcome`** records done, partial or skipped:

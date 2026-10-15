@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta
-from typing import Optional
+from typing import List, Optional, Sequence, Tuple
 
 
 class ClockError(ValueError):
@@ -110,6 +110,23 @@ def parse_duration_minutes(value) -> int:
 def format_clock(dt: datetime) -> str:
     """'4:30 PM' style, without a leading zero."""
     return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered: bool = False) -> List[str]:
+    """A plan as a reader expects it: '- 4:00 PM – Feed cat', one line per item, in order.
+
+    Items are (start, end, title, note). Each item ends when the next one starts, so an end
+    time is added only where it isn't implied: before a gap, under an overlap, or at the end.
+    """
+    lines = []
+    for i, (start, end, title, note) in enumerate(items):
+        next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)
+        extras = [note] if note else []
+        if next_start != end:
+            extras.append(f"until {format_clock(end)}")
+        prefix = f"{i + 1}. " if numbered else "- "
+        lines.append(f"{prefix}{format_clock(start)} – {title}" + (f" ({', '.join(extras)})" if extras else ""))
+    return lines
 
 
 def format_duration(minutes: int) -> str:

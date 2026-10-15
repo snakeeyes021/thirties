@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import tempfile
 import time as time_mod
@@ -174,6 +175,26 @@ def memory_mentions(word: str) -> Check:
     return check
 
 
+def replies(pattern: str, present: bool = True, list_lines_only: bool = False) -> Check:
+    """Some assistant reply matches (or, with present=False, none matches) a regex. With
+    list_lines_only, only lines of a list ("- ..." or "1. ...") are searched."""
+    rx = re.compile(pattern, re.IGNORECASE)
+
+    def check(run: "SimRun") -> Optional[str]:
+        texts = [t for r, t, _ in run.transcript if r == "assistant"]
+        if list_lines_only:
+            texts = [l for t in texts for l in t.splitlines() if re.match(r"\s*(?:[-*•]|\d+\.)\s", l)]
+        hits = [t for t in texts if rx.search(t)]
+        if present:
+            return None if hits else f"no reply matches /{pattern}/"
+        return f"reply matches /{pattern}/: {hits[0][:120]!r}" if hits else None
+    check.__doc__ = f"{'' if present else 'no '}reply /{pattern}/"
+    return check
+
+
+# Durations, chunk counts and block numbers inside a plan list: noise when start times already say it.
+BUSY_LIST = r"\bblocks?\s+\d|\b\d+\s+(?:chunks?|thirties)\b|\(\d+\s*(?:h|hrs?|hours?|m|min|minutes)\b"
+
 THU = date(2026, 10, 15)
 SAT = date(2026, 10, 10)
 SUN = date(2026, 10, 11)
@@ -325,6 +346,25 @@ SCENARIOS: List[SimScenario] = [
                "Ask to see the afternoon as a clean list."],
         checks=[order("shower", "upgrade", "chore"), order("lunch", "upgrade"), has_item("lunch", ("12:30", "13:30"))],
     ),
+    SimScenario(
+        "fill_afternoon", SAT, "13:00",
+        persona="Matt, easygoing; wants the assistant to do the organizing. Skims replies; dislikes busy formatting.",
+        situation="Saturday 1 PM, nothing planned until dinner around 6.",
+        goals=["Ask the assistant to fill up your afternoon (until about 6) with things from your backlog.",
+               "Accept its plan, or swap out one item you don't fancy.",
+               "Ask to see the afternoon at a glance."],
+        checks=[has_item("", ("13:00", "18:30")), replies(BUSY_LIST, present=False, list_lines_only=True)],
+    ),
+    SimScenario(
+        "fits_in_chunks", THU, "12:30",
+        persona="Counts time in chunks (the app's 30-minute thirties) and expects the assistant to as well. Brief.",
+        situation="Thursday 12:30 PM, a day off (work already cleared). The only thing this afternoon is groceries at 3.",
+        setup=[("remove_event", {"event": "Work"}),
+               ("add_event", {"title": "Groceries", "start": "3:00 PM", "end": "3:30 PM"})],
+        goals=["Say a client call will take at least three chunks this afternoon, and ask where it could go.",
+               "Pick one of the times offered and have it scheduled."],
+        checks=[has_item("call|client", ("12:30", "19:00"), minimum_minutes=90), replies(r"\bchunks?\b")],
+    ),
 ]
 
 
@@ -375,7 +415,7 @@ Grade strictly and return ONLY a JSON object:
 {{"goals": [{{"goal": <short>, "met": 0 | 0.5 | 1, "why": <short>}}...],
  "accuracy": 1-5 (do the assistant's statements match the real schedule? 5 = always),
  "understanding": 1-5 (did it grasp what the user meant, including corrections and vague references?),
- "clarity": 1-5 (are replies easy to read: clock times, line-separated lists, no jargon or ids?),
+ "clarity": 1-5 (are replies easy to read and shaped for the question? The user's own units (chunks if they count in chunks); plan lists one item per line led by start times, without durations, block numbers or ids the user didn't need?),
  "efficiency": 1-5 (how much effort did the user need? 5 = minimal back-and-forth),
  "tone": 1-5 (warm, appropriate, not pushy),
  "issues": [<short concrete problems>]}}"""

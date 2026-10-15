@@ -25,7 +25,7 @@ from thirties_core.assistant_tools import _stem, _words, rank_tasks
 from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
-from thirties_core.clock import ClockError, format_clock, parse_clock, parse_duration_minutes
+from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -603,6 +603,17 @@ class SlmBrain:
         plan = self.tools.plan_for(day) if day else self.tools.day_plan
         return plan.get_span(m.group(1))
 
+    def _user_unit(self) -> Optional[str]:
+        """'chunks' or 'thirties' when the user is counting in them, so answers can too."""
+        m = re.search(r"\b(chunks?|thirties)\b", getattr(self, "_message", "").lower())
+        if not m:
+            return None
+        return "chunks" if m.group(1).startswith("chunk") else "thirties"
+
+    def _in_user_units(self, minutes: int) -> str:
+        n, unit = minutes // 30, self._user_unit()
+        return f"{n} {unit if n != 1 else {'chunks': 'chunk', 'thirties': 'thirty'}[unit]}"
+
     def _added_line(self, out: str) -> str:
         day = ""
         m = re.match(r"\[(.+?)\] ", out)
@@ -611,7 +622,15 @@ class SlmBrain:
         m = re.match(r"Added (.+?), (.+? – .+?) \((.+?)\)", out)
         if not m:
             return out
-        return f"Added {m.group(1)}{day}: {m.group(2)} ({m.group(3)})."
+        length = m.group(3)
+        if self._user_unit():
+            try:
+                minutes = parse_duration_minutes(length.replace(" ", ""))
+            except ClockError:
+                minutes = 0
+            if minutes and minutes % 30 == 0:
+                length = self._in_user_units(minutes)
+        return f"Added {m.group(1)}{day}: {m.group(2)} ({length})."
 
     def _offer_alternatives(self, args: Dict[str, Any], why: str) -> str:
         """The requested time clashes: offer concrete options instead of failing."""
@@ -755,8 +774,7 @@ class SlmBrain:
             return f"I couldn't swap them: {out}", False
         self._remember(first, second)
         a_, b_ = sorted((first, second), key=lambda s: s.start_dt)
-        return (f"Swapped:\n- {format_clock(a_.start_dt)} – {format_clock(a_.end_dt)}: {a_.title}\n"
-                f"- {format_clock(b_.start_dt)} – {format_clock(b_.end_dt)}: {b_.title}"), True
+        return "Swapped:\n" + "\n".join(agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in (a_, b_)])), True
 
     def _do_remove(self, a: Action) -> Tuple[str, bool]:
         span, problem = self._resolve_one(a)
@@ -807,17 +825,21 @@ class SlmBrain:
         return text, False  # recorded, but the free time didn't change
 
     def _apply_proposals(self, items: List[Dict[str, Any]]) -> Tuple[str, bool]:
-        lines, changed = [], False
+        added, lines, failures = [], [], []
         for args in items:
             ok, out = self._run("add_event", args)
             if ok:
-                changed = True
-                self._remember(self._span_from_result(out, args.get("day")))
+                span = self._span_from_result(out, args.get("day"))
+                self._remember(span)
+                added.append(span)
                 lines.append(self._added_line(out))
             else:
-                lines.append(f"Couldn't add {args['title']}: {out}")
+                failures.append(f"Couldn't add {args['title']}: {out}")
         self.state.proposal, self.state.proposal_kind = [], ""
-        return "\n".join(lines), changed
+        if len(added) >= 2 and all(added):
+            lines = ["Done:"] + agenda_lines([(s.start_dt, s.end_dt, s.title, "")
+                                               for s in sorted(added, key=lambda s: s.start_dt)])
+        return "\n".join(lines + failures), bool(added)
 
     def _do_confirm(self, a: Action) -> Tuple[str, bool]:
         target = {_stem(w) for w in _words(a.get("target") or "")}
@@ -943,13 +965,14 @@ class SlmBrain:
         if not proposal:
             return "I don't have a good backlog item for that. What are you in the mood for?", False
         self.state.proposal, self.state.proposal_kind = proposal, "plan"
-        lines = ["How about:"]
-        for i, p in enumerate(proposal, 1):
+        items = []
+        for p in proposal:
             p_start = self._loose_time(p["start"])
             p_end = p_start + timedelta(minutes=parse_duration_minutes(p["duration"]))
             task = next((t for t in self.tasks if t.id == p["task_id"]), None)
-            why = f" (put off {task.deferred_count}x)" if task and task.deferred_count >= 2 else ""
-            lines.append(f"{i}. {format_clock(p_start)} – {format_clock(p_end)}: {p['title']}{why}")
+            why = f"put off {task.deferred_count}x" if task and task.deferred_count >= 2 else ""
+            items.append((p_start, p_end, p["title"], why))
+        lines = ["How about:"] + agenda_lines(items, numbered=True)
         lines.append("Want all of these, just one (say the number), or something else?")
         return "\n".join(lines), False
 
@@ -1008,6 +1031,8 @@ class SlmBrain:
 
             def length(a, b) -> str:
                 m = int((b - a).total_seconds() // 60)
+                if self._user_unit() and m >= 30:
+                    return self._in_user_units(m)
                 h, mm = divmod(m, 60)
                 return (f"{h} hour{'s' if h != 1 else ''}" if h else "") + (" and " if h and mm else "") + (f"{mm} minutes" if mm else "")
             if len(windows) == 1:
@@ -1050,11 +1075,10 @@ class SlmBrain:
                      if s.category != SpanCategory.SLEEP]
             if not items:
                 return f"Nothing is planned for {label} yet."
-            lines = [f"Here's {label}:"]
-            for s in items:
-                note = " (unconfirmed)" if s.tentative else (f" ({s.status.value})" if s.status.value != "planned" else "")
-                lines.append(f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title}{note}")
-            return "\n".join(lines)
+            rows = [(s.start_dt, s.end_dt, s.title,
+                     "unconfirmed" if s.tentative else (s.status.value if s.status.value != "planned" else ""))
+                    for s in items]
+            return "\n".join([f"Here's {label}:"] + agenda_lines(rows))
         finally:
             self.tools.day_plan = saved
 
