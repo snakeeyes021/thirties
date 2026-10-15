@@ -319,6 +319,37 @@ class TestProposalsAndOutcomes(SlmTestCase):
         out = self.say("meeting at 8, three chunks", {"type": "add", "title": "Meeting", "start": "8", "duration": "3 chunks"})
         self.assertIn("Added Meeting: 8:00 PM – 9:30 PM (3 chunks).", out)
 
+    def test_fill_the_evening_until_a_time(self):
+        self.rt.pick_replies.append('{"picks": [2, 1]}')
+        out = self.say("could you fill up my evening with stuff from my backlog, until 9?",
+                       {"type": "question", "topic": "backlog"})
+        self.assertTrue(out.startswith("How about:"), out)
+        starts = [l.split(" – ")[0].split(". ", 1)[1] for l in out.splitlines() if l[:1].isdigit()]
+        self.assertEqual(starts, ["5:00 PM", "6:30 PM", "7:30 PM", "8:30 PM"], out)  # around the dentist, until 9
+        self.assertIn("(until 9:00 PM)", out)
+        out = self.say("sure", {"type": "confirm"})
+        self.assertTrue(out.startswith("Done:"), out)
+
+    def test_you_pick_makes_the_plan(self):
+        self.rt.pick_replies.append('{"picks": [1]}')
+        out = self.say("idk, just pick whatever and put together a schedule for my evening",
+                       {"type": "question", "topic": "what kind of activities"})
+        self.assertTrue(out.startswith("Done:"), out)
+        self.assertNotEqual(occupant(self.m.day_plan, "17:00"), None)
+
+    def test_pick_for_me_accepts_a_pending_proposal(self):
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        self.say("ideas for tonight?", {"type": "suggest", "topic": "tonight"})
+        out = self.say("any of those work honestly, just pick a few and slot them in", {"type": "chat"})
+        self.assertTrue(out.startswith("Done:"), out)
+
+    def test_where_could_it_go_is_about_open_time(self):
+        out = self.say("I have a client call tonight, at least 3 chunks. where could it go?",
+                       {"type": "suggest", "topic": "tonight"})
+        self.assertTrue(out.startswith("You're free"), out)
+        self.assertIn("chunks", out)
+        self.assertNotIn("5:00 PM", out)  # only an hour before the dentist: too short
+
     def test_answering_when_completes_the_pending_add(self):
         out = self.say("I want a walk soon", {"type": "add", "title": "Walk", "duration": "30 minutes"})
         self.assertEqual(out, "When should I put Walk?")

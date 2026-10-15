@@ -418,6 +418,44 @@ class SlmBrain:
     _NO_RE = re.compile(r"^\s*(no|nah|nope|not really|neither|none of (those|them|these)|pass|skip)\b", re.IGNORECASE)
     _ORDINAL_WORDS = {"first": 1, "1st": 1, "one": 1, "second": 2, "2nd": 2, "two": 2, "third": 3, "3rd": 3, "three": 3}
 
+    # Handing the planning over: "fill up my afternoon", "you pick", "where could it go?"
+    _FILL_RE = re.compile(r"\b(fill|plan out|line up|load up|put together|block out|pack)\b.{0,50}"
+                          r"\b(afternoon|morning|evening|tonight|day|rest|time|schedule|until|til|till)\b|\bfill (it|that|the rest|in)\b",
+                          re.IGNORECASE)
+    _PICK_RE = re.compile(r"\b(you pick|just pick|pick (for me|whatever|a few|some|any|something)|whatever (you think|makes sense|works)|"
+                          r"up to you|your call|surprise me|you decide|you choose|dealer'?s choice)\b", re.IGNORECASE)
+    _PLACE_RE = re.compile(r"\bwhere (could|can|should|would|might|will|does|do) [\w' ]{1,30}? ?(go|fit|put|squeeze)\b|"
+                           r"\bwhen (can|could|should) (i|we) (fit|do|put|squeeze|schedule)\b|"
+                           r"\bwhat times? (are|is|do i have) (free|open)\b", re.IGNORECASE)
+    _UNTIL_RE = re.compile(r"\b(?:until|til|till|up to|before)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|dinner|bed(?:time)?)\b",
+                           re.IGNORECASE)
+    _LENGTH_RE = re.compile(r"\b(\d+(?:\.\d+)?|an?|one|two|three|four|five|six)\s+(chunks?|thirties|hours?|hrs?|minutes?|mins?)\b",
+                            re.IGNORECASE)
+    _PARTS = ("morning", "afternoon", "evening", "tonight")
+
+    def _route(self, actions: List[Action], message: str) -> List[Action]:
+        """Recognize requests that hand the planning over, which the parser tends to misfile."""
+        lowered = message.lower()
+        part = next((p for p in self._PARTS if p in lowered), "")
+        edits = [a for a in actions if a.type in ("add", "move", "remove", "swap", "outcome", "confirm", "reject", "choose")]
+        if self._PLACE_RE.search(message) and not any(a.type in ("add", "move") for a in edits):
+            q = Action("question", {"topic": f"free time {part}".strip()})
+            m = self._LENGTH_RE.search(message)
+            if m:
+                q.fields["duration"] = m.group(0)
+            return edits + [q]
+        fill = bool(self._FILL_RE.search(message))
+        pick = bool(self._PICK_RE.search(message))
+        if fill or (pick and not self.state.proposal and not edits):
+            suggest = Action("suggest", {"topic": part or "today", "fill": True, "apply": pick})
+            m = self._UNTIL_RE.search(message)
+            if m:
+                suggest.fields["until"] = m.group(1)
+            keep = [a for a in actions if a.type not in ("suggest", "chat") and
+                    not (a.type == "question" and not self._SHOW_DAY_RE.search(message))]
+            return [a for a in keep if a.type != "question"] + [suggest] + [a for a in keep if a.type == "question"]
+        return actions
+
     def _dialog_act(self, message: str) -> Optional[Action]:
         """Answers to our own pending question: yes / no / which option."""
         if not self.state.proposal:
@@ -429,6 +467,8 @@ class SlmBrain:
         m = re.search(r"\bthe (first|second|third|1st|2nd|3rd) (?:one|option)\b|^\s*(first|second|third) one\b", lowered)
         if m:
             return Action("choose", {"option": self._ORDINAL_WORDS[m.group(1) or m.group(2)]})
+        if self._PICK_RE.search(lowered) and not self._FILL_RE.search(lowered):
+            return Action("confirm", {})
         if self._NO_RE.search(lowered) and len(lowered) < 60:
             return Action("reject", {})
         if self._YES_RE.search(lowered) and len(lowered) < 60:
@@ -443,6 +483,7 @@ class SlmBrain:
             actions = [act] + [a for a in actions if not (a.type == "add" and (a.get("title") or "").lower() in proposed)
                                and a.type != "chat"]
         actions = self._sanity(actions, message)
+        actions = self._route(actions, message)
         waiting = self.state.awaiting_time
         if waiting and not any(a.type in ("add", "move", "remove") for a in actions):
             m = self._TIME_IN_TEXT.search(message)
@@ -913,6 +954,17 @@ class SlmBrain:
     def _do_suggest(self, a: Action) -> Tuple[str, bool]:
         topic = a.get("topic") or ""
         start, end = self._window_for(topic)
+        fill = bool(a.get("fill"))
+        if a.get("until"):
+            until = str(a.get("until")).lower()
+            dinner = next((s for s in self.tools.day_plan.active_spans() if "dinner" in s.title.lower() and s.start_dt > start), None)
+            try:
+                end = dinner.start_dt if until == "dinner" and dinner else \
+                    self._loose_time({"dinner": "6 PM", "bed": "bedtime"}.get(until, until), after=start)
+            except ClockError:
+                pass
+            if fill and end > start and not any(p in topic for p in self._PARTS):
+                start = max(self._now(), self.tools.day_plan.day_start) if self._is_today() else start
         windows = [(max(s, start), min(e, end)) for s, e in self.tools.open_windows(after=start, before=end)]
         windows = [(s, e) for s, e in windows if e - s >= timedelta(minutes=30)]
         if not windows:
@@ -936,7 +988,8 @@ class SlmBrain:
             ranked.append(t)
             if len(ranked) >= 12:
                 break
-        ranked = self._pick(ranked, topic, windows) or ranked[:3]
+        picked = self._pick(ranked, topic, windows) or ranked[:3]
+        ranked = picked + [t for t in ranked if t not in picked] if fill else picked
         try:
             total = parse_duration_minutes(a.get("duration")) if a.get("duration") else None
         except ClockError:
@@ -946,7 +999,7 @@ class SlmBrain:
         cursor_windows = list(windows)
         budget = total
         for task in ranked:
-            minutes = want or max(30, 30 * (task.estimated_thirties or 1))
+            minutes = want or max(60 if fill else 30, 30 * (task.estimated_thirties or 1))
             if budget is not None:
                 if budget < 30:
                     break
@@ -954,17 +1007,22 @@ class SlmBrain:
                 budget -= minutes
             for i, (ws, we) in enumerate(cursor_windows):
                 slot_start = ws if ws.minute in (0, 30) and ws.second == 0 else \
-                    ws.replace(minute=0 if ws.minute == 0 else 30, second=0, microsecond=0) + (timedelta(minutes=30) if ws.minute not in (0, 30) else timedelta())
+                    ws.replace(minute=0 if ws.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
+                if fill and timedelta(minutes=30) <= we - slot_start < timedelta(minutes=minutes):
+                    minutes = int((we - slot_start).total_seconds() // 1800) * 30  # use up the end of a window
                 if we - slot_start >= timedelta(minutes=minutes):
                     proposal.append({"title": task.title, "start": format_clock(slot_start),
                                      "duration": f"{minutes} minutes", "task_id": task.id})
                     cursor_windows[i] = (slot_start + timedelta(minutes=minutes), we)
                     break
-            if len(proposal) >= 3:
+            if len(proposal) >= (10 if fill else 3):
                 break
         if not proposal:
             return "I don't have a good backlog item for that. What are you in the mood for?", False
         self.state.proposal, self.state.proposal_kind = proposal, "plan"
+        if a.get("apply"):  # "you pick": the user handed the decision over, so make it
+            text, changed = self._apply_proposals(proposal)
+            return text + "\nSay the word if you want to swap anything out.", changed
         items = []
         for p in proposal:
             p_start = self._loose_time(p["start"])
@@ -1023,7 +1081,11 @@ class SlmBrain:
             try:
                 self.tools.day_plan = self.tools.plan_for(day)
                 start, end = self._window_for(topic) if not day else (self.tools.day_plan.day_start, self.tools.day_plan.day_end)
-                windows = [(a, b) for a, b in self.tools.open_windows(after=start, before=end) if b - a >= timedelta(minutes=15)]
+                try:
+                    need = parse_duration_minutes(a.get("duration")) if a.get("duration") else 15
+                except ClockError:
+                    need = 15
+                windows = [(w0, w1) for w0, w1 in self.tools.open_windows(after=start, before=end) if w1 - w0 >= timedelta(minutes=need)]
             finally:
                 self.tools.day_plan = saved
             if not windows:
