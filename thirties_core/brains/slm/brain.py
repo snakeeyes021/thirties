@@ -360,8 +360,15 @@ class SlmBrain:
             kept.append(a)
         return kept
 
+    _SHOW_DAY_RE = re.compile(r"\b(show|list|lay out|layout|see|recap|overview|summar\w*|what'?s on|whole day|my day|"
+                              r"schedule look)\b.*\b(day|schedule|plan|today|tonight|tomorrow|list)\b|"
+                              r"\b(clean|full|whole) (list|day|schedule)\b", re.IGNORECASE)
+
     def _execute(self, actions: List[Action], message: str) -> str:
         actions = self._sanity(actions, message)
+        if all(a.type == "chat" for a in actions) and self._SHOW_DAY_RE.search(message):
+            day = "tomorrow" if "tomorrow" in message.lower() else None
+            actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
         if not actions:
             return self._chat(message)
         lines: List[str] = []

@@ -216,6 +216,12 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.assertEqual(self.say("thanks!", {"type": "chat"}), "You're welcome!")
         self.assertEqual(self.say("how's it going", {"type": "chat"}), "Happy to help!")
 
+    def test_show_my_day_never_becomes_small_talk(self):
+        self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
+        out = self.say("can you show me the whole day as a clean list now?", {"type": "chat"})
+        self.assertTrue(out.startswith("Here's today:"), out)
+        self.assertIn("- 7:00 PM – 8:00 PM: Dinner", out)
+
     def test_unparseable_output_falls_back(self):
         out = self.say("hmm", "sorry I can't do JSON")
         self.assertEqual(out, "Happy to help!")

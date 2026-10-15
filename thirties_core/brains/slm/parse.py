@@ -94,6 +94,8 @@ fyi the probation stuff is things I probably won't do => {"actions":[{"type":"re
 I want to finish Natalie's piece by December => {"actions":[{"type":"profile","text":"Wants to finish Natalie's piece by December"}]}
 I'm wiped => {"actions":[{"type":"energy","level":1}]}
 when am I free this afternoon? => {"actions":[{"type":"question","topic":"free time this afternoon"}]}
+show me the whole day as a clean list => {"actions":[{"type":"question","topic":"schedule"}]}
+what's on tomorrow? => {"actions":[{"type":"question","topic":"schedule","day":"tomorrow"}]}
 thanks! => {"actions":[{"type":"chat"}]}
 Reply with the JSON object only."""
 
