@@ -281,6 +281,11 @@ class AssistantTools:
                 start_dt = end_dt - timedelta(minutes=planned_minutes)
             span.actual_start = start_dt or span.start_dt
             span.actual_end = end_dt or span.end_dt
+            if (span.actual_start, span.actual_end) != (span.start_dt, span.end_dt):
+                # Show what really happened; keep the original plan for statistics.
+                if span.planned_start is None:
+                    span.planned_start, span.planned_end = span.start_dt, span.end_dt
+                span.start_dt, span.end_dt = span.actual_start, span.actual_end
             if started not in (None, "") and (finished not in (None, "") or duration not in (None, "")) and not guessed:
                 span.time_source = "reported"
             elif start_dt or end_dt:

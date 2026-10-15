@@ -35,6 +35,7 @@ ACTION_SCHEMA: Dict[str, Any] = {
                     "before": {"type": "string"},
                     "push": {"type": "boolean"},
                     "other": {"type": "string"},
+                    "to_day": {"type": "string"},
                     "day": {"type": "string"},
                     "status": {"type": "string", "enum": ["done", "partial", "skipped"]},
                     "started": {"type": "string"},
@@ -55,7 +56,7 @@ ACTION_SCHEMA: Dict[str, Any] = {
 SYSTEM_PROMPT = """You convert one message from the user to their day-planning assistant into actions, as JSON.
 Action types:
 add: a new item. title; start, or after/before (the name of another item); end OR duration; day if not today; alongside=true if done during something else; push=true if later items should slide back to make room.
-move: change an existing item. target (its name, or "it"); then shift ("+1 hour" later, "-30 minutes" earlier) OR a new start/end/duration OR after/before another item; push=true to slide later items.
+move: change an existing item. target (its name, or "it"); then shift ("+1 hour" later, "-30 minutes" earlier) OR a new start/end/duration OR after/before another item; push=true to slide later items; to_day to move it to another day.
 remove: take an item off. target.
 swap: switch two items. target and other.
 outcome: the user did, finished or skipped something. target; status done|partial|skipped; started/finished times only if said.
@@ -74,6 +75,7 @@ make the first upgrades block 3 thirties => {"actions":[{"type":"move","target":
 push it back an hour => {"actions":[{"type":"move","target":"it","shift":"+1 hour"}]}
 oh shoot, work went til 4:30 => {"actions":[{"type":"move","target":"work","end":"4:30"}]}
 I'm starting work at 10 today => {"actions":[{"type":"move","target":"work","start":"10"}]}
+push the email to tomorrow at 9 => {"actions":[{"type":"move","target":"email","to_day":"tomorrow","start":"9"}]}
 I took the day off => {"actions":[{"type":"remove","target":"work"}]}
 cancel composing and do laundry at 7:30 for an hour => {"actions":[{"type":"remove","target":"composing"},{"type":"add","title":"Laundry","start":"7:30","duration":"1 hour"}]}
 dinner 6 to 7, and I'll listen to Project Hail Mary while I eat => {"actions":[{"type":"add","title":"Dinner","start":"6","end":"7"},{"type":"add","title":"Project Hail Mary","start":"6","end":"7","alongside":true}]}

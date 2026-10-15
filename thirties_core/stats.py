@@ -73,7 +73,8 @@ def duration_ratios(spans: List[EventSpan]) -> Dict[str, List[float]]:
             continue
         if s.time_source not in RELIABLE_TIME_SOURCES or not (s.actual_start and s.actual_end):
             continue
-        planned = s.end_dt.timestamp() - s.start_dt.timestamp()
+        p_start, p_end = s.planned_start or s.start_dt, s.planned_end or s.end_dt
+        planned = p_end.timestamp() - p_start.timestamp()
         actual = s.actual_end.timestamp() - s.actual_start.timestamp()
         if planned > 0 and actual > 0:
             ratios.setdefault(activity_key(s.title), []).append(actual / planned)

@@ -74,6 +74,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "title": "New title.",
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
             "push_later": "true to slide the planned activities that follow it later instead of overlapping them.",
+            "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
             "day": "The day the item is on (default: the day being planned).",
         },
         "required": ["event"],
@@ -436,11 +437,14 @@ class PlanTools:
         title: Optional[str] = None,
         replace_overlaps: Any = False,
         push_later: Any = False,
+        to_day: Any = None,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
         if span.source == "calendar":
             raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
+        if to_day not in (None, ""):
+            return self._move_to_day(span, to_day, start, end, duration, title)
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
 
@@ -480,6 +484,36 @@ class PlanTools:
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
         return f"Changed {before} → {self.describe(span)}.{extra}"
+
+    def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any) -> str:
+        source_plan = self.day_plan
+        target_plan = self.plan_for(to_day)
+        length = span.end_dt - span.start_dt
+        if start not in (None, ""):
+            new_start = resolve_clock(str(start), target_plan.day_start)
+        else:
+            clock = span.start_dt.timetz()
+            new_start = resolve_clock(clock.strftime("%H:%M"), target_plan.day_start)
+        if end not in (None, ""):
+            new_end = resolve_clock(str(end), target_plan.day_start, after=new_start)
+        elif duration not in (None, ""):
+            new_end = new_start + timedelta(minutes=parse_duration_minutes(duration))
+        else:
+            new_end = new_start + length
+        moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
+                          source="user", task_id=span.task_id, notes=span.notes)
+        self.day_plan = target_plan
+        try:
+            self._place(moved, False)
+        finally:
+            self.day_plan = source_plan
+        before = self.describe(span)
+        source_plan.spans = [s for s in source_plan.spans if s.id != span.id]
+        span.title, span.start_dt, span.end_dt, span.source = moved.title, new_start, new_end, "user"
+        target_plan.spans.append(span)
+        target_plan.spans.sort(key=lambda s: s.start_dt)
+        self._persist(span)
+        return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}."
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:
         a, b = self._find_span(first), self._find_span(second)

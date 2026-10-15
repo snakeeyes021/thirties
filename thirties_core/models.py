@@ -114,6 +114,9 @@ class EventSpan:
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
     time_source: str = ""
+    # The original plan, kept when an outcome moves the span to when it really happened.
+    planned_start: Optional[datetime] = None
+    planned_end: Optional[datetime] = None
 
     def __post_init__(self) -> None:
         if self.start_dt.timestamp() >= self.end_dt.timestamp():
@@ -155,6 +158,8 @@ class EventSpan:
             "actual_start": self.actual_start.isoformat() if self.actual_start else None,
             "actual_end": self.actual_end.isoformat() if self.actual_end else None,
             "time_source": self.time_source,
+            "planned_start": self.planned_start.isoformat() if self.planned_start else None,
+            "planned_end": self.planned_end.isoformat() if self.planned_end else None,
         }
 
     @classmethod
@@ -175,6 +180,8 @@ class EventSpan:
             actual_start=datetime.fromisoformat(data["actual_start"]) if data.get("actual_start") else None,
             actual_end=datetime.fromisoformat(data["actual_end"]) if data.get("actual_end") else None,
             time_source=data.get("time_source", ""),
+            planned_start=datetime.fromisoformat(data["planned_start"]) if data.get("planned_start") else None,
+            planned_end=datetime.fromisoformat(data["planned_end"]) if data.get("planned_end") else None,
         )
 
 

@@ -144,6 +144,11 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("the 9 PM one should end at 10", {"type": "move", "target": "upgrades", "end": "10"})
         self.assertIn("Moved Upgrades to 9:00 PM – 10:00 PM", out)
 
+    def test_move_to_tomorrow(self):
+        self.say("email at 5", {"type": "add", "title": "Email", "start": "5", "duration": "30 minutes"})
+        out = self.say("push the email to tomorrow at 9", {"type": "move", "target": "email", "to_day": "tomorrow", "start": "9"})
+        self.assertIn("Friday, October 16, 9:00 AM – 9:30 AM", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

@@ -543,6 +543,23 @@ class SlmBrain:
         args: Dict[str, Any] = {"event": span.id}
         if a.get("day"):
             args["day"] = a.get("day")
+        if a.get("to_day"):
+            args["to_day"] = a.get("to_day")
+            if a.get("start"):
+                target_plan = self.tools.plan_for(a.get("to_day"))
+                saved = self.tools.day_plan
+                self.tools.day_plan = target_plan
+                try:
+                    args["start"] = self._clock_arg(self._loose_time(a.get("start"), prefer_future=False,
+                                                                      near=target_plan.day_start + timedelta(hours=4)))
+                except ClockError as e:
+                    return f"I couldn't read that time: {e}", False
+                finally:
+                    self.tools.day_plan = saved
+            ok, out = self._run("update_event", args)
+            if not ok:
+                return f"I couldn't move {span.title}: {out}", False
+            return out.replace("Moved ", "Moved ", 1), True
         if a.get("push"):
             args["push_later"] = True
         anchor_ref = a.get("after") or a.get("before")

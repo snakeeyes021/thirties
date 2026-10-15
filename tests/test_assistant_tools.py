@@ -44,6 +44,9 @@ class TestOutcomes(ToolsTestCase):
         self.joplin.complete_task.assert_called_once()
         span = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Taxes")
         self.assertEqual((span.status, span.actual_start, span.time_source), (SpanStatus.DONE, at("16:15"), "reported"))
+        # The schedule now shows what really happened; the plan is kept for statistics
+        self.assertEqual((span.start_dt, span.end_dt, span.planned_start, span.planned_end),
+                         (at("16:15"), at("17:45"), at("16:00"), at("17:00")))
         self.assertEqual(self.sched.state_db.get_task_history("t_taxes").completed_date, DAY.isoformat())
 
     def test_finish_time_only_is_estimated(self) -> None:
@@ -97,6 +100,16 @@ class TestAnyDay(ToolsTestCase):
         sat = next(l for l in lines if l.startswith("Sat"))
         self.assertIn("no work; 1 planned", sat)
         self.assertIn("Piano", sat)
+
+    def test_move_to_another_day(self) -> None:
+        self.t.execute("add_event", {"title": "Email recruiter", "start": "3:00 PM", "duration": "30 min"})
+        out = self.t.execute("update_event", {"event": "Email recruiter", "to_day": "tomorrow", "start": "9:00 AM"})
+        self.assertIn("to Friday, October 16, 9:00 AM – 9:30 AM", out)
+        self.assertNotIn("Email recruiter", [s.title for s in self.t.day_plan.spans])
+        self.assertEqual(occupant(self.sched.build_day_plan(DAY + timedelta(days=1))[0], "09:00", 1), "Email recruiter")
+        self.t.execute("add_event", {"title": "Call", "start": "4:00 PM", "duration": "30 min"})
+        out = self.t.execute("update_event", {"event": "Call", "to_day": "Saturday"})
+        self.assertIn("Saturday, October 17, 4:00 PM", out)
 
     def test_list_another_day_and_weekend_has_no_work(self) -> None:
         saturday = self.t.execute("list_schedule", {"day": "Saturday"})
