@@ -164,9 +164,10 @@ class SlmBrain:
             message=message,
             last_item=last.title if last else "",
         )
-        raw = extract_json(self.parser.ask(context))
+        text = self.parser.ask(context)
+        raw = extract_json(text)
         if raw is None or "actions" not in raw:
-            logger.warning("[SlmBrain] unparseable parser output; retrying with constrained decoding")
+            logger.warning("[SlmBrain] unparseable parser output %r; retrying with constrained decoding", text[:300])
             raw = self.runtime.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
         return parse_actions(raw)
 
@@ -286,6 +287,12 @@ class SlmBrain:
                 if title_words and not (title_words & said):
                     logger.info("[SlmBrain] dropping invented add: %s", a.fields)
                     continue
+            if a.type == "remove" and self.state.proposal and not self._span_candidates(a.get("target") or ""):
+                target = {_stem(w) for w in _words(a.get("target") or "")}
+                if any(target & {_stem(w) for w in _words(p["title"])} for p in self.state.proposal):
+                    a = Action("reject", {})  # turning down a suggestion, not removing anything
+                    if any(k.type == "reject" for k in kept):
+                        continue
             if a.type == "move" and not self._span_candidates(a.get("target") or "") and (a.get("start") or a.get("after") or a.get("before")):
                 if not any(b.type == "add" for b in actions):
                     a = Action("add", {**a.fields, "title": a.get("target")})
@@ -608,7 +615,7 @@ class SlmBrain:
             ok, out = self._run("resolve_calendar_event", {"event": invites[0].id, "attend": False})
             return (f"Okay, declined {invites[0].title}." if ok else out), ok
         self.state.proposal, self.state.proposal_kind = [], ""
-        return "Okay, I won't add that. What would you rather do?", False
+        return "No problem, I'll leave those off.", False
 
     def _do_choose(self, a: Action) -> Tuple[str, bool]:
         n = a.get("option")
@@ -650,6 +657,8 @@ class SlmBrain:
             score += 3.0
         if task.parent_task_id:
             score -= 0.5  # prefer whole tasks over sub-steps
+        if not task.is_checkbox_item and not task.id.startswith("media:"):
+            score -= 1.0  # a whole note ("Assorted Quickies") is a bucket, not an action
         if "media" in task.tags or task.id.startswith("media:"):
             score -= 1.5 if not (topic_words & {"watch", "read", "relax", "movi", "show", "book"}) else -1.0
         return score

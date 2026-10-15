@@ -106,3 +106,36 @@ class TestCalendarEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEDSHelpers(unittest.TestCase):
+    """RSVP and time conversion on real iCal components (no calendar server needed)."""
+
+    def setUp(self) -> None:
+        try:
+            import gi
+            gi.require_version("ICalGLib", "3.0")
+            from gi.repository import ICalGLib
+        except Exception:
+            self.skipTest("ICalGLib not available")
+        self.ical = ICalGLib
+        self.tz = ZoneInfo("America/New_York")
+
+    def comp(self, attendees: str = "") -> object:
+        return self.ical.Component.new_from_string(
+            "BEGIN:VEVENT\nUID:x1\nSUMMARY:Team dinner\n"
+            "DTSTART;TZID=America/New_York:20261015T190000\nDTEND;TZID=America/New_York:20261015T210000\n"
+            + attendees + "END:VEVENT\n")
+
+    def test_partstat_for_my_address(self) -> None:
+        me = {"me@example.com"}
+        cases = {"NEEDS-ACTION": "needsAction", "ACCEPTED": "accepted", "DECLINED": "declined", "TENTATIVE": "tentative"}
+        for raw, expected in cases.items():
+            comp = self.comp(f"ATTENDEE;PARTSTAT={raw}:mailto:Me@Example.com\nATTENDEE;PARTSTAT=ACCEPTED:mailto:other@x.com\n")
+            self.assertEqual(EDSCalendarEngine._my_partstat(comp, me), expected, raw)
+        self.assertIsNone(EDSCalendarEngine._my_partstat(self.comp(), me))
+
+    def test_time_conversion_uses_utc_epoch(self) -> None:
+        t = self.ical.Time.new_from_string("20261015T230000Z")
+        dt = EDSCalendarEngine._to_datetime(t, self.tz)
+        self.assertEqual((dt.hour, dt.minute, dt.tzinfo), (19, 0, self.tz))

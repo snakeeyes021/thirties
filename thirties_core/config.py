@@ -52,7 +52,12 @@ class JoplinConfig:
 @dataclass
 class CalendarConfig:
     primary_calendar_id: str = "primary"
-    default_ignore_secondary: bool = False
+    default_ignore_secondary: bool = False  # true: events on calendars that aren't yours are ignored entirely
+    # Calendars to read, by display name or uid (empty: all enabled calendars).
+    include_calendars: List[str] = field(default_factory=list)
+    exclude_calendars: List[str] = field(default_factory=lambda: ["Birthdays & Anniversaries"])
+    # Your addresses, used to read your RSVP on invites; found automatically from GNOME Online Accounts.
+    my_emails: List[str] = field(default_factory=list)
 
 
 @dataclass
