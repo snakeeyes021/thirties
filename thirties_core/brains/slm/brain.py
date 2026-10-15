@@ -456,14 +456,16 @@ class SlmBrain:
             lowered = message.lower()
             day = "tomorrow" if "tomorrow" in lowered else None
             if re.search(r"\b(free|open|available|time left|left before|room)\b", lowered) and "?" in message:
-                actions = [Action("question", {"topic": "free time " + ("tonight" if "tonight" in lowered or "bed" in lowered else ""),
+                actions = [Action("question", {"topic": "free time " + ("tonight" if "tonight" in lowered else ""),
                                                **({"day": day} if day else {})})]
             elif self._SHOW_DAY_RE.search(message):
                 actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
         # Also answer a free-time question asked alongside other requests
         if re.search(r"\bhow much (free )?time\b|\bwhen am i free\b|\bfree time\b", message.lower()) and \
                 not any(a.type == "question" for a in actions):
-            actions = actions + [Action("question", {"topic": "free time tonight"})]
+            tonight = bool(re.search(r"\b(tonight|this evening|before bed|bedtime)\b", message.lower()))
+            actions = actions + [Action("question", {"topic": "free time" + (" tonight" if tonight else ""),
+                                                     "day": None})]
         if not actions:
             return self._chat(message)
         lines: List[str] = []

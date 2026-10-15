@@ -278,7 +278,8 @@ class AssistantTools:
             if start_dt and not end_dt:
                 end_dt = start_dt + timedelta(minutes=planned_minutes)
             if end_dt and not start_dt:
-                start_dt = end_dt - timedelta(minutes=planned_minutes)
+                # "Took until 3:30": assume it started on time unless that's impossible.
+                start_dt = span.start_dt if end_dt > span.start_dt else end_dt - timedelta(minutes=planned_minutes)
             span.actual_start = start_dt or span.start_dt
             span.actual_end = end_dt or span.end_dt
             if (span.actual_start, span.actual_end) != (span.start_dt, span.end_dt):

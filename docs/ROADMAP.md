@@ -13,9 +13,9 @@ Both brains run on one shared core, and both are measured with simulated users: 
 | Brain | Goals met | Deterministic checks | Judge: accuracy / understanding / clarity / efficiency / tone (of 5) | Time per reply |
 |---|---|---|---|---|
 | Frontier (gemini-3.8-flash-low via agy) | **0.98** | 12/13 | 4.5 / 4.3 / 4.9 / 4.5 / 4.8 | ~9 s |
-| SLM (Gemma 4 E4B on the laptop's iGPU), round 4 | **0.93** | 11/13 | 4.5 / 3.5 / 4.4 / 3.3 / 4.3 | ~14 s |
+| SLM (Gemma 4 E4B on the laptop's iGPU), round 5 | **0.97** | 12/13 | 4.3 / 4.0 / 4.6 / 4.1 / 4.4 | ~13 s |
 
-The SLM went from 0.39 to 0.94 on the hardest scenario (the user's real Sunday conversation) over four rounds. Each fix came from reading transcripts and the judge's notes.
+The SLM went from 0.39 to 0.89–0.94 on the hardest scenario (the user's real Sunday conversation), and from 0.33 to 1.0 on "work ran long", over five rounds. Each fix came from reading transcripts and the judge's notes. Its one remaining check failure came from a check that was too strict, since relaxed.
 
 The first real day of use (before 2026-10-14) was about 75% usable, on the old core. Everything below has changed since.
 
@@ -114,7 +114,8 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
 ## Next
 
 1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
-2. **SLM understanding and efficiency** (judge scores 3.3–3.5):
+2. **SLM understanding and efficiency** (judge scores ~4.0):
+   - Decision fatigue: when the user says "you pick" or is low on energy, propose one low-effort plan and apply it on "sure". Tasks need a rough effort estimate for this.
    - Multi-part messages still drop a part now and then. Measure per action with `tests/slm_parse_eval.py`, and add a "did I cover everything in the message?" check in Python (look for nouns from the message that matched no action).
    - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
 3. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).

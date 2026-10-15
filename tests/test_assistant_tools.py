@@ -52,7 +52,7 @@ class TestOutcomes(ToolsTestCase):
     def test_finish_time_only_is_estimated(self) -> None:
         self.t.execute("add_event", {"title": "Reading", "start": "4:00 PM", "duration": "1 hour"})
         out = self.t.execute("log_outcome", {"event": "Reading", "status": "done", "finished": "5:30 PM"})
-        self.assertIn("4:30 PM – 5:30 PM, estimated", out)
+        self.assertIn("4:00 PM – 5:30 PM, estimated", out)  # assumed it started on time
 
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})

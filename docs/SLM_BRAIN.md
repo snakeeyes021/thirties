@@ -82,9 +82,20 @@ Dialog state that must survive restarts (the pending proposal, what "it" refers 
 - **`tests/interactive_eval.py`: step through turns by hand,** with state deltas and an agent or human as the judge.
 - **`tests/legacy_slm/`: the old block-number harnesses.** Source material only; they don't run.
 
-### 4.2 Results
+### 4.2 Results (2026-10-15)
 
-See `docs/ROADMAP.md` (Where We Are) for the latest numbers. Raw reports go to `docs/eval_reports/sim/` (gitignored).
+All 13 simulated-user scenarios, judged by Gemini; the Frontier Brain was run on the same scenarios for comparison.
+
+| Round | SLM goals met | Notes |
+|---|---|---|
+| 1 | 0.39–0.9 (2 scenarios) | robotic replies, "3 thirties" read as 30 min, stuck on "which one?" |
+| 4 | 0.93 (13 scenarios) | after the persistent parser, dialog acts, retries, guards |
+| 5 | **0.97** (13 scenarios) | 12/13 checks; judge 4.0–4.6; ~13 s per reply |
+| Frontier | 0.98 | 12/13 checks; judge 4.3–4.9; ~9 s per reply |
+
+Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, median 3.5 s per message. The misses are mostly yes/no/option replies to a pending question, which Python now handles deterministically.
+
+Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.3 Next experiments
 
