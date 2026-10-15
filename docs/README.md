@@ -1,22 +1,8 @@
-# Thirties Documentation Directory
+# Thirties Documentation
 
-Welcome to the Thirties documentation directory.
+- **[`../AGENTS.md`](../AGENTS.md)**: mission, division of labor, architecture and invariants. **The authority**: if any other doc disagrees with it, that other doc is wrong.
+- **[`ROADMAP.md`](./ROADMAP.md)**: the single ordered backlog for the whole project.
+- **[`SLM_BRAIN.md`](./SLM_BRAIN.md)**: research design and evaluation plan for the on-device SLM brain.
+- **[`archive/`](./archive/)**: superseded specs and plans, kept for history only. Never treat them as instructions.
 
-## 🧭 Navigational Rule: Source of Truth
-
-- **Primary Source of Truth**: **[`BRANCH_STRATEGY_AND_DESIGN.md`](./BRANCH_STRATEGY_AND_DESIGN.md)**
-  This document defines the exact mission, technical architecture, component design, and active roadmap for the branch you currently have checked out.
-- **Historical Archive**: **[`archive/`](./archive/)**
-  Contains superseded specifications, historical action plans, and past test logs. These files are preserved for historical lineage and should not be used as active specifications.
-
----
-
-## 🌿 Dual-Track Branch Strategy
-
-1. **`feat/practical-gemini-assistant`**:
-   - Focuses on immediate, rugged usability.
-   - Powered by Gemini 3.8 Flash via Antigravity.
-   - Comprehensive Joplin context ingestion, cross-device sync via Joplin notes, and natural conversational scheduling.
-2. **`feat/longterm-slm-architecture`**:
-   - Long-term research testbed for 4B on-device SLMs (Gemma 4B via LiteRT-LM).
-   - Focuses on radical primitive simplification (Option B: uniform astronomical event canvas) and a massive agentic evaluation harness.
+Evaluation output goes to `docs/eval_reports/`, which is gitignored.
