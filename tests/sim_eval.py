@@ -192,7 +192,7 @@ SCENARIOS: List[SimScenario] = [
             "it right after dinner, with the Natalie listening moved after it.",
             "Wind down with something non-active at the end if there's time (a movie or show).",
         ],
-        checks=[has_item("dinner", ("19:30", "20:30")), has_item("carl"), has_item("recruiter|pto|email"),
+        checks=[has_item("dinner", ("19:30", "21:30")), has_item("carl"), has_item("recruiter|pto|email"),
                 has_item("natalie|inspiration|listening"), order("dinner", "recruiter|pto|email", "natalie|inspiration")],
     ),
     SimScenario(

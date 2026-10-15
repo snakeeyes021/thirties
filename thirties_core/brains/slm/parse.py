@@ -74,7 +74,7 @@ oh shoot, work went til 4:30 => {"actions":[{"type":"move","target":"work","end"
 I'm starting work at 10 today => {"actions":[{"type":"move","target":"work","start":"10"}]}
 I took the day off => {"actions":[{"type":"remove","target":"work"}]}
 cancel composing and do laundry at 7:30 for an hour => {"actions":[{"type":"remove","target":"composing"},{"type":"add","title":"Laundry","start":"7:30","duration":"1 hour"}]}
-dinner 6 to 7, and I'll listen to my audiobook while I eat => {"actions":[{"type":"add","title":"Dinner","start":"6","end":"7"},{"type":"add","title":"Audiobook","start":"6","end":"7","alongside":true}]}
+dinner 6 to 7, and I'll listen to Project Hail Mary while I eat => {"actions":[{"type":"add","title":"Dinner","start":"6","end":"7"},{"type":"add","title":"Project Hail Mary","start":"6","end":"7","alongside":true}]}
 finished the taxes around 4 => {"actions":[{"type":"outcome","target":"taxes","status":"done","finished":"4"}]}
 didn't get to the email => {"actions":[{"type":"outcome","target":"email","status":"skipped"}]}
 email the recruiter right after dinner, an hour => {"actions":[{"type":"add","title":"Email the recruiter","after":"dinner","duration":"an hour"}]}
@@ -153,3 +153,8 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
                         break
         start = cleaned.find("{", start + 1)
     return None
+
+
+PICKER_PROMPT = """You help choose what someone should do next. You get the time, the open time, what they said, and numbered candidate tasks from their to-do lists.
+Pick up to 3 candidates that best fit what they asked for, their energy, the time of day and their goals. Prefer variety and things that are realistic right now. Never pick something that doesn't fit what they asked.
+Reply with JSON only: {"picks": [numbers in order of preference]}"""

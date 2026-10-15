@@ -23,8 +23,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
 from thirties_core.astronomy import get_current_time
-from thirties_core.brains.slm.parse import (ACTION_SCHEMA, SYSTEM_PROMPT, Action, build_context, extract_json,
-                                            parse_actions)
+from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, Action, build_context,
+                                            extract_json, parse_actions)
 from thirties_core.clock import ClockError, format_clock, parse_clock, parse_duration_minutes
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
@@ -80,6 +80,12 @@ class SlmBrain:
         if self._parser is None:
             self._parser = self.runtime.parser(SYSTEM_PROMPT)
         return self._parser
+
+    @property
+    def picker(self):
+        if getattr(self, "_picker", None) is None:
+            self._picker = self.runtime.parser(PICKER_PROMPT)
+        return self._picker
 
     def warm(self) -> None:
         """Load the model and process the instruction before the first message (call off the UI thread)."""
@@ -269,7 +275,27 @@ class SlmBrain:
 
     # --- 3. execution ---
 
+    def _sanity(self, actions: List[Action], message: str) -> List[Action]:
+        """Drop or repair actions the message can't support (a small model sometimes invents)."""
+        said = {_stem(w) for w in _words(message)}
+        refers_back = bool(re.search(r"\b(it|that|those|them|these|this|same|again)\b", message.lower()))
+        kept: List[Action] = []
+        for a in actions:
+            if a.type == "add" and not refers_back:
+                title_words = {_stem(w) for w in _words(a.get("title") or "")}
+                if title_words and not (title_words & said):
+                    logger.info("[SlmBrain] dropping invented add: %s", a.fields)
+                    continue
+            if a.type == "move" and not self._span_candidates(a.get("target") or "") and (a.get("start") or a.get("after") or a.get("before")):
+                if not any(b.type == "add" for b in actions):
+                    a = Action("add", {**a.fields, "title": a.get("target")})
+                else:
+                    continue
+            kept.append(a)
+        return kept
+
     def _execute(self, actions: List[Action], message: str) -> str:
+        actions = self._sanity(actions, message)
         if not actions:
             return self._chat(message)
         lines: List[str] = []
@@ -637,7 +663,9 @@ class SlmBrain:
             return "There's no open time left in that stretch. Want me to look at tomorrow?", False
         profile = self.tools.services.profile.sections() if self.tools.services else {}
         goal_words = {_stem(w) for w in _words(" ".join(profile.get(k, "") for k in ("Near-term goals", "Long-term goals")))}
-        topic_words = {_stem(w) for w in _words(topic)} - {"tonight", "evening", "afternoon", "morn", "today", "something"}
+        time_words = {"tonight", "evening", "afternoon", "morning", "today", "something", "night", "now", "later",
+                      "rest", "day", "next", "couple", "hours", "hour", "few", "what", "should", "suggest", "ideas", "idea"}
+        topic_words = {_stem(w) for w in _words(topic) if w not in time_words}
         scheduled = {s.title.lower() for s in self.tools.day_plan.spans}
         scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled), i, t) for i, t in enumerate(self.tasks)),
                         key=lambda x: (-x[0], x[1]))
@@ -650,13 +678,24 @@ class SlmBrain:
                 continue
             seen_notes.add(note)
             ranked.append(t)
-            if len(ranked) >= 6:
+            if len(ranked) >= 12:
                 break
-        want = parse_duration_minutes(a.get("duration")) if a.get("duration") else None
+        ranked = self._pick(ranked, topic, windows) or ranked[:3]
+        try:
+            total = parse_duration_minutes(a.get("duration")) if a.get("duration") else None
+        except ClockError:
+            total = None
+        want = None
         proposal: List[Dict[str, Any]] = []
         cursor_windows = list(windows)
+        budget = total
         for task in ranked:
             minutes = want or max(30, 30 * (task.estimated_thirties or 1))
+            if budget is not None:
+                if budget < 30:
+                    break
+                minutes = min(minutes, budget)
+                budget -= minutes
             for i, (ws, we) in enumerate(cursor_windows):
                 slot_start = ws if ws.minute in (0, 30) and ws.second == 0 else \
                     ws.replace(minute=0 if ws.minute == 0 else 30, second=0, microsecond=0) + (timedelta(minutes=30) if ws.minute not in (0, 30) else timedelta())
@@ -679,6 +718,40 @@ class SlmBrain:
             lines.append(f"{i}. {format_clock(p_start)} – {format_clock(p_end)}: {p['title']}{why}")
         lines.append("Want all of these, just one (say the number), or something else?")
         return "\n".join(lines), False
+
+    def _pick(self, candidates: List[TaskItem], topic: str, windows) -> List[TaskItem]:
+        """Let the model choose the best few candidates for the moment (one small decision)."""
+        if len(candidates) <= 3:
+            return candidates
+        now = self._now()
+        lines = [f"{i}. {t.title} [{t.parent_note_title or t.source_notebook}"
+                 f"{', put off ' + str(t.deferred_count) + 'x' if t.deferred_count else ''}]"
+                 for i, t in enumerate(candidates, 1)]
+        energy = ""
+        if self.tools.services:
+            recent = self.tools.services.energy.entries(since=now - timedelta(hours=4))
+            if recent:
+                energy = f"Energy: {recent[-1]['level']}/5. "
+        goals = ""
+        if self.tools.services:
+            prof = self.tools.services.profile.sections()
+            goals = " ".join(prof.get(k, "") for k in ("Near-term goals",)).strip()
+        user_line = next((m["content"] for m in reversed(self.messages) if m.get("role") == "user"), topic)
+        context = (f"Now: {now.strftime('%A')} {format_clock(now)}. Open: "
+                   + ", ".join(f"{format_clock(a)}-{format_clock(b)}" for a, b in windows[:3])
+                   + f". {energy}{'Goals: ' + goals[:200] + '. ' if goals else ''}\nThey said: \"{user_line[:300]}\"\n"
+                   + "Candidates:\n" + "\n".join(lines))
+        try:
+            raw = extract_json(self.picker.ask(context)) or {}
+        except Exception as e:
+            logger.warning("[SlmBrain] picker failed: %s", e)
+            return []
+        picks = [candidates[i - 1] for i in raw.get("picks", []) if isinstance(i, int) and 1 <= i <= len(candidates)]
+        unique: List[TaskItem] = []
+        for t in picks:
+            if all(u.id != t.id for u in unique):
+                unique.append(t)
+        return unique[:3]
 
     # --- questions, memory, profile, energy ---
 
