@@ -23,6 +23,7 @@ import re
 import sys
 import tempfile
 import time as time_mod
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -93,6 +94,7 @@ class SimScenario:
     profile: Dict[str, str] = field(default_factory=dict)
     opening: str = ""
     max_turns: int = 10
+    hide_tasks: List[str] = field(default_factory=list)  # backlog titles this scenario assumes aren't there
     tags: List[str] = field(default_factory=list)  # goal kinds, for per-kind results
 
 
@@ -394,6 +396,7 @@ SCENARIOS: List[SimScenario] = [
         persona="Matt; knows his own lists well and gets impatient when told he already has something he doesn't.",
         situation="Thursday 1 PM; work ends at 4. His Errands/Admin list has 'Message Brad about a weekend trip' "
                   "under Probation, which is NOT what he means: Brad just messaged him and he needs to reply.",
+        hide_tasks=["Message Brad back"],
         goals=["Ask to make sure you message Brad back today, around 5.",
                "If the assistant thinks it's the weekend-trip item, say it's a different thing.",
                "Have it put on your Errands/Admin list as well, and scheduled at 5."],
@@ -543,6 +546,30 @@ class SimRun:
         return "\n".join(lines)
 
 
+class SimJoplinAPI:
+    """Joplin's API in memory, seeded from the backlog, so list edits work in evals and never touch the
+    user's real notes."""
+
+    def __init__(self, tasks: List[TaskItem]) -> None:
+        self.notes: Dict[str, Dict[str, str]] = {}
+        for t in tasks:
+            if t.is_checkbox_item and t.parent_note_id:
+                note = self.notes.setdefault(t.parent_note_id, {"id": t.parent_note_id, "body": ""})
+                note["body"] += f"- [ ] {t.title}\n"
+            elif not t.id.startswith("media:"):
+                self.notes.setdefault(t.id, {"id": t.id, "body": ""})
+
+    def ping(self) -> bool:
+        return True
+
+    def get_note(self, note_id: str, fields: str = "") -> Optional[Dict[str, str]]:
+        return dict(self.notes.setdefault(note_id, {"id": note_id, "body": ""}))
+
+    def update_note(self, note_id: str, data: Dict[str, Any]) -> bool:
+        self.notes.setdefault(note_id, {"id": note_id, "body": ""}).update(data)
+        return True
+
+
 def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: List[Dict], engine) -> Tuple[Any, Any]:
     cfg = load_config()
     cfg.assistant.brain = brain
@@ -551,8 +578,12 @@ def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: Li
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp(prefix="sim_")) / "state.sqlite"),
                                    MockCalendarEngine(events))
     plan, pending = sched.build_day_plan(scn.day)
-    manager = ConversationManager(plan, [TaskItem(**t.to_dict()) for t in tasks], pending, sched,
-                                  inference_engine=engine, active_notes=notes)
+    hidden = {h.lower() for h in scn.hide_tasks}
+    tasks = [TaskItem(**t.to_dict()) for t in tasks if t.title.lower() not in hidden]
+    cfg.joplin.write_back, cfg.joplin.api_token = True, "sim"
+    joplin = SimpleNamespace(api_client=SimJoplinAPI(tasks))
+    manager = ConversationManager(plan, tasks, pending, sched, inference_engine=engine, active_notes=notes)
+    manager.tools.services.joplin = joplin
     for tool, args in scn.setup:
         manager.execute_tool(tool, args)
     for section, text in scn.profile.items():

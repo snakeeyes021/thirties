@@ -349,7 +349,8 @@ class AssistantTools:
         _, note_title, note_id = scored[0]
         writer = self._writer()
         if writer is None:
-            raise ToolError("Joplin isn't connected.")
+            raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
+                            "Connect it in Preferences → Tasks.")
         status, msg = writer.submit({"op": "add_task", "note_id": note_id, "title": title.strip(),
                                      "section": section or None})
         if status in ("not_allowed", "failed"):
@@ -373,7 +374,8 @@ class AssistantTools:
             raise ToolError("Give at least two steps.")
         writer = self._writer()
         if writer is None:
-            raise ToolError("Joplin isn't connected.")
+            raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
+                            "Connect it in Preferences → Tasks.")
         from thirties_core.joplin_writeback import break_down_op
         status, msg = writer.submit(break_down_op(found, steps))
         if status in ("not_allowed", "failed"):
@@ -777,8 +779,9 @@ class AssistantTools:
             t = same[0]
             return f"Same task: {describe_task(t)}. Schedule it with this task_id."
         if similar:
-            return ("Only similar tasks, possibly different things. Don't assume: ask whether it's one of these or "
-                    "something new.\n" + "\n".join(f"- {describe_task(t)}" for t in similar[:3]))
+            return ("No exact match; these are only similar and may be different things (ask the user, in your own "
+                    "words, whether they mean one of them or something new):\n"
+                    + "\n".join(f"- {describe_task(t)}" for t in similar[:3]))
         return "Nothing on the lists matches: treat it as a new item."
 
     def search_backlog(self, query: str, **_: Any) -> str:

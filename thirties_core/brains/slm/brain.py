@@ -533,6 +533,9 @@ class SlmBrain:
     _ADD_TO_LIST_RE = re.compile(r"\b(?:add|put|throw|stick|write|jot)\s+(?:down\s+)?(?P<task>.+?)\s+(?:to|on|onto|in|into)\s+"
                                  r"(?:my\s+|the\s+)?(?P<list>[\w/&' -]+?)\s+(?:list|note|backlog|to-?do(?:s| list)?)\b",
                                  re.IGNORECASE)
+    # "make sure that's on my errands list too"
+    _ON_LIST_RE = re.compile(r"\b(?P<task>it|that|this)(?:'s| is)?\s+(?:also\s+)?(?:on|in|onto|into)\s+(?:my\s+|the\s+)?"
+                             r"(?P<list>[\w/&' -]+?)\s+(?:list|note|backlog|to-?do(?:s| list)?)\b", re.IGNORECASE)
     _BREAKDOWN_RE = re.compile(r"\bbreak\s+(?:(?P<what>.+?)\s+)?(?:down|up|apart)\b|\b(?:too (?:big|much|hard|daunting|overwhelming)"
                                r"|hard to (?:start|get started)|can'?t (?:get )?start(?:ed)?|don'?t know where to start"
                                r"|smaller (?:steps|parts|pieces|chunks|bits))\b", re.IGNORECASE)
@@ -611,9 +614,14 @@ class SlmBrain:
             return [reminder]
         if self._MUTE_RE.search(message):
             return [a for a in actions if a.type == "outcome"] + [Action("mute", {})]
-        m = self._ADD_TO_LIST_RE.search(message)
+        m = self._ADD_TO_LIST_RE.search(message) or self._ON_LIST_RE.search(message)
         if m and not re.search(r"\b(calendar|schedule|plan)\b", m.group("list"), re.IGNORECASE):
             task = re.sub(r"^(?:a|an|the)\s+", "", m.group("task").strip(" '\""), flags=re.IGNORECASE)
+            if task.lower() in PRONOUNS:  # "put it on my errands list": the item just talked about
+                last = self.tools.day_plan.get_span(self.state.last_ids[0]) if self.state.last_ids else None
+                if last is None:
+                    return [Action("chat", {})]
+                task = last.title
             return [Action("task_add", {"title": task[:1].upper() + task[1:], "list": m.group("list")})]
         m = self._BREAKDOWN_RE.search(message)
         if m and not any(a.type in ("add", "move", "remove", "swap") for a in actions):

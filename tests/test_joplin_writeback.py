@@ -126,7 +126,7 @@ class TestTools(unittest.TestCase):
                                      is_checkbox_item=True, parent_note_title="Errands", parent_note_id="n1"))
         self.assertTrue(self.t.execute("match_backlog", {"text": "call the bank"}).startswith("Same task: Call the bank"))
         out = self.t.execute("match_backlog", {"text": "message Brad back"})
-        self.assertTrue(out.startswith("Only similar tasks"), out)
+        self.assertTrue(out.startswith("No exact match; these are only similar"), out)
         self.assertIn("Message Brad about a weekend trip", out)
         self.assertEqual(self.t.execute("match_backlog", {"text": "feed the cats"}),
                          "Nothing on the lists matches: treat it as a new item.")

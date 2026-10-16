@@ -535,6 +535,14 @@ class TestJoplinLists(SlmTestCase):
         self.assertEqual(out, "Added 'Buy stamps' to Errands/Admin.")
         self.assertIn("- [ ] Buy stamps", self.api.notes["n1"]["body"])
 
+    def test_put_it_on_a_list_means_the_item_just_planned(self):
+        self.say("message brad back at 5", {"type": "add", "title": "Message Brad back", "start": "5", "duration": "15 min"})
+        out = self.say("also put it on my errands/admin list", {"type": "add", "title": "It"})
+        self.assertEqual(out, "Added 'Message Brad back' to Errands/Admin.")
+        self.api.notes["n1"]["body"] = "- [ ] Costco customer service\n"
+        out = self.say("can you also make sure that's on my errands/admin list?", {"type": "add", "title": "Message Brad back"})
+        self.assertEqual(out, "Added 'Message Brad back' to Errands/Admin.")
+
     def test_break_down_then_schedule_the_first_step(self):
         self.say("natalie text search at 5", {"type": "add", "title": "Text search for Natalie's piece", "start": "5"})
         self.rt.json_replies.append({"steps": ["List three poets", "Read one poem aloud", "Note lines that fit"]})
