@@ -122,15 +122,20 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
    - Multi-part messages drop a part (50% on the parse benchmark: "work ran until 4:30, and move budget review to 4:30" loses the work change). Add a "did I cover everything in the message?" check in Python: look for nouns from the message that matched no action.
    - "Dinner, cooking and eating, listening to X" becomes three items; it should be one item with X alongside.
    - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
-3. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).
-4. **Statistics in planning:** use real durations from history when proposing how long things take, and warn when a plan exceeds the capacity you've actually shown.
-5. **Conversation summaries** when a conversation ends, so history search works on summaries instead of raw messages.
-6. **Calendar refinements:**
+3. **Messages to the user (check-ins and reminders):**
+   - Keep: one check-in 10 minutes after a planned item ends with no outcome.
+   - User-requested messages at any time, on any day ("remind me next week to water the alligator" → "3 PM on Saturday").
+   - Suppression on request ("no need to keep asking about X"; "I'll do it tomorrow").
+   - Later, once there's a rule for it: contextual messages ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
+4. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).
+5. **Statistics in planning:** use real durations from history when proposing how long things take, and warn when a plan exceeds the capacity you've actually shown.
+6. **Conversation summaries** when a conversation ends, so history search works on summaries instead of raw messages.
+7. **Calendar refinements:**
    - remember "not mine" decisions per recurring series, not per occurrence
-   - creating events back in Google Calendar (write access through EDS)
-7. **Connector abstraction (Anti-Pattern 1):** `TaskSource`, `CalendarSource` and `SyncTransport` interfaces. The user mentioned "a cloud location with much more storage" as another configurable option, probably a sync or storage transport; waiting on the user to say what it is.
-8. **Weekly patterns:** different routines per weekday (work hours, sleep).
-9. **Housekeeping:**
+   - (not planned for now: writing events back to Google Calendar; task write-back, Joplin first, is what matters)
+8. **Connector abstraction (Anti-Pattern 1):** `TaskSource`, `CalendarSource` and `SyncTransport` interfaces. The user mentioned "a cloud location with much more storage" as another configurable option, probably a sync or storage transport; waiting on the user to say what it is.
+9. **Weekly patterns:** different routines per weekday (work hours, sleep).
+10. **Housekeeping:**
    - `pyproject.toml` dependencies are stale (`astral` is unused; `litert-lm-api` should be optional)
    - `inference.py` hard-codes `~/dev/Thirties` runner paths
    - unused imports
