@@ -51,6 +51,9 @@ if GTK:
     from thirties.views.chat_panel import ChatPanel, persist_conversation
     from thirties.views.day_view import DayView
     from thirties.views.profile_dialog import ProfileMemoryDialog
+    from thirties.views import settings_rows
+    from thirties.views.preferences import PreferencesDialog
+    from thirties.views.setup import SetupWindow
     from thirties.widgets.block_widget import GroupedBlockWidget
 
 
@@ -217,6 +220,42 @@ def _children(widget):
     while child is not None:
         yield child
         child = child.get_next_sibling()
+
+
+
+@unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+class SetupAndPreferencesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from unittest import mock
+        from thirties_core.app_core import AppCore
+        from thirties_core.config import ThirtiesConfig
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tempfile.mkdtemp(prefix="thirties_gui_data_")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.core = AppCore(use_keyring=False, config=ThirtiesConfig())
+        self.app = mock.MagicMock()
+
+    def test_setup_saves_choices_applies_them_and_finishes(self):
+        done = []
+        win = SetupWindow(application=None, core=self.core, on_done=lambda: done.append(True))
+        win.app = self.app
+        win._finish(None)  # no location yet: refused
+        self.assertEqual(done, [])
+        win.ctx.set("general.latitude", 51.5)
+        win.ctx.set("general.longitude", -0.12)
+        win.ctx.set("general.work_days", ["sat", "sun"])
+        win._finish(None)
+        self.assertEqual(done, [True])
+        self.assertTrue(self.core.setup_done)
+        self.assertEqual(self.core.settings.get("assistant.brain"), "slm")  # Gemma unless chosen otherwise
+        self.assertEqual(self.core.config.general.work_days, ["sat", "sun"])  # applied live
+        self.app.request_background_permission.assert_called_once()
+
+    def test_preferences_has_every_page(self):
+        dialog = PreferencesDialog(self.core, app=None)
+        self.assertIsNotNone(dialog)
+        group = settings_rows.schedule_group(settings_rows.SettingsContext(self.core))
+        self.assertIsNotNone(group)
 
 
 if __name__ == "__main__":

@@ -321,6 +321,20 @@ class JoplinEngine:
 
         return tasks
 
+    def list_notebooks(self, db_path: Optional[Path] = None) -> List[str]:
+        """Top-level notebook names, for choosing which ones to read."""
+        path = db_path or self.config.resolve_joplin_db_path()
+        if not path or not path.is_file():
+            return []
+        try:
+            with self._open_db(path) as conn:
+                rows = conn.execute("SELECT title FROM folders WHERE deleted_time = 0 AND (parent_id = '' OR parent_id IS NULL) "
+                                    "ORDER BY title").fetchall()
+        except sqlite3.Error as e:
+            logger.warning("Couldn't list Joplin notebooks: %s", e)
+            return []
+        return [r["title"] for r in rows]
+
     def fetch_active_notes(self, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
         """Fetch all active non-archive notes with notebook path, title, body, and metadata."""
         path = db_path or self.config.resolve_joplin_db_path()

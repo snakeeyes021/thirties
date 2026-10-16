@@ -29,6 +29,7 @@ configure_file(
 thirties_sources = [
   '__init__.py',
   'main.py',
+  'portal.py',
   'window.py',
 ]
 

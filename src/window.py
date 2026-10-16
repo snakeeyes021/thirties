@@ -6,14 +6,9 @@ from datetime import date, timedelta
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from thirties_core.astronomy import get_diurnal_date
-from thirties_core.config import load_config
 from thirties_core.backlog import load_backlog
 from thirties_core.brains import BRAINS, brain_choice
 from thirties_core.conversation import ConversationManager
-from thirties_core.inference import get_inference_engine
-from thirties_core.joplin_engine import JoplinEngine
-from thirties_core.scheduler import DeterministicScheduler
-from thirties_core.sync_engine import SyncEngine
 from thirties.views.chat_panel import ChatPanel
 from thirties.views.day_view import DayView
 from thirties.views.profile_dialog import ProfileMemoryDialog
@@ -43,11 +38,17 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     split_view = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
 
-    def __init__(self, **kwargs):
+    def __init__(self, core=None, **kwargs):
         super().__init__(**kwargs)
-        self.config = load_config()
-        self.scheduler = DeterministicScheduler(self.config)
-        self.joplin_engine = JoplinEngine(self.config)
+        if core is None:
+            from thirties_core.app_core import AppCore
+            core = AppCore(use_keyring=False)
+        self.core = core
+        self.config = core.config
+        self.scheduler = core.scheduler
+        self.joplin_engine = core.joplin_engine
+        self.inference_engine = core.inference_engine
+        self.sync_engine = core.sync_engine
         self.active_date = self._get_active_diurnal_date()
         self.current_date = self.active_date
 
@@ -55,15 +56,6 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
 
-        # Inference backend (Gemini via Antigravity, LiteRT, or Mock)
-        self.inference_engine = get_inference_engine(self.config)
-
-        # Joplin cross-device synchronization engine
-        self.sync_engine = SyncEngine(
-            config=self.config,
-            state_db=self.scheduler.state_db,
-            joplin_engine=self.joplin_engine,
-        )
         if self.config.sync.enabled and self.config.sync.auto_pull_on_startup:
             try:
                 ok, msg = self.sync_engine.pull()
@@ -71,6 +63,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                     logger.info("Startup sync pull: %s", msg)
             except Exception as e:
                 logger.warning("Startup sync pull failed (continuing normally): %s", e)
+        core.listeners.append(self._on_settings_changed)
 
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
@@ -129,12 +122,11 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         name = value.get_string()
         if name == action.get_state().get_string():
             return
-        if name == "slm":
-            from thirties_core.brains.slm.runtime import slm_unavailable_reason
-            why = slm_unavailable_reason(self.config)
-            if why:
-                self._toast(f"Gemma isn't available here: {why}")
-                return
+        from thirties_core.brains import brain_unavailable_reason
+        why = brain_unavailable_reason(name, self.config)
+        if why:
+            self._toast(f"{BRAINS[name].split(' (')[0]} isn't available: {why}")
+            return
         if self.chat_panel.is_busy:
             self._toast("Switch after the current reply arrives.")
             return
@@ -181,7 +173,20 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         for source_id in self._timers:
             GLib.source_remove(source_id)
         self._timers = []
+        if self._on_settings_changed in self.core.listeners:
+            self.core.listeners.remove(self._on_settings_changed)
         return False
+
+    def _on_settings_changed(self) -> None:
+        """Preferences changed: pick up the new engines and reload the day (keeping its conversation)."""
+        self.joplin_engine = self.core.joplin_engine
+        self.inference_engine = self.core.inference_engine
+        self.sync_engine = self.core.sync_engine
+        self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
+        self.scheduler.attach_history_to_tasks(self.backlog_tasks)
+        if not self.chat_panel.is_busy:
+            self._load_day(self.current_date)
+        self._sync_brain_action()
 
     # --- loading days ---
 

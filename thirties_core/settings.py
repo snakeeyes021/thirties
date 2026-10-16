@@ -65,6 +65,7 @@ _ALL = [
     Setting("telegram.bot_token", "device", secret=True),
     Setting("telegram.allowed_chat_ids", "device"),
     Setting("setup.done", "device"),
+    Setting("background.enabled", "device"),
 ]
 SETTINGS: Dict[str, Setting] = {s.key: s for s in _ALL}
 
