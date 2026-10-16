@@ -114,6 +114,28 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
 
 ---
 
+## MVP (agreed 2026-10-16)
+
+Done means a generic user can install Thirties fresh and use it daily, with no config files, dev tools or hand-run setup. Work happens on `restructure/one-core-two-brains`, in roughly this order:
+
+1. **Fix Gemma in the Flatpak, the right way:** the LiteRT runtime is bundled in the Flatpak (the wheel is pure-py3 manylinux) and runs inside the sandbox. The model (not gated) is downloaded on first run, with progress. This replaces the host-process workaround.
+2. **First-run setup and real Preferences.** No hand-edited TOML: brain; sync storage (a folder the user picks, or a Joplin note); Joplin connection and permission to check items off; Telegram; location (auto-detected, or a city); work days and hours; sleep; media wishlist usernames (profiles must be public). Everything is editable later in Preferences.
+3. **Brains:** Gemma is the default. Gemini through agy is a developer option: selectable only when `agy` is installed and signed in, with a one-line note on how to set it up and no walkthrough. The user chooses which Gemini sources it uses and in what order: subscription through agy, API key, or both.
+4. **Joplin write-back:** connect through Joplin's local API (Web Clipper service), queue anything that can't be delivered, and retry. With the user's permission, Thirties starts Joplin minimized when it needs it and Joplin isn't running.
+5. **Telegram:** setup in the app (BotFather steps, token check, pairing your phone's chat, saved), and the bridge running as the app's background mode through the Background portal (autostart at login, switchable in GNOME Settings).
+6. **Messages:** keep the check-in 10 minutes after an item ends; add reminders the user asks for at any time, on any day, and suppression on request.
+7. **Chat panel as its own full-height pane** with its own header bar (the libadwaita split-view pattern), holding new conversation, the conversation picker and the brain.
+8. **Sync to a user-chosen folder** (Drive via Insync, for example), with the Joplin note as the fallback.
+9. **AM/PM only where it could be mistaken:** the first time when it isn't obvious from now, wherever a time crosses noon or midnight relative to the time before it, and on ambiguous bare hours.
+10. **Rollover as a batch:** yesterday's unfinished items proposed together, confirmed in one go.
+11. **Statistics in planning:** real durations in proposals; a warning when a plan exceeds the capacity you've actually shown.
+12. **Conversation summaries** for history search.
+13. **The release build, last:** a Flatpak manifest and GitHub Actions workflow like Pianola's. Then a human PR and merge to `main`, then a fresh eval baseline (both brains, sim/judge on flash-low, within the 66% budget).
+
+**Deferred until after the MVP:** contextual check-ins ("have you started?"), a headless Joplin CLI sync peer, calendar refinements (no calendar write-back), per-weekday routines, the connector abstraction beyond the storage transport, further SLM research (E2B only if E4B doesn't fit a device), Flathub, translations, a native mobile app, and housekeeping.
+
+---
+
 ## Next
 
 1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
