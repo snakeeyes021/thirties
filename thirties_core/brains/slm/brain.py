@@ -357,6 +357,9 @@ class SlmBrain:
 
     # --- 3. execution ---
 
+    _LENGTH_ONLY_RE = re.compile(r"(?:for\s+)?(?:an?|one|two|three|four|half an?|\d+(?:\.\d+)?)\s*"
+                                 r"(?:hours?|hrs?|minutes?|mins?|chunks?|thirties)(?:\s+long)?", re.IGNORECASE)
+
     def _sanity(self, actions: List[Action], message: str) -> List[Action]:
         """Drop or repair actions the message can't support (a small model sometimes invents)."""
         said = {_stem(w) for w in _words(message)}
@@ -374,6 +377,14 @@ class SlmBrain:
             actions = [a for a in actions if not (a.type == "move" and a.get("shift"))]
         kept: List[Action] = []
         for a in actions:
+            if a.type in ("add", "move"):
+                bare = re.fullmatch(r"\s*(\d{1,2}(?::\d{2})?)\s*(am|pm|a\.m\.|p\.m\.)?\s*", str(a.get("duration") or ""), re.IGNORECASE)
+                if bare and (":" in bare.group(1) or bare.group(2) or int(bare.group(1)) <= 12):
+                    a.fields.pop("duration")
+                    if not a.get("start") and not a.get("shift"):
+                        a.fields["start"] = bare.group(0).strip()  # "move scales to 3" is 3 o'clock, not 3 minutes
+            if a.type == "add" and self._LENGTH_ONLY_RE.fullmatch((a.get("title") or "").strip()) and not a.get("start"):
+                a = Action("move", {"target": "it", "duration": re.sub(r"^for\s+", "", a.get("title").strip(), flags=re.I)})
             target_cats = {s.category for s in self._span_candidates(a.get("target") or "")} if a.type in ("move", "remove") else set()
             if SpanCategory.SLEEP in target_cats and not mentions_sleep:
                 logger.info("[SlmBrain] ignoring a sleep change the user didn't ask for: %s", a.fields)
@@ -399,7 +410,9 @@ class SlmBrain:
                     a = Action("reject", {})  # turning down a suggestion, not removing anything
                     if any(k.type == "reject" for k in kept):
                         continue
-            if a.type == "move" and not self._span_candidates(a.get("target") or "") and (a.get("start") or a.get("after") or a.get("before")):
+            if a.type == "move" and not self._span_candidates(a.get("target") or "") and \
+                    not (a.get("day") or self._find_on_other_day(a.get("target") or "")[0]) and \
+                    (a.get("start") or a.get("after") or a.get("before")):
                 same = {_stem(w) for w in _words(a.get("target") or "")}
                 if any(b.type == "add" and same & {_stem(w) for w in _words(b.get("title") or "")} for b in actions):
                     continue  # the add in this message already covers it
@@ -694,6 +707,14 @@ class SlmBrain:
 
     def _offer_alternatives(self, args: Dict[str, Any], why: str) -> str:
         """The requested time clashes: offer concrete options instead of failing."""
+        saved = self.tools.day_plan
+        self.tools.day_plan = self.tools.plan_for(args.get("day"))
+        try:
+            return self._alternatives_on_plan(args)
+        finally:
+            self.tools.day_plan = saved
+
+    def _alternatives_on_plan(self, args: Dict[str, Any]) -> str:
         plan = self.tools.day_plan
         start = self._loose_time(args["start"])
         end = self._loose_time(args["end"], after=start) if "end" in args else \
@@ -732,6 +753,10 @@ class SlmBrain:
             found = self._span_candidates(ref)
         finally:
             self.tools.day_plan = saved
+        if not found and not a.get("day"):
+            found, day = self._find_on_other_day(ref)
+            if found:
+                a.fields["day"] = day
         if not found:
             return None, f"I don't see {ref or 'that'} on the schedule."
         if len(found) > 1:
@@ -753,6 +778,35 @@ class SlmBrain:
             options = "; ".join(f"{s.title} at {format_clock(s.start_dt)}" for s in found[:4])
             return None, f"Which one do you mean: {options}?"
         return found[0], ""
+
+    _DAY_WORD_RE = re.compile(r"\b(tomorrow|tmrw|tmr|tomorow|yesterday|monday|tuesday|wednesday|thursday|friday|"
+                              r"saturday|sunday)\b", re.IGNORECASE)
+
+    def _find_on_other_day(self, ref: str) -> Tuple[List[EventSpan], Optional[str]]:
+        """An item that isn't on today's plan: on a day the message names, or one we just touched."""
+        days = []
+        m = self._DAY_WORD_RE.search(getattr(self, "_message", ""))
+        if m:
+            word = m.group(1).lower()
+            days.append("tomorrow" if word.startswith("tm") or word == "tomorow" else word)
+        days += [d for d in ("tomorrow", "yesterday") if d not in days]
+        saved = self.tools.day_plan
+        try:
+            for day in days:
+                try:
+                    self.tools.day_plan = self.tools.plan_for(day)
+                except Exception:
+                    continue
+                found = self._span_candidates(ref)
+                if ref.lower() in PRONOUNS or not ref:
+                    found = [s for s in found if s.id in self.state.last_ids]
+                elif not m:  # without a day in the message, only follow something we just touched
+                    found = [s for s in found if s.id in self.state.last_ids]
+                if found:
+                    return found, day
+        finally:
+            self.tools.day_plan = saved
+        return [], None
 
     def _do_move(self, a: Action) -> Tuple[str, bool]:
         span, problem = self._resolve_one(a)

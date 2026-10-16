@@ -228,6 +228,28 @@ class TestSchedulingActions(SlmTestCase):
         self.assertIn("Work", out)
         self.assertIn("Reading", out)
 
+    def test_bare_number_is_a_clock_time_and_a_length_alone_changes_the_last_item(self):
+        self.say("piano 7 to 8", {"type": "add", "title": "Piano", "start": "7", "end": "8"})
+        out = self.say("move piano to 9", {"type": "move", "target": "piano", "duration": "9"})
+        self.assertIn("9:00 PM – 10:00 PM", out)
+        out = self.say("for an hour and a half", {"type": "add", "title": "For 90 minutes"})
+        self.assertNotIn("Added", out)
+        piano = next(s for s in self.m.day_plan.spans if s.title == "Piano")
+        self.assertEqual(piano.duration_minutes, 90)
+
+    def test_items_on_other_days_can_be_referred_to(self):
+        self.say("email the recruiter tomorrow at 8", {"type": "add", "title": "Email the recruiter", "start": "8:00 AM",
+                                                         "duration": "30 minutes", "day": "tomorrow"})
+        out = self.say("walk tmrw at 7:30 for an hour", {"type": "add", "title": "Walk", "start": "7:30 AM",
+                                                          "duration": "1 hour", "day": "tomorrow"})
+        self.assertIn("would overlap Email the recruiter", out)
+        out = self.say("no, move the recruiter email to 8:30 instead", {"type": "reject"},
+                       {"type": "move", "target": "recruiter email", "start": "8:30 AM"})
+        self.assertIn("Moved", out)
+        tomorrow = self.sched.build_day_plan(DAY + timedelta(days=1))[0]
+        email = next(s for s in tomorrow.spans if s.title == "Email the recruiter")
+        self.assertEqual(email.start_dt.strftime("%H:%M"), "08:30")
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

@@ -98,7 +98,7 @@ def check(actions, expected_types, fields) -> Tuple[bool, str]:
     for i, wanted in fields.items():
         for key, sub in wanted.items():
             got = str(actions[i].fields.get(key, ""))
-            if sub.lower() not in got.lower():
+            if str(sub).lower() not in got.lower():
                 return False, f"action {i} {key}={got!r}, expected ~{sub!r}"
     return True, ""
 
