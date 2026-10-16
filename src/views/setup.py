@@ -46,7 +46,10 @@ class SetupWindow(Adw.ApplicationWindow):
         start.add_css_class("suggested-action")
         start.add_css_class("pill")
         welcome.set_child(start)
-        welcome_page = Adw.NavigationPage(title="Welcome", child=welcome)
+        welcome_view = Adw.ToolbarView()
+        welcome_view.add_top_bar(Adw.HeaderBar(show_title=False))
+        welcome_view.set_content(welcome)
+        welcome_page = Adw.NavigationPage(title="Welcome", child=welcome_view)
 
         pages = [
             _page("Your Day", "", [rows.location_group, rows.schedule_group], ctx),

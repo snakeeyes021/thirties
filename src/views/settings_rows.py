@@ -164,6 +164,7 @@ def schedule_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     for key, letter in DAY_NAMES:
         b = Gtk.ToggleButton(label=letter, active=key in cfg.work_days, tooltip_text=key.capitalize())
         b.add_css_class("circular")
+        b.add_css_class("day-toggle")
         buttons[key] = b
         box.append(b)
 
@@ -189,11 +190,11 @@ def schedule_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 # --- the assistant ---
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
-    from thirties_core.brains import brain_choice, brain_unavailable_reason
+    from thirties_core.brains import brain_unavailable_reason
     from thirties_core.brains.slm.runtime import find_model
     group = Adw.PreferencesGroup(title="Assistant",
                                  description="Gemma runs privately on this computer. Nothing you say leaves it.")
-    chosen = brain_choice(ctx.config(), ctx.core.scheduler.state_db)
+    chosen = ctx.get("assistant.brain") or "slm"  # Gemma unless the user chose otherwise
     gemma = Adw.ActionRow(title="Gemma (on this computer)")
     gemma_check = Gtk.CheckButton(active=chosen == "slm", valign=Gtk.Align.CENTER)
     gemma.add_prefix(gemma_check)
@@ -461,12 +462,10 @@ PHONE_STEPS = ("On your phone: install Telegram and sign in.\n"
 
 def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     from thirties_core.telegram_bridge import TelegramClient, pair_by_code
+    steps = "\n".join(f"{i}. {line}" for i, line in enumerate(PHONE_STEPS.split("\n"), 1))
     group = Adw.PreferencesGroup(title="Your phone (Telegram)",
-                                 description="Optional. Plan from your phone and get check-ins and reminders there.")
-    steps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_bottom=12)
-    for i, line in enumerate(PHONE_STEPS.split("\n"), 1):
-        steps.append(_label(f"{i}. {line}", css=()))
-    group.add(steps)
+                                 description="Optional. Plan from your phone and get check-ins and reminders there.\n\n"
+                                             + steps)
     token = Adw.PasswordEntryRow(title="Bot token", show_apply_button=True)
     token.set_text(ctx.get("telegram.bot_token", "") or "")
     pair = Adw.ActionRow(title="Pair your phone")

@@ -108,3 +108,9 @@
 .profile-editor text {
     background-color: transparent;
 }
+
+/* Work-day toggles in setup and Preferences: days that are on use the accent colour */
+.day-toggle:checked {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
