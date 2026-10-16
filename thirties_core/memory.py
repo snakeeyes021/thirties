@@ -117,6 +117,33 @@ def _row_to_conversation(row) -> Conversation:
     )
 
 
+_CHANGE_RE = re.compile(r"^(?:\[[^\]]+\]\s*)?(?:Added|Moved|Changed|Removed|Swapped|Marked|Rolled into today|Broke|"
+                        r"Reminder set|Cancelled the reminder|Planned .+ again|I won't ask|Confirmed|Declined|"
+                        r"Updated the profile|Remembered|Okay, I'll remind you|Got it, I'll remember)\b")
+
+
+def summarize_conversation(conv: "Conversation") -> str:
+    """A short, factual summary: how it started and what changed (from the tool results and confirmations)."""
+    users = [str(m.get("content", "")) for m in conv.messages if m.get("role") == "user"]
+    if not users:
+        return ""
+    changes: List[str] = []
+    for m in conv.messages:
+        if m.get("role") not in ("assistant", "tool"):
+            continue
+        for line in str(m.get("content", "")).splitlines():
+            line = line.strip().lstrip("-• ").strip()
+            if _CHANGE_RE.match(line):
+                short = re.sub(r"\s*\[id [0-9a-f]+\]|\s*\(id [0-9a-f]+\)|\s*id=\S+", "", line)[:110]
+                if short not in changes:
+                    changes.append(short)
+    first = users[0] if len(users[0]) <= 90 else users[0][:87] + "…"
+    text = f'{len(users)} message{"s" if len(users) != 1 else ""}; started with "{first}".'
+    if changes:
+        text += " Changes: " + "; ".join(changes[:8]) + ("; …" if len(changes) > 8 else "") + "."
+    return text
+
+
 class ConversationStore:
     """Persistent conversations, grouped by diurnal day."""
 
@@ -171,8 +198,26 @@ class ConversationStore:
                 (start.isoformat(), end.isoformat())).fetchall()
         return [_row_to_conversation(r) for r in rows]
 
+    def summarize_finished(self, today: date, current_id: Optional[str] = None) -> int:
+        """Write summaries for conversations that are over: from earlier days, or replaced by a newer one."""
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM conversations WHERE summary = '' ORDER BY plan_date, created_at").fetchall()
+        latest_today = self.latest_for_day(today)
+        done = 0
+        for row in rows:
+            conv = _row_to_conversation(row)
+            if conv.id == current_id or (latest_today and conv.id == latest_today.id):
+                continue
+            summary = summarize_conversation(conv)
+            if summary:
+                with self.db._get_connection() as conn:
+                    conn.execute("UPDATE conversations SET summary = ? WHERE id = ?", (summary, conv.id))
+                done += 1
+        return done
+
     def search(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
-        """Messages matching the query's words, best matches first (simple keyword scoring)."""
+        """Summaries and messages matching the query's words, best matches first (simple keyword scoring).
+        A match in a conversation's summary ranks above single messages."""
         words = [w for w in re.findall(r"[a-z0-9']+", query.lower()) if len(w) > 2]
         if not words:
             return []
@@ -181,6 +226,12 @@ class ConversationStore:
         hits = []
         for row in rows:
             conv = _row_to_conversation(row)
+            if conv.summary:
+                lowered = conv.summary.lower()
+                score = sum(lowered.count(w) for w in words) + 2 * sum(1 for w in words if w in lowered)
+                if score:
+                    hits.append({"score": score + 3, "date": conv.plan_date.isoformat(), "conversation_id": conv.id,
+                                 "role": "summary", "text": conv.summary})
             for m in conv.messages:
                 if m.get("role") not in ("user", "assistant"):
                     continue

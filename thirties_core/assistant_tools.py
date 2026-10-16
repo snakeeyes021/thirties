@@ -596,7 +596,14 @@ class AssistantTools:
 
     # --- history ---
 
+    def _summarize_finished(self) -> None:
+        try:
+            self.s.conversations.summarize_finished(self._today())
+        except Exception as e:
+            logger.warning("Summarizing conversations failed: %s", e)
+
     def search_history(self, query: str, **_: Any) -> str:
+        self._summarize_finished()
         hits = self.s.conversations.search(str(query))
         if not hits:
             return f"Nothing in past conversations mentions '{query}'."
@@ -607,6 +614,7 @@ class AssistantTools:
         today = self._today()
         start = parse_day(from_day, today) if from_day else today - timedelta(days=7)
         end = parse_day(to_day, today) if to_day else today
+        self._summarize_finished()
         convs = self.s.conversations.between(start, end)
         if not convs:
             return "No conversations in that range."

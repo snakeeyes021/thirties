@@ -78,6 +78,11 @@ class BackgroundService:
                 self._manager = ConversationManager(plan, tasks, pending, self.scheduler, joplin_engine=self.joplin_engine,
                                                     inference_engine=self.inference_engine, active_notes=notes)
                 self._day = today
+                try:
+                    from thirties_core.memory import ConversationStore
+                    ConversationStore(self.scheduler.state_db).summarize_finished(today)
+                except Exception as e:
+                    logger.warning("Summarizing finished conversations failed: %s", e)
             return self._manager
 
     def now(self) -> datetime:

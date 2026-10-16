@@ -221,5 +221,22 @@ class TestChoosingTheBrain(ConversationTestCase):
         self.assertEqual(self.manager.brain_name, "frontier")
 
 
+
+class TestSummaries(ConversationTestCase):
+
+    def test_new_conversation_summarizes_the_old_one_and_search_finds_it(self):
+        self.engine.set_next_response(reply('CALL add_event {"title": "Dentist prep", "start": "5:00 PM", "duration": "30 min"}'))
+        self.engine.set_next_response(reply("Added Dentist prep at 5."))
+        self.manager.send_user_message("can you add dentist prep at 5")
+        old = self.manager.conversation.id
+        self.manager.new_conversation()
+        from thirties_core.memory import ConversationStore
+        summary = ConversationStore(self.manager.scheduler.state_db).get(old).summary
+        self.assertIn('started with "can you add dentist prep at 5"', summary)
+        self.assertIn("Added Dentist prep", summary)
+        out = self.manager.execute_tool("search_history", {"query": "dentist"})
+        self.assertTrue(out.splitlines()[1].startswith("- 2026-10-15 (summary"), out)
+
+
 if __name__ == "__main__":
     unittest.main()

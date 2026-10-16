@@ -133,6 +133,10 @@ class ConversationManager:
         """Start a fresh conversation for this day (it becomes the current one)."""
         if self.conversation is not None and not self.conversation.messages:
             return  # the current one is already empty
+        if self._store and self.conversation is not None:
+            from thirties_core.memory import summarize_conversation
+            self.conversation.summary = summarize_conversation(self.conversation)
+            self._store.save(self.conversation)
         self._load(self._store.create(self.day_plan.target_date) if self._store else None)
 
     def switch_conversation(self, conversation_id: str) -> bool:
