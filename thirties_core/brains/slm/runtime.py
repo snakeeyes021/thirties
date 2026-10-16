@@ -35,35 +35,18 @@ def find_model(configured: str = "") -> Optional[Path]:
     return next((c for c in candidates if c.is_file()), None)
 
 
-# In the Flatpak there's no LiteRT-LM: Gemma runs on the host, in the LiteRT venv (docs/SLM_BRAIN.md §5).
-HOST_VENV = Path.home() / ".local" / "share" / "thirties" / "venv"
-SERVER_COPY = Path.home() / ".local" / "share" / "thirties" / "gemma_server.py"
-
-
-def in_flatpak() -> bool:
-    return Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
-
-
 def _litert_importable() -> bool:
     import importlib.util
     return importlib.util.find_spec("litert_lm") is not None
 
 
-def _use_host() -> bool:
-    return os.environ.get("THIRTIES_SLM_HOST") == "1" or (in_flatpak() and not _litert_importable())
-
-
 def slm_unavailable_reason(config: Any = None) -> Optional[str]:
     """Why the on-device brain can't run here, or None if it can."""
+    if not _litert_importable():
+        return "the LiteRT-LM runtime isn't installed."
     configured = getattr(getattr(config, "assistant", None), "slm_model_path", "") or ""
     if find_model(configured) is None:
-        return "there's no Gemma model in ~/.local/share/thirties/models (see docs/SLM_BRAIN.md §5)."
-    if _use_host():
-        if not (HOST_VENV / "pyvenv.cfg").exists():
-            return "the LiteRT venv isn't set up at ~/.local/share/thirties/venv (see docs/SLM_BRAIN.md §5)."
-        return None
-    if not _litert_importable():
-        return "the litert-lm-api package isn't installed for this Python."
+        return "the Gemma model hasn't been downloaded yet (Preferences → Assistant)."
     return None
 
 
@@ -81,7 +64,7 @@ class GemmaRuntime:
         try:
             import litert_lm
         except ImportError as e:
-            raise SlmUnavailable("The litert-lm-api package is not installed for this Python.") from e
+            raise SlmUnavailable("the LiteRT-LM runtime isn't installed.") from e
         self._lm = litert_lm
         self.model_path = model_path
         cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "thirties" / "litert"
@@ -107,8 +90,8 @@ class GemmaRuntime:
             if cls._shared is None:
                 path = find_model(configured_path)
                 if path is None:
-                    raise SlmUnavailable("No Gemma model found in ~/.local/share/thirties/models.")
-                cls._shared = HostGemmaRuntime(path) if _use_host() else cls(path)
+                    raise SlmUnavailable("the Gemma model hasn't been downloaded yet.")
+                cls._shared = cls(path)
             return cls._shared
 
     def _text(self, message: Any) -> str:
@@ -225,98 +208,4 @@ class ParserSession:
             with self.runtime._lock:
                 self.runtime.close_conversation(self._conv)
             self._conv = None
-
-
-class HostGemmaRuntime:
-    """GemmaRuntime's interface, served by gemma_server.py on the host (for the Flatpak).
-
-    The server is copied to ~/.local/share/thirties (visible to both sides) and run
-    with the host's LiteRT venv through ``flatpak-spawn --host``.
-    """
-
-    def __init__(self, model_path: Path) -> None:
-        import atexit
-        import subprocess
-        self.model_path = model_path
-        self._lock = threading.Lock()      # held by ParserSession around a whole exchange
-        self._io_lock = threading.Lock()   # one request at a time on the pipe
-        self.calls: List[Dict[str, Any]] = []
-        self._next_sid = 0
-        source = Path(__file__).with_name("gemma_server.py").read_text()
-        SERVER_COPY.parent.mkdir(parents=True, exist_ok=True)
-        if not SERVER_COPY.exists() or SERVER_COPY.read_text() != source:
-            SERVER_COPY.write_text(source)
-        cmd = [str(HOST_VENV / "bin" / "python"), str(SERVER_COPY), str(model_path)]
-        if in_flatpak():
-            cmd = ["flatpak-spawn", "--host"] + cmd
-        log_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "thirties"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        self._log = open(log_dir / "gemma_server.log", "w")
-        start = time.time()
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
-                                     text=True, bufsize=1)
-        atexit.register(self.close)
-        hello = self._read()
-        if not hello.get("ready"):
-            raise SlmUnavailable(f"Gemma didn't start on the host: {hello.get('error', 'no reply')}")
-        self.backend = hello.get("backend", "?")
-        self.load_seconds = time.time() - start
-        logger.info("Gemma serving from the host on %s in %.1fs", self.backend, self.load_seconds)
-
-    def _read(self) -> Dict[str, Any]:
-        line = self.proc.stdout.readline() if self.proc.stdout else ""
-        if not line:
-            raise SlmUnavailable("The host Gemma process stopped; see ~/.cache/thirties/gemma_server.log.")
-        return json.loads(line)
-
-    def _rpc(self, **request: Any) -> Dict[str, Any]:
-        with self._io_lock:
-            self.proc.stdin.write(json.dumps(request) + "\n")
-            self.proc.stdin.flush()
-            reply = self._read()
-        if "error" in reply:
-            raise RuntimeError(reply["error"])
-        return reply
-
-    def parser(self, system: str) -> "ParserSession":
-        return ParserSession(self, system)
-
-    def open_conversation(self, system: str) -> int:
-        self._next_sid += 1
-        self._rpc(op="open", sid=self._next_sid, system=system)
-        return self._next_sid
-
-    def send(self, conversation: int, user: str) -> str:
-        return self._rpc(op="send", sid=conversation, user=user)["out"]
-
-    def close_conversation(self, conversation: int) -> None:
-        self._rpc(op="close", sid=conversation)
-
-    def json_call(self, system: str, user: str, schema: Dict[str, Any], max_output_tokens: int = 256) -> Dict[str, Any]:
-        start = time.time()
-        with self._lock:
-            raw = self._rpc(op="json", system=system, user=user, schema=schema, max_output_tokens=max_output_tokens)["raw"]
-        self.calls.append({"kind": "json", "seconds": round(time.time() - start, 2), "prompt_chars": len(system) + len(user)})
-        try:
-            return json.loads(raw)
-        except ValueError:
-            logger.warning("Gemma returned unparseable JSON: %r", raw[:300])
-            return {}
-
-    def text_call(self, system: str, user: str, max_output_tokens: int = 120) -> str:
-        start = time.time()
-        with self._lock:
-            out = self._rpc(op="text", system=system, user=user, max_output_tokens=max_output_tokens)["out"]
-        self.calls.append({"kind": "text", "seconds": round(time.time() - start, 2), "prompt_chars": len(system) + len(user)})
-        return out
-
-    def close(self) -> None:
-        if self.proc.poll() is None:
-            try:
-                with self._io_lock:
-                    self.proc.stdin.write(json.dumps({"op": "quit"}) + "\n")
-                    self.proc.stdin.flush()
-                self.proc.wait(timeout=5)
-            except Exception:
-                self.proc.kill()
 

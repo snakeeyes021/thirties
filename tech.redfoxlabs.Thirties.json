@@ -1,10 +1,10 @@
 {
-    "id" : "tech.redfoxlabs.Thirties",
-    "runtime" : "org.gnome.Platform",
-    "runtime-version" : "50",
-    "sdk" : "org.gnome.Sdk",
-    "command" : "thirties",
-    "finish-args" : [
+    "id": "tech.redfoxlabs.Thirties",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "50",
+    "sdk": "org.gnome.Sdk",
+    "command": "thirties",
+    "finish-args": [
         "--share=network",
         "--share=ipc",
         "--socket=fallback-x11",
@@ -20,7 +20,7 @@
         "--filesystem=xdg-config/thirties:create",
         "--filesystem=xdg-data/thirties:create"
     ],
-    "cleanup" : [
+    "cleanup": [
         "/include",
         "/lib/pkgconfig",
         "/man",
@@ -31,15 +31,32 @@
         "*.la",
         "*.a"
     ],
-    "modules" : [
+    "modules": [
         {
-            "name" : "thirties",
-            "builddir" : true,
-            "buildsystem" : "meson",
-            "sources" : [
+            "name": "python3-litert-lm-api",
+            "buildsystem": "simple",
+            "build-commands": [
+                "pip3 install --verbose --exists-action=i --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} litert-lm-api --no-build-isolation"
+            ],
+            "sources": [
                 {
-                    "type" : "dir",
-                    "path" : "."
+                    "type": "file",
+                    "url": "https://files.pythonhosted.org/packages/c9/8f/eb7a5203be1d48440c6b8d6e6382c3f744dd6d338fe400555718b4d695a1/litert_lm_api-0.18.0-py3-none-manylinux_2_27_x86_64.whl",
+                    "sha256": "b64e2cf6d7dcb90ff094b74af595cc5d53faa07e0889f967d15df8d3e696b53c",
+                    "only-arches": [
+                        "x86_64"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "thirties",
+            "builddir": true,
+            "buildsystem": "meson",
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "."
                 }
             ]
         }

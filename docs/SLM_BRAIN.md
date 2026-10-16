@@ -151,5 +151,5 @@ The SLM brain needs the `litert-lm-api` package, plus a model in `~/.local/share
   - In any chat, including Telegram: `/brain gemma` (or `/brain gemini` to go back).
   - The choice is this device's own (`local_settings` in the state database, never synced). Every client on the device follows it, and the conversation carries on.
   - `[assistant] brain = "slm"` in config is the default when nothing has been chosen.
-- **The Flatpak** has no LiteRT-LM inside. It runs `thirties_core/brains/slm/gemma_server.py` on the host with the venv's Python, through `flatpak-spawn --host`, and talks to it over a pipe (`HostGemmaRuntime`). The server's log is at `~/.cache/thirties/gemma_server.log`. `THIRTIES_SLM_HOST=1` forces this path outside the Flatpak, for testing.
+- **The Flatpak bundles LiteRT-LM** (the `litert-lm-api` wheel is pure py3 manylinux) and runs Gemma inside the sandbox on the GPU through Vulkan; `--device=dri` is all it needs (measured on an RTX 3080 Ti: 2.2 s load). The model (~3 GB, not gated) is downloaded on first use to `$XDG_DATA_HOME/thirties/models` by `thirties_core/brains/slm/model_download.py`, resuming and checking its SHA-256.
 - Run evals, and clients from source, with `~/.local/share/thirties/venv/bin/python`.

@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
 from thirties_core.astronomy import get_current_time
+from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
 from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes
@@ -181,7 +182,12 @@ class SlmBrain:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
         self._message = user_text
-        actions = self._parse(user_text)
+        try:
+            actions = self._parse(user_text)
+        except SlmUnavailable as e:
+            reply = f"Gemma can't run yet: {e} Until then, open Preferences → Assistant to set it up."
+            self.messages.append({"role": "assistant", "content": reply})
+            return reply
         logger.info("[SlmBrain] actions: %s", [(a.type, a.fields) for a in actions])
         try:
             reply = self._execute(actions, user_text)
