@@ -1,130 +1,100 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   xmlns:dc="http://purl.org/dc/elements/1.1/"
-   xmlns:cc="http://creativecommons.org/ns#"
-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-   xmlns:svg="http://www.w3.org/2000/svg"
-   xmlns="http://www.w3.org/2000/svg"
-   width="33.750061mm"
-   height="33.750061mm"
-   viewBox="0 0 33.750061 33.750061"
-   version="1.1"
-   id="svg974">
-  <defs
-     id="defs968">
-    <clipPath
-       clipPathUnits="userSpaceOnUse"
-       id="clipPath18689">
-      <rect
-         clip-path="none"
-         transform="rotate(45)"
-         ry="32.000008"
-         rx="32.000008"
-         y="123.9986"
-         x="486.03726"
-         height="362.94299"
-         width="362.94299"
-         id="rect18691"
-         style="display:inline;opacity:1;vector-effect:none;fill:#4a86cf;fill-opacity:1;stroke:none;stroke-width:26.0669;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new" />
-    </clipPath>
-    <clipPath
-       clipPathUnits="userSpaceOnUse"
-       id="clipPath18689-3">
-      <rect
-         clip-path="none"
-         transform="rotate(45)"
-         ry="32.000008"
-         rx="32.000008"
-         y="123.9986"
-         x="486.03726"
-         height="362.94299"
-         width="362.94299"
-         id="rect18691-6"
-         style="display:inline;opacity:1;vector-effect:none;fill:#4a86cf;fill-opacity:1;stroke:none;stroke-width:26.0669;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new" />
-    </clipPath>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Thirties: a rock-carved sundial worn as a wristwatch. GNOME app icon, 128×128. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3.5" flood-color="#000" flood-opacity="0.22"/>
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#000" flood-opacity="0.14"/>
+    </filter>
+    <linearGradient id="strap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1a5fb4"/>
+      <stop offset="0.2" stop-color="#1c71d8"/>
+      <stop offset="0.8" stop-color="#1c71d8"/>
+      <stop offset="1" stop-color="#1a5fb4"/>
+    </linearGradient>
+    <linearGradient id="strap-back" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a5fb4"/>
+      <stop offset="1" stop-color="#174d8f"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#865e3c"/>
+      <stop offset="0.45" stop-color="#b5835a"/>
+      <stop offset="1" stop-color="#865e3c"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8d9c5"/>
+      <stop offset="1" stop-color="#cdab8f"/>
+    </linearGradient>
+    <radialGradient id="face" cx="0.4" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#f6f0e8"/>
+      <stop offset="0.65" stop-color="#e3d5c2"/>
+      <stop offset="1" stop-color="#cdab8f"/>
+    </radialGradient>
+    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8e45c"/>
+      <stop offset="0.5" stop-color="#e5a50a"/>
+      <stop offset="1" stop-color="#c88800"/>
+    </linearGradient>
+    <clipPath id="face-clip"><ellipse cx="64.0" cy="70.0" rx="37.0" ry="25.5"/></clipPath>
   </defs>
-  <metadata
-     id="metadata971">
-    <rdf:RDF>
-      <cc:Work
-         rdf:about="">
-        <dc:format>image/svg+xml</dc:format>
-        <dc:type
-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
-      </cc:Work>
-    </rdf:RDF>
-  </metadata>
-  <g
-     id="layer1"
-     transform="translate(-61.819823,-103.94395)">
-    <g
-       transform="matrix(0.26367235,0,0,0.26367235,61.819823,-529.39703)"
-       style="display:inline;stroke-width:0.25;enable-background:new"
-       id="g1836">
-      <title
-         id="title1838">application-x-executable</title>
-      <g
-         transform="matrix(0.25,0,0,0.25,0,2295)"
-         id="g18818"
-         style="stroke-width:0.25">
-        <g
-           style="stroke-width:0.269963"
-           transform="matrix(0.92605186,0,0,0.92605186,18.930729,50.876335)"
-           id="g18590">
-          <g
-             style="stroke-width:0.269963"
-             id="g18681"
-             clip-path="url(#clipPath18689-3)">
-            <rect
-               style="opacity:1;vector-effect:none;fill:#3584e4;fill-opacity:1;stroke:none;stroke-width:8.22095;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal"
-               id="rect18571"
-               width="424"
-               height="424"
-               x="458.33722"
-               y="90.641701"
-               rx="10.092117"
-               ry="10.092117"
-               transform="matrix(0.60528171,0.60528171,-0.60528171,0.60528171,33.440632,99.073632)"
-               clip-path="none" />
-            <circle
-               style="opacity:1;vector-effect:none;fill:#f66151;fill-opacity:1;stroke:none;stroke-width:7.03712;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal"
-               id="path18706"
-               cx="0"
-               cy="0"
-               r="0"
-               transform="translate(0,-212)" />
-            <circle
-               style="opacity:1;vector-effect:none;fill:#f66151;fill-opacity:1;stroke:none;stroke-width:7.03712;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal"
-               id="path18708"
-               cx="0"
-               cy="0"
-               r="0"
-               transform="translate(0,-212)" />
-            <path
-               style="display:inline;opacity:1;vector-effect:none;fill:#98c1f1;fill-opacity:1;stroke:none;stroke-width:7.03712;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new"
-               d="m 408.91993,561.9183 -9.8861,29.82892 a 172.97099,172.97099 0 0 0 -1.42693,-0.0713 172.97099,172.97099 0 0 0 -23.92891,1.85189 l -13.80082,-28.50125 a 203.29325,203.29325 0 0 0 -29.40085,7.97217 l 2.28619,31.40474 a 172.97099,172.97099 0 0 0 -22.73152,11.31923 l -23.71796,-21.103 a 203.29325,203.29325 0 0 0 -24.05918,18.6741 l 14.09863,28.07319 a 172.97099,172.97099 0 0 0 -16.63608,19.21074 l -30.05845,-10.44758 a 203.29325,203.29325 0 0 0 -15.01683,26.48807 l 23.73035,20.50738 a 172.97099,172.97099 0 0 0 -7.98456,24.14293 l -31.73044,1.84879 a 203.29325,203.29325 0 0 0 -3.77825,30.21664 l 29.82892,9.8861 a 172.97099,172.97099 0 0 0 -0.0713,1.42693 172.97099,172.97099 0 0 0 1.85188,23.92889 l -28.50125,13.80084 a 203.29325,203.29325 0 0 0 7.97215,29.40084 l 31.40475,-2.28619 a 172.97099,172.97099 0 0 0 11.31922,22.73152 l -21.10296,23.71797 a 203.29325,203.29325 0 0 0 18.67409,24.05918 l 28.07319,-14.09863 a 172.97099,172.97099 0 0 0 19.21074,16.63606 l -10.44758,30.05847 a 203.29325,203.29325 0 0 0 26.48806,15.01683 l 20.50739,-23.73036 a 172.97099,172.97099 0 0 0 24.14293,7.98457 l 1.8488,31.73043 a 203.29325,203.29325 0 0 0 30.21666,3.77826 l 9.8861,-29.82892 a 172.97099,172.97099 0 0 0 1.42693,0.0713 172.97099,172.97099 0 0 0 23.9289,-1.85188 l 13.80084,28.50125 a 203.29325,203.29325 0 0 0 29.40084,-7.97217 l -2.2862,-31.40474 a 172.97099,172.97099 0 0 0 22.73153,-11.31922 l 23.71796,21.10297 A 203.29325,203.29325 0 0 0 532.96,916.00016 l -14.09864,-28.07319 a 172.97099,172.97099 0 0 0 16.63607,-19.21073 l 30.05846,10.44757 a 203.29325,203.29325 0 0 0 15.01683,-26.48807 l -23.73036,-20.50738 a 172.97099,172.97099 0 0 0 7.98457,-24.14293 l 31.73044,-1.84879 a 203.29325,203.29325 0 0 0 3.77825,-30.21667 l -29.82892,-9.8861 a 172.97099,172.97099 0 0 0 0.0713,-1.42692 172.97099,172.97099 0 0 0 -1.85189,-23.9289 l 28.50124,-13.80084 a 203.29325,203.29325 0 0 0 -7.97215,-29.40084 l -31.40474,2.2862 a 172.97099,172.97099 0 0 0 -11.31923,-22.73153 l 21.10297,-23.71797 a 203.29325,203.29325 0 0 0 -18.67409,-24.05918 l -28.07319,14.09863 a 172.97099,172.97099 0 0 0 -19.21074,-16.63606 l 10.44757,-30.05847 A 203.29325,203.29325 0 0 0 485.6357,581.68117 l -20.50738,23.73035 a 172.97099,172.97099 0 0 0 -24.14293,-7.98455 l -1.84879,-31.73044 a 203.29325,203.29325 0 0 0 -30.21667,-3.77826 z M 397.6069,637.72208 A 126.92605,126.92605 0 0 1 524.5318,764.64699 126.92605,126.92605 0 0 1 397.6069,891.57189 126.92605,126.92605 0 0 1 270.682,764.64699 126.92605,126.92605 0 0 1 397.6069,637.72208 Z"
-               id="path18717-4" />
-            <path
-               id="path18758"
-               d="m 51.748325,401.28402 -9.8861,29.82892 c -0.475543,-0.0257 -0.951191,-0.0495 -1.42693,-0.0713 -8.00956,0.0625 -16.005106,0.6813 -23.92891,1.85189 L 2.7055639,404.39228 c -9.9858697,1.91835 -19.8137359,4.58322 -29.4008489,7.97217 l 2.28619,31.40474 c -7.844275,3.21103 -15.441918,6.9943 -22.73152,11.31923 l -23.71796,-21.103 c -8.475372,5.61437 -16.517661,11.85658 -24.05918,18.6741 l 14.09863,28.07319 c -6.008901,5.98701 -11.569263,12.40791 -16.636077,19.21074 l -30.058438,-10.44758 c -5.66072,8.44155 -10.68041,17.29574 -15.01683,26.48807 l 23.73035,20.50738 c -3.25027,7.84084 -5.919,15.91028 -7.98456,24.14293 l -31.73044,1.84879 c -2.01308,9.96359 -3.27604,20.06413 -3.77825,30.21664 l 29.82892,9.8861 c -0.0257,0.47554 -0.0495,0.95119 -0.0713,1.42693 0.0625,8.00955 0.68129,16.00509 1.85188,23.92889 l -28.50125,13.80084 c 1.91835,9.98587 4.58321,19.81373 7.97215,29.40084 l 31.40475,-2.28619 c 3.21102,7.84427 6.99429,15.44192 11.31922,22.73152 l -21.10296,23.71797 c 5.61437,8.47537 11.85658,16.51766 18.67409,24.05918 l 28.073175,-14.09863 c 5.987006,6.00889 12.407911,11.56925 19.21074,16.63606 l -10.44758,30.05847 c 8.441549,5.66072 17.295731,10.68041 26.48806,15.01683 l 20.50739,-23.73036 c 7.840839,3.25027 15.910282,5.91901 24.142929,7.98457 l 1.8488,31.73043 c 9.9635962,2.01309 20.064147,3.27605 30.216661,3.77826 l 9.8861,-29.82892 c 0.475543,0.0257 0.951191,0.0495 1.42693,0.0713 8.009557,-0.0625 16.005099,-0.68129 23.9289,-1.85188 l 13.80084,28.50125 c 9.985867,-1.91835 19.813731,-4.58322 29.400855,-7.97217 l -2.2862,-31.40474 c 7.84428,-3.21102 15.44192,-6.99429 22.73153,-11.31922 l 23.71796,21.10297 c 8.47538,-5.61437 16.51767,-11.85658 24.05919,-18.6741 l -14.09864,-28.07319 c 6.0089,-5.987 11.56926,-12.4079 16.63607,-19.21073 l 30.05846,10.44757 c 5.66072,-8.44155 10.68041,-17.29574 15.01683,-26.48807 l -23.73036,-20.50738 c 3.25027,-7.84084 5.91901,-15.91028 7.98457,-24.14293 l 31.73044,-1.84879 c 2.01308,-9.9636 3.27604,-20.06415 3.77825,-30.21667 l -29.82892,-9.8861 c 0.0257,-0.47554 0.0495,-0.95118 0.0713,-1.42692 -0.0625,-8.00956 -0.6813,-16.0051 -1.85189,-23.9289 l 28.50124,-13.80084 c -1.91835,-9.98587 -4.58321,-19.81373 -7.97215,-29.40084 l -31.40474,2.2862 c -3.21103,-7.84428 -6.9943,-15.44192 -11.31923,-22.73153 l 21.10297,-23.71797 c -5.61437,-8.47537 -11.85658,-16.51766 -18.67409,-24.05918 l -28.07319,14.09863 c -5.98701,-6.00889 -12.40791,-11.56925 -19.21074,-16.63606 l 10.44757,-30.05847 c -8.44155,-5.66072 -17.29572,-10.6804 -26.48805,-15.01682 l -20.50738,23.73035 c -7.84085,-3.25027 -15.910298,-5.91899 -24.142945,-7.98455 l -1.84879,-31.73044 c -9.9636,-2.01309 -20.064152,-3.27605 -30.21667,-3.77826 z"
-               style="display:inline;opacity:1;vector-effect:none;fill:#1a5fb4;fill-opacity:1;stroke:none;stroke-width:7.03712;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new" />
-          </g>
-        </g>
-        <path
-           style="display:inline;opacity:0.534;vector-effect:none;fill:#1a5fb4;fill-opacity:1;stroke:none;stroke-width:1.62918;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new"
-           clip-path="none"
-           d="m 8.4765625,2676 c -1.1711695,2.8866 -0.5827763,6.3078 1.7656255,8.6562 l 48.101562,48.1016 c 3.133898,3.1339 8.178602,3.1339 11.3125,0 l 48.10156,-48.1016 c 2.3484,-2.3484 2.9368,-5.7696 1.76563,-8.6562 -0.39174,0.9655 -0.98013,1.8708 -1.76563,2.6562 l -48.10156,48.1016 c -3.133898,3.1339 -8.178602,3.1339 -11.3125,0 L 10.242188,2678.6562 C 9.4566904,2677.8708 8.8682972,2676.9655 8.4765625,2676 Z"
-           transform="matrix(4,0,0,4,0,-10028)"
-           id="rect18571-6" />
-      </g>
-      <rect
-         y="2402"
-         x="-1.5000001e-06"
-         height="128"
-         width="128"
-         id="rect9125-7-2"
-         style="display:inline;opacity:1;vector-effect:none;fill:none;fill-opacity:1;stroke:none;stroke-width:1.25;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;marker-start:none;marker-mid:none;marker-end:none;paint-order:normal;enable-background:new" />
+
+  <g filter="url(#shadow)">
+    <!-- back strap, receding behind the dial -->
+    <path d="M47 8h34a3 3 0 0 1 3 3v40H44V11a3 3 0 0 1 3-3z" fill="url(#strap-back)"/>
+    <path d="M49 12v36M79 12v36" stroke="#99c1f1" stroke-width="0.9" stroke-dasharray="2.6 2.2" opacity="0.5"/>
+    <!-- front strap, coming toward us -->
+    <path d="M42 96h44l2 24a4 4 0 0 1-4 4H44a4 4 0 0 1-4-4z" fill="url(#strap)"/>
+    <path d="M45 99l-1.2 21M83 99l1.2 21" stroke="#99c1f1" stroke-width="0.9" stroke-dasharray="2.6 2.2" opacity="0.55"/>
+    <rect x="58.5" y="110" width="11" height="4" rx="2" fill="#174d8f"/>
+
+    <!-- the stone puck: its side, its carved rim, its sunken face -->
+    <path d="M17 70 a47 33 0 0 0 94 0 v10 a47 33 0 0 1 -94 0 z" fill="url(#side)"/>
+    <!-- sandstone layers in the side -->
+    <path d="M18.5 76 a47 33 0 0 0 91 0" fill="none" stroke="#63452c" stroke-width="0.9" opacity="0.35"/>
+    <path d="M21 82 a46 31 0 0 0 86 0" fill="none" stroke="#cdab8f" stroke-width="0.8" opacity="0.45"/>
+    <ellipse cx="64" cy="70" rx="47" ry="33" fill="url(#rim)"/>
+    <ellipse cx="64" cy="70" rx="47" ry="33" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1"/>
+    <!-- chips knocked out of the rim's edge -->
+    <path d="M24.5 54 l4.5 -2.2 l-1.2 4.4 z" fill="#b5835a"/>
+    <path d="M104.5 85.5 l-3.8 -0.6 l1.8 3.6 z" fill="#b5835a"/>
+    <path d="M71 37.2 l3.8 0.9 l-2.6 2.2 z" fill="#b5835a"/>
+    <!-- chisel marks on the rim -->
+    <g stroke="#b5835a" stroke-width="1.1" stroke-linecap="round" opacity="0.55">
+      <path d="M24 64l4 1.5M27 80l4-1M101 61l-4 2M99 82l-3.5-1.5M44 43l2 3M86 44l-2 3M56 101l1-3M78 100l-1-3"/>
     </g>
+    <ellipse cx="64.0" cy="68.8" rx="38.6" ry="27.1" fill="#b5835a"/>
+    <ellipse cx="64.0" cy="70.0" rx="37.0" ry="25.5" fill="url(#face)"/>
+
+    <g clip-path="url(#face-clip)">
+      <g fill="#986a44" opacity="0.25">
+        <circle cx="45" cy="64" r="0.9"/><circle cx="80" cy="58" r="0.7"/><circle cx="88" cy="76" r="0.9"/>
+        <circle cx="52" cy="84" r="0.8"/><circle cx="71" cy="88" r="0.7"/><circle cx="62" cy="52" r="0.6"/>
+      </g>
+      <!-- the gnomon's shadow, cast long across the stone -->
+      <path d="M64 71 L92 72 L40 87 Z" fill="#3d3846" opacity="0.26"/>
+      <path d="M64 71 L72 71.3 L40 87 Z" fill="#3d3846" opacity="0.12"/>
+    </g>
+
+    <!-- carved hour marks -->
+    <g stroke="#986a44" stroke-linecap="round" opacity="0.85">
+        <path d="M93.6 70.0L98.4 70.0" stroke-width="2.6"/>
+        <path d="M89.6 80.2L93.8 81.9" stroke-width="1.8"/>
+        <path d="M78.8 87.7L81.2 90.5" stroke-width="1.8"/>
+        <path d="M64.0 90.4L64.0 93.7" stroke-width="2.6"/>
+        <path d="M49.2 87.7L46.8 90.5" stroke-width="1.8"/>
+        <path d="M38.4 80.2L34.2 81.9" stroke-width="1.8"/>
+        <path d="M34.4 70.0L29.6 70.0" stroke-width="2.6"/>
+        <path d="M38.4 59.8L34.2 58.1" stroke-width="1.8"/>
+        <path d="M49.2 52.3L46.8 49.5" stroke-width="1.8"/>
+        <path d="M64.0 49.6L64.0 46.3" stroke-width="2.6"/>
+        <path d="M78.8 52.3L81.2 49.5" stroke-width="1.8"/>
+        <path d="M89.6 59.8L93.8 58.1" stroke-width="1.8"/>
+    </g>
+
+    <!-- the gnomon: a bronze blade standing up off the dial -->
+    <path d="M64 71 L64 31 L94 71 Z" fill="url(#bronze)"/>
+    <path d="M64 71 L64 31 L60.5 34.5 L60.5 72.5 Z" fill="#c88800"/>
+    <path d="M64 31 L94 71" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1"/>
+    <ellipse cx="64" cy="71.5" rx="3.6" ry="2.4" fill="#865e3c"/>
   </g>
 </svg>
