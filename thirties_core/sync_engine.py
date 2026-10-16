@@ -278,12 +278,15 @@ class SyncEngine:
         return True, result_msg
 
     def _stores(self) -> Dict[str, Any]:
-        from thirties_core.memory import ConversationStore, EnergyLog, MemoryStore, ProfileStore
+        from thirties_core.memory import (CheckinMutes, ConversationStore, EnergyLog, MemoryStore, ProfileStore,
+                                          ReminderStore)
         return {
             "conversations": ConversationStore(self.state_db),
             "profile": ProfileStore(self.state_db),
             "memory": MemoryStore(self.state_db),
             "energy": EnergyLog(self.state_db),
+            "reminders": ReminderStore(self.state_db),
+            "checkin_mutes": CheckinMutes(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

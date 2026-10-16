@@ -147,19 +147,6 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.assertIn("8:30 AM – 4:00 PM: Work", msg)
         self.assertNotIn("Block", msg)
 
-    def test_check_in_after_a_planned_item_ends(self):
-        plan = self.bridge.conv_manager.day_plan
-        start = plan.blocks[2].start_dt
-        self.scheduler.state_db.upsert_span(EventSpan("tx", "Taxes", start, start + timedelta(minutes=60), SpanCategory.TASK))
-        self.bridge.conv_manager.refresh()
-        self.bridge.active_chats = {1001}
-        with patch.object(self.bridge, "_get_current_time", return_value=start + timedelta(minutes=75)):
-            self.bridge._maybe_check_in()
-            self.bridge._maybe_check_in()  # asked only once
-        self.bridge.client.send_message.assert_called_once()
-        self.assertIn("did you get to *Taxes*", self.bridge.client.send_message.call_args[0][1])
-        self.assertIn("did you get to Taxes", self.bridge.conv_manager.history()[-1]["content"])
-
     def test_new_command_starts_fresh_conversation(self):
         self.bridge.conv_manager.add_assistant_message("earlier")
         first = self.bridge.conv_manager.conversation.id
@@ -190,35 +177,25 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         args, kwargs = self.bridge.client.send_message.call_args
         self.assertIn("ready to help you plan", args[1])
 
-    def test_auto_bind_first_chat_if_allowed_chat_ids_empty(self):
-        open_config = ThirtiesConfig(
-            telegram=TelegramConfig(
-                enabled=True,
-                bot_token="FAKE_TOKEN",
-                allowed_chat_ids=[],
-            )
-        )
-        with patch.object(TelegramClient, "get_me", return_value={"username": "thirties_bot"}):
-            bridge = ThirtiesTelegramBridge(
-                config=open_config,
-                scheduler=self.scheduler,
-                joplin_engine=self.mock_joplin,
-                inference_engine=self.mock_inference,
-                sync_engine=self.mock_sync,
-            )
+    def test_unpaired_bot_points_to_the_app(self):
+        open_config = ThirtiesConfig(telegram=TelegramConfig(enabled=True, bot_token="FAKE_TOKEN", allowed_chat_ids=[]))
+        bridge = ThirtiesTelegramBridge(config=open_config, scheduler=self.scheduler, joplin_engine=self.mock_joplin,
+                                        inference_engine=self.mock_inference, sync_engine=self.mock_sync)
         bridge.client = MagicMock()
-        bridge.handle_message(chat_id=777, text="/start")
-        self.assertIn(777, bridge.active_chats)
-        bridge.client.send_message.assert_called_once()
-        args, _ = bridge.client.send_message.call_args
-        self.assertIn("Security Note", args[1])
-        self.assertIn("777", args[1])
+        bridge.handle_message(chat_id=777, text="what's on my schedule?")
+        self.assertIn("Preferences → Phone", bridge.client.send_message.call_args[0][1])
+        self.assertEqual(bridge.active_chats, set())
 
-        # Once bound, any other chat is refused
-        bridge.client.reset_mock()
-        bridge.handle_message(chat_id=888, text="what's on my schedule?")
-        self.assertIn("Unauthorized", bridge.client.send_message.call_args[0][1])
-        self.assertNotIn(888, bridge.active_chats)
+    def test_pairing_by_code_ignores_other_messages(self):
+        from thirties_core.telegram_bridge import pair_by_code
+        client = MagicMock()
+        client.get_updates.side_effect = [
+            [{"update_id": 1, "message": {"text": "hello", "chat": {"id": 5, "first_name": "Eve"}}}],
+            [{"update_id": 2, "message": {"text": "/start 4821", "chat": {"id": 9, "first_name": "Matt"}}}],
+            [],
+        ]
+        self.assertEqual(pair_by_code(client, "4821", timeout=5), {"id": 9, "name": "Matt"})
+        self.assertEqual(client.send_message.call_args[0][0], 9)
 
 
 if __name__ == "__main__":

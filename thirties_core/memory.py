@@ -58,6 +58,20 @@ CREATE TABLE IF NOT EXISTS memory_notes (
     source TEXT NOT NULL DEFAULT 'assistant',
     deleted INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS reminders (
+    id TEXT PRIMARY KEY,
+    due_utc TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending'
+);
+CREATE TABLE IF NOT EXISTS checkin_mutes (
+    id TEXT PRIMARY KEY,
+    span_id TEXT NOT NULL DEFAULT '',
+    until_utc TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS energy_log (
     id TEXT PRIMARY KEY,
     at TEXT NOT NULL,
@@ -365,3 +379,88 @@ class EnergyLog:
             cur = conn.execute("INSERT OR IGNORE INTO energy_log (id, at, level, note) VALUES (:id, :at, :level, :note)",
                                record)
             return cur.rowcount > 0
+
+
+# ----------------------------------------------------------------------------
+# Reminders and check-in muting
+# ----------------------------------------------------------------------------
+
+@dataclass
+class Reminder:
+    id: str
+    due: datetime
+    text: str
+    state: str = "pending"  # pending, sent, cancelled
+
+
+class ReminderStore:
+    """Messages the user asked for at a given time ("remind me Saturday at 3 to water the alligator")."""
+
+    def __init__(self, db: StateDatabase) -> None:
+        self.db = db
+        ensure_schema(db)
+
+    def add(self, due: datetime, text: str) -> Reminder:
+        now = utc_now_iso()
+        rem = Reminder(uuid.uuid4().hex[:12], due, text.strip())
+        with self.db._get_connection() as conn:
+            conn.execute("INSERT INTO reminders (id, due_utc, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                         (rem.id, due.astimezone(timezone.utc).isoformat(), rem.text, now, now))
+        return rem
+
+    def _rows(self, where: str = "", args: tuple = ()) -> List[Reminder]:
+        with self.db._get_connection() as conn:
+            rows = conn.execute(f"SELECT * FROM reminders {where} ORDER BY due_utc", args).fetchall()
+        return [Reminder(r["id"], datetime.fromisoformat(r["due_utc"]), r["text"], r["state"]) for r in rows]
+
+    def pending(self) -> List[Reminder]:
+        return self._rows("WHERE state = 'pending'")
+
+    def due(self, now: datetime) -> List[Reminder]:
+        return [r for r in self.pending() if r.due <= now]
+
+    def set_state(self, rem_id: str, state: str) -> None:
+        with self.db._get_connection() as conn:
+            conn.execute("UPDATE reminders SET state = ?, updated_at = ? WHERE id = ?", (state, utc_now_iso(), rem_id))
+
+    def all_records(self) -> List[Dict[str, Any]]:
+        with self.db._get_connection() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM reminders").fetchall()]
+
+    def merge_record(self, record: Dict[str, Any]) -> bool:
+        with self.db._get_connection() as conn:
+            row = conn.execute("SELECT updated_at FROM reminders WHERE id = ?", (record["id"],)).fetchone()
+            if row and row["updated_at"] >= record["updated_at"]:
+                return False
+            conn.execute("INSERT OR REPLACE INTO reminders (id, due_utc, text, created_at, updated_at, state) "
+                         "VALUES (:id, :due_utc, :text, :created_at, :updated_at, :state)", record)
+            return True
+
+
+class CheckinMutes:
+    """Check-ins the user asked to stop: for one item, or for everything until a time."""
+
+    def __init__(self, db: StateDatabase) -> None:
+        self.db = db
+        ensure_schema(db)
+
+    def mute(self, until: datetime, span_id: str = "") -> None:
+        with self.db._get_connection() as conn:
+            conn.execute("INSERT INTO checkin_mutes (id, span_id, until_utc, updated_at) VALUES (?, ?, ?, ?)",
+                         (uuid.uuid4().hex[:12], span_id, until.astimezone(timezone.utc).isoformat(), utc_now_iso()))
+
+    def is_muted(self, span_id: str, now: datetime) -> bool:
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT span_id, until_utc FROM checkin_mutes").fetchall()
+        return any(datetime.fromisoformat(r["until_utc"]) > now and r["span_id"] in ("", span_id) for r in rows)
+
+    def all_records(self) -> List[Dict[str, Any]]:
+        with self.db._get_connection() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM checkin_mutes").fetchall()]
+
+    def merge_record(self, record: Dict[str, Any]) -> bool:
+        with self.db._get_connection() as conn:
+            cur = conn.execute("INSERT OR IGNORE INTO checkin_mutes (id, span_id, until_utc, updated_at) "
+                               "VALUES (:id, :span_id, :until_utc, :updated_at)", record)
+            return cur.rowcount > 0
+

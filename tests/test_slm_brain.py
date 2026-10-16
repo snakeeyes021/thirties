@@ -513,5 +513,25 @@ class TestJoplinLists(SlmTestCase):
         self.assertIn("List three poets", out)
 
 
+
+class TestMessages(SlmTestCase):
+
+    def test_remind_me_parses_day_time_and_text_in_python(self):
+        out = self.say("remind me next week to water my pet alligator", {"type": "add", "title": "Water alligator"})
+        self.assertEqual(out, "Okay, I'll remind you Monday, October 19 at 9:00 AM: Water my pet alligator")
+        out = self.say("hey remind me saturday at 3 to call grandma", {"type": "chat"})
+        self.assertEqual(out, "Okay, I'll remind you Saturday, October 17 at 3:00 PM: Call grandma")
+        out = self.say("ping me in 20 minutes about the laundry", {"type": "chat"})
+        self.assertIn("5:00 PM: The laundry", out)
+
+    def test_stop_asking_mutes_the_item_just_asked_about(self):
+        self.say("taxes 2 to 3", {"type": "add", "title": "Taxes", "start": "2:00 PM", "end": "3:00 PM"})
+        self.m.add_assistant_message("👋 Just checking in: did you get to Taxes?")
+        out = self.say("not yet, but no need to keep asking, I'll let you know", {"type": "chat"})
+        self.assertEqual(out, "I won't ask about Taxes again.")
+        out = self.say("and stop checking in for today please", {"type": "chat"})
+        self.assertIn("No more check-ins until", out)
+
+
 if __name__ == "__main__":
     unittest.main()

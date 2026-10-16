@@ -78,6 +78,8 @@ class TelegramClient:
                 return res.get("result", [])
             logger.warning("Telegram getUpdates returned not ok: %s", res)
             return []
+        except urllib.error.HTTPError:
+            raise
         except (urllib.error.URLError, TimeoutError) as e:
             logger.debug("getUpdates network or timeout exception: %s", e)
             return []
@@ -155,6 +157,31 @@ class TelegramClient:
         return chunks
 
 
+def pair_by_code(client: TelegramClient, code: str, timeout: float = 300.0,
+                 cancel: Optional[threading.Event] = None) -> Optional[Dict[str, Any]]:
+    """Wait for someone to send the bot this one-time code; returns their chat ({"id", "name"}) or None.
+
+    The code proves the chat belongs to the person at the computer, so the pairing can be
+    saved for good (unlike binding whichever chat writes first).
+    """
+    deadline = time.time() + timeout
+    offset: Optional[int] = None
+    code = code.strip()
+    while time.time() < deadline and not (cancel is not None and cancel.is_set()):
+        for u in client.get_updates(offset=offset, timeout=5):
+            offset = u.get("update_id", 0) + 1
+            msg = u.get("message") or {}
+            words = (msg.get("text") or "").replace("/start", " ").split()
+            if code in words:
+                chat = msg.get("chat", {})
+                client.get_updates(offset=offset, timeout=0)  # mark it read
+                name = chat.get("first_name") or chat.get("username") or str(chat.get("id"))
+                client.send_message(chat["id"], f"✅ Linked to Thirties. Hi {name}! You can plan here now; "
+                                                f"send /help to see what I can do.", parse_mode=None)
+                return {"id": chat["id"], "name": name}
+    return None
+
+
 class ThirtiesTelegramBridge:
     """Headless daemon bridging Telegram to Thirties ConversationManager and Proactive Transitions."""
 
@@ -165,13 +192,17 @@ class ThirtiesTelegramBridge:
         joplin_engine: Optional[JoplinEngine] = None,
         inference_engine: Optional[InferenceEngine] = None,
         sync_engine: Optional[SyncEngine] = None,
+        service: Any = None,
     ) -> None:
+        """With ``service`` (the app's BackgroundService), the bridge shares its day and conversation."""
+        self.service = service
+        if service is not None:
+            config, scheduler, joplin_engine = service.config, service.scheduler, service.joplin_engine
+            inference_engine, sync_engine = service.inference_engine, service.sync_engine
         self.config = config or load_config()
         self.bot_token = self.config.telegram.bot_token.strip()
         if not self.bot_token:
-            raise ValueError(
-                "Telegram bot token is not configured. Set telegram.bot_token in config.toml or specify --token."
-            )
+            raise ValueError("No Telegram bot token: set one up in Preferences → Phone.")
 
         self.client = TelegramClient(self.bot_token)
         self.scheduler = scheduler or DeterministicScheduler(self.config)
@@ -184,36 +215,31 @@ class ThirtiesTelegramBridge:
         )
 
         self.allowed_chat_ids: Set[int] = set(self.config.telegram.allowed_chat_ids)
-        self.auto_bound_chat_id: Optional[int] = None
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
         self.current_date: date = self._get_active_diurnal_date()
-
-        self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
-
-        # Startup sync pull
-        if self.config.sync.enabled and self.config.sync.auto_pull_on_startup:
-            try:
-                ok, msg = self.sync_engine.pull()
-                if ok:
-                    logger.info("Startup Joplin sync pull: %s", msg)
-            except Exception as e:
-                logger.warning("Startup Joplin sync pull failed: %s", e)
-
-        day_plan, ambiguous = self.scheduler.build_day_plan(self.current_date)
-        self.conv_manager = ConversationManager(
-            day_plan=day_plan,
-            tasks=self.backlog_tasks,
-            ambiguous_events=ambiguous,
-            scheduler=self.scheduler,
-            joplin_engine=self.joplin_engine,
-            inference_engine=self.inference_engine,
-            active_notes=self.active_notes,
-        )
-
-        self.last_notified_block_index: Optional[int] = None
-        self.checked_in_span_ids: Set[str] = set()
+        self._own_manager: Optional[ConversationManager] = None
         self.running = False
-        self._notifier_thread: Optional[threading.Thread] = None
+
+        if service is None:
+            self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
+            day_plan, ambiguous = self.scheduler.build_day_plan(self.current_date)
+            self._own_manager = ConversationManager(
+                day_plan=day_plan,
+                tasks=self.backlog_tasks,
+                ambiguous_events=ambiguous,
+                scheduler=self.scheduler,
+                joplin_engine=self.joplin_engine,
+                inference_engine=self.inference_engine,
+                active_notes=self.active_notes,
+            )
+
+    @property
+    def conv_manager(self) -> ConversationManager:
+        return self.service.manager() if self.service is not None else self._own_manager
+
+    @conv_manager.setter
+    def conv_manager(self, value: ConversationManager) -> None:
+        self._own_manager = value
 
     def _get_active_diurnal_date(self) -> date:
         gen = self.config.general
@@ -242,13 +268,15 @@ class ThirtiesTelegramBridge:
         return next((b for b in blocks if b.start_dt <= now < b.end_dt), None)
 
     def _check_and_refresh_date(self) -> None:
+        if self.service is not None:
+            return  # the service follows the day
         today = self._get_active_diurnal_date()
         if today != self.current_date:
             logger.info("Diurnal date rolled over from %s to %s. Reloading day plan.", self.current_date, today)
             self.current_date = today
             self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
             plan, ambiguous = self.scheduler.build_day_plan(today)
-            self.conv_manager = ConversationManager(
+            self._own_manager = ConversationManager(
                 day_plan=plan,
                 tasks=self.backlog_tasks,
                 ambiguous_events=ambiguous,
@@ -257,21 +285,15 @@ class ThirtiesTelegramBridge:
                 inference_engine=self.inference_engine,
                 active_notes=self.active_notes,
             )
-            self.last_notified_block_index = None
 
     def handle_message(self, chat_id: int, text: str) -> None:
         """Process incoming message from a chat."""
         text = text.strip()
 
-        # With no allowed_chat_ids configured, the first chat to message the bot claims it
-        # for the lifetime of this process; everyone else is refused.
         if not self.allowed_chat_ids:
-            self.allowed_chat_ids = {chat_id}
-            self.auto_bound_chat_id = chat_id
-            logger.warning(
-                "No telegram.allowed_chat_ids configured: bound this bot to chat %s until restart. "
-                "Add allowed_chat_ids = [%s] to config.toml to make that permanent.", chat_id, chat_id,
-            )
+            self.client.send_message(chat_id, "This bot isn't linked to Thirties yet. In the Thirties app, open "
+                                     "Preferences → Phone and follow the steps there.", parse_mode=None)
+            return
 
         # Authorization check
         if chat_id not in self.allowed_chat_ids:
@@ -352,16 +374,6 @@ class ThirtiesTelegramBridge:
             "• _\"Move my workout to 3:30pm\"_\n"
             "• _\"What do I have remaining in my backlog?\"_\n"
         )
-        if self.auto_bound_chat_id == chat_id:
-            msg += (
-                f"\n🔒 *Security Note*:\n"
-                f"This bot is now bound to your chat (ID `{chat_id}`) until the bridge restarts.\n"
-                f"Add it to `~/.config/thirties/config.toml` to make that permanent:\n"
-                f"```toml\n"
-                f"[telegram]\n"
-                f"allowed_chat_ids = [{chat_id}]\n"
-                f"```"
-            )
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
     def _cmd_now(self, chat_id: int) -> None:
@@ -427,8 +439,9 @@ class ThirtiesTelegramBridge:
     def _cmd_status(self, chat_id: int) -> None:
         inf_name = type(self.inference_engine).__name__
         model_name = getattr(self.inference_engine, "model_name", "N/A")
-        tasks_count = len(self.backlog_tasks)
-        notes_count = len(self.active_notes)
+        services = self.conv_manager.tools.services
+        tasks_count = len(services.tasks) if services else 0
+        notes_count = len(getattr(self, "active_notes", []) or [])
         sync_enabled = "Enabled" if self.config.sync.enabled else "Disabled"
         notify_enabled = "Enabled" if self.config.telegram.notify_block_transitions else "Disabled"
 
@@ -445,93 +458,15 @@ class ThirtiesTelegramBridge:
         )
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
-    def _notifier_loop(self) -> None:
-        """Background loop that sends lock-screen push notifications at 30-min block transitions."""
-        logger.info("Proactive block transition notifier started.")
-        while self.running:
-            try:
-                time.sleep(15.0)
-                if not self.running:
-                    break
+    def broadcast(self, text: str) -> None:
+        """Send a message to the paired phone(s)."""
+        for chat_id in list(self.allowed_chat_ids):
+            self.client.send_message(chat_id, text, parse_mode="Markdown")
 
-                self._check_and_refresh_date()
-                self._maybe_check_in()
-                curr = self._get_current_block()
-                if not curr:
-                    continue
-
-                curr_idx = curr.index
-
-                if self.last_notified_block_index is None:
-                    # Initial startup anchor
-                    self.last_notified_block_index = curr_idx
-                    continue
-
-                if curr_idx != self.last_notified_block_index:
-                    logger.info("Thirty transition detected: #%s -> #%s", self.last_notified_block_index, curr.number)
-                    self.last_notified_block_index = curr_idx
-
-                    if self.config.telegram.notify_block_transitions and self.active_chats:
-                        span = self.conv_manager.day_plan.display_span(curr)
-                        s_time, e_time = format_clock(curr.start_dt), format_clock(curr.end_dt)
-                        if span and span.category == SpanCategory.SLEEP and span.start_dt >= curr.start_dt:
-                            buzz_msg = f"🌙 *Bedtime* ({s_time})\n\nYour sleep starts now. Wind down and rest well!"
-                        elif span and span.start_dt >= curr.start_dt:
-                            buzz_msg = f"🔔 *{span.title}* starts now ({s_time} – {format_clock(span.end_dt)})"
-                        elif span:
-                            continue  # still inside something already announced
-                        else:
-                            buzz_msg = f"🔔 *Open time* ({s_time} – {e_time})"
-
-                        for chat_id in list(self.active_chats):
-                            self.client.send_message(chat_id, buzz_msg, parse_mode="Markdown")
-
-            except Exception as e:
-                logger.error("Error in block transition notifier loop: %s", e)
-
-    def _maybe_check_in(self) -> None:
-        """After a planned activity ends with no outcome recorded, ask about it once."""
-        cfg = self.config.assistant
-        if not (cfg.checkins and self.active_chats):
-            return
-        now = self._get_current_time()
-        grace = timedelta(minutes=cfg.checkin_after_minutes)
-        plan = self.conv_manager.day_plan
-        due = [s for s in plan.active_spans()
-               if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.status.value == "planned"
-               and s.id not in self.checked_in_span_ids
-               and s.end_dt + grace <= now < s.end_dt + timedelta(hours=2)]
-        if not due:
-            return
-        span = due[-1]
-        self.checked_in_span_ids.update(s.id for s in due)
-        following = next((s for s in plan.active_spans()
-                          if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.covers(now)), None)
-        question = f"👋 Just checking in: did you get to *{span.title}*"
-        question += f", or are you still on it? (Next up: {following.title}.)" if following else "?"
-        self.conv_manager.refresh()
-        self.conv_manager.add_assistant_message(question.replace("*", ""))
-        for chat_id in list(self.active_chats):
-            self.client.send_message(chat_id, question, parse_mode="Markdown")
-
-    def start(self) -> None:
-        """Start the polling listener and transition notifier."""
-        bot_info = self.client.get_me()
-        bot_name = bot_info.get("first_name", "Thirties Bot")
-        bot_user = bot_info.get("username", "")
-        logger.info("Connected to Telegram Bot: %s (@%s)", bot_name, bot_user)
-        print("\n=======================================================")
-        print(f"🚀 Thirties Telegram Bridge Running as @{bot_user}!")
-        print(f"📱 Open Telegram on your phone and send /start to @{bot_user}")
-        if not self.allowed_chat_ids:
-            print("⚠️  No allowed_chat_ids set: the first chat to message the bot will be bound to it.")
-        print("=======================================================\\n")
-
+    def poll_forever(self) -> None:
+        """Answer messages until stopped. Another computer polling the same bot makes Telegram refuse
+        one of the two (HTTP 409); then this one backs off, since only one computer should run the bridge."""
         self.running = True
-        self.conv_manager.warm_in_background()
-        self._notifier_thread = threading.Thread(target=self._notifier_loop, daemon=True, name="BlockNotifier")
-        self._notifier_thread.start()
-
         offset: Optional[int] = None
         while self.running:
             try:
@@ -540,21 +475,31 @@ class ThirtiesTelegramBridge:
                     update_id = u.get("update_id")
                     if update_id is not None:
                         offset = update_id + 1
-
                     msg = u.get("message") or u.get("edited_message")
                     if not msg:
                         continue
-
-                    chat = msg.get("chat", {})
-                    chat_id = chat.get("id")
+                    chat_id = msg.get("chat", {}).get("id")
                     text = msg.get("text", "")
                     if chat_id is not None and text:
                         self.handle_message(chat_id, text)
-
+            except urllib.error.HTTPError as e:
+                if e.code == 409:
+                    logger.warning("Another computer is running the Telegram bridge for this bot; backing off.")
+                    time.sleep(60)
+                else:
+                    logger.error("Telegram polling error: %s", e)
+                    time.sleep(5)
             except Exception as e:
                 if self.running:
                     logger.error("Polling error: %s (sleeping 5s)", e)
                     time.sleep(5.0)
+
+    def start(self) -> None:
+        """Run standalone (a developer tool; the app runs the bridge inside its background service)."""
+        bot_user = self.client.get_me().get("username", "")
+        logger.info("Thirties Telegram bridge running as @%s.", bot_user)
+        self.conv_manager.warm_in_background()
+        self.poll_forever()
 
     def stop(self) -> None:
         """Stop the bridge gracefully."""
@@ -591,7 +536,8 @@ def check_setup(cfg: ThirtiesConfig) -> bool:
     if cfg.telegram.allowed_chat_ids:
         line(True, "Allowed chats", ", ".join(str(c) for c in cfg.telegram.allowed_chat_ids))
     else:
-        line(None, "Allowed chats", "none yet: the first chat to message the bot gets bound until restart")
+        line(False, "Paired phone", "none yet: pair it in the app (Preferences → Phone)")
+        ok = False
 
     engine = get_inference_engine(cfg)
     name = type(engine).__name__
@@ -643,20 +589,19 @@ def main() -> None:
     if args.check:
         sys.exit(0 if check_setup(cfg) else 1)
 
-    bridge = ThirtiesTelegramBridge(config=cfg)
+    from thirties_core.background import BackgroundService
+    service = BackgroundService(cfg)
 
     def sig_handler(sig, frame):
-        print("\nShutting down Telegram Bridge...")
-        bridge.stop()
+        print("\nShutting down...")
+        service.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
-
-    try:
-        bridge.start()
-    except KeyboardInterrupt:
-        bridge.stop()
+    service.start()
+    while service.running:
+        time.sleep(1)
 
 
 if __name__ == "__main__":

@@ -152,6 +152,7 @@ RULES
 12. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned. For bigger-picture planning (goals over weeks), look at week_overview, statistics and the profile, and spread work across days. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 13. Things done at the same time (an audiobook during dinner, a podcast on a walk) can share the time: add the second one with alongside=true.
 14. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
+15. Messages: you can send the user a message later with set_reminder ("remind me Saturday to water the plants"); if they give no time, choose a sensible one and say it. If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
 """
 
     def build_backlog_summary(self) -> str:

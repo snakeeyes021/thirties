@@ -537,9 +537,56 @@ class SlmBrain:
                                r"|hard to (?:start|get started)|can'?t (?:get )?start(?:ed)?|don'?t know where to start"
                                r"|smaller (?:steps|parts|pieces|chunks|bits))\b", re.IGNORECASE)
 
+    _REMIND_RE = re.compile(r"\b(?:remind|ping|nudge|text|message) me\b", re.IGNORECASE)
+    _MUTE_RE = re.compile(r"\b(?:no need to|don'?t|do not|stop|quit|no more)\s+(?:keep\s+|keeping\s+)?(?:on\s+)?"
+                          r"(?:ask(?:ing)?|check(?:ing)?[ -]?in(?:s|g)?|remind(?:ing)?|bug(?:ging)?|nag(?:ging)?|"
+                          r"pester(?:ing)?|message(?:s)?)\b", re.IGNORECASE)
+    _WEEKDAY_RE = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)"
+
+    def _reminder_from(self, message: str) -> Optional[Action]:
+        lowered = message.lower()
+        m = self._REMIND_RE.search(lowered)
+        if not m:
+            return None
+        rest = message[m.end():]
+        day_m = re.search(rf"\b(today|tonight|tomorrow|next week|(?:next |this |on )?{self._WEEKDAY_RE}|"
+                          r"(?:on )?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2})\b", rest, re.I)
+        time_m = re.search(r"\bin (\d+|an?|half an) (minutes?|mins?|hours?|hrs?)\b|"
+                           r"\b(?:at|around|by)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon)\b|"
+                           r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b", rest, re.I)
+        fields: Dict[str, Any] = {}
+        cut = []
+        if day_m:
+            fields["date"] = re.sub(r"^(on|this) ", "", day_m.group(1).lower()).replace("tonight", "today")
+            cut.append(day_m.group(0))
+            if day_m.group(1).lower() == "tonight" and not time_m:
+                fields["time"] = "7:00 PM"
+        if time_m:
+            cut.append(time_m.group(0))
+            if time_m.group(1):
+                fields["time"] = f"in {time_m.group(1)} {time_m.group(2)}"
+            else:
+                clock = (time_m.group(3) or time_m.group(4)).strip().lower()
+                if clock != "noon" and not re.search(r"[ap]\.?m", clock):
+                    hour = int(clock.split(":")[0])
+                    clock += " am" if 7 <= hour <= 11 else " pm"
+                fields["time"] = clock
+        text = rest
+        for c in cut:
+            text = text.replace(c, " ")
+        text = re.sub(r"^\s*(?:to|about|that|of)\s+", "", re.sub(r"\s+", " ", text).strip(" ,.!?"), flags=re.I)
+        text = re.sub(r"\s+(?:to|about|on|at)$", "", text).strip(" ,.!?")
+        fields["text"] = text[:1].upper() + text[1:] if text else "Reminder"
+        return Action("remind", fields)
+
     def _route(self, actions: List[Action], message: str) -> List[Action]:
         """Recognize requests that hand the planning over, which the parser tends to misfile."""
         lowered = message.lower()
+        reminder = self._reminder_from(message)
+        if reminder is not None:
+            return [reminder]
+        if self._MUTE_RE.search(message):
+            return [a for a in actions if a.type == "outcome"] + [Action("mute", {})]
         m = self._ADD_TO_LIST_RE.search(message)
         if m and not re.search(r"\b(calendar|schedule|plan)\b", m.group("list"), re.IGNORECASE):
             task = re.sub(r"^(?:a|an|the)\s+", "", m.group("task").strip(" '\""), flags=re.IGNORECASE)
@@ -658,6 +705,7 @@ class SlmBrain:
             "accept": lambda a: self._apply_proposals(a.get("items")),
             "profile": self._do_profile, "energy": self._do_energy,
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
+            "remind": self._do_remind, "mute": self._do_mute,
         }
         retry: List[Action] = []
         for action in actions:
@@ -1080,6 +1128,28 @@ class SlmBrain:
         if self.state.proposal_kind == "options":
             return self._apply_proposals(self.state.proposal[:1])
         return self._apply_proposals(self.state.proposal)
+
+    # --- messages ---
+
+    def _do_remind(self, a: Action) -> Tuple[str, bool]:
+        ok, out = self._run("set_reminder", {k: v for k, v in a.fields.items() if k in ("text", "date", "time")})
+        if not ok:
+            return out, False
+        m = re.match(r"Reminder set for (.+?) at (.+?): (.+) \(id \w+\)\.$", out)
+        return (f"Okay, I'll remind you {m.group(1)} at {m.group(2)}: {m.group(3)}" if m else out), False
+
+    def _do_mute(self, a: Action) -> Tuple[str, bool]:
+        message = getattr(self, "_message", "").lower()
+        everything = bool(re.search(r"\b(all|any|anything|every|today|tonight|for (the|a) (day|while))\b", message))
+        target = None
+        if not everything:
+            last = next((m.get("content", "") for m in reversed(self.messages[:-1]) if m.get("role") == "assistant"), "")
+            asked = re.search(r"did you get to (.+?)(?:, or are you still on it|\?)", last)
+            ref = asked.group(1) if asked else ""
+            named = [s for s in self._span_candidates(message) if not s.is_envelope] if not ref else []
+            target = (self._span_candidates(ref) or named or [None])[0] if (ref or named) else None
+        ok, out = self._run("mute_checkins", {"event": target.id} if target else {})
+        return out, False
 
     # --- the user's lists in Joplin ---
 

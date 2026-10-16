@@ -14,7 +14,8 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes
-from thirties_core.memory import PROFILE_SECTIONS, ConversationStore, EnergyLog, MemoryStore, ProfileStore
+from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
+                                  ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
 from thirties_core.stats import fact_lines, unreviewed_spans
 
@@ -38,10 +39,13 @@ class Services:
     energy: EnergyLog
     tasks: List[TaskItem] = field(default_factory=list)
     joplin: Optional["JoplinEngine"] = None
+    reminders: Optional[ReminderStore] = None
+    mutes: Optional[CheckinMutes] = None
 
     @classmethod
     def for_db(cls, db, tasks: Optional[List[TaskItem]] = None, joplin=None) -> "Services":
-        return cls(ConversationStore(db), ProfileStore(db), MemoryStore(db), EnergyLog(db), list(tasks or []), joplin)
+        return cls(ConversationStore(db), ProfileStore(db), MemoryStore(db), EnergyLog(db), list(tasks or []), joplin,
+                   ReminderStore(db), CheckinMutes(db))
 
 
 ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
@@ -140,6 +144,35 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["task", "steps"],
     },
     {
+        "name": "set_reminder",
+        "description": "Send the user a message at a given time (desktop notification, and Telegram if paired). "
+                       "If they don't say a time, pick a sensible one and tell them.",
+        "parameters": {"text": "What to remind them of.",
+                       "date": "Which day: 'today', 'tomorrow', 'Saturday', 'next week', 'Oct 20' (default today).",
+                       "time": "Clock time like '3:00 PM', or 'in 2 hours' (default 9:00 AM)."},
+        "required": ["text"],
+    },
+    {
+        "name": "list_reminders",
+        "description": "List upcoming reminders. Read-only.",
+        "parameters": {},
+        "required": [],
+    },
+    {
+        "name": "cancel_reminder",
+        "description": "Cancel an upcoming reminder.",
+        "parameters": {"reminder": "Its id or words from it."},
+        "required": ["reminder"],
+    },
+    {
+        "name": "mute_checkins",
+        "description": "Stop check-in questions: about one item (when the user says there's no need to ask), or "
+                       "all of them until a time (default: the end of the day).",
+        "parameters": {"event": "The item's id or title (leave empty for all check-ins).",
+                       "until": "Clock time, or 'tomorrow' (default: end of the day)."},
+        "required": [],
+    },
+    {
         "name": "search_backlog",
         "description": "Find backlog tasks by keywords. Read-only.",
         "parameters": {"query": "Words to look for."},
@@ -148,7 +181,7 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
-                       "get_statistics", "search_backlog", "week_overview"}
+                       "get_statistics", "search_backlog", "week_overview", "list_reminders"}
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -529,6 +562,78 @@ class AssistantTools:
             return f"No backlog tasks match '{query}'."
         return "\n".join(f"- {describe_task(t)}" for t in found)
 
+    # --- reminders and check-ins ---
+
+    def reminder_due(self, date: Any = None, time: Any = None) -> "datetime":
+        """When a reminder is due, from a day ('Saturday', 'next week') and a time ('3 PM', 'in 2 hours')."""
+        from datetime import datetime as _dt, time as _time
+        now = self.pt._now()
+        time_text = str(time or "").strip().lower()
+        m = re.match(r"^in\s+(.+)$", time_text)
+        if m:
+            return now + timedelta(minutes=parse_duration_minutes(m.group(1)))
+        day_text = str(date or "").strip().lower()
+        if day_text in ("next week", "next wk"):
+            target = self._today() + timedelta(days=7 - self._today().weekday())
+        else:
+            target = parse_day(day_text or "today", self._today())
+        if time_text:
+            from thirties_core.clock import parse_clock
+            t = parse_clock(time_text)
+        else:
+            t = _time(9, 0)
+        due = _dt.combine(target, t, tzinfo=self.pt.day_plan.day_start.tzinfo)
+        if not day_text and due <= now:
+            due += timedelta(days=1)
+        return due
+
+    def set_reminder(self, text: str, date: Any = None, time: Any = None, **_: Any) -> str:
+        if self.s.reminders is None:
+            raise ToolError("Reminders aren't available here.")
+        try:
+            due = self.reminder_due(date, time)
+        except (ClockError, ValueError) as e:
+            raise ToolError(f"I couldn't read when: {e}")
+        if due <= self.pt._now():
+            raise ToolError(f"{format_clock(due)} on {due.strftime('%A')} has already passed.")
+        rem = self.s.reminders.add(due, str(text))
+        return f"Reminder set for {due.strftime('%A, %B %d')} at {format_clock(due)}: {rem.text} (id {rem.id})."
+
+    def list_reminders(self, **_: Any) -> str:
+        pending = self.s.reminders.pending() if self.s.reminders else []
+        if not pending:
+            return "No upcoming reminders."
+        tz = self.pt.day_plan.day_start.tzinfo
+        return "\n".join(f"- {r.due.astimezone(tz).strftime('%a %b %d')} {format_clock(r.due.astimezone(tz))}: "
+                         f"{r.text} (id {r.id})" for r in pending)
+
+    def cancel_reminder(self, reminder: str, **_: Any) -> str:
+        pending = self.s.reminders.pending() if self.s.reminders else []
+        q = {_stem(w) for w in _words(str(reminder))}
+        found = [r for r in pending if r.id == str(reminder).strip()] or \
+            [r for r in pending if q and q <= {_stem(w) for w in _words(r.text)}] or \
+            [r for r in pending if q & {_stem(w) for w in _words(r.text)}]
+        if len(found) != 1:
+            raise ToolError("Which reminder? " + (self.list_reminders() if pending else "There are none."))
+        self.s.reminders.set_state(found[0].id, "cancelled")
+        return f"Cancelled the reminder: {found[0].text}."
+
+    def mute_checkins(self, event: Any = None, until: Any = None, **_: Any) -> str:
+        if self.s.mutes is None:
+            raise ToolError("Check-ins aren't available here.")
+        now = self.pt._now()
+        span = self.pt._find_span(event) if event not in (None, "") else None
+        if until in (None, ""):
+            end = now + timedelta(days=2) if span else self.pt.day_plan.day_end
+        elif str(until).strip().lower() == "tomorrow":
+            end = self.pt.day_plan.day_end
+        else:
+            end = self.pt._end(until, now)
+        self.s.mutes.mute(end, span.id if span else "")
+        if span:
+            return f"I won't ask about {span.title} again."
+        return f"No more check-ins until {format_clock(end)}" + (" tomorrow." if end.date() > now.date() else ".")
+
     def handlers(self) -> Dict[str, Any]:
         return {
             "log_outcome": self.log_outcome,
@@ -543,6 +648,10 @@ class AssistantTools:
             "get_statistics": self.get_statistics,
             "search_backlog": self.search_backlog,
             "add_task": self.add_task,
+            "set_reminder": self.set_reminder,
+            "list_reminders": self.list_reminders,
+            "cancel_reminder": self.cancel_reminder,
+            "mute_checkins": self.mute_checkins,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }
