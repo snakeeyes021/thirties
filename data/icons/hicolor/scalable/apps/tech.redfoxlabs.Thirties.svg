@@ -1,100 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Thirties: a rock-carved sundial worn as a wristwatch. GNOME app icon, 128×128. -->
+<!-- Thirties: a hand-hewn sandstone sundial. GNOME app icon, 128×128. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
       <feDropShadow dx="0" dy="4" stdDeviation="3.5" flood-color="#000" flood-opacity="0.22"/>
       <feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#000" flood-opacity="0.14"/>
     </filter>
-    <linearGradient id="strap" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#1a5fb4"/>
-      <stop offset="0.2" stop-color="#1c71d8"/>
-      <stop offset="0.8" stop-color="#1c71d8"/>
-      <stop offset="1" stop-color="#1a5fb4"/>
+    <linearGradient id="top" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#efe3d3"/><stop offset="1" stop-color="#cdab8f"/>
     </linearGradient>
-    <linearGradient id="strap-back" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1a5fb4"/>
-      <stop offset="1" stop-color="#174d8f"/>
-    </linearGradient>
-    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#865e3c"/>
-      <stop offset="0.45" stop-color="#b5835a"/>
-      <stop offset="1" stop-color="#865e3c"/>
-    </linearGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#e8d9c5"/>
-      <stop offset="1" stop-color="#cdab8f"/>
-    </linearGradient>
-    <radialGradient id="face" cx="0.4" cy="0.3" r="0.8">
-      <stop offset="0" stop-color="#f6f0e8"/>
-      <stop offset="0.65" stop-color="#e3d5c2"/>
-      <stop offset="1" stop-color="#cdab8f"/>
-    </radialGradient>
-    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f8e45c"/>
-      <stop offset="0.5" stop-color="#e5a50a"/>
-      <stop offset="1" stop-color="#c88800"/>
-    </linearGradient>
-    <clipPath id="face-clip"><ellipse cx="64.0" cy="70.0" rx="37.0" ry="25.5"/></clipPath>
+    <clipPath id="face"><path d="M14.0 58.0 L20.0 44.0 L36.0 34.0 L58.0 30.0 L80.0 31.0 L99.0 38.0 L112.0 52.0 L114.0 66.0 L104.0 80.0 L84.0 89.0 L60.0 91.0 L36.0 86.0 L20.0 76.0 Z"/></clipPath>
   </defs>
-
   <g filter="url(#shadow)">
-    <!-- back strap, receding behind the dial -->
-    <path d="M47 8h34a3 3 0 0 1 3 3v40H44V11a3 3 0 0 1 3-3z" fill="url(#strap-back)"/>
-    <path d="M49 12v36M79 12v36" stroke="#99c1f1" stroke-width="0.9" stroke-dasharray="2.6 2.2" opacity="0.5"/>
-    <!-- front strap, coming toward us -->
-    <path d="M42 96h44l2 24a4 4 0 0 1-4 4H44a4 4 0 0 1-4-4z" fill="url(#strap)"/>
-    <path d="M45 99l-1.2 21M83 99l1.2 21" stroke="#99c1f1" stroke-width="0.9" stroke-dasharray="2.6 2.2" opacity="0.55"/>
-    <rect x="58.5" y="110" width="11" height="4" rx="2" fill="#174d8f"/>
+    <path d="M14.0 71.0 L20.0 57.0 L36.0 47.0 L58.0 43.0 L80.0 44.0 L99.0 51.0 L112.0 65.0 L114.0 79.0 L104.0 93.0 L84.0 102.0 L60.0 104.0 L36.0 99.0 L20.0 89.0 Z" fill="#865e3c"/>
+    <path d="M14.0 58.0 L20.0 44.0 L20.0 57.0 L14.0 71.0 Z" fill="#865e3c"/><path d="M112.0 52.0 L114.0 66.0 L114.0 79.0 L112.0 65.0 Z" fill="#865e3c"/><path d="M114.0 66.0 L104.0 80.0 L104.0 93.0 L114.0 79.0 Z" fill="#b5835a"/><path d="M104.0 80.0 L84.0 89.0 L84.0 102.0 L104.0 93.0 Z" fill="#865e3c"/><path d="M84.0 89.0 L60.0 91.0 L60.0 104.0 L84.0 102.0 Z" fill="#b5835a"/><path d="M60.0 91.0 L36.0 86.0 L36.0 99.0 L60.0 104.0 Z" fill="#865e3c"/><path d="M36.0 86.0 L20.0 76.0 L20.0 89.0 L36.0 99.0 Z" fill="#b5835a"/><path d="M20.0 76.0 L14.0 58.0 L14.0 71.0 L20.0 89.0 Z" fill="#865e3c"/>
+    <path d="M14.0 58.0 L20.0 44.0 L36.0 34.0 L58.0 30.0 L80.0 31.0 L99.0 38.0 L112.0 52.0 L114.0 66.0 L104.0 80.0 L84.0 89.0 L60.0 91.0 L36.0 86.0 L20.0 76.0 Z" fill="url(#top)"/>
+    <path d="M28.0 58.6 L32.3 48.8 L43.8 41.8 L59.7 39.0 L75.5 39.7 L89.2 44.6 L98.6 54.4 L100.0 64.2 L92.8 74.0 L78.4 80.3 L61.1 81.7 L43.8 78.2 L32.3 71.2 Z" fill="#865e3c" opacity="0.13"/>
+    <path d="M30 46 L46 38 M90 40 L100 48 M26 70 L33 76" stroke="#efe3d3" stroke-width="1.6" opacity="0.8"/>
+    <g clip-path="url(#face)"><path d="M62 62 L96 63 L30 84 Z" fill="#3d3846" opacity="0.28"/></g>
+    <ellipse cx="99.7" cy="67.5" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="80.0" cy="79.9" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="51.0" cy="80.7" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="29.5" cy="69.3" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="28.3" cy="52.5" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="48.0" cy="40.1" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="77.0" cy="39.3" rx="2.6" ry="1.9" fill="#986a44"/><ellipse cx="98.5" cy="50.7" rx="2.6" ry="1.9" fill="#986a44"/>
+    <path d="M56 63 L58 18 L92 62 Z" fill="#b5835a"/>
+    <path d="M58 18 L74 40 L66 41 Z" fill="#efe3d3" opacity="0.55"/>
+    <path d="M56 63 L58 18 L52 25 L50 66 Z" fill="#865e3c"/>
 
-    <!-- the stone puck: its side, its carved rim, its sunken face -->
-    <path d="M17 70 a47 33 0 0 0 94 0 v10 a47 33 0 0 1 -94 0 z" fill="url(#side)"/>
-    <!-- sandstone layers in the side -->
-    <path d="M18.5 76 a47 33 0 0 0 91 0" fill="none" stroke="#63452c" stroke-width="0.9" opacity="0.35"/>
-    <path d="M21 82 a46 31 0 0 0 86 0" fill="none" stroke="#cdab8f" stroke-width="0.8" opacity="0.45"/>
-    <ellipse cx="64" cy="70" rx="47" ry="33" fill="url(#rim)"/>
-    <ellipse cx="64" cy="70" rx="47" ry="33" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1"/>
-    <!-- chips knocked out of the rim's edge -->
-    <path d="M24.5 54 l4.5 -2.2 l-1.2 4.4 z" fill="#b5835a"/>
-    <path d="M104.5 85.5 l-3.8 -0.6 l1.8 3.6 z" fill="#b5835a"/>
-    <path d="M71 37.2 l3.8 0.9 l-2.6 2.2 z" fill="#b5835a"/>
-    <!-- chisel marks on the rim -->
-    <g stroke="#b5835a" stroke-width="1.1" stroke-linecap="round" opacity="0.55">
-      <path d="M24 64l4 1.5M27 80l4-1M101 61l-4 2M99 82l-3.5-1.5M44 43l2 3M86 44l-2 3M56 101l1-3M78 100l-1-3"/>
-    </g>
-    <ellipse cx="64.0" cy="68.8" rx="38.6" ry="27.1" fill="#b5835a"/>
-    <ellipse cx="64.0" cy="70.0" rx="37.0" ry="25.5" fill="url(#face)"/>
-
-    <g clip-path="url(#face-clip)">
-      <g fill="#986a44" opacity="0.25">
-        <circle cx="45" cy="64" r="0.9"/><circle cx="80" cy="58" r="0.7"/><circle cx="88" cy="76" r="0.9"/>
-        <circle cx="52" cy="84" r="0.8"/><circle cx="71" cy="88" r="0.7"/><circle cx="62" cy="52" r="0.6"/>
-      </g>
-      <!-- the gnomon's shadow, cast long across the stone -->
-      <path d="M64 71 L92 72 L40 87 Z" fill="#3d3846" opacity="0.26"/>
-      <path d="M64 71 L72 71.3 L40 87 Z" fill="#3d3846" opacity="0.12"/>
-    </g>
-
-    <!-- carved hour marks -->
-    <g stroke="#986a44" stroke-linecap="round" opacity="0.85">
-        <path d="M93.6 70.0L98.4 70.0" stroke-width="2.6"/>
-        <path d="M89.6 80.2L93.8 81.9" stroke-width="1.8"/>
-        <path d="M78.8 87.7L81.2 90.5" stroke-width="1.8"/>
-        <path d="M64.0 90.4L64.0 93.7" stroke-width="2.6"/>
-        <path d="M49.2 87.7L46.8 90.5" stroke-width="1.8"/>
-        <path d="M38.4 80.2L34.2 81.9" stroke-width="1.8"/>
-        <path d="M34.4 70.0L29.6 70.0" stroke-width="2.6"/>
-        <path d="M38.4 59.8L34.2 58.1" stroke-width="1.8"/>
-        <path d="M49.2 52.3L46.8 49.5" stroke-width="1.8"/>
-        <path d="M64.0 49.6L64.0 46.3" stroke-width="2.6"/>
-        <path d="M78.8 52.3L81.2 49.5" stroke-width="1.8"/>
-        <path d="M89.6 59.8L93.8 58.1" stroke-width="1.8"/>
-    </g>
-
-    <!-- the gnomon: a bronze blade standing up off the dial -->
-    <path d="M64 71 L64 31 L94 71 Z" fill="url(#bronze)"/>
-    <path d="M64 71 L64 31 L60.5 34.5 L60.5 72.5 Z" fill="#c88800"/>
-    <path d="M64 31 L94 71" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1"/>
-    <ellipse cx="64" cy="71.5" rx="3.6" ry="2.4" fill="#865e3c"/>
   </g>
 </svg>
