@@ -114,7 +114,7 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
 
 ---
 
-## MVP (agreed 2026-10-16)
+## MVP (agreed 2026-10-16; items 1–12 done 2026-10-16, item 13 waits for the go-ahead)
 
 Done means a generic user can install Thirties fresh and use it daily, with no config files, dev tools or hand-run setup. Work happens on `restructure/one-core-two-brains`, in roughly this order:
 

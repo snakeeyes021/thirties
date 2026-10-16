@@ -189,23 +189,28 @@ Thirties/
 │   ├── SLM_BRAIN.md                   # Research design for the on-device SLM brain and its evals
 │   └── archive/                       # Superseded plans; history only, never instructions
 ├── src/                               # GTK4 / Libadwaita Desktop GUI (Presentation Client)
-│   ├── main.py                        # GUI entrypoint
-│   ├── window.py                      # Main application window & stack
-│   ├── views/                         # DayView, ChatPanel
+│   ├── main.py                        # GUI entrypoint: setup on first run, background mode, notifications
+│   ├── portal.py                      # The Background portal (run in background, autostart) over D-Bus
+│   ├── window.py                      # Main application window (schedule and chat panes)
+│   ├── views/                         # DayView, ChatPanel, setup, Preferences (shared settings rows)
 │   └── widgets/                       # BlockWidget, SolarArc
 ├── thirties_core/                     # Pure Python core: zero GUI imports
-│   ├── assistant_tools.py             # Outcomes, review/rollover, memory, profile, history, statistics tools
+│   ├── app_core.py                    # What a running app shares: config + settings, engines, background service
+│   ├── assistant_tools.py             # Outcomes, rollover, memory, profile, history, statistics, reminders, Joplin edits
+│   ├── background.py                  # Background service: check-ins, reminders, start nudges, Joplin outbox, sync
 │   ├── astronomy.py                   # NOAA solar equations & diurnal dates
 │   ├── backlog.py                     # One loader for every task source (Joplin, media wishlists)
 │   ├── brains/                        # Model-specific layer: prompts & turn logic
 │   │   ├── frontier.py                # FrontierBrain: single rich prompt for Gemini
-│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (runtime, parse, brain)
+│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (runtime, parse, brain, model download)
 │   ├── calendar_engine.py             # Calendars via EDS / GNOME Online Accounts; events -> spans
 │   ├── clock.py                       # Clock-time & duration parsing: the model says "4:30 PM", Python does the math
 │   ├── config.py                      # TOML configuration & dataclasses
 │   ├── conversation.py                # ConversationManager: client entry point, wires tools to a brain
 │   ├── inference.py                   # Model transports (agy CLI, Gemini API, LiteRT, Mock) & directive parser
-│   ├── joplin_engine.py               # Joplin connector (SQLite read, REST write)
+│   ├── joplin_engine.py               # Joplin connector (SQLite read)
+│   ├── joplin_writeback.py            # Writing to Joplin through its API: check off, add, break down; outbox
+│   ├── location.py                    # City search and naming (OpenStreetMap), system time zone
 │   ├── legacy.py                      # Converts pre-span (block-kind) saved plans into spans
 │   ├── media_sources.py               # Goodreads / Letterboxd / Serializd wishlists (public, no login)
 │   ├── memory.py                      # Conversations (per day), user profile, memory notes, energy log
@@ -213,9 +218,10 @@ Thirties/
 │   ├── plan_tools.py                  # PlanTools: the shared clock-time tool API & invariants
 │   ├── runner.py                      # Host-side LiteRT runner (used from the Flatpak sandbox)
 │   ├── scheduler.py                   # Span store (StateDatabase) & day builder (DeterministicScheduler)
+│   ├── settings.py                    # App settings: per device or synced, secrets in the keyring
 │   ├── stats.py                       # Statistics from what actually happened, as plain facts
-│   ├── sync_engine.py                 # Cross-device state sync via a Joplin note
-│   └── telegram_bridge.py             # Temporary headless mobile Telegram bot & notifier
+│   ├── sync_engine.py                 # Cross-device state sync via a chosen folder or a Joplin note
+│   └── telegram_bridge.py             # Telegram bot (run by the background service), pairing
 └── tests/                             # Unit tests & evaluation harnesses
     ├── test_*.py                      # Standard unit test suite
     ├── fixtures.py                    # Shared test fixtures (a scheduler on a temp DB for a fixed day)

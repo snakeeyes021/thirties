@@ -144,12 +144,7 @@ Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ## 5. Running It
 
-The SLM brain needs the `litert-lm-api` package, plus a model in `~/.local/share/thirties/models/` (`gemma-4-E4B-it-gpu.litertlm` from `litert-community/gemma-4-E4B-it-litert-lm` on Hugging Face). On the dev machine, both live in `~/.local/share/thirties/venv` (created with `--system-site-packages`, so GTK works from it too). Then:
-
-- **Choosing it:**
-  - In the desktop app: main menu → Assistant → Gemma (on this device).
-  - In any chat, including Telegram: `/brain gemma` (or `/brain gemini` to go back).
-  - The choice is this device's own (`local_settings` in the state database, never synced). Every client on the device follows it, and the conversation carries on.
-  - `[assistant] brain = "slm"` in config is the default when nothing has been chosen.
-- **The Flatpak bundles LiteRT-LM** (the `litert-lm-api` wheel is pure py3 manylinux) and runs Gemma inside the sandbox on the GPU through Vulkan; `--device=dri` is all it needs (measured on an RTX 3080 Ti: 2.2 s load). The model (~3 GB, not gated) is downloaded on first use to `$XDG_DATA_HOME/thirties/models` by `thirties_core/brains/slm/model_download.py`, resuming and checking its SHA-256.
-- Run evals, and clients from source, with `~/.local/share/thirties/venv/bin/python`.
+- **In the app:** Gemma is the default brain. Setup (or Preferences → Assistant) downloads the model (~3 GB, not gated) to `$XDG_DATA_HOME/thirties/models` with `thirties_core/brains/slm/model_download.py`, resuming and checking its SHA-256.
+- **The Flatpak bundles LiteRT-LM** (the `litert-lm-api` wheel is pure py3 manylinux). It runs Gemma inside the sandbox on the GPU through Vulkan; `--device=dri` is all it needs (measured on an RTX 3080 Ti: 2.2 s to load).
+- **Switching brains:** main menu → Assistant, Preferences, or `/brain gemma` / `/brain gemini` in any chat, including Telegram. The choice belongs to this device, and the conversation carries on.
+- **Evals and development from source** use a venv with LiteRT: `python3 -m venv --system-site-packages ~/.local/share/thirties/venv`, then `pip install litert-lm-api`, and run everything with `~/.local/share/thirties/venv/bin/python`.

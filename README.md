@@ -17,16 +17,25 @@ Thirties works when a real day runs like this without friction:
 3. **Evening, or next morning:** the assistant asks what actually happened, records it, and proposes where unfinished items should go in one batch.
 4. **Over weeks:** its suggestions get more realistic because it has learned how long things actually take you.
 
-Steps 1–2 work today (about 75% usable in the first real day). Steps 3–4 are roadmap phases 3–4.
+All four steps are in place as of the MVP (2026-10-16); see `docs/ROADMAP.md`.
 
 ## Running
 
+Open Thirties and the setup assistant asks for your location, usual week, assistant
+(Gemma runs on your computer; it's downloaded on first use), Joplin, sync, and
+optionally your phone (Telegram). Everything can be changed later in Preferences.
+With your permission it keeps running in the background after you close it, for
+reminders, check-ins and your phone; Ctrl+Q quits it completely.
+
+The desktop app is a Flatpak built with meson (GNOME Builder, or `flatpak-builder`
+with `tech.redfoxlabs.Thirties.json`).
+
+For development:
+
 ```bash
-python3 -m unittest discover tests        # unit tests
-python3 -m tests.frontier_eval            # live-model eval (needs GEMINI_API_KEY)
-python3 -m thirties_core.telegram_bridge  # headless Telegram bridge (temporary mobile client)
+python3 -m unittest discover tests                         # unit tests
+~/.local/share/thirties/venv/bin/python -m tests.sim_eval  # simulated users (see docs/SLM_BRAIN.md §4)
+python3 -m thirties_core.telegram_bridge                   # the background service headless, without the app
 ```
 
-The GTK desktop app is built with meson (GNOME Builder, or `flatpak-builder` with `tech.redfoxlabs.Thirties.json`).
-
-Configuration lives in `~/.config/thirties/config.toml`.
+An optional `~/.config/thirties/config.toml` sets developer defaults; settings chosen in the app win over it.
