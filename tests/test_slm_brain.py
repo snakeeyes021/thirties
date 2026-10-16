@@ -221,7 +221,7 @@ class TestSchedulingActions(SlmTestCase):
         self.say("reading at 7", {"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"})
         out = self.say("show me a clean list of the evening", {"type": "question", "topic": "schedule"})
         self.assertTrue(out.startswith("Here's the evening:"), out)
-        self.assertIn("- 7:00 PM – Reading (until 8:00 PM)", out)
+        self.assertTrue(out.endswith("- 7:00 PM – Reading"), out)
         self.assertNotIn("Sleep", out)
         self.assertNotIn("daylight", out)
 
@@ -382,7 +382,7 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
         out = self.say("can you show me the whole day as a clean list now?", {"type": "chat"})
         self.assertTrue(out.startswith("Here's today:"), out)
-        self.assertIn("- 7:00 PM – Dinner (until 8:00 PM)", out)
+        self.assertTrue(out.endswith("- 7:00 PM – Dinner"), out)
 
     def test_answers_in_chunks_when_the_user_counts_in_chunks(self):
         out = self.say("when am I free tonight?", {"type": "question", "topic": "free time tonight"})
@@ -400,7 +400,7 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.assertTrue(out.startswith("How about:"), out)
         starts = [l.split(" – ")[0].split(". ", 1)[1] for l in out.splitlines() if l[:1].isdigit()]
         self.assertEqual(starts, ["5:00 PM", "6:30 PM", "7:30 PM", "8:30 PM"], out)  # around the dentist, until 9
-        self.assertIn("(until 9:00 PM)", out)
+        self.assertIn("4. 8:30 PM – Write wedding thank-you notes\n", out)
         out = self.say("sure", {"type": "confirm"})
         self.assertTrue(out.startswith("Done:"), out)
 
@@ -433,7 +433,7 @@ class TestProposalsAndOutcomes(SlmTestCase):
         out = self.say("looks good, but not feeling the costco call today, swap it for something else",
                        {"type": "suggest", "topic": "evening"})
         after = [p["title"] for p in self.brain.state.proposal]
-        self.assertTrue(out.startswith("Swapped out Costco customer service. Now:"), out)
+        self.assertTrue(out.startswith("Here's the plan with Costco customer service swapped out:"), out)
         self.assertEqual(len(after), len(before))
         self.assertNotIn("Costco customer service", after)
         self.assertEqual([p for p in after if p in before], [p for p in before if p != "Costco customer service"])

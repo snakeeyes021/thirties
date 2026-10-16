@@ -722,6 +722,9 @@ class SlmBrain:
         actions = self._sanity(actions, message)
         actions = self._route(actions, message)
         actions = self._accept_readds(actions)
+        if any(a.type in ("confirm", "accept", "choose") for a in actions) and self.state.proposal:
+            # accepting a plan already lists it ("Done: ..."); a "show me" alongside would repeat it
+            actions = [a for a in actions if not (a.type == "question" and "schedule" in (a.get("topic") or ""))]
         waiting = self.state.awaiting_time
         if waiting and not any(a.type in ("add", "move", "remove") for a in actions):
             m = self._TIME_IN_TEXT.search(message)
@@ -1217,8 +1220,8 @@ class SlmBrain:
         for p in proposal:
             p_start = self._loose_time(p["start"])
             items.append((p_start, p_start + timedelta(minutes=parse_duration_minutes(p["duration"])), p["title"], ""))
-        lines = [f"Swapped out {', '.join(out_titles)}. Now:"] + agenda_lines(items, numbered=True)
-        lines.append("Want all of these, or another change?")
+        lines = [f"Here's the plan with {', '.join(out_titles)} swapped out:"] + agenda_lines(items, numbered=True)
+        lines.append("Want me to put these on your schedule, or change something else?")
         return "\n".join(lines), False
 
     # --- messages ---

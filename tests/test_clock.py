@@ -80,11 +80,11 @@ class TestClock(unittest.TestCase):
             "- 5:00 PM – Wash car (until 5:30 PM)",
             "- 6:00 PM – Dinner",
             "- 6:00 PM – Audiobook",
-            "- 7:00 PM – Team dinner (unconfirmed, until 9:00 PM)",
+            "- 7:00 PM – Team dinner (unconfirmed)",  # the last item's end isn't worth the noise
         ])
         nested = [(at("08:30"), at("16:00"), "Work", ""), (at("10:00"), at("11:00"), "Meeting", "")]
         self.assertEqual(agenda_lines(nested, numbered=True),
-                         ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting (until 11:00 AM)"])
+                         ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting"])
 
 
 if __name__ == "__main__":
