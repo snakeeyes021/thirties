@@ -93,6 +93,7 @@ class SimScenario:
     profile: Dict[str, str] = field(default_factory=dict)
     opening: str = ""
     max_turns: int = 10
+    tags: List[str] = field(default_factory=list)  # goal kinds, for per-kind results
 
 
 def has_item(words: str, between: Tuple[str, str] = None, day_offset: int = 0, minimum_minutes: int = 0) -> Check:
@@ -163,6 +164,19 @@ def outcome(words: str, status: str) -> Check:
             return None
         return f"no '{words}' marked {status} (have {[(s.title, s.status.value) for s in match]})"
     check.__doc__ = f"{words} {status}"
+    return check
+
+
+def new_items(between: Tuple[str, str], at_least: int, besides: Tuple[str, ...] = ()) -> Check:
+    """At least N planned items within a window today, not counting work, sleep, calendar events or `besides` titles."""
+    def check(run: "SimRun") -> Optional[str]:
+        plan = run.plan(0)
+        lo, hi = at(plan.target_date, between[0]), at(plan.target_date, between[1])
+        found = [s.title for s in plan.spans_in_view() if not s.tentative and not s.is_envelope
+                 and s.category not in (SpanCategory.WORK, SpanCategory.SLEEP, SpanCategory.CALENDAR)
+                 and s.title not in besides and lo <= s.start_dt and s.end_dt <= hi + timedelta(minutes=30)]
+        return None if len(found) >= at_least else f"only {len(found)} new item(s) within {between}: {found}"
+    check.__doc__ = f"{at_least}+ new items {between}"
     return check
 
 
@@ -372,6 +386,24 @@ SCENARIOS: List[SimScenario] = [
 # Simulator and judge
 # ----------------------------------------------------------------------------
 
+class AgyError(RuntimeError):
+    """agy kept failing. Not the brain's fault: the run is left out of the scores."""
+
+
+class QuotaExhausted(AgyError):
+    """agy says the usage quota is used up: stop the whole eval and report how far it got."""
+
+
+AGY_ERROR_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out")
+QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many requests|usage limit|limit (reached|exceeded)",
+                      re.IGNORECASE)
+
+
+def raise_if_agy_failed(text: str) -> None:
+    if text.startswith(AGY_ERROR_PREFIXES):
+        raise (QuotaExhausted if QUOTA_RE.search(text) else AgyError)(text[:400])
+
+
 def make_llm(model: str) -> Callable[[str], str]:
     cfg = ThirtiesConfig()
     cfg.inference.gemini_model = model
@@ -381,10 +413,13 @@ def make_llm(model: str) -> Callable[[str], str]:
     def ask(prompt: str) -> str:
         for attempt in range(3):  # agy occasionally returns nothing or an error; try again
             out = engine.chat([{"role": "user", "content": prompt}]).get("content", "")
-            if out.strip() and not out.startswith(("Error contacting model", "Failed invoking", "The Antigravity assistant timed out")):
+            if out.strip() and not out.startswith(AGY_ERROR_PREFIXES):
                 return out
+            if QUOTA_RE.search(out):
+                raise QuotaExhausted(out[:400])
             time_mod.sleep(5 * (attempt + 1))
-        return out
+        raise_if_agy_failed(out)
+        raise AgyError("agy returned nothing three times")
     return ask
 
 
@@ -430,6 +465,7 @@ class SimRun:
     transcript: List[Tuple[str, str, float]] = field(default_factory=list)
     end_reason: str = ""
     check_failures: List[str] = field(default_factory=list)
+    checks: List[Dict[str, Any]] = field(default_factory=list)
     judge: Dict[str, Any] = field(default_factory=dict)
     error: str = ""
 
@@ -497,6 +533,8 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
             calls_before = len(runtime.calls) if runtime is not None else 0
             start = time_mod.time()
             reply = run.manager.send_user_message(message)
+            if brain == "frontier":
+                raise_if_agy_failed(reply)
             run.transcript.append(("assistant", reply, round(time_mod.time() - start, 1)))
             runtime = GemmaRuntime._shared
             breakdown = ""
@@ -507,11 +545,14 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
             run.end_reason = "turn limit"
         for check in scn.checks:
             msg = check(run)
+            run.checks.append({"check": check.__doc__ or "", "ok": msg is None})
             if msg:
-                run.check_failures.append(msg)
+                run.check_failures.append(f"{check.__doc__}: {msg}")
         verdict = judge(JUDGE_PROMPT.format(persona=scn.persona, situation=scn.situation, goals=goals,
                                             transcript=run.transcript_text(), schedule=run.schedule_text()))
         run.judge = extract_json(verdict) or {"raw": verdict[:500]}
+    except QuotaExhausted:
+        raise
     except Exception as e:
         logger.exception("scenario %s failed", scn.id)
         run.error = f"{type(e).__name__}: {e}"
@@ -526,11 +567,100 @@ def goal_score(judge: Dict[str, Any]) -> Optional[float]:
     return sum(vals) / len(vals) if vals else None
 
 
+def choose_scenarios(args) -> List[SimScenario]:
+    scenarios = [] if args.generated and not args.with_handwritten else list(SCENARIOS)
+    if args.generated:
+        from tests.sim_generator import generate
+        scenarios += generate(args.generated, seed=args.seed)
+    return [s for s in scenarios if not args.only or s.id in args.only]
+
+
+def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Run (scenario, brain, repeat) jobs in this process. Returns results and a quota message if agy ran out."""
+    cfg = load_config()
+    sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp()) / "s.sqlite"), MockCalendarEngine([]))
+    tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)
+    print(f"Backlog: {len(tasks)} tasks from {len(notes)} notes; {len(jobs)} conversations", flush=True)
+    sim = make_llm(args.sim_model)
+    judge = make_llm(args.sim_model)
+    fcfg = ThirtiesConfig()
+    fcfg.inference.gemini_model = args.frontier_model
+    fcfg.inference.timeout_seconds = 180
+    frontier_engine = AntigravityInferenceEngine(fcfg)
+    results = []
+    for n, (scn, brain, i) in enumerate(jobs, 1):
+        print(f"\n== {scn.id} [{brain}] {i}/{args.repeat}  ({n}/{len(jobs)})", flush=True)
+        try:
+            run = run_scenario(scn, brain, sim, judge, tasks, notes, frontier_engine)
+        except QuotaExhausted as e:
+            return results, f"agy quota ran out after {len(results)} finished conversations in this worker: {e}"
+        gs = goal_score(run.judge)
+        latencies = [t for r, _, t in run.transcript if r == "assistant"]
+        print(f"  -> end: {run.end_reason}; goals {gs if gs is None else round(gs, 2)}; checks failed: "
+              f"{run.check_failures or 'none'}; judge: { {k: run.judge.get(k) for k in JUDGE_DIMS} }"
+              f"{'; ERROR ' + run.error if run.error else ''}", flush=True)
+        if run.judge.get("issues"):
+            print("  issues: " + " | ".join(map(str, run.judge["issues"])), flush=True)
+        results.append({
+            "scenario": scn.id, "brain": brain, "repeat": i, "tags": scn.tags, "end_reason": run.end_reason,
+            "goal_score": gs, "checks": run.checks, "check_failures": run.check_failures, "judge": run.judge,
+            "error": run.error, "turns": len(latencies),
+            "mean_latency": round(sum(latencies) / len(latencies), 1) if latencies else None,
+            "persona": scn.persona, "situation": scn.situation, "goals": scn.goals,
+            "transcript": run.transcript, "final_schedule": run.schedule_text() if run.scheduler else "",
+        })
+    return results, None
+
+
+JUDGE_DIMS = ("accuracy", "understanding", "clarity", "efficiency", "tone")
+
+
+def summarize(results: List[Dict[str, Any]], brains: List[str]) -> None:
+    print("\n=== Summary ===")
+    for brain in brains:
+        rs = [r for r in results if r["brain"] == brain and not r["error"]]
+        errors = sum(1 for r in results if r["brain"] == brain and r["error"])
+        if not rs:
+            continue
+        gs = [r["goal_score"] for r in rs if r["goal_score"] is not None]
+        checks_ok = sum(1 for r in rs if not r["check_failures"])
+        all_checks = [c for r in rs for c in r.get("checks", [])]
+        dims = {d: [r["judge"].get(d) for r in rs if isinstance(r["judge"].get(d), (int, float))] for d in JUDGE_DIMS}
+        lat = [r["mean_latency"] for r in rs if r["mean_latency"]]
+        gave_up = sum(1 for r in rs if str(r["end_reason"]).upper().startswith("GIVE UP"))
+        print(f"{brain}: {len(rs)} conversations{f' (+{errors} errored)' if errors else ''} | "
+              f"goals {sum(gs) / len(gs):.2f} | all checks passed {checks_ok}/{len(rs)} | "
+              f"single checks {sum(c['ok'] for c in all_checks)}/{len(all_checks)} | gave up {gave_up} | "
+              + " ".join(f"{d} {sum(v) / len(v):.1f}" for d, v in dims.items() if v)
+              + (f" | latency {sum(lat) / len(lat):.1f}s" if lat else ""))
+        kinds: Dict[str, List[float]] = {}
+        for r in rs:
+            for tag in r.get("tags") or []:
+                kinds.setdefault(tag, []).append(r["goal_score"] or 0.0)
+        kind_checks: Dict[str, List[bool]] = {}
+        for c in all_checks:
+            m = re.match(r"\[(\w+)\]", c["check"])
+            if m:
+                kind_checks.setdefault(m.group(1), []).append(c["ok"])
+        if kinds:
+            print("  by goal kind (conversations, mean goal score, checks passed):")
+            for tag in sorted(kinds, key=lambda t: sum(kinds[t]) / len(kinds[t])):
+                ks = kind_checks.get(tag, [])
+                print(f"    {tag:<18} {len(kinds[tag]):>4}  {sum(kinds[tag]) / len(kinds[tag]):.2f}"
+                      + (f"  {sum(ks)}/{len(ks)}" if ks else ""))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--brain", choices=["slm", "frontier", "both"], default="slm")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--generated", type=int, default=0, help="add N generated scenarios (tests/sim_generator.py)")
+    ap.add_argument("--with-handwritten", action="store_true", help="with --generated, also run the hand-written ones")
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--workers", type=int, default=1, help="parallel worker processes (each SLM worker loads Gemma)")
+    ap.add_argument("--shard", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--out", default="", help=argparse.SUPPRESS)
     ap.add_argument("--sim-model", default="gemini-3.8-flash-medium")
     ap.add_argument("--frontier-model", default="gemini-3.8-flash-low")
     ap.add_argument("--label", default="")
@@ -538,52 +668,48 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="      [%(name)s] %(message)s")
     logging.getLogger("thirties_core.brains.slm.brain").setLevel(logging.INFO)
 
-    cfg = load_config()
-    sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp()) / "s.sqlite"), MockCalendarEngine([]))
-    tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)
-    print(f"Backlog: {len(tasks)} tasks from {len(notes)} notes", flush=True)
-    sim = make_llm(args.sim_model)
-    judge = make_llm(args.sim_model)
-    fcfg = ThirtiesConfig()
-    fcfg.inference.gemini_model = args.frontier_model
-    fcfg.inference.timeout_seconds = 180
-    frontier_engine = AntigravityInferenceEngine(fcfg)
-
     brains = ["slm", "frontier"] if args.brain == "both" else [args.brain]
-    scenarios = [s for s in SCENARIOS if not args.only or s.id in args.only]
-    results = []
-    for scn in scenarios:
-        for brain in brains:
-            for i in range(args.repeat):
-                print(f"\n== {scn.id} [{brain}] {i + 1}/{args.repeat}", flush=True)
-                run = run_scenario(scn, brain, sim, judge, tasks, notes, frontier_engine)
-                gs = goal_score(run.judge)
-                latencies = [t for r, _, t in run.transcript if r == "assistant"]
-                print(f"  -> end: {run.end_reason}; goals {gs if gs is None else round(gs, 2)}; checks failed: "
-                      f"{run.check_failures or 'none'}; judge: { {k: run.judge.get(k) for k in ('accuracy', 'understanding', 'clarity', 'efficiency', 'tone')} }"
-                      f"{'; ERROR ' + run.error if run.error else ''}", flush=True)
-                if run.judge.get("issues"):
-                    print("  issues: " + " | ".join(map(str, run.judge["issues"])), flush=True)
-                results.append({
-                    "scenario": scn.id, "brain": brain, "repeat": i + 1, "end_reason": run.end_reason,
-                    "goal_score": gs, "check_failures": run.check_failures, "judge": run.judge, "error": run.error,
-                    "turns": len(latencies), "mean_latency": round(sum(latencies) / len(latencies), 1) if latencies else None,
-                    "transcript": run.transcript, "final_schedule": run.schedule_text() if run.scheduler else "",
-                })
+    jobs = [(scn, brain, i + 1) for scn in choose_scenarios(args) for i in range(args.repeat) for brain in brains]
+    quota_notes: List[str] = []
+    if args.shard:
+        k, n = (int(x) for x in args.shard.split("/"))
+        results, quota = run_jobs(args, jobs[k::n])
+        Path(args.out).write_text(json.dumps({"results": results, "quota": quota}, default=str))
+        sys.exit(3 if quota else 0)
+    elif args.workers > 1:
+        import subprocess
+        log_dir = REPORTS_DIR / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        procs = []
+        for k in range(args.workers):
+            out = log_dir / f"{stamp}_worker{k}.json"
+            cmd = [sys.executable, "-m", "tests.sim_eval", *sys.argv[1:], "--shard", f"{k}/{args.workers}", "--out", str(out)]
+            log = open(log_dir / f"{stamp}_worker{k}.log", "w")
+            procs.append((subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=REPO_ROOT), out, log))
+        print(f"{len(jobs)} conversations on {args.workers} workers; logs in {log_dir.relative_to(REPO_ROOT)}/{stamp}_worker*.log",
+              flush=True)
+        results = []
+        for proc, out, log in procs:
+            proc.wait()
+            log.close()
+            if out.exists():
+                data = json.loads(out.read_text())
+                results += data["results"]
+                if data.get("quota"):
+                    quota_notes.append(data["quota"])
+            else:
+                print(f"worker {out.name} crashed (exit {proc.returncode}); see its log", flush=True)
+    else:
+        results, quota = run_jobs(args, jobs)
+        if quota:
+            quota_notes.append(quota)
 
-    print("\n=== Summary ===")
-    for brain in brains:
-        rs = [r for r in results if r["brain"] == brain and not r["error"]]
-        if not rs:
-            continue
-        gs = [r["goal_score"] for r in rs if r["goal_score"] is not None]
-        checks_ok = sum(1 for r in rs if not r["check_failures"])
-        dims = {d: [r["judge"].get(d) for r in rs if isinstance(r["judge"].get(d), (int, float))]
-                for d in ("accuracy", "understanding", "clarity", "efficiency", "tone")}
-        lat = [r["mean_latency"] for r in rs if r["mean_latency"]]
-        print(f"{brain}: goals {sum(gs) / len(gs):.2f} | checks passed {checks_ok}/{len(rs)} | "
-              + " ".join(f"{d} {sum(v) / len(v):.1f}" for d, v in dims.items() if v)
-              + (f" | latency {sum(lat) / len(lat):.1f}s" if lat else ""))
+    summarize(results, brains)
+    if quota_notes:
+        print(f"\n!!! agy QUOTA ran out: {len(results)} of {len(jobs)} conversations finished before it stopped.")
+        for q in quota_notes:
+            print("    " + q)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out = REPORTS_DIR / f"sim_{datetime.now().strftime('%Y%m%d_%H%M%S')}{'_' + args.label if args.label else ''}.json"
     out.write_text(json.dumps(results, indent=2, default=str))

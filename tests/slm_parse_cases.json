@@ -1,0 +1,7200 @@
+[
+ {
+  "category": "add_exact",
+  "message": "gym at 4:30 for 45 min",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "gym",
+    "start": "4:30",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "walk with dave 5 to 5:30",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk",
+    "start": "5",
+    "end": "5:30"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "i need to cook dinner at 5:15 for 45 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dinner",
+    "start": "5:15",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "let's add extra composing from 9 to 10 tonight",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "composing",
+    "start": "9",
+    "end": "10"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "meditatoin at 4:30pm for 20 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "meditat",
+    "start": "4:30",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "Please schedule a follow-up on work emails from 4:15 PM to 4:45 PM.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "work",
+    "start": "4:15",
+    "end": "4:45"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "put an hour of reading at 9pm",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "reading",
+    "start": "9pm",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "groceries 5:00-5:45",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "groceries",
+    "start": "5:00",
+    "end": "5:45"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "so right after work wraps up at 4 i wanna go for a bike ride at 4:15 for an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "bike",
+    "start": "4:15",
+    "duration": "an hour"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "stretch at 8:45 for 15 minutes",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "stretch",
+    "start": "8:45",
+    "duration": "15"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "wind down from 10pm until 10:45",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "wind down",
+    "start": "10pm",
+    "end": "10:45"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "guitar practice at 8:45 pm, 45 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "guitar",
+    "start": "8:45",
+    "duration": "45"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "nap at 4:30 for half an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "nap",
+    "start": "4:30",
+    "duration": "half an hour"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "schedule video games 9 to 10:30",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "video games",
+    "start": "9",
+    "end": "10:30"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "call mom from 5 til 5:30pm",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "mom",
+    "start": "5",
+    "end": "5:30"
+   }
+  }
+ },
+ {
+  "category": "add_exact",
+  "message": "add 2 thirties of photo editing at 8:45",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "photo",
+    "start": "8:45",
+    "duration": "2 thirties"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "walk the dog after work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk",
+    "after": "work"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "can we fit in a quick run right after work? 30 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "run",
+    "after": "work",
+    "duration": "30"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "grocery shopping around 5 for an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocer",
+    "start": "5",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "call mom later this afternoon",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "call",
+    "start": "afternoon"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "slip in a quick call with Dave sometime before dinner, maybe 15 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "Dave",
+    "before": "dinner",
+    "duration": "15"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "I need to review the quarterly report sometime after dinner for roughly 45 minutes.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "report",
+    "after": "dinner",
+    "duration": "45"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "quick nap round 4ish thirty mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "nap",
+    "start": "4",
+    "duration": "thirty"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "im thinking i should prolly water the plants after work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "water",
+    "after": "work"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "put 20 mins of yoga before dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "yoga",
+    "before": "dinner",
+    "duration": "20"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "hey can you add read a chapter around 9ish for an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "read",
+    "start": "9",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "clean kitchen after dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "kitchen",
+    "after": "dinner"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "gonna try to do 15 min of meditation right after composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "meditat",
+    "after": "composing",
+    "duration": "15"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "grab coffee with Sarah sometime around 4:30 for 30 minutes",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "coffee",
+    "start": "4:30",
+    "duration": "30"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "Please schedule a 45 minute prep session prior to dinner.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "prep",
+    "before": "dinner",
+    "duration": "45"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "sketching new themes for 30 minutes after dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "sketch",
+    "after": "dinner",
+    "duration": "30"
+   }
+  }
+ },
+ {
+  "category": "add_loose",
+  "message": "could we slot in about thirty mins of guitar practice sometime later tonight after composing?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "guitar",
+    "after": "composing",
+    "duration": "thirty"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "walk dog for 30 minutes right after work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk",
+    "after": "work",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "can you put 15 mins of yoga right before dinner?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "yoga",
+    "before": "dinner",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "dishes right aftr dinner 20 min",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dishes",
+    "after": "dinner",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "I really need to prep my sheet music for 20 minutes before composing tonight",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "sheet music",
+    "before": "composing",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "read fiction for 45 minutes right before sleep",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "read",
+    "before": "sleep",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "Immediately following Composing, please add 30 minutes of synthesizer maintenance.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "synthesizer",
+    "after": "composing",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "quick shower after work 15 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "shower",
+    "after": "work",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "wanna do 10 mins of meditation rite before sleep",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "meditation",
+    "before": "sleep",
+    "duration": "10 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "call mom for 25 minutes right after dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "call mom",
+    "after": "dinner",
+    "duration": "25 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "skincare for 15 minutes before sleep",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "skincare",
+    "before": "sleep",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "hey after work throw in 45 minutes of grocery run and push later stuff back",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocery",
+    "after": "work",
+    "duration": "45 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "piano warmup 15 min b4 composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "piano",
+    "before": "composing",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "journaling for an hour right after composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "journaling",
+    "after": "composing",
+    "duration": "an hour"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "so right after work I should probably unpack my suitcase for like 20 minutes",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "unpack",
+    "after": "work",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "set the table 10 minutes before dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "table",
+    "before": "dinner",
+    "duration": "10 min"
+   }
+  }
+ },
+ {
+  "category": "add_relative",
+  "message": "take a break for 15 minutes right after work, then 45 minutes of gym",
+  "context": {},
+  "types": [
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "break",
+    "after": "work",
+    "duration": "15 min"
+   },
+   "1": {
+    "title": "gym",
+    "after": "break",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "audiobook during dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "audiobook",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "Hey, while I'm doing composing tonight I want to put on that new ambient album in the background for an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "album",
+    "duration": "hour",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "gona listen to podcsat while at work for 45 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "podc",
+    "duration": "45 min",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "quick walk 5 to 5:30, and call mom while walking",
+  "context": {},
+  "types": [
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk",
+    "start": "5",
+    "end": "5:30"
+   },
+   "1": {
+    "title": "mom",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "Please schedule a 30 minute phone conference with Dr. Aris at 6:30 PM alongside dinner.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "Aris",
+    "start": "6:30",
+    "duration": "30 min",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "oh also i forgot to mention since i'm still stuck at work until 4 i might as well run a laundry cycle in the background",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "laundry",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "run at 4:30 for 30 min, and listen to a podcast at the same time",
+  "context": {},
+  "types": [
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "run",
+    "start": "4:30",
+    "duration": "30 min"
+   },
+   "1": {
+    "title": "podcast",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "can u put stretching during composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "stretch",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "6 to 7 watch youtube during dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "youtube",
+    "start": "6",
+    "end": "7",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "so im basically just doing busywork right now, throw on lo-fi beats alongside work for 2 hours",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "lo-fi",
+    "duration": "2 hours",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "also listen to the Daily during that",
+  "context": {
+   "last_item": "walk"
+  },
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "Daily",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "play white noise while sleeping tonight",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "white noise",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "I need to review flashcards at the same time as dinner tonight",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "flashcard",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "put audiobok parallel to dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "audiob",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "prep dinner 5:30 to 6, and call dad while doing that",
+  "context": {},
+  "types": [
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dinner",
+    "start": "5:30",
+    "end": "6"
+   },
+   "1": {
+    "title": "dad",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_alongside",
+  "message": "7pm start a dishwasher run alongside composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dishwasher",
+    "start": "7",
+    "alongside": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze in a 30 min quick workout at 5, push everything back",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "workout",
+    "start": "5",
+    "duration": "30 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "can we fit a quick call with mom at 6:30 for 15 mins? bump everything else down",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "call",
+    "start": "6:30",
+    "duration": "15 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "Hey, my sister just called and asked if I could help her carry some groceries at 5:15. Can you squeeze that in for like 45 minutes and slide the rest of the evening back?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "groceries",
+    "start": "5:15",
+    "duration": "45 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze in a 20m shower right before dinner, slide the rest back",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "shower",
+    "before": "dinner",
+    "duration": "20m",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "sqeeze in an oil chnage at 4:30 for an hour and slide back later stuff",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "oil",
+    "start": "4:30",
+    "duration": "an hour",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "Please insert a forty-five minute sync with Marcus at 3:30 PM, shifting all subsequent events back accordingly.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "sync",
+    "start": "3:30",
+    "duration": "forty-five minute",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze in 15 min meditation at 5pm, push later items",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "meditation",
+    "start": "5pm",
+    "duration": "15 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "I really need to squeeze in a 1 hour nap at 4, push everything else later please",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "nap",
+    "start": "4",
+    "duration": "1 hour",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze in walking the dog for 30 minutes right after work and push everything back",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dog",
+    "after": "work",
+    "duration": "30 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "fit in dentist appt at 3:30 for 1 hr, slide later tasks",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dentist",
+    "start": "3:30",
+    "duration": "1 hr",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze Dinner in at 5:00 instead and push back everything after",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "Dinner",
+    "start": "5:00",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "gonna squeeze in guitar practice from 5 to 6, push back anything after it",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "guitar",
+    "start": "5",
+    "end": "6",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "Oh man, I totally forgot I have to pick up the dry cleaning. Squeeze in 20 minutes for dry cleaning at 4:15 and push back the rest of the schedule.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dry cleaning",
+    "start": "4:15",
+    "duration": "20 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "slot in 45 min of yoga at 5:00 and delay everything after it",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "yoga",
+    "start": "5:00",
+    "duration": "45 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "squeeze in 10m mail check after dinner, push later items",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "mail",
+    "after": "dinner",
+    "duration": "10m",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_push",
+  "message": "need to squeeze in grocery run at 4:30 for 45 mins and cascade everything later",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocery",
+    "start": "4:30",
+    "duration": "45 min",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "dentist tomorrow at 10am for 45 mins",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dentist",
+    "day": "tomorrow",
+    "start": "10",
+    "duration": "45"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Hey! Could you schedule lunch with Sarah on Friday from 12:30 to 1:30?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "lunch",
+    "day": "Friday",
+    "start": "12:30",
+    "end": "1:30"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "add grocery run saturday morning at 9 for an hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocery",
+    "day": "saturday",
+    "start": "9",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "plz add gym sesh tomorrow at 6:30am for 1 hour",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "gym",
+    "day": "tomorrow",
+    "start": "6:30",
+    "duration": "1 hour"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Please schedule a quarterly planning session on Monday, Oct 20 from 9:00 AM to 11:00 AM.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "planning",
+    "day": "Oct 20",
+    "start": "9:00",
+    "end": "11:00"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Oh I completely forgot, my sister said we should do brunch this Sunday, maybe around 11 for like an hour and a half?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "brunch",
+    "day": "Sunday",
+    "start": "11",
+    "duration": "hour and a half"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "tomorrow after work put a 30 min run",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "run",
+    "day": "tomorrow",
+    "after": "work",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "put flight to Chicago on Oct 20 at 6am",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "flight",
+    "day": "Oct 20",
+    "start": "6"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "tomorrow squeeze in a team sync at 10am for 30m and push everything back",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "team sync",
+    "day": "tomorrow",
+    "start": "10",
+    "duration": "30",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "on Friday during Dinner let's do a 30 minute video call with Mom",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "video call",
+    "day": "Friday",
+    "alongside": "True",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "piano lesson saturday 4 to 5pm",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "piano",
+    "day": "saturday",
+    "start": "4",
+    "end": "5"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "need to call mom tomorrow at 5pm",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "call mom",
+    "day": "tomorrow",
+    "start": "5"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Let's block out 3 hours for composing on Saturday starting at 1pm",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "composing",
+    "day": "Saturday",
+    "start": "1",
+    "duration": "3 hours"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Oct 20 at 2pm meeting with advisor for 45 minutes",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "advisor",
+    "day": "Oct 20",
+    "start": "2",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "Friday dinner with David at 7:30pm for 2 hours",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dinner",
+    "day": "Friday",
+    "start": "7:30",
+    "duration": "2 hours"
+   }
+  }
+ },
+ {
+  "category": "add_other_day",
+  "message": "tomorrow put a 20 minute meditation right before work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "meditation",
+    "day": "tomorrow",
+    "before": "work",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "groceries at some point",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocer"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "hey so I really need to get around to folding the laundry today whenever there's time",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "laundry"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "need to call mom today",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "mom"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "gotta do the dishs at some point today",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dish"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "I must ensure that I submit the quarterly expense report sometime today.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "expense"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "ugh my back is killing me from sitting, really need to do some stretching today whenever",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "stretch"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "I need to make dinner at some point",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "dinner"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "take out trash whenever",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "trash"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "remind me to pay the electric bill sometime today",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "bill"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "gotta waash the car at some point",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "car"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "need to catch up on some work emails at some point",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "email"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "shld probably vacuum the living room at some point",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "vacuum"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "oh I have to remember to water the plants sometime today",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "plant"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "need to drop off packages at ups whenever",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "package"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "fit in a quick walk whenever there is a break",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk"
+   }
+  }
+ },
+ {
+  "category": "add_no_time",
+  "message": "at some point today I really need to practice composing scales",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "composing"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "walk 1 thirty after work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "walk",
+    "duration": "1 thirty",
+    "after": "work"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "need 2 thirties of reading before dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "reading",
+    "duration": "2 thirties",
+    "before": "dinner"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "put 1 chunk of email at 4:15",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "email",
+    "start": "4:15",
+    "duration": "1 chunk"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "hey can we fit in 2 chunks of admin right at 5pm?",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "admin",
+    "start": "5",
+    "duration": "2 chunks"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "plz add 3 thrties of gardening aftr work",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "gardening",
+    "duration": "thrties",
+    "after": "work"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "after work do 1 thirty of stretching then 2 chunks of reading",
+  "context": {},
+  "types": [
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "stretching",
+    "duration": "1 thirty",
+    "after": "work"
+   },
+   "1": {
+    "title": "reading",
+    "duration": "2 chunks"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "Please schedule three chunks of research starting at 9:00 PM.",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "research",
+    "start": "9:00",
+    "duration": "three chunks"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "I really need to prep for tomorrow, give me 2 thirties of planning after composing",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "planning",
+    "duration": "2 thirties",
+    "after": "composing"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "squeeze in a chunk of yoga at 5:30 and push later items",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "yoga",
+    "start": "5:30",
+    "duration": "chunk",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "tomorrow at 10am put 4 chunks of code review",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "code review",
+    "day": "tomorrow",
+    "start": "10",
+    "duration": "4 chunks"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "give me 1 chunk of guitar after dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "guitar",
+    "duration": "1 chunk",
+    "after": "dinner"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "gonna knock out two thirties of workout at 4:30",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "workout",
+    "start": "4:30",
+    "duration": "two thirties"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "3 chunks of video editing at 8:45",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "video editing",
+    "start": "8:45",
+    "duration": "3 chunks"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "drop in a thirty of tidy up before dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "tidy",
+    "duration": "thirty",
+    "before": "dinner"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "so tired today but i should probably do 1 thirty of chores around 5",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "chores",
+    "start": "5",
+    "duration": "1 thirty"
+   }
+  }
+ },
+ {
+  "category": "add_chunks",
+  "message": "a chunk of reading before sleep",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "reading",
+    "duration": "chunk",
+    "before": "sleep"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "push dinner back 30 minutes",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "can we push it back an hour?",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "dinner +15m",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "Move dinner 45 minutes earlier",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "coul we psh dinner back like 20 min",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "Please postpone composing by one hour.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "traffic is terrible heading home, let's push dinner back 45 minutes so I don't have to rush",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "let's do that 30 minutes sooner",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "that",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "composing -15 min",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "push dinner back 30 minutes and slide everything after it",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "bump the gym session back half an hour",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "gym",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "feeling energetic, let's start composing 30 minutes earlier",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "can we pull the call with mom forward by 15 minutes?",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "call with mom",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "delay it by 45 mins",
+  "context": {
+   "last_item": "Dinner"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "move piano practice 20 minutes earlier",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "piano",
+    "shift": "-"
+   }
+  }
+ },
+ {
+  "category": "move_shift",
+  "message": "push dinner back 30 minutes and composing back an hour",
+  "context": {},
+  "types": [
+   "move",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+"
+   },
+   "1": {
+    "target": "composing",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "push dinner back 30m",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+30"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "Hey, running a bit behind today, can we push composing back an hour?",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "shift": "+1"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "move dinner 30 minutes earlier",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "-30"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "pysh dinner to 6:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "start": "6:30"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "push it back 15 mins",
+  "context": {
+   "last_item": "composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "shift": "+15"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "work is going to go until 4:30 today",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "4:30"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "move dinner to 6:30 and push everything after it",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "start": "6:30",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "put composing right after dinner",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "after": "dinner"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "can we do composing before dinner instead?",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "before": "dinner"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "move composing to tomorrow",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "delay composing until tomorrow at 8pm",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow",
+    "start": "8"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "Please adjust the start time of dinner to 6:45 PM.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "start": "6:45"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "I got caught up on a call with a client so work is wrapping up at 5:00 instead of 4",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "5:00"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "composing -> 8:00",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "start": "8:00"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "let's do dinner 1 hour sooner",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "-1"
+   }
+  }
+ },
+ {
+  "category": "move_time",
+  "message": "make dinner 6:30 to 7:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "start": "6:30",
+    "end": "7:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "work ran late, going until 5",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "5"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "Hey! Things got super busy this afternoon, so work is going to run until 5:30.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "5:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "done with work early! finished up at 2:30",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "wokr ran late, push it back 45 minutes",
+  "context": {
+   "last_item": "work"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "Please extend my work block until 4:45 PM today as a client meeting ran over.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "4:45"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "ugh emergency prod issue at work so i'm stuck here until 6, slide dinner to 6:30",
+  "context": {},
+  "types": [
+   "move",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "6"
+   },
+   "1": {
+    "target": "dinner",
+    "start": "6:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "started work late today at 9:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "start": "9:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "All done with work at 3:15",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "3:15"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "finished work early at 2, put an hour of reading at 3:30",
+  "context": {},
+  "types": [
+   "outcome",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2"
+   },
+   "1": {
+    "title": "reading",
+    "start": "3:30",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "we are running behind on this sprint, push work back an hour and slide everything after",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "shift": "+",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "I'm starting work late today at 10",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "start": "10"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "Got off work early today! We wrapped at 1:30",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "1:30"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "work ends at 5 today",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "5"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "meeting ran long, finished work around 4:45",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "4:45"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "done with work early at 3, can we move dinner earlier to 5?",
+  "context": {},
+  "types": [
+   "outcome",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "3"
+   },
+   "1": {
+    "target": "dinner",
+    "start": "5"
+   }
+  }
+ },
+ {
+  "category": "move_work",
+  "message": "yeah, it went til 4:30",
+  "context": {
+   "assistant": "Did work finish on time at 4?",
+   "last_item": "work"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "end": "4:30"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "push composing to tomorrow",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "can we move dinner to tomorrow at 6:30?",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "to_day": "tomorrow",
+    "start": "6:30"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "move it to friday morning",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "to_day": "friday"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "postpone composing to Saturday",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "saturday"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "composing -> tomorrow",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "Actually I'm way too drained to write music tonight, put composing on tomorrow's schedule at 7pm",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow",
+    "start": "7pm"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "shove composing to satruday",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "satruday"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "Please reschedule tonight's dinner to Friday at 7.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "to_day": "friday",
+    "start": "7"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "let's kick composing over to Monday",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "monday"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "push it to tomorrow instead",
+  "context": {
+   "last_item": "Dinner"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "to_day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "move the car inspection to next Tuesday",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "car inspection",
+    "to_day": "tuesday"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "bump composing to tomorrow for 2 hours",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "tomorrow",
+    "duration": "2 hours"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "wont have time for composing today, shift it to sunday at 2pm",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "sunday",
+    "start": "2pm"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "let's do dinner tomorrow night instead",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "to_day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "move piano practice to tomorrow after work",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "piano practice",
+    "to_day": "tomorrow",
+    "after": "work"
+   }
+  }
+ },
+ {
+  "category": "move_day",
+  "message": "reschedule that to Friday",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "that",
+    "to_day": "friday"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "composing 2 hours",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "duration": "2 hour"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "cut dinner down to 30 mins",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "looks like this meeting is dragging on, work is gonna go until 5 today",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "5"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "make it 3 hours tonight",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "duration": "3 hour"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "extned dinner to 7:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "end": "7:30"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "I will be wrapping up work early today at 3:30 PM.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "end": "3:30"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "let's shrink dinner to half an hour",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "duration": "half an hour"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "stretch dinner to an hour and a half",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "duration": "hour and a half"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "make composing 4 thirties",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "duration": "4 thirties"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "just a quick 15 min dinner tonight",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "need to expand the reading block to 45 minutes",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "reading",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "can we shorten it to 40 minutes?",
+  "context": {
+   "last_item": "Dinner"
+  },
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "duration": "40 min"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "make composing 1 hr tonite",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "duration": "1 hr"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "Please extend my sleep block until 8:00 AM tomorrow.",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "sleep",
+    "end": "8:00"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "feeling super inspired, give me 2.5 hours for composing",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "duration": "2.5 hour"
+   }
+  }
+ },
+ {
+  "category": "move_length",
+  "message": "dinner til 6:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "end": "6:30"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "cancel composing",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "drop dinner tonight",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "Please remove Composing from my schedule for this evening.",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "cancle dinner",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "scratch that 7pm composing block",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "im done for the day, take work off the rest of the schedule",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "Hey, plans changed and I'm eating out with friends, so let's get rid of dinner.",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "nix composing",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "remove Dinner from 6 to 7",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "take gym off my calendar today",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "gym"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "My head is pounding and I really can't focus on music right now, delete composing please",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "actually let's cancel it",
+  "context": {
+   "last_item": "Dinner"
+  },
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "remove",
+  "message": "scrap composing for tonight",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "cancel dinner and put pizza pickup at 6:30 for 20 min",
+  "context": {},
+  "types": [
+   "remove",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   },
+   "1": {
+    "start": "6:30",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "wipe composing off today's plan",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "remove",
+  "message": "not doing dinner, take it off",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "took the day off work",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "no work today took the day off",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "tok the day off work today",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "called in sick today, pull work off my schedule",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Please remove work from my schedule today as I am taking personal time off.",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "hey so my boss let me take the day off today, clear work off the day and I will just chill until dinner",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Took the day off work! Put painting at 10am for 2 hours",
+  "context": {},
+  "types": [
+   "remove",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "title": "paint",
+    "start": "10",
+    "duration": "2 hour"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "took the day off! yoga 10 to 11, then lunch at 12:30 for an hour",
+  "context": {},
+  "types": [
+   "remove",
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "title": "yoga",
+    "start": "10",
+    "end": "11"
+   },
+   "2": {
+    "title": "lunch",
+    "start": "12:30",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Took the day off work, let's move composing to 2pm",
+  "context": {},
+  "types": [
+   "remove",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "target": "composing",
+    "start": "2"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Taking the day off work today, push dinner back an hour",
+  "context": {},
+  "types": [
+   "remove",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "target": "dinner",
+    "shift": "+1 hour"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "took the day off work today, feeling totally drained",
+  "context": {},
+  "types": [
+   "remove",
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "level": "1"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "I took the day off work today, what should I do this afternoon?",
+  "context": {},
+  "types": [
+   "remove",
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "topic": "afternoon"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "taking the day off work. what does the rest of my schedule look like?",
+  "context": {},
+  "types": [
+   "remove",
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "topic": "schedule"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Taking today off work and let's cancel composing too",
+  "context": {},
+  "types": [
+   "remove",
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Took the day off work. Put an hour walk right after dinner",
+  "context": {},
+  "types": [
+   "remove",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "title": "walk",
+    "after": "dinner",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "day_off",
+  "message": "Took the day off work. Swap dinner with composing tonight",
+  "context": {},
+  "types": [
+   "remove",
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "work"
+   },
+   "1": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swap dinner and composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "switch composing with dinner",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "hey I'm not really hungry yet so could we swap dinner and composing tonight?",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swp dinner and composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "Please swap the dinner and composing sessions on my schedule.",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "flip composing and dinner",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swap it with dinner",
+  "context": {
+   "last_item": "composing"
+  },
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swap laundry and dishes",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "laundry",
+    "other": "dishes"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "switch dinner and composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swicth composing with dinner",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "change of plans, let's swap composing with dinner",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "can u swap gym and shower",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "gym",
+    "other": "shower"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "switch around dinner and composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "trade dinner with composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "flip the order of composing and dinner",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "other": "dinner"
+   }
+  }
+ },
+ {
+  "category": "swap",
+  "message": "swap dinner & composing please",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "Hey, I actually wrapped up work early at 2:30 today!",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2:30"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "done with work",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "Finished work at 2:45 PM",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2:45 PM"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "did my taxes from 1 to 2:15",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "taxes",
+    "status": "done",
+    "started": "1",
+    "finished": "2:15"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "knocked out composing already, finished around 1:30",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "status": "done",
+    "finished": "1:30"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "finsihed work early",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "just finished the laundry",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "laundry",
+    "status": "done"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "I have concluded work for today as of 2:50.",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2:50"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "started dinner prep at 2:15 and just finished it up",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner prep",
+    "status": "done",
+    "started": "2:15"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "done with it at 2",
+  "context": {
+   "last_item": "Work"
+  },
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "status": "done",
+    "finished": "2"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "Got through the grocery run way faster than expected, got back at 1:45",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "grocery",
+    "status": "done",
+    "finished": "1:45"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "clocked out of work at 2:15",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "2:15"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "work is done",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "cleared out my inbox, was on it between 11:00 and 12:30",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "inbox",
+    "status": "done",
+    "started": "11:00",
+    "finished": "12:30"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "crushed the presentation prep, done by 2pm",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "presentation prep",
+    "status": "done",
+    "finished": "2pm"
+   }
+  }
+ },
+ {
+  "category": "outcome_done",
+  "message": "Hey! Just finished composing for the day at 2:40.",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "status": "done",
+    "finished": "2:40"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "didn't get to composing",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "only got through part of work today",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "didnt get to the gym todday",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "gym",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "Got completely bogged down with emergency client calls so I only managed to do about half of work.",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "couldn't get to it",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "I was unable to attend the team sync today.",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "sync",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "had to stop work at 2, only got partway through",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "partial",
+    "finished": "2"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "ended up skipping lunch entirely",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "lunch",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "started composing at 1:30 but only did like 15 minutes of it",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "status": "partial",
+    "started": "1:30"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "missed my afternoon walk",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "walk",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "i only got halfway through the reading list",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "reading",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "never got around to doing the dishes",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "dishes",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "only did a little bit of it",
+  "context": {
+   "last_item": "Dinner"
+  },
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "didnt finish the chores, only did some",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "chores",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "skipped it",
+  "context": {
+   "last_item": "Work"
+  },
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "status": "skipped"
+   }
+  }
+ },
+ {
+  "category": "outcome_skipped",
+  "message": "only got some composing done before dinner",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "status": "partial"
+   }
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yep",
+  "context": {
+   "assistant": "You finish work at 4:00 PM. Want me to block out 30 minutes for a walk then?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "sounds good to me!",
+  "context": {
+   "assistant": "Should I schedule dinner for 6:00 PM as usual?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "Yeah, let's do the happy hour",
+  "context": {
+   "assistant": "The team invited you to happy hour at 4:30 PM. Would you like to attend?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {
+    "target": "happy hour"
+   }
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "That would be wonderful, thank you.",
+  "context": {
+   "assistant": "Would you like me to reserve 9:00 PM to 10:00 PM for reading before bed?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "bet, make it happen",
+  "context": {
+   "assistant": "Should we shift Dinner to 6:30 PM so you have time to decompress after work?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yea sure that wrks",
+  "context": {
+   "assistant": "I can set a 15-minute break at 3:30 PM right now if you need it."
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "Yes, go ahead and extend composing.",
+  "context": {
+   "assistant": "Would you like to extend Composing until 9:30 PM tonight?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "Honestly that sounds like a great idea, my head is spinning from work so definitely do that.",
+  "context": {
+   "assistant": "Do you want me to schedule a 45-minute jog at 4:15 PM once you finish work?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yes",
+  "context": {
+   "assistant": "Should I leave Composing at 7:00 PM?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "count me in for the team dinner",
+  "context": {
+   "assistant": "The team dinner is scheduled for 6:00 PM tonight. Should I add it to your calendar?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {
+    "target": "team dinner"
+   }
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "go for it",
+  "context": {
+   "assistant": "Shall I schedule a 30-minute wind-down routine at 10:30 PM before sleep?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "perfect, do it!",
+  "context": {
+   "assistant": "Would you like me to block out 30 minutes at 4:15 PM to reply to personal emails?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "perfetc",
+  "context": {
+   "assistant": "Should I push Composing back to 7:30 PM?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yep please lock that in",
+  "context": {
+   "assistant": "Should I schedule 45 minutes for meal prep right before dinner at 5:15 PM?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yes to piano practice",
+  "context": {
+   "assistant": "You have free time between 4:00 PM and 6:00 PM. Would you like me to add piano practice at 4:30?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {
+    "target": "piano practice"
+   }
+  }
+ },
+ {
+  "category": "confirm",
+  "message": "yeah i guess so",
+  "context": {
+   "assistant": "Do you still want to keep the 7:00 PM composing session on the schedule?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "reject",
+  "message": "no",
+  "context": {
+   "assistant": "Should I schedule a 30-minute walk at 4:30 PM?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "nah dont do that",
+  "context": {
+   "assistant": "Want me to move Composing to 9pm?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "nope not today",
+  "context": {
+   "assistant": "I can put laundry at 4:30 right after work, sound good?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "No thank you, I would prefer to keep that time open.",
+  "context": {
+   "assistant": "Would you like me to block out 4:00 PM to 5:00 PM for reading?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "no, let's put gym at 4:30 for 45 min instead",
+  "context": {
+   "assistant": "Should we slot in grocery shopping at 4:15 PM?"
+  },
+  "types": [
+   "reject",
+   "add"
+  ],
+  "fields": {
+   "1": {
+    "title": "gym",
+    "start": "4:30",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "no keep dinner where it is",
+  "context": {
+   "assistant": "Should I push dinner back to 6:30?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "no definitely not, actually move composing to 5pm",
+  "context": {
+   "assistant": "Would you like me to push Composing back to 8:00 PM?"
+  },
+  "types": [
+   "reject",
+   "move"
+  ],
+  "fields": {
+   "1": {
+    "target": "composing",
+    "start": "5pm"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "nahhh put 30 mins of stretching at 4:15",
+  "context": {
+   "assistant": "Do you want to add a 15-minute break at 4:00?"
+  },
+  "types": [
+   "reject",
+   "add"
+  ],
+  "fields": {
+   "1": {
+    "title": "stretching",
+    "start": "4:15",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "pass",
+  "context": {
+   "assistant": "Should I add piano practice before dinner?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "no thanks",
+  "context": {
+   "assistant": "Would you like some suggestions for what to do after work?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "no, work went til 4:30 actually",
+  "context": {
+   "assistant": "Ready to wrap up work at 4:00 PM?"
+  },
+  "types": [
+   "reject",
+   "move"
+  ],
+  "fields": {
+   "1": {
+    "target": "work",
+    "end": "4:30"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "no way, i'm completely exhausted",
+  "context": {
+   "assistant": "Do you want to squeeze in a quick jog before dinner?"
+  },
+  "types": [
+   "reject",
+   "energy"
+  ],
+  "fields": {
+   "1": {
+    "level": 1
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "nope. what should I do tonight?",
+  "context": {
+   "assistant": "I can schedule reading at 9:00 PM, should I?"
+  },
+  "types": [
+   "reject",
+   "suggest"
+  ],
+  "fields": {
+   "1": {
+    "topic": "tonight"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "No don't do that. what's on tomorrow?",
+  "context": {
+   "assistant": "Should I move Composing to tomorrow?"
+  },
+  "types": [
+   "reject",
+   "question"
+  ],
+  "fields": {
+   "1": {
+    "topic": "schedule",
+    "day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "reject",
+  "message": "Negative, keep the schedule as is.",
+  "context": {
+   "assistant": "Would you like me to extend dinner until 7:30 PM?"
+  },
+  "types": [
+   "reject"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "reject",
+  "message": "No thank you, appreciate it though!",
+  "context": {
+   "assistant": "Want me to find a time for your taxes today?"
+  },
+  "types": [
+   "reject",
+   "chat"
+  ],
+  "fields": {}
+ },
+ {
+  "category": "choose",
+  "message": "2",
+  "context": {
+   "assistant": "You have a free block between 4:00 PM and 6:00 PM. What would you like to do? 1) Go for a run, 2) Relax and read, 3) Run errands."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "the second one",
+  "context": {
+   "assistant": "For your composing block at 7:00 PM, would you rather: 1) Work on Natalie's piece, or 2) Focus on piano improvisation?"
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "let's do 1",
+  "context": {
+   "assistant": "Work wraps up at 4:00 PM. Here are two ways to spend your afternoon break: 1) Take a 30-minute walk, 2) Take a quick power nap."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 1
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "#2",
+  "context": {
+   "assistant": "Would you like to adjust Composing? 1) Move it earlier to 5:00 PM, 2) Keep it at 7:00 PM as scheduled."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "number 3 sounds best",
+  "context": {
+   "assistant": "Ideas for dinner at 6:00 PM: 1) Cook pasta, 2) Order Thai food, 3) Reheat leftovers."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 3
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "first one please",
+  "context": {
+   "assistant": "To fit in laundry before dinner: 1) Put a load in at 4:15 PM right after work, 2) Wait until 8:30 PM after composing."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 1
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "optin 2",
+  "context": {
+   "assistant": "How would you like to wind down before sleep at 11:00 PM? 1) Read a book at 9:30 PM, 2) Stretch and listen to music at 10:00 PM."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "I would prefer option 1, please.",
+  "context": {
+   "assistant": "Since you have free time from 4:00 PM to 6:00 PM: 1) Clear out work emails, 2) Rest on the couch."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 1
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "definitely #3",
+  "context": {
+   "assistant": "Here are 3 options for tomorrow morning before work: 1) Quick gym session at 7:00 AM, 2) Meditate at 7:30 AM, 3) Sleep in until 7:45 AM."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 3
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "the 3rd one",
+  "context": {
+   "assistant": "What should we add after composing finishes at 8:30 PM? 1) Call mom, 2) Tidy the apartment, 3) Watch a movie."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 3
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "Hmm, looking at my energy levels right now, I think option 2 makes the most sense.",
+  "context": {
+   "assistant": "Right after work at 4:00 PM: 1) High-intensity interval workout, 2) Gentle walk outside, 3) Tidy up the desk."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "1",
+  "context": {
+   "assistant": "For dinner at 6:00 PM: 1) Make a quick salad, 2) Pick up sushi."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 1
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "third one",
+  "context": {
+   "assistant": "Suggestions for your 4:00 PM break: 1) Call dentist to reschedule, 2) Grocery shopping, 3) 20-minute espresso break."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 3
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "2nd option",
+  "context": {
+   "assistant": "We could extend composing tonight: 1) Extend by 30 minutes to 9:00 PM, 2) Leave it ending at 8:30 PM as scheduled."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "lets go with option 1",
+  "context": {
+   "assistant": "Two options for tomorrow's lunch: 1) Pack lunch tonight at 8:30 PM, 2) Buy lunch tomorrow during work."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 1
+   }
+  }
+ },
+ {
+  "category": "choose",
+  "message": "option 2 looks good",
+  "context": {
+   "assistant": "To fit in a 30-minute phone call tonight: 1) Put it before dinner at 5:30 PM, 2) Put it after composing at 8:30 PM."
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "ideas for tonight?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "tonight"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "what should i do after work today? got like 2 hours before dinner",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "2 hour",
+    "topic": "work"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "Please choose an activity for me to do between 4:00 PM and dinner.",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "dinner"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "any idead what to do after composing tonight?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "I'm almost done with work and don't really have plans until dinner at 6, could you suggest something productive to do for an hour?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "hour",
+    "topic": "productive"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "fill the 2 hours after work",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "2 hour",
+    "topic": "work"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "Give me some ideas for something creative tonight.",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "creative"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "need ideas for a quick 30 minutes before dinner",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "30 min",
+    "topic": "dinner"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "you decide what i should do tonight",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "tonight"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "honestly not sure what to do with the gap after work, got any chill suggestions for about an hour?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "hour",
+    "topic": "chill"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "Could you recommend a suitable task to fill my free time this afternoon?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "afternoon"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "what should i do after 8:30?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "8:30"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "suugest soemthing for 30 min before dinner",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "30 min",
+    "topic": "dinner"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "Any suggestions for something active to do for an hour after work?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "duration": "hour",
+    "topic": "active"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "Pick something relaxing for me to do between composing and sleep tonight.",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "relaxing"
+   }
+  }
+ },
+ {
+  "category": "suggest",
+  "message": "what should I do tomorrow morning before work starts?",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "how much free time do i have before dinner?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "where could i fit a 30 min walk?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "walk"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "Could you please inform me how much unscheduled time is available between Work and Dinner?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "Work"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "free time after 4?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "do i hav any open slots before composing tonite",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "Hey, I wrap up work at 4 today and was wondering how much free time I have before we eat dinner at 6?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "Where can I squeeze in 45 minutes of grocery shopping today?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "grocery shopping"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "how much downtime do I have between composing and sleep?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "How many hours of free time do I have left today?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "any free time tomorrow morning?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time",
+    "day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "gotta call mom for 20 mins, where does that fit in?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "call mom"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "Am I completely free between 4:00 PM and 6:00 PM?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "I'm thinking about doing a quick workout or running an errand, how much free time is there between getting off work and dinner?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "where could a 1 hour guitar practice session fit in tonight?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "guitar"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "do i have time to read before dinner",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "read"
+   }
+  }
+ },
+ {
+  "category": "question_free",
+  "message": "how much free time after composing?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "schedule",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "what's my schedule for today",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "hey can you pull up my schedule for the rest of today? i know work ends at 4 and dinner is at 6 but i can't remember what's after",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "show me my scheduele for today",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "Could you please display my schedule for the rest of today?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "tomorrow's schedule",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "what's on tomorrow?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "whats my schedule look like tomorrow",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "tomorrow"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "what is on the schedule for friday?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "friday"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "can i see my schedule for saturday?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "saturday"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "what's on my schedule after work today?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "show me the whole day's schedule as a clean list",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "hey, do i have anything on the schedule for sunday or is the day totally clear?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "sunday"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "whats on my scedule tomorow",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "day": "tomor"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "Would you kindly provide my complete schedule for Monday?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched",
+    "day": "monday"
+   }
+  }
+ },
+ {
+  "category": "question_schedule",
+  "message": "what's my schedule looking like between dinner and composing tonight?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "sched"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "whats in my backlog right now",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "backlog list",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "Hey, do you remember what we talked about earlier regarding my composing session?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "what tasks r sitting in my backlog right now?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "Could you please remind me what we discussed regarding my work hours in our previous conversation?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "work"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "i know i parked a bunch of chores for later because work was crazy, what's actually sitting on my backlog?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "What did we decide about dinner yesterday?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "dinner"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "do i have any composing tasks on my backlog?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "What were those podcast recommendations we talked about earlier?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "podcast"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "what did i do for work yesterday morning?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "work"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "remind me what we agreed on for my composing schedule",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "composing"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "what's the oldest item on my backlog?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "Wait, what did I tell you earlier about why I was skipping lunch?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "lunch"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "did we talk abt dinner plans already?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "dinner"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "show me all the taxes and finance stuff in my backlog",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "backlog"
+   }
+  }
+ },
+ {
+  "category": "question_tasks",
+  "message": "What was that book title we talked about during lunch?",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "book"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "fyi parking lot is just random backlog, never schedule from it",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "parking lot"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Hey just so you know, I always like having at least 30 minutes of breathing room between dinner and composing so I don't feel rushed.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "composing"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "heads up: quick hits = stuff under 10 mins i can knock out between meetings",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "quick hits"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Please note that any tasks designated as Deep Work require a minimum uninterrupted block of two hours.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "Deep Work"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "So with work, if I'm doing administrative stuff like clearing tickets or filling timesheets, I prefer to batch that at the very end of the workday around 3:30 rather than scattering it throughout the day.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "work"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "fyi anything in the 'icebox' is bassically on hold indefinitly, dont plan it",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "icebox"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "items marked with an asterisk are tentative, not confirmed yet",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "asterisk"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Just a reminder that dinner is strictly family time in my house, so I never take work calls or schedule chores while eating.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "dinner"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "btw my someday list is just a dumping ground for ideas, not actual to-dos",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "someday"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "For future reference, my composing sessions are most productive when scheduled in the evening after 7 PM rather than during the day.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "composing"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Whenever I have errands on my list, I really hate doing them one by one, so I always bundle them into a single outing on Saturday mornings instead of running around mid-week.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "errands"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "the triage section is just for uncategorized emials and slack mesages i havent sorted yet",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "triage"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Wind-down starts at 10:30 PM before sleep, no screen tasks after that.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "sleep"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Oh by the way, when I do software upgrades I like to do them in thirty-minute chunks so I don't get stuck in dependency hell all afternoon.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "upgrades"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "fyi staging is stuff that needs approval before we put it on the calendar",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "staging"
+   }
+  }
+ },
+ {
+  "category": "remember",
+  "message": "Whenever an off-site appointment is added, please automatically assume a 20-minute travel buffer both before and after.",
+  "context": {},
+  "types": [
+   "remember"
+  ],
+  "fields": {
+   "0": {
+    "text": "buffer"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "goal: finish the string quartet draft by end of the month",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "quartet"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "just so you know, i really prefer wrapping up work completely by 4 so i can decompress before dinner",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "work"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "i usually go for a 20 min walk right after work",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "walk"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "im tryin to write at least 30 mins of music every single day",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "music"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "Please note that I prefer to reserve all composing sessions for the evening after 7 PM.",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "composing"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "honestly i've been trying to get into the habit of reading for 15 minutes in bed before going to sleep at 11 instead of looking at my phone",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "reading"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "I want to run a 10k by next spring",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "10k"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "we pretty much always eat dinner around 6 as a family",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "dinner"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "I hate doing any heavy screen work right before sleep",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "screen"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "my main priority for composing right now is finishing the second movement before thanksgiving",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "second movement"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "habit: 8 hours of sleep every night",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "sleep"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "fyi i never drink caffeine after 2pm, totally ruins my sleep",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "caffeine"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "so one big personal goal for this year is to cook dinner at home at least five nights a week instead of ordering takeout",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "cook"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "no meetings before 10am is my general rule of thumb for work",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "meetings"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "i always try to take a short coffe break around 10 during work",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "break"
+   }
+  }
+ },
+ {
+  "category": "profile",
+  "message": "My aim is to submit the revised score to the publisher by December 15th.",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "score"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "exhausted",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "work was brutal today, my brain is completely fried",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "im super low enrgy right now",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "2"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "I'm dragging today, can we push composing back an hour?",
+  "context": {},
+  "types": [
+   "energy",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "level": "2"
+   },
+   "1": {
+    "target": "composing",
+    "shift": "+1 hour"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "Energy is about average right now, nothing crazy.",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "3"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "Just had an espresso, feeling pretty energized now!",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "4"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "feeling amazing today, got tons of energy!",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "5"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "sitting here at work and I'm completely wiped, let's cancel it",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "energy",
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   },
+   "1": {
+    "target": "it"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "My energy levels are currently quite low following this work block.",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "2"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "got a second wind after work, feeling good",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "4"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "energy is so-so, what should I do tonight?",
+  "context": {},
+  "types": [
+   "energy",
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "level": "3"
+   },
+   "1": {
+    "topic": "tonight"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "running on fumes here, totally drained",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "crushed that presentation and I'm on fire right now, 100% charged!",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "5"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "Feeling okay, not super tired but not bursting with energy either.",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "3"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "fading fast, barely keepin my eyes open",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   }
+  }
+ },
+ {
+  "category": "energy",
+  "message": "Got lots of energy this afternoon, put a walk at 5 for 30 minutes",
+  "context": {},
+  "types": [
+   "energy",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "level": "4"
+   },
+   "1": {
+    "title": "walk",
+    "start": "5",
+    "duration": "30 min"
+   }
+  }
+ },
+ {
+  "category": "chat",
+  "message": "thanks",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "thnaks so much!",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "hey there",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "thanks for keeping my composing time protected today, really appreciate it",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "good afternoon!",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "ty! talk later",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "Thank you kindly for your assistance with my schedule today.",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "Just wanted to say I really appreciate the help today, looking forward to dinner later and hope work wraps up nicely!",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "heyy good afternoon hope your day is going well",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "haha you're the best assistant ever, thanks!",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "yo",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "appreciate it mate, catch ya later",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "Sweet, thanks a lot! Heading off to get ready for dinner soon.",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "alright cool cool thx man",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "omg thank youuuu!! you are an absolute lifesaver",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "chat",
+  "message": "Much obliged. Have a wonderful rest of your Thursday afternoon.",
+  "context": {},
+  "types": [
+   "chat"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "multi",
+  "message": "wrapped up work early at 3:15, push dinner back to 6:30",
+  "context": {},
+  "types": [
+   "outcome",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "3:15"
+   },
+   "1": {
+    "target": "dinner",
+    "start": "6:30"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "done with work, what should i do before dinner?",
+  "context": {},
+  "types": [
+   "outcome",
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done"
+   },
+   "1": {
+    "topic": "before dinner"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "cancel composing, add reading at 8 for 45 min",
+  "context": {},
+  "types": [
+   "remove",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   },
+   "1": {
+    "title": "reading",
+    "start": "8",
+    "duration": "45 min"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "yeah do that, and also throw in a quick 20 min walk right after work",
+  "context": {
+   "assistant": "Should I move dinner to 6:30?"
+  },
+  "types": [
+   "confirm",
+   "add"
+  ],
+  "fields": {
+   "0": {},
+   "1": {
+    "title": "walk",
+    "after": "work",
+    "duration": "20 min"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "finished work at 3:30. push composing by +30 min and put grocery run at 5 for an hour",
+  "context": {},
+  "types": [
+   "outcome",
+   "move",
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "3:30"
+   },
+   "1": {
+    "target": "composing",
+    "shift": "+"
+   },
+   "2": {
+    "title": "grocery run",
+    "start": "5",
+    "duration": "an hour"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "swap dinner and composing, and when am i going to sleep tonight?",
+  "context": {},
+  "types": [
+   "swap",
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   },
+   "1": {
+    "topic": "sleep"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "im completely exhausted today, level 1... what should i do tonight instead of composing?",
+  "context": {},
+  "types": [
+   "energy",
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "level": "1"
+   },
+   "1": {
+    "topic": "tonight"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "Please remove dinner, move composing to 8:00, and note my goal to exercise 3 times a week.",
+  "context": {},
+  "types": [
+   "remove",
+   "move",
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner"
+   },
+   "1": {
+    "target": "composing",
+    "start": "8:00"
+   },
+   "2": {
+    "text": "exercise 3 times a week"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "option 2, and slide composing back 30 mins too",
+  "context": {
+   "assistant": "1: Move dinner to 6:30 | 2: Move dinner to 7:00"
+  },
+  "types": [
+   "choose",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "option": "2"
+   },
+   "1": {
+    "target": "composing",
+    "shift": "+"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "hey thanks for the help earlier! put gym at 4:15 for 45 mins, then stretch right after for 15 min",
+  "context": {},
+  "types": [
+   "chat",
+   "add",
+   "add"
+  ],
+  "fields": {
+   "0": {},
+   "1": {
+    "title": "gym",
+    "start": "4:15",
+    "duration": "45 min"
+   },
+   "2": {
+    "title": "stretch",
+    "after": "gym",
+    "duration": "15 min"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "push it back an hour, and what does the rest of my evening look like?",
+  "context": {
+   "last_item": "Composing"
+  },
+  "types": [
+   "move",
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "target": "it",
+    "shift": "+1 hour"
+   },
+   "1": {
+    "topic": "evening"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "no thanks, let's put yoga at 4:30 for 30 minutes instead and slide everything after",
+  "context": {
+   "assistant": "Would you like to schedule 30 minutes of meditation after work?"
+  },
+  "types": [
+   "reject",
+   "add"
+  ],
+  "fields": {
+   "0": {},
+   "1": {
+    "title": "yoga",
+    "start": "4:30",
+    "duration": "30 minutes",
+    "push": "True"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "didn't finish work yet only got partial, let's do a 15 min break at 4:15, and do I have any free time after 8:30?",
+  "context": {},
+  "types": [
+   "outcome",
+   "add",
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "partial"
+   },
+   "1": {
+    "title": "break",
+    "start": "4:15",
+    "duration": "15 min"
+   },
+   "2": {
+    "topic": "free time"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "fyi work blocks always include a 15 min wrap up, and push composing to tomorrow at 9",
+  "context": {},
+  "types": [
+   "remember",
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "text": "wrap up"
+   },
+   "1": {
+    "target": "composing",
+    "to_day": "tomorrow",
+    "start": "9"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "move composing to 8:00, push sleep back 30 minutes, and what can I do between work and dinner?",
+  "context": {},
+  "types": [
+   "move",
+   "move",
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "start": "8:00"
+   },
+   "1": {
+    "target": "sleep",
+    "shift": "+"
+   },
+   "2": {
+    "topic": "between work and dinner"
+   }
+  }
+ },
+ {
+  "category": "multi",
+  "message": "call mom at 5 for 20 mins, walk the dog right after for 30 min, and i finished work at 3:45",
+  "context": {},
+  "types": [
+   "add",
+   "add",
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "title": "call mom",
+    "start": "5",
+    "duration": "20 mins"
+   },
+   "1": {
+    "title": "walk",
+    "after": "call mom",
+    "duration": "30 min"
+   },
+   "2": {
+    "target": "work",
+    "status": "done",
+    "finished": "3:45"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "Hey can you put gym on the calendar for 4:30 for 45 minutes no wait actually work is running until 4 so make it gym at 5 for an hour instead please",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "gym",
+    "start": "5",
+    "duration": "hour"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "cancel composing tonight scratch that don't cancel it just push it back 30 minutes",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "shift": "+30 minutes"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "im done with work early wrapped it up at 3 actually no more like 3:15",
+  "context": {},
+  "types": [
+   "outcome"
+  ],
+  "fields": {
+   "0": {
+    "target": "work",
+    "status": "done",
+    "finished": "3:15"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "can you move dinner to 7 no wait composing is at 7 right uh leave dinner where it is and move composing to 8:30",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "start": "8:30"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "add grocery shopping after work for half an hour wait no make it 45 minutes and put it before dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "grocery shopping",
+    "before": "dinner",
+    "duration": "45 minutes"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "no don't do that wait actually yes go ahead and do that sorry",
+  "context": {
+   "assistant": "Should I push Dinner back by 30 minutes?"
+  },
+  "types": [
+   "confirm"
+  ],
+  "fields": {
+   "0": {}
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "add a 30 minute phone call with mom at 5 and push dinner back an hour oh wait mom's not free then don't add the call just push dinner back an hour",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "shift": "+1 hour"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "let's go with option one uh no wait let me check option 2 is better let's pick number 2",
+  "context": {
+   "assistant": "1. 5:00 PM (45m)\n2. 5:30 PM (45m)\n3. 9:00 PM (1h)"
+  },
+  "types": [
+   "choose"
+  ],
+  "fields": {
+   "0": {
+    "option": 2
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "what do I have going on tomorrow morning wait sorry I mean what's left on my schedule for today",
+  "context": {},
+  "types": [
+   "question"
+  ],
+  "fields": {
+   "0": {
+    "topic": "schedule"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "feeling pretty drained like level 2 actually no you know what I had some coffee I'm feeling great level 4 right now",
+  "context": {},
+  "types": [
+   "energy"
+  ],
+  "fields": {
+   "0": {
+    "level": 4
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "push composing to tomorrow at 8pm actually wait scratch that move it to saturday at 8pm",
+  "context": {},
+  "types": [
+   "move"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing",
+    "to_day": "saturday",
+    "start": "8pm"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "swap dinner with work wait that makes no sense haha swap dinner with composing",
+  "context": {},
+  "types": [
+   "swap"
+  ],
+  "fields": {
+   "0": {
+    "target": "dinner",
+    "other": "composing"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "take dinner off my schedule oh wait no keep dinner take composing off instead I won't have time",
+  "context": {},
+  "types": [
+   "remove"
+  ],
+  "fields": {
+   "0": {
+    "target": "composing"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "give me some ideas for what to do before dinner for 20 minutes wait make that an hour give me suggestions for something relaxing for an hour",
+  "context": {},
+  "types": [
+   "suggest"
+  ],
+  "fields": {
+   "0": {
+    "topic": "something relaxing",
+    "duration": "an hour"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "add a rule that I always sleep at midnight actually no just note in my profile that I want to exercise 4 days a week",
+  "context": {},
+  "types": [
+   "profile"
+  ],
+  "fields": {
+   "0": {
+    "text": "exercise 4 days a week"
+   }
+  }
+ },
+ {
+  "category": "ramble",
+  "message": "put 45 minutes of podcast at 6 and push dinner wait no scratch that just put podcast at 6 for 45 minutes alongside dinner",
+  "context": {},
+  "types": [
+   "add"
+  ],
+  "fields": {
+   "0": {
+    "title": "podcast",
+    "start": "6",
+    "duration": "45 minutes",
+    "alongside": "True"
+   }
+  }
+ }
+]
