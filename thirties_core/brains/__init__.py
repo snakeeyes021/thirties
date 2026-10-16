@@ -30,7 +30,7 @@ class Brain(Protocol):
         ...
 
 
-BRAINS = {"frontier": "Gemini (cloud)", "slm": "Gemma (on this device)"}
+BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud, for developers)"}
 BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontier",
                  "slm": "slm", "gemma": "slm", "local": "slm", "device": "slm", "on-device": "slm"}
 
@@ -46,6 +46,17 @@ def brain_choice(config, state_db=None) -> str:
     return BRAIN_ALIASES.get(configured, "frontier")
 
 
+def brain_unavailable_reason(name: str, config) -> "str | None":
+    """Why a brain can't be chosen on this device, or None if it can."""
+    if name == "slm":
+        from thirties_core.brains.slm.runtime import slm_unavailable_reason
+        return slm_unavailable_reason(config)
+    from thirties_core.inference import GeminiSourcesEngine
+    if not GeminiSourcesEngine(config).is_available():
+        return "no Gemini source is set up: add an API key, or install the Antigravity CLI as `agy` and sign in."
+    return None
+
+
 def make_brain(config, tools, inference_engine, tasks=None, active_notes=None, choice=None) -> Brain:
     """A brain: ``choice`` ("frontier" or "slm"), defaulting to ``[assistant] brain`` in config."""
     if choice is None:
@@ -56,4 +67,4 @@ def make_brain(config, tools, inference_engine, tasks=None, active_notes=None, c
     return FrontierBrain(tools, inference_engine, tasks=tasks, active_notes=active_notes)
 
 
-__all__ = ["BRAINS", "BRAIN_ALIASES", "Brain", "FrontierBrain", "brain_choice", "make_brain"]
+__all__ = ["BRAINS", "BRAIN_ALIASES", "Brain", "FrontierBrain", "brain_choice", "brain_unavailable_reason", "make_brain"]

@@ -699,12 +699,60 @@ class MockInferenceEngine:
         }
 
 
+TRANSPORT_FAILURE_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out",
+                              "Encountered an error communicating with Gemini API")
+GEMINI_SOURCES = {"agy": "Subscription (Antigravity CLI)", "api": "Gemini API key"}
+
+
+def gemini_sources_status(config: ThirtiesConfig) -> Dict[str, bool]:
+    """Which Gemini sources could be used on this device right now."""
+    return {"agy": AntigravityInferenceEngine(config).is_available(),
+            "api": GeminiInferenceEngine(config).is_available()}
+
+
+class GeminiSourcesEngine:
+    """The Gemini brain's model, from the user's sources in their order: if one fails (quota, no
+    network, not signed in), the next is tried."""
+
+    def __init__(self, config: ThirtiesConfig) -> None:
+        self.engines: List[Tuple[str, Any]] = []
+        for name in config.inference.sources or []:
+            engine = AntigravityInferenceEngine(config) if name == "agy" else \
+                GeminiInferenceEngine(config) if name == "api" else None
+            if engine is not None and engine.is_available():
+                self.engines.append((name, engine))
+        self.model = self.engines[0][1].model if self.engines else ""
+        self.model_name = self.model
+
+    def is_available(self) -> bool:
+        return bool(self.engines)
+
+    def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        if not self.engines:
+            return {"role": "assistant", "tool_calls": [],
+                    "content": "Error contacting model: no Gemini source is set up (Preferences → Assistant)."}
+        reply: Dict[str, Any] = {}
+        for name, engine in self.engines:
+            reply = engine.chat(messages, tools)
+            if not str(reply.get("content", "")).startswith(TRANSPORT_FAILURE_PREFIXES):
+                return reply
+            logger.warning("Gemini source %s failed; trying the next one: %s", name, str(reply.get("content"))[:200])
+        return reply
+
+
 def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEngine:
     """Factory creating the appropriate inference engine backend based on configuration."""
     cfg = config or ThirtiesConfig()
     backend = (cfg.inference.backend or "gemini").lower()
 
-    if backend in ("gemini", "antigravity"):
+    if backend == "gemini":
+        sources = GeminiSourcesEngine(cfg)
+        if sources.is_available():
+            logger.info("Gemini sources: %s", [name for name, _ in sources.engines])
+            return sources
+        return MockInferenceEngine()
+
+    if backend == "antigravity":
         agy = AntigravityInferenceEngine(cfg)
         if agy.is_available():
             logger.info("Using Antigravity CLI inference backend (model: %s).", agy.model)

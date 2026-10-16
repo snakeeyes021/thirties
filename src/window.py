@@ -141,7 +141,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         if self.conv_manager is not None:
             self.conv_manager.set_brain(name)
         else:
-            self.scheduler.state_db.set_setting("brain", name)
+            from thirties_core.settings import Settings
+            Settings(self.scheduler.state_db).set("assistant.brain", name)
         action.set_state(value)
         self._toast(f"Now using {BRAINS[name]}" + (". It takes a few seconds to load." if name == "slm" else "."))
 

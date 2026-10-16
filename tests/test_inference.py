@@ -136,6 +136,23 @@ class TestTransports(unittest.TestCase):
             engine.chat([{"role": "user", "content": "b"}])
         self.assertEqual([o for _, _, o in agy_ledger(60)], ["ok", "quota"])
 
+    def test_gemini_sources_in_the_users_order_with_fallback(self) -> None:
+        from thirties_core.inference import GeminiSourcesEngine
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "k"
+        cfg.inference.sources = ["api", "agy"]
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
+            engine = GeminiSourcesEngine(cfg)
+        self.assertEqual([n for n, _ in engine.engines], ["api", "agy"])
+        api, agy = engine.engines[0][1], engine.engines[1][1]
+        with patch.object(api, "chat", return_value={"content": "Encountered an error communicating with Gemini API: 429",
+                                                    "tool_calls": []}), \
+                patch.object(agy, "chat", return_value={"content": "hello", "tool_calls": []}):
+            self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "hello")
+        cfg.inference.sources = ["agy"]  # the user unticked the API: it's never used
+        with patch("thirties_core.inference.find_agy_binary", return_value=None):
+            self.assertFalse(GeminiSourcesEngine(cfg).is_available())
+
     def test_antigravity_chat_includes_tool_results(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())
         payload = {"response": 'CALL remove_event {"event": "Work"}\nEnjoy the day off.'}
@@ -181,10 +198,11 @@ class TestTransports(unittest.TestCase):
         cfg = ThirtiesConfig()
         cfg.inference.backend = "gemini"
         with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
-            self.assertIsInstance(get_inference_engine(cfg), AntigravityInferenceEngine)
+            engine = get_inference_engine(cfg)
+            self.assertIsInstance(engine.engines[0][1], AntigravityInferenceEngine)
         with patch("thirties_core.inference.find_agy_binary", return_value=None):
             cfg.inference.gemini_api_key = "test_key"
-            self.assertIsInstance(get_inference_engine(cfg), GeminiInferenceEngine)
+            self.assertIsInstance(get_inference_engine(cfg).engines[0][1], GeminiInferenceEngine)
 
         cfg_api = ThirtiesConfig()
         cfg_api.inference.backend = "gemini_api"

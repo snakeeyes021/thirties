@@ -102,7 +102,7 @@
     <section>
       <attribute name="label" translatable="yes">Assistant</attribute>
       <item>
-        <attribute name="label" translatable="yes">Gemini (cloud)</attribute>
+        <attribute name="label" translatable="yes">Gemini (cloud, for developers)</attribute>
         <attribute name="action">win.brain</attribute>
         <attribute name="target">frontier</attribute>
       </item>
