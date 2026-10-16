@@ -129,6 +129,41 @@ def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered:
     return lines
 
 
+_TIME_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\s?(AM|PM)\b")
+_DAY_HINT_RE = re.compile(r"\b(?:tomorrow|yesterday|tonight|today|mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|"
+                          r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d", re.IGNORECASE)
+
+
+def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:
+    """Say AM/PM only where it could be mistaken.
+
+    Kept on the first time unless it's in the same half of the day as now, wherever the
+    half changes from the previous time (crossing noon or midnight), wherever a day or
+    date is named in between, and always on 12 o'clock. "Dinner 6:00 PM – 7:00 PM" said
+    in the afternoon becomes "Dinner 6:00 – 7:00".
+    """
+    out: List[str] = []
+    pos = 0
+    last: Optional[str] = None
+    now_half = None if now is None else ("AM" if now.hour < 12 else "PM")
+    for m in _TIME_RE.finditer(text):
+        half = m.group(3).upper()
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        before = text[pos:m.start()] if last is not None else text[line_start:m.start()]
+        if int(m.group(1)) == 12 or _DAY_HINT_RE.search(before):
+            keep = True
+        elif last is None:
+            keep = now_half is None or half != now_half
+        else:
+            keep = half != last
+        out.append(text[pos:m.start()])
+        out.append(m.group(0) if keep else f"{m.group(1)}:{m.group(2)}")
+        pos = m.end()
+        last = half
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def format_duration(minutes: int) -> str:
     """'2h 30m', '45m', '3h'."""
     h, m = divmod(int(minutes), 60)

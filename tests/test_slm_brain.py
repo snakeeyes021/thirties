@@ -84,8 +84,10 @@ class SlmTestCase(unittest.TestCase):
         self.m._load(None)
 
     def say(self, text, *parse):
+        """The brain's own reply (the AM/PM pass that follows is tested in test_clock and below)."""
         self.rt.parse_replies.append(actions(*parse) if parse and isinstance(parse[0], dict) else (parse[0] if parse else ""))
-        return self.m.send_user_message(text)
+        self.shown = self.m.send_user_message(text)
+        return self.m.last_raw_reply
 
 
 class TestSchedulingActions(SlmTestCase):
@@ -284,6 +286,10 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("nah don't do that, I'm wiped", {"type": "confirm"})
         self.assertNotIn("Done", out)
         self.assertEqual(self.brain.state.proposal, [])
+
+    def test_what_the_user_sees_drops_obvious_am_pm(self):
+        self.say("dinner at 7 for an hour", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
+        self.assertTrue(self.shown.startswith("Added Dinner: 7:00 – 8:00 (1h)."), self.shown)  # it's 4:40 PM
 
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})

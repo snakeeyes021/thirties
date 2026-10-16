@@ -55,7 +55,7 @@ class TestBackground(unittest.TestCase):
     def test_start_nudge(self):
         self.svc.starts(at("17:00") + timedelta(seconds=20))
         self.svc.starts(at("17:01"))
-        self.assertEqual(self.desktop, [("start", "🔔 Taxes starts now (5:00 PM – 6:00 PM)")])
+        self.assertEqual(self.desktop, [("start", "🔔 Taxes starts now (5:00 – 6:00)")])
 
 
 class TestReminderTools(unittest.TestCase):

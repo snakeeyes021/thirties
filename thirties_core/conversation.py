@@ -12,7 +12,8 @@ import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.astronomy import set_debug_time
+from thirties_core.clock import trim_meridiems
+from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
 from thirties_core.calendar_engine import CalendarEvent
@@ -264,5 +265,14 @@ class ConversationManager:
 
 
         reply = self.brain.respond(user_text)
+        self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
+        trimmed = trim_meridiems(reply, get_current_time(self.day_plan.day_start.tzinfo)
+                                 if self.day_plan.target_date == self.tools.today() else None)
+        if trimmed != reply:
+            for m in reversed(self.brain.messages):
+                if m.get("role") == "assistant":
+                    if m.get("content") == reply:
+                        m["content"] = trimmed
+                    break
         self._save()
-        return reply
+        return trimmed

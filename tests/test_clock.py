@@ -12,6 +12,7 @@ from thirties_core.clock import (
     parse_duration_minutes,
     parse_shift_minutes,
     resolve_clock,
+    trim_meridiems,
 )
 
 
@@ -58,6 +59,15 @@ class TestClock(unittest.TestCase):
         self.assertEqual(format_duration(150), "2h 30m")
         self.assertEqual(format_duration(45), "45m")
         self.assertEqual(format_duration(120), "2h")
+
+    def test_am_pm_only_where_it_could_be_mistaken(self) -> None:
+        afternoon = at("16:40")
+        self.assertEqual(trim_meridiems("Dinner 6:00 PM – 7:00 PM", afternoon), "Dinner 6:00 – 7:00")
+        self.assertEqual(trim_meridiems("Dinner 6:00 PM – 7:00 PM", at("09:00")), "Dinner 6:00 PM – 7:00")
+        self.assertEqual(trim_meridiems("- 11:30 PM – Read\n- 1:00 AM – Sleep", afternoon),
+                         "- 11:30 – Read\n- 1:00 AM – Sleep")  # crossing midnight
+        self.assertEqual(trim_meridiems("Lunch at 12:30 PM", afternoon), "Lunch at 12:30 PM")  # 12 is never obvious
+        self.assertEqual(trim_meridiems("Moved to tomorrow, 4:00 PM", afternoon), "Moved to tomorrow, 4:00 PM")
 
     def test_agenda_lines_show_end_times_only_where_not_implied(self) -> None:
         items = [(at("16:00"), at("17:00"), "Feed cat", ""),

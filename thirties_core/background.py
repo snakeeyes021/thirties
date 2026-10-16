@@ -86,8 +86,15 @@ class BackgroundService:
     # --- delivering a message ---
 
     def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
-             to_conversation: bool = True) -> None:
+             to_conversation: bool = True, now: Optional[datetime] = None) -> None:
         """Send a message to the desktop and, if a phone is paired here, to Telegram."""
+        from thirties_core.clock import trim_meridiems
+        try:
+            now = now or self.now()
+            text = trim_meridiems(text, now)
+            telegram_text = trim_meridiems(telegram_text, now) if telegram_text else None
+        except Exception:
+            pass
         if to_conversation:
             try:
                 manager = self.manager()
@@ -136,7 +143,7 @@ class BackgroundService:
                           if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.covers(now)), None)
         question = f"👋 Just checking in: did you get to {span.title}"
         question += f", or are you still on it? (Next up: {following.title}.)" if following else "?"
-        self.send(question, "checkin", telegram_text=question.replace(span.title, f"*{span.title}*", 1))
+        self.send(question, "checkin", telegram_text=question.replace(span.title, f"*{span.title}*", 1), now=now)
 
     def reminders(self, now: datetime) -> None:
         from thirties_core.memory import ReminderStore
@@ -148,7 +155,7 @@ class BackgroundService:
                        f"{format_clock(rem.due.astimezone(now.tzinfo))}): {rem.text}"
             else:
                 text = f"⏰ Reminder: {rem.text}"
-            self.send(text, "reminder")
+            self.send(text, "reminder", now=now)
 
     def starts(self, now: datetime) -> None:
         """Say when a planned item (or bedtime) starts."""
@@ -166,7 +173,7 @@ class BackgroundService:
                 text = f"🌙 Bedtime ({format_clock(span.start_dt)}). Wind down and rest well!"
             else:
                 text = f"🔔 {span.title} starts now ({format_clock(span.start_dt)} – {format_clock(span.end_dt)})"
-            self.send(text, "start", to_conversation=False)
+            self.send(text, "start", to_conversation=False, now=now)
 
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
