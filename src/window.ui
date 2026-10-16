@@ -74,6 +74,8 @@
         <property name="content">
           <!-- Schedule on the left, chat on the right: equal halves when wide,
                chat overlaid over the schedule when narrow. -->
+          <object class="AdwToastOverlay" id="toast_overlay">
+            <property name="child">
           <object class="AdwOverlaySplitView" id="split_view">
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
@@ -82,6 +84,8 @@
             <property name="min-sidebar-width">340</property>
             <property name="max-sidebar-width">4000</property>
             <property name="show-sidebar" bind-source="chat_toggle_btn" bind-property="active" bind-flags="sync-create|bidirectional"/>
+          </object>
+            </property>
           </object>
         </property>
       </object>
@@ -95,6 +99,19 @@
     </child>
   </template>
   <menu id="primary_menu">
+    <section>
+      <attribute name="label" translatable="yes">Assistant</attribute>
+      <item>
+        <attribute name="label" translatable="yes">Gemini (cloud)</attribute>
+        <attribute name="action">win.brain</attribute>
+        <attribute name="target">frontier</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Gemma (on this device)</attribute>
+        <attribute name="action">win.brain</attribute>
+        <attribute name="target">slm</attribute>
+      </item>
+    </section>
     <section>
       <item>
         <attribute name="label" translatable="yes">Profile &amp; _Memory</attribute>

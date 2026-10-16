@@ -188,5 +188,37 @@ class TestSlashCommands(ConversationTestCase):
         self.assertEqual(self.engine.call_history, [])
 
 
+
+class TestChoosingTheBrain(ConversationTestCase):
+
+    def setUp(self) -> None:
+        super().setUp()
+        from unittest.mock import patch
+        warm = patch.object(ConversationManager, "warm_in_background")  # don't load Gemma in unit tests
+        warm.start()
+        self.addCleanup(warm.stop)
+
+    def test_switching_keeps_the_conversation_and_sticks_on_this_device(self) -> None:
+        self.engine.set_next_response(reply("Morning!"))
+        self.manager.send_user_message("hi")
+        self.assertEqual(self.manager.brain_name, "frontier")
+        out = self.manager.send_user_message("/brain gemma")
+        self.assertIn("Gemma (on this device)", out)
+        self.assertEqual(type(self.manager.brain).__name__, "SlmBrain")
+        self.assertIn("hi", [m["content"] for m in self.manager.history()])
+        # Another client on the same database (the Telegram bridge) follows on its next refresh.
+        sched = self.manager.scheduler
+        other = ConversationManager(self.manager.day_plan, [], [], sched, inference_engine=self.engine, active_notes=[])
+        self.assertEqual(other.brain_name, "slm")
+        sched.state_db.set_setting("brain", "frontier")
+        other.refresh()
+        self.assertEqual(type(other.brain).__name__, "FrontierBrain")
+        self.assertIn("hi", [m["content"] for m in other.history()])
+
+    def test_unknown_brain_is_refused(self) -> None:
+        self.assertIn("Unknown brain", self.manager.send_user_message("/brain gpt"))
+        self.assertEqual(self.manager.brain_name, "frontier")
+
+
 if __name__ == "__main__":
     unittest.main()

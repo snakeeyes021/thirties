@@ -8,6 +8,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import load_config
 from thirties_core.backlog import load_backlog
+from thirties_core.brains import BRAINS, brain_choice
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import get_inference_engine
 from thirties_core.joplin_engine import JoplinEngine
@@ -40,6 +41,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     window_title = Gtk.Template.Child()
     chat_toggle_btn = Gtk.Template.Child()
     split_view = Gtk.Template.Child()
+    toast_overlay = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -105,6 +107,12 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         toggle.connect("activate", lambda *_: self.chat_toggle_btn.set_active(not self.chat_toggle_btn.get_active()))
         self.add_action(toggle)
 
+        brain = Gio.SimpleAction.new_stateful(
+            "brain", GLib.VariantType.new("s"),
+            GLib.Variant("s", brain_choice(self.config, self.scheduler.state_db)))
+        brain.connect("change-state", self._on_brain_change)
+        self.add_action(brain)
+
         profile = Gio.SimpleAction.new("profile-memory", None)
         profile.connect("activate", lambda *_: self._show_profile_dialog())
         self.add_action(profile)
@@ -112,6 +120,37 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         app = self.get_application()
         if app is not None:
             app.set_accels_for_action("win.toggle-chat", ["F9"])
+
+    def _toast(self, text: str) -> None:
+        self.toast_overlay.add_toast(Adw.Toast(title=text, timeout=4))
+
+    def _on_brain_change(self, action, value) -> None:
+        """Main menu → Assistant: switch brains on this device; the conversation carries on."""
+        name = value.get_string()
+        if name == action.get_state().get_string():
+            return
+        if name == "slm":
+            from thirties_core.brains.slm.runtime import slm_unavailable_reason
+            why = slm_unavailable_reason(self.config)
+            if why:
+                self._toast(f"Gemma isn't available here: {why}")
+                return
+        if self.chat_panel.is_busy:
+            self._toast("Switch after the current reply arrives.")
+            return
+        if self.conv_manager is not None:
+            self.conv_manager.set_brain(name)
+        else:
+            self.scheduler.state_db.set_setting("brain", name)
+        action.set_state(value)
+        self._toast(f"Now using {BRAINS[name]}" + (". It takes a few seconds to load." if name == "slm" else "."))
+
+    def _sync_brain_action(self) -> None:
+        """Show a switch made elsewhere (/brain in Telegram) in the menu."""
+        action = self.lookup_action("brain")
+        if action is not None and self.conv_manager is not None and \
+                action.get_state().get_string() != self.conv_manager.brain_name:
+            action.set_state(GLib.Variant("s", self.conv_manager.brain_name))
 
     def _install_type_to_chat(self) -> None:
         """Typing anywhere in the window goes to the chat input while the chat is shown."""
@@ -228,11 +267,13 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             return
         self.day_view.refresh_plan(self.conv_manager.day_plan)
         self.chat_panel.after_store_refresh()
+        self._sync_brain_action()
 
     def _on_plan_updated(self, plan) -> None:
         """Triggered after an assistant turn, which may have changed the plan."""
         if self.conv_manager is not None and plan.target_date == self.current_date:
             self.day_view.refresh_plan(self.conv_manager.day_plan)
+        self._sync_brain_action()  # "/brain gemma" typed in the chat
         self._push_sync()
 
     def _push_sync(self) -> None:

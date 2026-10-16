@@ -127,6 +127,11 @@ class StateDatabase:
                 routines_applied INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
+            -- This device's own settings (never synced), e.g. which brain the clients use.
+            CREATE TABLE IF NOT EXISTS local_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS event_decisions (
                 event_id TEXT PRIMARY KEY,
                 decision TEXT NOT NULL,
@@ -287,6 +292,18 @@ class StateDatabase:
         if migrated:
             logger.info("Migrated %d legacy day snapshots to event spans.", migrated)
         return migrated
+
+    # --- this device's settings ---
+
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM local_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO local_settings (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
     # --- task history ---
 

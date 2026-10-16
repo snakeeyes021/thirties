@@ -146,5 +146,10 @@ Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 The SLM brain needs the `litert-lm-api` package, plus a model in `~/.local/share/thirties/models/` (`gemma-4-E4B-it-gpu.litertlm` from `litert-community/gemma-4-E4B-it-litert-lm` on Hugging Face). On the dev machine, both live in `~/.local/share/thirties/venv` (created with `--system-site-packages`, so GTK works from it too). Then:
 
-- In config: `[assistant] brain = "slm"`.
-- Run clients and evals with `~/.local/share/thirties/venv/bin/python`.
+- **Choosing it:**
+  - In the desktop app: main menu → Assistant → Gemma (on this device).
+  - In any chat, including Telegram: `/brain gemma` (or `/brain gemini` to go back).
+  - The choice is this device's own (`local_settings` in the state database, never synced). Every client on the device follows it, and the conversation carries on.
+  - `[assistant] brain = "slm"` in config is the default when nothing has been chosen.
+- **The Flatpak** has no LiteRT-LM inside. It runs `thirties_core/brains/slm/gemma_server.py` on the host with the venv's Python, through `flatpak-spawn --host`, and talks to it over a pipe (`HostGemmaRuntime`). The server's log is at `~/.cache/thirties/gemma_server.log`. `THIRTIES_SLM_HOST=1` forces this path outside the Flatpak, for testing.
+- Run evals, and clients from source, with `~/.local/share/thirties/venv/bin/python`.

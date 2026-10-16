@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from thirties_core.brains import BRAINS
 from thirties_core.astronomy import get_diurnal_date
 from thirties_core.config import ThirtiesConfig, load_config
 from thirties_core.astronomy import get_current_time
@@ -302,6 +303,8 @@ class ThirtiesTelegramBridge:
                 self._cmd_clear(chat_id)
             elif cmd == "/status":
                 self._cmd_status(chat_id)
+            elif cmd == "/brain":
+                self.client.send_message(chat_id, self.conv_manager.send_user_message(text))
             else:
                 self.client.send_message(
                     chat_id,
@@ -341,6 +344,7 @@ class ThirtiesTelegramBridge:
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
             "• `/status` – System, model, and sync status\n"
+            "• `/brain` – Which brain answers; `/brain gemma` or `/brain gemini` to switch\n"
             "• `/help` – Show this guide\n\n"
             "💬 *Conversation*:\n"
             "Simply send natural messages to schedule and plan:\n"
@@ -431,6 +435,7 @@ class ThirtiesTelegramBridge:
         msg = (
             "⚙️ *Thirties System Status*\n\n"
             f"🧠 *Inference Backend*: `{inf_name}`\n"
+            f"🧠 *Brain*: {BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)}\n"
             f"🤖 *Model*: `{model_name}`\n"
             f"🔄 *Joplin Sync*: {sync_enabled}\n"
             f"🔔 *Block Buzzes*: {notify_enabled}\n"

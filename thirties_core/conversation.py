@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import set_debug_time
 from thirties_core.assistant_tools import Services
-from thirties_core.brains import Brain, make_brain
+from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.inference import InferenceEngine, MockInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
@@ -51,18 +51,41 @@ class ConversationManager:
             active_notes = self.joplin_engine.fetch_active_notes() if self.joplin_engine else []
         services = Services.for_db(scheduler.state_db, tasks, joplin_engine) if scheduler else None
         self.tools = PlanTools(day_plan, ambiguous_events, scheduler, services=services)
-        self.brain: Brain = brain or make_brain(
-            scheduler.config if scheduler else None,
-            self.tools,
-            inference_engine or MockInferenceEngine(),
-            tasks=tasks,
-            active_notes=active_notes,
-        )
+        config = scheduler.config if scheduler else None
+        state_db = scheduler.state_db if scheduler else None
+        # Without an explicit brain, follow this device's choice (the app's menu or /brain), even mid-day.
+        self._brain_args = None if brain else (config, inference_engine or MockInferenceEngine(), tasks, active_notes)
+        self.brain_name = brain_choice(config, state_db) if not brain else \
+            ("slm" if type(brain).__name__ == "SlmBrain" else "frontier")
+        self.brain: Brain = brain or make_brain(config, self.tools, self._brain_args[1], tasks=tasks,
+                                                active_notes=active_notes, choice=self.brain_name)
         self.conversation: Optional[Conversation] = None
         self._followed_latest: Optional[str] = None
         if services:
             conv = services.conversations.get(conversation_id) if conversation_id else None
             self._load(conv or services.conversations.latest_for_day(day_plan.target_date))
+
+    # --- choosing the brain ---
+
+    def set_brain(self, choice: str) -> str:
+        """Switch this device to another brain, keeping the conversation. Returns the brain's name."""
+        name = BRAIN_ALIASES.get(str(choice).strip().lower())
+        if name is None:
+            raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(BRAINS)}.")
+        if self.scheduler is not None:
+            self.scheduler.state_db.set_setting("brain", name)
+        if name != self.brain_name:
+            self._use_brain(name)
+        return name
+
+    def _use_brain(self, name: str) -> None:
+        if self._brain_args is None:
+            return  # a brain given explicitly (tests, evals) stays
+        config, engine, tasks, notes = self._brain_args
+        self.brain = make_brain(config, self.tools, engine, tasks=tasks, active_notes=notes, choice=name)
+        self.brain_name = name
+        self._load(self.conversation)
+        self.warm_in_background()
 
     # --- conversation persistence ---
 
@@ -127,6 +150,9 @@ class ConversationManager:
         """
         if self.scheduler is None:
             return
+        wanted = brain_choice(self.scheduler.config, self.scheduler.state_db)
+        if wanted != self.brain_name:
+            self._use_brain(wanted)  # switched on another client (the app's menu, or /brain in Telegram)
         plan, pending = self.scheduler.build_day_plan(self.day_plan.target_date)
         self.tools.day_plan = plan
         self.tools.ambiguous_events = list(pending)
@@ -214,12 +240,21 @@ class ConversationManager:
             elif cmd in ("/reset", "/now"):
                 set_debug_time(None)
                 reply = "Simulated time cleared. Real-world system clock restored."
+            elif cmd.split()[0] == "/brain":
+                arg = clean_text.split(maxsplit=1)[1] if len(clean_text.split()) > 1 else ""
+                if not arg:
+                    reply = (f"Using {BRAINS[self.brain_name]}. Switch with /brain gemini or /brain gemma.")
+                else:
+                    try:
+                        reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."
+                    except ValueError as e:
+                        reply = str(e)
             elif cmd.startswith("/time"):
                 val = clean_text[5:].strip()
                 set_debug_time(val)
                 reply = f"Simulated time set to {val}."
             else:
-                reply = f"Unknown command: {clean_text}. Available: /night, /midnight, /day, /midday, /noon, /sunrise, /reset, /time HH:MM"
+                reply = f"Unknown command: {clean_text}. Available: /brain, /night, /midnight, /day, /midday, /noon, /sunrise, /reset, /time HH:MM"
 
             self.messages.append({"role": "user", "content": user_text})
             self.messages.append({"role": "assistant", "content": reply})
