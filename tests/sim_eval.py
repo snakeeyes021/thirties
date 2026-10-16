@@ -592,7 +592,13 @@ def choose_scenarios(args) -> List[SimScenario]:
     if args.generated:
         from tests.sim_generator import generate
         scenarios += generate(args.generated, seed=args.seed)
-    return [s for s in scenarios if not args.only or s.id in args.only]
+    only = set(args.only or [])
+    for report in args.only_from or []:
+        only |= {r["scenario"] for r in json.loads(Path(report).read_text()) if not r.get("error")}
+    skip = set()
+    for report in args.skip_from or []:
+        skip |= {r["scenario"] for r in json.loads(Path(report).read_text()) if not r.get("error")}
+    return [s for s in scenarios if (not only or s.id in only) and s.id not in skip]
 
 
 def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -678,6 +684,8 @@ def main() -> None:
     ap.add_argument("--generated", type=int, default=0, help="add N generated scenarios (tests/sim_generator.py)")
     ap.add_argument("--with-handwritten", action="store_true", help="with --generated, also run the hand-written ones")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--only-from", nargs="*", metavar="REPORT", help="only the scenarios in these reports (to compare)")
+    ap.add_argument("--skip-from", nargs="*", metavar="REPORT", help="skip scenarios in these reports (to finish a run)")
     ap.add_argument("--workers", type=int, default=1, help="parallel worker processes (each SLM worker loads Gemma)")
     ap.add_argument("--shard", default="", help=argparse.SUPPRESS)
     ap.add_argument("--out", default="", help=argparse.SUPPRESS)
