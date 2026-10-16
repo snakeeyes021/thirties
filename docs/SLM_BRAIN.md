@@ -77,6 +77,13 @@ Dialog state that must survive restarts (the pending proposal, what "it" refers 
   - swaps and inserts
 
   Run `--brain both` to compare with the Frontier Brain on the same scenarios.
+- **`tests/sim_generator.py`: generated scenarios for `sim_eval` (`--generated N --seed S`).** Each scenario combines:
+  - a kind of user (6)
+  - a talking style (10: terse, rambler, lowercase, counts in chunks, decision-fatigued, ...)
+  - a day setup (7: workday morning or evening, day off, weekend, ...)
+  - two to four of 21 goal kinds (move, shift, swap, insert and slide, fill a window, skipped item to tomorrow, invite, calendar conflict, ...)
+
+  Times come from the day's real free time, so goals never collide, and the simulated user's situation is generated from the same setup the brain sees. Every goal brings its own deterministic checks, tagged by kind, so results come per goal kind. `--workers N` runs worker processes, each with its own Gemma (2.9 GB of GPU memory each). agy failures are left out of the scores. If agy's quota runs out, the run stops cleanly and reports how many conversations finished. `--only-from` / `--skip-from` a report reruns or finishes a run.
 - **`tests/test_slm_brain.py`: the Python side, with a scripted stand-in for Gemma.** It covers references, loose times, relative placement, sliding, conflict options, swaps, proposals that survive a restart, outcomes, memory and profile. It runs in the normal unit suite.
 - **`tests/frontier_eval.py`: deterministic multi-turn day scenarios.** These cover the Frontier Brain only.
 - **`tests/interactive_eval.py`: step through turns by hand,** with state deltas and an agent or human as the judge.
@@ -95,12 +102,24 @@ All 13 simulated-user scenarios, judged by Gemini; the Frontier Brain was run on
 
 Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, median 3.5 s per message. The misses are mostly yes/no/option replies to a pending question, which Python now handles deterministically.
 
+**Scaled up (2026-10-15, desktop: RTX 3080 Ti Laptop GPU).**
+- **Parse benchmark, 546 cases.** 496 of them were written and labelled by Gemini from the parser's own instruction, then spot-checked; disagreements are read by hand, since the label can be the wrong one. The benchmark scores both the model alone and Python's reading of it (`SlmBrain._interpret`).
+  - Model alone: 84%. After Python: 88%. Median 0.5 s per message.
+  - Weakest after Python: multi-request messages (50%), "no" to an offer (62%, up from 6%), confirm (75%), "before/after X" (75%).
+- **Generated scenarios, baseline at commit e122160** (seed 1). agy's quota ran out after 235 of 500 conversations:
+
+| Brain | Conversations | Goals met | All checks passed | Gave up | Judge (accuracy / understanding / clarity / efficiency / tone) | Time per reply |
+|---|---|---|---|---|---|---|
+| Frontier | 139 | 0.98 | 111/139 | 3 | 4.8 / 4.7 / 4.2 / 4.7 / 4.9 | 9.3 s |
+| SLM | 90 | 0.88 | 63/90 | 12 | 4.2 / 3.4 / 3.2 / 3.4 / 4.2 | 2.2 s |
+
+  Weakest SLM goal kinds: free time (0.71), work ran late (0.74), move (0.75), fill a window (0.76), shift (0.78), outcome done (0.78). The 13 hand-written scenarios had hidden this: they score 0.97. Fixes for most of the failures it found landed after this baseline and need a rerun on the same scenarios (`--only-from` the baseline report).
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.3 Next experiments
 
 - **A "voice" pass for natural replies:** Gemma rewrites the template reply, and Python verifies that every clock time and title survived, falling back to the template otherwise.
-- **Per-stage accuracy on a labelled utterance set:** parse accuracy by action type, with Gemini producing labels at scale.
 - **A smaller model (E2B) for speed, and a check on what accuracy it costs.**
 - **Feeding statistics into suggestions** (real durations, completion by time of day).
 
