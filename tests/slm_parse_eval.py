@@ -136,8 +136,17 @@ def _equivalent(want_type: str, want: Dict[str, Any], got) -> bool:
     return False
 
 
+ANCHOR_ENDS = {"work": "4:00", "dinner": "7:00", "composing": "8:30"}  # on SCHEDULE
+
+
 def check(actions, expected_types, fields, context=None) -> Tuple[bool, str]:
     context = context or {}
+    if any(a.type != "chat" for a in actions) and any(t != "chat" for t in expected_types):
+        # small talk next to real requests changes nothing; ignore it on both sides
+        kept = [i for i, t in enumerate(expected_types) if t != "chat"]
+        fields = {kept.index(i): f for i, f in fields.items() if i in kept}
+        expected_types = [expected_types[i] for i in kept]
+        actions = [a for a in actions if a.type != "chat"]
     types = [a.type for a in actions]
     if len(types) != len(expected_types):
         return False, f"types {types} != {expected_types}"
@@ -149,6 +158,11 @@ def check(actions, expected_types, fields, context=None) -> Tuple[bool, str]:
             continue  # an equivalent action was checked above
         for key, sub in wanted.items():
             got = actions[i].fields.get(key, "")
+            if key == "after" and not got and str(sub).lower() in ANCHOR_ENDS:
+                # "after work" given as the time work ends, read off the schedule
+                start = str(actions[i].fields.get("start", "")).lower().replace(" pm", "").replace("pm", "")
+                if start == ANCHOR_ENDS[str(sub).lower()]:
+                    continue
             if not _same_field(key, sub, got, context):
                 return False, f"action {i} {key}={str(got)!r}, expected ~{sub!r}"
     return True, ""

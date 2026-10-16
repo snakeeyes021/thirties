@@ -497,7 +497,8 @@ class SlmBrain:
     _ALL_YES_RE = re.compile(r"\b(let'?s do (all|them|those|these|it|that)|do (them|those|these) all|all of (them|those|these)|"
                              r"(those|these|that|it) (all )?(sounds?|looks?) (good|great|fine|perfect)|sounds? good|looks? good|"
                              r"works for me|(those|these) work)\b", re.IGNORECASE)
-    _NO_RE = re.compile(r"^\s*(no|nah|nope|not really|neither|none of (those|them|these)|pass|skip)\b", re.IGNORECASE)
+    _NO_RE = re.compile(r"^\s*(no+(?! (problem|worries|rush|biggie|doubt))|nah+|nope|negative|not really|neither|"
+                        r"none of (those|them|these)|pass|skip|i'?ll pass)\b", re.IGNORECASE)
     _ORDINAL_WORDS = {"first": 1, "1st": 1, "one": 1, "second": 2, "2nd": 2, "two": 2, "third": 3, "3rd": 3, "three": 3}
 
     # Handing the planning over: "fill up my afternoon", "you pick", "where could it go?"
@@ -564,7 +565,7 @@ class SlmBrain:
             return Action("choose", {"option": self._ORDINAL_WORDS[m.group(1) or m.group(2)]})
         if self._PICK_RE.search(lowered) and not self._FILL_RE.search(lowered):
             return Action("confirm", {})
-        if self._NO_RE.search(lowered) and len(lowered) < 60:
+        if self._NO_RE.search(lowered) and (len(lowered) < 60 or not re.search(r"\b(actually|wait)\b.*\b(yes|yeah|do it)\b", lowered)):
             return Action("reject", {})
         if self._YES_RE.search(lowered) and len(lowered) < 60:
             return Action("confirm", {})
