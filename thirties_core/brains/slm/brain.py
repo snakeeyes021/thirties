@@ -581,9 +581,31 @@ class SlmBrain:
         fields["text"] = text[:1].upper() + text[1:] if text else "Reminder"
         return Action("remind", fields)
 
+    _SWAP_OUT_RE = re.compile(r"\b(swap|replace|switch out|instead|not feeling|skip|drop|rather not|don'?t want|"
+                              r"something else|other than|not in the mood|not today)\b", re.IGNORECASE)
+
+    def _proposal_swap(self, message: str) -> Optional[Action]:
+        """'Looks good, but swap the unpacking for something else': change one item of a pending plan."""
+        if self.state.proposal_kind != "plan" or not self.state.proposal or not self._SWAP_OUT_RE.search(message):
+            return None
+        filler = {"looks", "good", "great", "fine", "feeling", "today", "swap", "something", "else", "instead",
+                  "replace", "skip", "drop", "rather", "want", "mood", "that", "this", "with", "other", "than"}
+        said = {_stem(w) for w in _words(message) if len(w) > 3 and w not in filler}
+        named = [i for i, p in enumerate(self.state.proposal)
+                 if said & {_stem(w) for w in _words(p["title"]) if len(w) > 3}]
+        m = re.search(r"\b(?:number|#|item)\s*(\d)\b|\bthe (first|second|third|fourth|fifth|last) one\b", message.lower())
+        if m and not named:
+            words = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "last": len(self.state.proposal)}
+            n = int(m.group(1)) if m.group(1) else words[m.group(2)]
+            named = [n - 1] if 0 < n <= len(self.state.proposal) else []
+        return Action("proposal_swap", {"indexes": named}) if named else None
+
     def _route(self, actions: List[Action], message: str) -> List[Action]:
         """Recognize requests that hand the planning over, which the parser tends to misfile."""
         lowered = message.lower()
+        swap = self._proposal_swap(message)
+        if swap is not None:
+            return [swap]
         reminder = self._reminder_from(message)
         if reminder is not None:
             return [reminder]
@@ -736,7 +758,7 @@ class SlmBrain:
             "accept": lambda a: self._apply_proposals(a.get("items")),
             "profile": self._do_profile, "energy": self._do_energy,
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
-            "remind": self._do_remind, "mute": self._do_mute,
+            "remind": self._do_remind, "mute": self._do_mute, "proposal_swap": self._do_proposal_swap,
         }
         retry: List[Action] = []
         for action in actions:
@@ -1171,6 +1193,33 @@ class SlmBrain:
         if self.state.proposal_kind == "options":
             return self._apply_proposals(self.state.proposal[:1])
         return self._apply_proposals(self.state.proposal)
+
+    def _do_proposal_swap(self, a: Action) -> Tuple[str, bool]:
+        proposal = [dict(p) for p in self.state.proposal]
+        avoid = {p["title"].lower() for p in proposal}
+        scheduled = {sp.title.lower() for sp in self.tools.day_plan.spans}
+        ranked = sorted((t for t in self.tasks if not t.someday and not t.parent_task_id
+                         and t.title.lower() not in avoid and t.title.lower() not in scheduled),
+                        key=lambda t: -self._score_task(t, set(), set(), scheduled))
+        out_titles = []
+        for i in a.get("indexes"):
+            out_titles.append(proposal[i]["title"])
+            minutes = parse_duration_minutes(proposal[i]["duration"])
+            pick = next((t for t in ranked if t.title.lower() not in avoid), None)
+            if pick is None:
+                proposal[i] = None
+                continue
+            avoid.add(pick.title.lower())
+            proposal[i] = {**proposal[i], "title": pick.title, "task_id": pick.id, "duration": f"{minutes} minutes"}
+        proposal = [p for p in proposal if p]
+        self.state.proposal = proposal
+        items = []
+        for p in proposal:
+            p_start = self._loose_time(p["start"])
+            items.append((p_start, p_start + timedelta(minutes=parse_duration_minutes(p["duration"])), p["title"], ""))
+        lines = [f"Swapped out {', '.join(out_titles)}. Now:"] + agenda_lines(items, numbered=True)
+        lines.append("Want all of these, or another change?")
+        return "\n".join(lines), False
 
     # --- messages ---
 

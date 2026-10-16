@@ -426,6 +426,20 @@ class TestProposalsAndOutcomes(SlmTestCase):
         starts = [l.split(" – ")[0].split(". ", 1)[1] for l in out.splitlines() if l[:1].isdigit()]
         self.assertEqual(starts, ["7:00 PM", "8:00 PM"], out)
 
+    def test_swap_one_item_of_a_pending_plan(self):
+        self.rt.pick_replies.append('{"picks": [2, 1]}')
+        self.say("could you fill up my evening with stuff from my backlog, until 9?", {"type": "suggest", "topic": "evening"})
+        before = [p["title"] for p in self.brain.state.proposal]
+        out = self.say("looks good, but not feeling the costco call today, swap it for something else",
+                       {"type": "suggest", "topic": "evening"})
+        after = [p["title"] for p in self.brain.state.proposal]
+        self.assertTrue(out.startswith("Swapped out Costco customer service. Now:"), out)
+        self.assertEqual(len(after), len(before))
+        self.assertNotIn("Costco customer service", after)
+        self.assertEqual([p for p in after if p in before], [p for p in before if p != "Costco customer service"])
+        out = self.say("perfect, thanks", {"type": "confirm"})
+        self.assertTrue(out.startswith("Done:"), out)
+
     def test_you_pick_makes_the_plan(self):
         self.rt.pick_replies.append('{"picks": [1]}')
         out = self.say("idk, just pick whatever and put together a schedule for my evening",

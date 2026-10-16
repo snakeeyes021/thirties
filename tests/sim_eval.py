@@ -387,7 +387,7 @@ SCENARIOS: List[SimScenario] = [
         goals=["Ask the assistant to fill up your afternoon (until about 6) with things from your backlog.",
                "Accept its plan, or swap out one item you don't fancy.",
                "Ask to see the afternoon at a glance."],
-        checks=[has_item("", ("13:00", "18:30")), replies(BUSY_LIST, present=False, list_lines_only=True)],
+        checks=[has_item("", ("13:00", "18:30")), no_busy_plan_lines()],
     ),
     SimScenario(
         "fits_in_chunks", THU, "12:30",
