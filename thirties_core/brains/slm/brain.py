@@ -546,8 +546,9 @@ class SlmBrain:
     def _reminder_from(self, message: str) -> Optional[Action]:
         lowered = message.lower()
         m = self._REMIND_RE.search(lowered)
-        if not m:
-            return None
+        if not m or re.match(r"\s*(?:me\s+)?(?:what|how|when|where|which|who|why|if|whether|of what|about what)\b",
+                             lowered[m.end():]):
+            return None  # "remind me what we discussed" is a question about the past
         rest = message[m.end():]
         day_m = re.search(rf"\b(today|tonight|tomorrow|next week|(?:next |this |on )?{self._WEEKDAY_RE}|"
                           r"(?:on )?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2})\b", rest, re.I)
@@ -576,6 +577,7 @@ class SlmBrain:
             text = text.replace(c, " ")
         text = re.sub(r"^\s*(?:to|about|that|of)\s+", "", re.sub(r"\s+", " ", text).strip(" ,.!?"), flags=re.I)
         text = re.sub(r"\s+(?:to|about|on|at)$", "", text).strip(" ,.!?")
+        text = re.sub(r"\s+(?:sometime|some time|at some point|later|soon|please)$", "", text, flags=re.I).strip(" ,.!?")
         fields["text"] = text[:1].upper() + text[1:] if text else "Reminder"
         return Action("remind", fields)
 

@@ -725,6 +725,9 @@ class AssistantTools:
         if time_text:
             from thirties_core.clock import parse_clock
             t = parse_clock(time_text)
+        elif target == self._today():  # "sometime today": a couple of hours from now, on the half hour
+            soon = now + timedelta(hours=2)
+            return soon.replace(minute=0 if soon.minute < 30 else 30, second=0, microsecond=0)
         else:
             t = _time(9, 0)
         due = _dt.combine(target, t, tzinfo=self.pt.day_plan.day_start.tzinfo)

@@ -541,6 +541,12 @@ class TestMessages(SlmTestCase):
         out = self.say("ping me in 20 minutes about the laundry", {"type": "chat"})
         self.assertIn("5:00 PM: The laundry", out)
 
+    def test_remind_me_what_is_a_question_and_today_gets_a_sensible_time(self):
+        out = self.say("remind me what we agreed on for composing", {"type": "question", "topic": "past composing"})
+        self.assertNotIn("I'll remind you", out)
+        out = self.say("remind me to pay the electric bill sometime today", {"type": "add", "title": "Electric bill"})
+        self.assertEqual(out, "Okay, I'll remind you Thursday, October 15 at 6:30 PM: Pay the electric bill")
+
     def test_stop_asking_mutes_the_item_just_asked_about(self):
         self.say("taxes 2 to 3", {"type": "add", "title": "Taxes", "start": "2:00 PM", "end": "3:00 PM"})
         self.m.add_assistant_message("👋 Just checking in: did you get to Taxes?")
