@@ -190,6 +190,12 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "get_weather",
+        "description": "The forecast for a day (default: the rest of today), as plain facts. Read-only.",
+        "parameters": {},
+        "required": [],
+    },
+    {
         "name": "match_backlog",
         "description": "Before scheduling something the user names, check whether it's already on their lists: "
                        "returns the same task (schedule it with its task_id), only similar ones (ask), or none (new). "
@@ -207,7 +213,7 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
                        "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal",
-                       "match_backlog"}
+                       "match_backlog", "get_weather"}
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -724,6 +730,44 @@ class AssistantTools:
             lines.append(head)
         return "\n".join(lines)
 
+    # --- weather ---
+
+    def _weather(self):
+        if not self.pt.scheduler:
+            return None
+        from thirties_core.weather import weather_for
+        return weather_for(self.pt.scheduler.config, self._db)
+
+    def weather_facts(self) -> List[str]:
+        """The rest of the day being planned (all of it, for another day)."""
+        weather = self._weather()
+        if weather is None:
+            return []
+        plan, now = self.pt.day_plan, self.pt._now()
+        start = max(now, plan.day_start) if plan.day_start <= now < plan.day_end else plan.day_start
+        sleep = next((s.start_dt for s in plan.active_spans() if s.is_envelope and s.category.value == "sleep"
+                      and s.start_dt > start), plan.day_end)
+        try:
+            return weather.facts(start, sleep)
+        except Exception as e:
+            logger.info("No weather: %s", e)
+            return []
+
+    def weather_warning(self, span) -> Optional[str]:
+        """'rain likely (70%) around 6 PM' when an outdoor-sounding item lands in bad weather, else None."""
+        from thirties_core.weather import OUTDOOR_RE
+        if not OUTDOOR_RE.search(span.title):
+            return None
+        weather = self._weather()
+        try:
+            return weather.bad_for_outdoors(span.start_dt, span.end_dt) if weather else None
+        except Exception:
+            return None
+
+    def get_weather(self, **_: Any) -> str:
+        facts = self.weather_facts()
+        return "\n".join(facts) if facts else "No forecast available right now."
+
     def match_backlog(self, text: str, **_: Any) -> str:
         """Is the thing the user wants to schedule already on their lists? Decided here, not guessed."""
         ranked = rank_tasks(self.s.tasks, str(text), limit=6)
@@ -833,6 +877,7 @@ class AssistantTools:
             "search_backlog": self.search_backlog,
             "add_task": self.add_task,
             "match_backlog": self.match_backlog,
+            "get_weather": self.get_weather,
             "rollover_proposal": self.rollover_proposal,
             "apply_rollover": self.apply_rollover,
             "set_reminder": self.set_reminder,

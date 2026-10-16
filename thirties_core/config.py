@@ -15,6 +15,7 @@ class GeneralConfig:
     longitude: float = -77.1067
     timezone: str = "America/New_York"
     place_name: str = ""  # shown in Preferences ("Arlington, Virginia"); the coordinates are what count
+    temperature_unit: str = ""  # "fahrenheit" or "celsius"; empty: from the locale
     work_start_thirty: int = 17   # 08:30 AM
     work_end_thirty: int = 31     # last work thirty starts 3:30 PM, so work ends 4:00 PM
     sleep_start_thirty: int = 46  # 11:00 PM

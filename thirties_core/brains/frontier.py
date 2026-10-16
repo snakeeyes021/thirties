@@ -87,6 +87,8 @@ class FrontierBrain:
         profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
         memory = "\n".join(f"- {n.text} (id {n.id})" for n in services.memory.notes()) if services else ""
         stats = "\n".join(f"- {f}" for f in assistant.statistics_facts()) if assistant else ""
+        weather = "\n".join(f"- {f}" for f in assistant.weather_facts()) if assistant else ""
+        weather = weather or "- No forecast available."
         review_block = ""
         if services and self.tools.scheduler:
             from thirties_core.stats import unreviewed_spans
@@ -128,6 +130,9 @@ YOUR MEMORY NOTES (how things work for this user; add with remember, delete with
 STATISTICS (computed from what actually happened)
 {stats}
 
+WEATHER (from the forecast)
+{weather}
+
 HOW TO CHANGE THE SCHEDULE
 Put each tool call on its own line, exactly in this form, then write your reply to the user as normal text:
 CALL add_event {{"title": "Composing", "start": "5:00 PM", "duration": "2 hours"}}
@@ -157,6 +162,7 @@ RULES
 17. Messages: you can send the user a message later with set_reminder ("remind me Saturday to water the plants"); if they give no time, choose a sensible one and say it. If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
 18. Mornings: if yesterday has items with no outcome, Thirties offers to roll them into today (rollover_proposal shows the plan). When the user agrees, call apply_rollover (with skip for anything they want left out) instead of moving items one by one.
 19. Time is told in thirties. Things shorter than 30 minutes are said by their thirty and in order ("in the 5:00 thirty: feed the cats, then message Brad"), never with minute times like 5:15, unless the user asks for exact times (list_schedule exact=true). Several short things can share a thirty: add each one normally (not alongside) and the tool stacks them in order. Use alongside only for things done at the same time.
+20. Weather: when suggesting or planning something outdoors (a walk, a run, yard work, errands on foot), check the forecast; don't suggest it into rain or bad weather, and if the user plans it there (a tool result says "Weather heads-up"), mention it once, briefly, with a better time if there is one.
 """
 
     def build_backlog_summary(self) -> str:

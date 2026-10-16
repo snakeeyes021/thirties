@@ -175,6 +175,12 @@ def location_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
     search.connect("apply", on_search)
     detect.connect("clicked", on_detect)
+    units = ["", "fahrenheit", "celsius"]
+    unit = Adw.ComboRow(title="Temperatures", subtitle="For the weather the assistant plans around",
+                        model=Gtk.StringList.new(["Automatic", "Fahrenheit", "Celsius"]))
+    unit.set_selected(units.index(cfg.general.temperature_unit) if cfg.general.temperature_unit in units else 0)
+    unit.connect("notify::selected", lambda r, _p: ctx.set("general.temperature_unit", units[r.get_selected()]))
+    group.add(unit)
     return group
 
 

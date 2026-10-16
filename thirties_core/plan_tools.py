@@ -447,6 +447,9 @@ class PlanTools:
         self._persist(span)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
+        weather = self.assistant.weather_warning(span) if self.assistant else None
+        if weather:
+            extra += f" Weather heads-up: {weather}."
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
     def update_event(

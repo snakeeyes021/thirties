@@ -742,6 +742,8 @@ class SlmBrain:
                                                **({"day": day} if day else {})})]
             elif self._SHOW_DAY_RE.search(message):
                 actions = [Action("question", {"topic": "schedule", **({"day": day} if day else {})})]
+            elif self._WEATHER_RE.search(message) and "?" in message:
+                actions = [Action("question", {"topic": "weather"})]
         # Also answer a free-time question asked alongside other requests
         if re.search(r"\bhow much (free )?time\b|\bwhen am i free\b|\bfree time\b", message.lower()) and \
                 not any(a.type in ("question", "suggest") for a in actions):
@@ -878,6 +880,9 @@ class SlmBrain:
             span = self._span_from_result(out, day)
             self._remember(span)
             text = self._added_line(out)
+            heads_up = re.search(r"Weather heads-up: (.+?)\.(?:\s|$)", out)
+            if heads_up:
+                text += f" Heads-up: {heads_up.group(1)}."
             if guessed:
                 text += " (I guessed an hour; tell me if it's different.)"
             elif learned:
@@ -1404,7 +1409,16 @@ class SlmBrain:
                       "rest", "day", "next", "couple", "hours", "hour", "few", "what", "should", "suggest", "ideas", "idea"}
         topic_words = {_stem(w) for w in _words(topic) if w not in time_words}
         scheduled = {s.title.lower() for s in self.tools.day_plan.spans}
-        scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled), i, t) for i, t in enumerate(self.tasks)),
+        assistant = getattr(self.tools, "assistant", None)
+        weather = assistant._weather() if assistant else None
+        try:
+            rainy = bool(weather and any(weather.bad_for_outdoors(ws, we) for ws, we in windows[:3]))
+        except Exception:
+            rainy = False
+        from thirties_core.weather import OUTDOOR_RE
+        scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled)
+                          - (6.0 if rainy and OUTDOOR_RE.search(t.title) else 0.0), i, t)  # nothing outdoors in the rain
+                         for i, t in enumerate(self.tasks)),
                         key=lambda x: (-x[0], x[1]))
         ranked, seen_notes = [], set()
         for score, _, t in scored:
@@ -1502,9 +1516,15 @@ class SlmBrain:
 
     # --- questions, memory, profile, energy ---
 
+    _WEATHER_RE = re.compile(r"\b(weather|forecast|rain\w*|sunny|snow\w*|umbrella|temperature|how (hot|cold|warm)|"
+                             r"nice out|storm\w*)\b", re.IGNORECASE)
+
     def _do_question(self, a: Action) -> Tuple[str, bool]:
         topic = (a.get("topic") or "").lower()
         day = a.get("day")
+        if self._WEATHER_RE.search(topic) or self._WEATHER_RE.search(getattr(self, "_message", "")):
+            ok, out = self._run("get_weather", {})
+            return out, False
         if "week" in topic or re.search(r"\b(my|this|the|next) week\b", getattr(self, "_message", "").lower()):
             ok, out = self._run("week_overview", {})
             return "Your week:\n" + "\n".join(f"- {l}" for l in out.splitlines()), False
