@@ -250,6 +250,33 @@ class TestSchedulingActions(SlmTestCase):
         email = next(s for s in tomorrow.spans if s.title == "Email the recruiter")
         self.assertEqual(email.start_dt.strftime("%H:%M"), "08:30")
 
+    def test_guards_against_common_misparses(self):
+        self.say("composing 7 to 8", {"type": "add", "title": "Composing", "start": "7", "end": "8"})
+        self.say("reading 9 to 10", {"type": "add", "title": "Reading", "start": "9", "end": "10"})
+        # "back" is later, whatever sign the model wrote
+        out = self.say("slide composing back 30 mins", {"type": "move", "target": "composing", "shift": "-30 minutes"})
+        self.assertIn("7:30 PM", out)
+        # naming an item that's already planned moves it rather than adding a second one
+        out = self.say("put composing right after the dentist", {"type": "add", "title": "Composing", "after": "dentist"})
+        self.assertEqual([s.title for s in self.m.day_plan.spans].count("Composing"), 1)
+        self.assertEqual(occupant(self.m.day_plan, "18:30"), "Composing")
+        # "before X" in the start field is a placement, not a time
+        out = self.say("stretch for 30 min before reading", {"type": "add", "title": "Stretch", "start": "before Reading",
+                                                             "duration": "30 minutes"})
+        self.assertEqual(occupant(self.m.day_plan, "20:30"), "Stretch")
+        # a day off removes work, and only work
+        out = self.say("I took the day off", {"type": "remove", "target": "work"}, {"type": "remove", "target": "reading"})
+        titles = [s.title for s in self.m.day_plan.active_spans()]
+        self.assertNotIn("Work", titles)
+        self.assertIn("Reading", titles)
+
+    def test_no_is_never_yes(self):
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        self.say("ideas for tonight?", {"type": "suggest", "topic": "tonight"})
+        out = self.say("nah don't do that, I'm wiped", {"type": "confirm"})
+        self.assertNotIn("Done", out)
+        self.assertEqual(self.brain.state.proposal, [])
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

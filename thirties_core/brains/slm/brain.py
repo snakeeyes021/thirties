@@ -369,6 +369,10 @@ class SlmBrain:
                                r"|\beverything (after|else) (it |that )?(slides?|moves?|gets pushed)", lowered))
         mentions_sleep = bool(re.search(r"\b(sleep|bed|bedtime|wake|asleep)\b", lowered))
         mentions_work = bool(re.search(r"\b(work|shift|job|office)\b", lowered))
+        starts_no = bool(self._NO_RE.search(lowered))
+        day_off = bool(re.search(r"\bday off\b|\boff (work|today)\b|\b(pto|vacation|sick day|calling in sick)\b", lowered))
+        clear_all = bool(re.search(r"\b(everything|all of it|clear (the|my) (day|schedule|evening|afternoon|morning))\b", lowered))
+        again = bool(re.search(r"\b(another|again|second|more|extra|round|too)\b", lowered))
         if slide and any(a.type in ("add", "move") and a.get("start") for a in actions):
             for a in actions:
                 if a.type in ("add", "move") and a.get("start") and not a.get("shift"):
@@ -383,6 +387,40 @@ class SlmBrain:
                     a.fields.pop("duration")
                     if not a.get("start") and not a.get("shift"):
                         a.fields["start"] = bare.group(0).strip()  # "move scales to 3" is 3 o'clock, not 3 minutes
+            if starts_no and a.type == "confirm":
+                a = Action("reject", {})  # "nah, don't do that" is never a yes
+            elif starts_no and a.type == "outcome" and a.get("status") == "skipped" and \
+                    not self._span_candidates(a.get("target") or ""):
+                a = Action("reject", {})  # "nah" to a suggestion, not a report about the day
+            if a.type == "outcome":
+                for wrong, right in (("start", "started"), ("end", "finished")):
+                    if a.get(wrong) and not a.get(right):
+                        a.fields[right] = a.fields.pop(wrong)
+            if a.type in ("add", "move"):
+                m = re.match(r"^\s*(before|after|right before|right after|just before|just after)\s+(.+)$",
+                             str(a.get("start") or ""), re.IGNORECASE)
+                if m and not re.search(r"\d", m.group(2)):
+                    a.fields.pop("start")
+                    a.fields[m.group(1).split()[-1].lower()] = m.group(2)
+            shift = str(a.get("shift") or "").strip()
+            if a.type == "move" and shift[:1] in "+-" and shift:
+                later = bool(re.search(r"\b(back|later|push|delay|bump)\b", lowered))
+                earlier = bool(re.search(r"\b(earlier|sooner|forward|up)\b", lowered))
+                if shift[0] == "-" and later and not earlier:
+                    a.fields["shift"] = "+" + shift[1:]
+                elif shift[0] == "+" and earlier and not later:
+                    a.fields["shift"] = "-" + shift[1:]
+            if a.type == "remove" and not refers_back and not clear_all:
+                target_words = {_stem(w) for w in _words(a.get("target") or "")}
+                cats = {s.category for s in self._span_candidates(a.get("target") or "")}
+                if not (target_words & said) and not (SpanCategory.WORK in cats and day_off):
+                    logger.info("[SlmBrain] dropping a removal the user didn't mention: %s", a.fields)
+                    continue
+            if a.type == "add" and not again and not a.get("day") and not a.get("alongside"):
+                same = [s for s in self.tools.day_plan.spans_in_view()
+                        if not s.is_envelope and s.title.lower() == (a.get("title") or "").strip().lower()]
+                if len(same) == 1:  # "put composing after dinner" when Composing is already planned: move it
+                    a = Action("move", {**{k: v for k, v in a.fields.items() if k != "title"}, "target": same[0].title})
             if a.type == "add" and self._LENGTH_ONLY_RE.fullmatch((a.get("title") or "").strip()) and not a.get("start"):
                 a = Action("move", {"target": "it", "duration": re.sub(r"^for\s+", "", a.get("title").strip(), flags=re.I)})
             target_cats = {s.category for s in self._span_candidates(a.get("target") or "")} if a.type in ("move", "remove") else set()
@@ -436,7 +474,8 @@ class SlmBrain:
 
     # Handing the planning over: "fill up my afternoon", "you pick", "where could it go?"
     _FILL_RE = re.compile(r"\b(fill|plan out|line up|load up|put together|block out|pack)\b.{0,50}"
-                          r"\b(afternoon|morning|evening|tonight|day|rest|time|schedule|until|til|till)\b|\bfill (it|that|the rest|in)\b",
+                          r"\b(afternoon|morning|evening|tonight|day|rest|time|schedule|until|til|till|hours?|gap|window)\b"
+                          r"|\bfill (it|that|the rest|in)\b",
                           re.IGNORECASE)
     _PICK_RE = re.compile(r"\b(you pick|just pick|pick (for me|whatever|a few|some|any|something)|whatever (you think|makes sense|works)|"
                           r"up to you|your call|surprise me|you decide|you choose|dealer'?s choice)\b", re.IGNORECASE)

@@ -91,15 +91,57 @@ CASES: List[Tuple[str, List[str], Dict[int, Dict[str, str]], Dict[str, Any]]] = 
 ]
 
 
-def check(actions, expected_types, fields) -> Tuple[bool, str]:
+PRONOUN_LABELS = {"it", "that", "this", "them", "those"}
+
+
+def _same_field(key: str, want: Any, got: Any, context: Dict[str, Any]) -> bool:
+    """A field matches if it contains the label, or means the same thing (an hour == 1 hour, 'it' == the last item)."""
+    from datetime import date
+    from thirties_core.clock import ClockError, parse_day, parse_duration_minutes
+    want_s, got_s = str(want).lower(), str(got).lower()
+    if want_s in got_s:
+        return True
+    if key == "duration":
+        try:
+            return parse_duration_minutes(want_s) == parse_duration_minutes(got_s)
+        except (ClockError, ValueError):
+            return False
+    if key in ("target", "other") and want_s in PRONOUN_LABELS:
+        last = str(context.get("last_item", "")).lower()
+        return bool(last) and (got_s in last or last in got_s)
+    if key in ("day", "to_day"):
+        today = date(2026, 10, 15)
+        try:
+            fixed = {"satruday": "saturday", "tmrw": "tomorrow", "tmr": "tomorrow", "tomorow": "tomorrow"}
+            return parse_day(fixed.get(want_s, want_s), today) == parse_day(got_s, today)
+        except Exception:
+            return False
+    return False
+
+
+def _equivalent(want_type: str, want: Dict[str, Any], got) -> bool:
+    """Different action, same effect: 'finished work at 3' as an outcome or as moving work's end to 3."""
+    if want_type == "outcome" and "work" in str(want.get("target", "")).lower() and got.type == "move":
+        return "work" in str(got.fields.get("target", "")).lower() and \
+            str(want.get("finished", "")).lower() in str(got.fields.get("end", "")).lower()
+    return False
+
+
+def check(actions, expected_types, fields, context=None) -> Tuple[bool, str]:
+    context = context or {}
     types = [a.type for a in actions]
-    if types[: len(expected_types)] != expected_types or len(types) != len(expected_types):
+    if len(types) != len(expected_types):
         return False, f"types {types} != {expected_types}"
+    for i, (want_type, got) in enumerate(zip(expected_types, actions)):
+        if got.type != want_type and not _equivalent(want_type, fields.get(i, {}), got):
+            return False, f"types {types} != {expected_types}"
     for i, wanted in fields.items():
+        if actions[i].type != expected_types[i]:
+            continue  # an equivalent action was checked above
         for key, sub in wanted.items():
-            got = str(actions[i].fields.get(key, ""))
-            if str(sub).lower() not in got.lower():
-                return False, f"action {i} {key}={got!r}, expected ~{sub!r}"
+            got = actions[i].fields.get(key, "")
+            if not _same_field(key, sub, got, context):
+                return False, f"action {i} {key}={str(got)!r}, expected ~{sub!r}"
     return True, ""
 
 
@@ -227,7 +269,7 @@ def main() -> None:
         start = time.time()
         raw = extract_json(session.ask(context)) or {}
         times.append(time.time() - start)
-        ok, why = check(parse_actions(raw), c["types"], c["fields"])
+        ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
         by_cat[c["category"]].append(ok)
         for t in set(c["types"]):
             by_type[t].append(ok)
