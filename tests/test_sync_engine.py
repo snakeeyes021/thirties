@@ -259,5 +259,33 @@ Here is the sync data:
         self.assertIn("User completed task-2", summaries_json)
 
 
+
+class TestFolderSync(unittest.TestCase):
+
+    def _device(self, name, folder):
+        from thirties_core.scheduler import StateDatabase
+        cfg = ThirtiesConfig()
+        cfg.sync.mode, cfg.sync.enabled, cfg.sync.folder, cfg.sync.device_id = "folder", True, folder, name
+        db = StateDatabase(Path(tempfile.mkdtemp()) / "state.sqlite")
+        return SyncEngine(config=cfg, state_db=db, joplin_engine=MagicMock()), db
+
+    def test_two_computers_share_a_folder_without_clobbering(self):
+        from datetime import datetime, timezone
+        from thirties_core.models import EventSpan, SpanCategory
+        folder = tempfile.mkdtemp()
+        laptop, ldb = self._device("laptop", folder)
+        desk, ddb = self._device("desk", folder)
+        t = datetime(2026, 10, 15, 18, tzinfo=timezone.utc)
+        ldb.upsert_span(EventSpan("a", "Dinner", t, t.replace(hour=19), SpanCategory.ACTIVITY))
+        ddb.upsert_span(EventSpan("b", "Gym", t.replace(hour=20), t.replace(hour=21), SpanCategory.ACTIVITY))
+        self.assertTrue(laptop.sync()[0])
+        self.assertTrue(desk.sync()[0])
+        self.assertTrue(laptop.sync()[0])
+        for db in (ldb, ddb):
+            self.assertEqual(sorted(r["id"] for r in db.get_span_records() if not r.get("deleted")), ["a", "b"])
+        self.assertEqual(sorted(p.name for p in (Path(folder) / "Thirties sync").glob("*.json")),
+                         ["desk.json", "laptop.json"])
+
+
 if __name__ == "__main__":
     unittest.main()
