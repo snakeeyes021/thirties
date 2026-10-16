@@ -37,9 +37,11 @@ BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontie
 
 def brain_choice(config, state_db=None) -> str:
     """The brain to use: this device's choice from the app (if any), else ``[assistant] brain`` in config."""
-    chosen = state_db.get_setting("brain") if state_db is not None else None
-    if chosen in BRAINS:
-        return chosen
+    if state_db is not None:
+        from thirties_core.settings import Settings
+        chosen = Settings(state_db).get("assistant.brain")
+        if chosen in BRAINS:
+            return chosen
     configured = (getattr(getattr(config, "assistant", None), "brain", "frontier") or "frontier").lower()
     return BRAIN_ALIASES.get(configured, "frontier")
 

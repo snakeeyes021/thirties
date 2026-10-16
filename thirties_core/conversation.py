@@ -73,7 +73,8 @@ class ConversationManager:
         if name is None:
             raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(BRAINS)}.")
         if self.scheduler is not None:
-            self.scheduler.state_db.set_setting("brain", name)
+            from thirties_core.settings import Settings
+            Settings(self.scheduler.state_db).set("assistant.brain", name)
         if name != self.brain_name:
             self._use_brain(name)
         return name

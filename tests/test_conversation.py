@@ -210,7 +210,8 @@ class TestChoosingTheBrain(ConversationTestCase):
         sched = self.manager.scheduler
         other = ConversationManager(self.manager.day_plan, [], [], sched, inference_engine=self.engine, active_notes=[])
         self.assertEqual(other.brain_name, "slm")
-        sched.state_db.set_setting("brain", "frontier")
+        from thirties_core.settings import Settings
+        Settings(sched.state_db).set("assistant.brain", "frontier")
         other.refresh()
         self.assertEqual(type(other.brain).__name__, "FrontierBrain")
         self.assertIn("hi", [m["content"] for m in other.history()])

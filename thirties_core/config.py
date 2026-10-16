@@ -14,6 +14,7 @@ class GeneralConfig:
     latitude: float = 38.8799
     longitude: float = -77.1067
     timezone: str = "America/New_York"
+    place_name: str = ""  # shown in Preferences ("Arlington, Virginia"); the coordinates are what count
     work_start_thirty: int = 17   # 08:30 AM
     work_end_thirty: int = 31     # last work thirty starts 3:30 PM, so work ends 4:00 PM
     sleep_start_thirty: int = 46  # 11:00 PM
@@ -28,6 +29,8 @@ class JoplinConfig:
     api_token: str = ""
     api_port: int = 41184
     api_host: str = "127.0.0.1"
+    write_back: bool = False          # the user allowed Thirties to check off, add and break down tasks
+    launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
     allowed_notebooks: List[str] = field(
         default_factory=lambda: [
             "1. Tasks",
@@ -66,6 +69,8 @@ class InferenceConfig:
     gemini_model: str = "gemini-3.8-flash-low"
     gemini_api_key: str = ""
     agy_path: Optional[str] = None
+    # Where the Gemini brain gets its model, in order of preference: "agy" (subscription) and/or "api" (key).
+    sources: List[str] = field(default_factory=lambda: ["agy", "api"])
     litert_model_path: str = "~/.local/share/thirties/models/gemma-4-e2b.litertlm"
     temperature: float = 0.2
     timeout_seconds: float = 60.0
@@ -91,7 +96,9 @@ class TelegramConfig:
 
 @dataclass
 class SyncConfig:
-    enabled: bool = True
+    mode: str = "off"     # "off", "folder" (files in a folder the user picks) or "joplin" (a Joplin note)
+    folder: str = ""
+    enabled: bool = False  # derived from mode
     notebook_name: str = "Archive"
     sync_subfolder: str = "Thirties_System"
     sync_note_title: str = "Thirties_State_Sync"
@@ -181,6 +188,9 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     telegram_data = data.get("telegram", {})
     assistant_data = data.get("assistant", {})
     media_data = data.get("media", {})
+
+    if sync_data.get("enabled") and "mode" not in sync_data:
+        sync_data = {**sync_data, "mode": "joplin"}
 
     return ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),

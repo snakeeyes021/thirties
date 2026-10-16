@@ -132,6 +132,12 @@ class StateDatabase:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            -- Settings about the person (work hours, permissions...), synced between devices.
+            CREATE TABLE IF NOT EXISTS shared_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS event_decisions (
                 event_id TEXT PRIMARY KEY,
                 decision TEXT NOT NULL,
@@ -304,6 +310,35 @@ class StateDatabase:
         with self._get_connection() as conn:
             conn.execute("INSERT INTO local_settings (key, value) VALUES (?, ?) "
                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def delete_setting(self, key: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM local_settings WHERE key = ?", (key,))
+
+    def get_shared_setting(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM shared_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_shared_setting(self, key: str, value: str, updated_at: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO shared_settings (key, value, updated_at) VALUES (?, ?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                         (key, value, updated_at))
+
+    def get_shared_setting_records(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT key, value, updated_at FROM shared_settings").fetchall()
+        return [dict(r) for r in rows]
+
+    def merge_shared_setting(self, record: Dict[str, Any]) -> int:
+        """Last write wins. Returns 1 if the record changed this device's value."""
+        current = self.get_shared_setting_records()
+        mine = next((r for r in current if r["key"] == record["key"]), None)
+        if mine and mine["updated_at"] >= record["updated_at"]:
+            return 0
+        self.set_shared_setting(record["key"], record["value"], record["updated_at"])
+        return 1
 
     # --- task history ---
 

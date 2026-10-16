@@ -123,6 +123,8 @@ class SyncEngine:
         decisions = self.state_db.get_event_decision_records()
         stores = self._stores()
         assistant_state = {name: store.all_records() for name, store in stores.items()}
+        from thirties_core.settings import Settings
+        settings = Settings(self.state_db).records()
 
         # 2. Task History & Analytics
         task_histories = self.state_db.get_all_task_histories()
@@ -141,6 +143,7 @@ class SyncEngine:
             "day_meta": day_meta,
             "event_decisions": decisions,
             "assistant_state": assistant_state,
+            "settings": settings,
             "analytics": {
                 "task_history": task_dict,
             },
@@ -207,6 +210,10 @@ class SyncEngine:
         for name, store in self._stores().items():
             for record in payload.get("assistant_state", {}).get(name, []):
                 merged_schedules_count += store.merge_record(record)
+        from thirties_core.settings import Settings
+        shared = Settings(self.state_db)
+        for record in payload.get("settings", []):
+            merged_schedules_count += shared.merge_record(record)
 
         # 2. Merge Task History & Analytics (union-max counters)
         remote_tasks = payload.get("analytics", {}).get("task_history", {})

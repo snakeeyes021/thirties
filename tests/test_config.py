@@ -20,7 +20,8 @@ class TestConfig(unittest.TestCase):
         self.assertIn("Archive", cfg.joplin.excluded_notebooks)
         self.assertEqual(cfg.inference.backend, "gemini")
         self.assertEqual(cfg.inference.gemini_model, "gemini-3.8-flash-low")
-        self.assertTrue(cfg.sync.enabled)
+        self.assertFalse(cfg.sync.enabled)  # off until the user picks a folder or a Joplin note
+        self.assertEqual(cfg.sync.mode, "off")
         self.assertEqual(cfg.sync.notebook_name, "Archive")
         self.assertEqual(cfg.sync.sync_subfolder, "Thirties_System")
         self.assertEqual(cfg.sync.sync_note_title, "Thirties_State_Sync")

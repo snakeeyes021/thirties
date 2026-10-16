@@ -30,6 +30,7 @@ class TestSyncEngine(unittest.TestCase):
         self.state_db = StateDatabase(self.db_path)
         self.config = ThirtiesConfig()
         self.config.sync.device_id = "test-device-1"
+        self.config.sync.mode, self.config.sync.enabled = "joplin", True
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
