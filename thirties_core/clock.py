@@ -112,13 +112,42 @@ def format_clock(dt: datetime) -> str:
     return dt.strftime("%I:%M %p").lstrip("0")
 
 
+SHORT = timedelta(minutes=30)
+
+
+def thirty_of(dt: datetime) -> datetime:
+    """The start of the thirty (clock half hour) a time falls in."""
+    return dt.replace(minute=0 if dt.minute < 30 else 30, second=0, microsecond=0)
+
+
+def group_short_items(items: Sequence[Tuple[datetime, datetime, str, str]]) -> List[Tuple[datetime, datetime, str, str]]:
+    """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one
+    row at the thirty's start ("5:00 – Feed cats, Message Brad"), ending when the thirty ends."""
+    out: List[Tuple[datetime, datetime, str, str]] = []
+    grouped: List[bool] = []  # parallel to out: is this row a thirty of short items?
+    for start, end, title, note in items:
+        if end - start < SHORT and thirty_of(start) == thirty_of(end - timedelta(seconds=1)):
+            block = thirty_of(start)
+            label = f"{title} ({note})" if note else title
+            if out and grouped[-1] and out[-1][0] == block:
+                out[-1] = (block, block + SHORT, f"{out[-1][2]}, {label}", "")
+                continue
+            out.append((block, block + SHORT, label, ""))
+            grouped.append(True)
+        else:
+            out.append((start, end, title, note))
+            grouped.append(False)
+    return out
+
+
 def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered: bool = False) -> List[str]:
     """A plan as a reader expects it: '- 4:00 PM – Feed cat', one line per item, in order.
 
     Items are (start, end, title, note). Each item ends when the next one starts, so an end
     time is added only where it isn't implied: before a gap or under an overlap (the last
-    item's end isn't worth the noise).
+    item's end isn't worth the noise). Items under 30 minutes are shown by their thirty.
     """
+    items = group_short_items(items)
     lines = []
     for i, (start, end, title, note) in enumerate(items):
         next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)

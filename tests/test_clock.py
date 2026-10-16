@@ -69,6 +69,11 @@ class TestClock(unittest.TestCase):
         self.assertEqual(trim_meridiems("Lunch at 12:30 PM", afternoon), "Lunch at 12:30 PM")  # 12 is never obvious
         self.assertEqual(trim_meridiems("Moved to tomorrow, 4:00 PM", afternoon), "Moved to tomorrow, 4:00 PM")
 
+    def test_short_items_are_listed_by_their_thirty(self) -> None:
+        items = [(at("17:00"), at("17:15"), "Message Brad", ""), (at("17:15"), at("17:30"), "Feed cats", ""),
+                 (at("17:30"), at("18:30"), "Dinner", "")]
+        self.assertEqual(agenda_lines(items), ["- 5:00 PM – Message Brad, Feed cats", "- 5:30 PM – Dinner"])
+
     def test_agenda_lines_show_end_times_only_where_not_implied(self) -> None:
         items = [(at("16:00"), at("17:00"), "Feed cat", ""),
                  (at("17:00"), at("17:30"), "Wash car", ""),

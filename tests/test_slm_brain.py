@@ -302,6 +302,11 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("reading at 8", {"type": "add", "title": "Reading", "start": "8"})
         self.assertIn("Added Reading: 8:00 PM – 8:45 PM (45m). (about as long as it usually takes you)", out)
 
+    def test_short_items_are_told_by_their_thirty(self):
+        self.say("message brad at 7, 10 minutes", {"type": "add", "title": "Message Brad", "start": "7", "duration": "10 minutes"})
+        out = self.say("and feed the cats at 7 too, 5 min", {"type": "add", "title": "Feed the cats", "start": "7", "duration": "5 min"})
+        self.assertEqual(out.splitlines()[0], "Added Feed the cats to the 7:00 PM thirty, after Message Brad.")
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

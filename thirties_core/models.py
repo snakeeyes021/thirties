@@ -281,6 +281,9 @@ class DayPlan:
         foreground = [s for s in occupants if not s.is_envelope]
         if not foreground:
             return self.display_span(block).title
+        in_order = sorted(foreground, key=lambda s: s.start_dt)
+        if len(in_order) > 1 and all(b.start_dt >= a.end_dt for a, b in zip(in_order, in_order[1:])):
+            return "\n".join(s.title for s in in_order)  # one after another inside the thirty: a line each
         titles: List[str] = []
         for s in sorted(foreground, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt)):
             if s.title not in titles:

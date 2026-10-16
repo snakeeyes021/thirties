@@ -26,7 +26,7 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
-from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes
+from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes, thirty_of
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -913,6 +913,14 @@ class SlmBrain:
         m = re.match(r"\[(.+?)\] ", out)
         if m:
             day, out = f" on {m.group(1)}", out[m.end():]
+        span = self._span_from_result(out, None) if not day else None
+        if span is not None and span.duration_minutes < 30:  # short items are told by their thirty
+            block = thirty_of(span.start_dt)
+            before = [s.title for s in self.tools.day_plan.spans_in_view()
+                      if s.id != span.id and not s.is_envelope and s.duration_minutes < 30
+                      and thirty_of(s.start_dt) == block and s.end_dt <= span.start_dt]
+            return f"Added {span.title} to the {format_clock(block)} thirty" + \
+                (f", after {' and '.join(before)}." if before else ".")
         m = re.match(r"Added (.+?), (.+? – .+?) \((.+?)\)", out)
         if not m:
             return out

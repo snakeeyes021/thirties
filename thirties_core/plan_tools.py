@@ -26,6 +26,7 @@ from thirties_core.assistant_tools import (
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.clock import (
+    thirty_of,
     ClockError,
     format_clock,
     format_duration,
@@ -119,7 +120,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "list_schedule",
         "description": "Show a day's schedule (any day). Read-only; you will see the result before replying.",
-        "parameters": {"day": "Which day, e.g. 'tomorrow' or 'Oct 20' (default: the day being planned)."},
+        "parameters": {"day": "Which day, e.g. 'tomorrow' or 'Oct 20' (default: the day being planned).",
+                       "exact": "true to show minute times of items shorter than 30 minutes (only if the user asks)."},
         "required": [],
     },
     {
@@ -250,6 +252,23 @@ class PlanTools:
 
     def _end(self, text: Any, start: datetime) -> datetime:
         return resolve_clock(str(text), self.day_plan.day_start, after=start)
+
+    def _stack_short(self, start: datetime, end: datetime, ignore: Optional[str] = None) -> Tuple[datetime, datetime]:
+        """Something under 30 minutes put into a thirty that already holds short items goes after them,
+        so three five-minute errands at 5:00 run 5:00, 5:05, 5:10 instead of overlapping."""
+        length = end - start
+        if length >= timedelta(minutes=30):
+            return start, end
+        block = thirty_of(start)
+        shorts = [s for s in self.day_plan.spans_overlapping(block, block + timedelta(minutes=30))
+                  if s.id != ignore and not s.is_envelope and s.duration_minutes < 30
+                  and s.start_dt >= block and s.end_dt <= block + timedelta(minutes=30)]
+        if not any(s.start_dt < end and start < s.end_dt for s in shorts):
+            return start, end
+        after = max(s.end_dt for s in shorts)
+        if after + length <= block + timedelta(minutes=30):
+            return after, after + length
+        return start, end
 
     def describe(self, span: EventSpan) -> str:
         return f"{span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)} ({format_duration(span.duration_minutes)})"
@@ -411,6 +430,8 @@ class PlanTools:
         else:
             raise ToolError("Give an end time or a duration.")
 
+        if not _as_bool(alongside):
+            start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if _as_bool(alongside):
             notes = []
@@ -466,6 +487,8 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
 
+        if start not in (None, "") and shift in (None, ""):
+            new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
         if _as_bool(push_later) and not span.is_envelope:
@@ -645,14 +668,27 @@ class PlanTools:
             return "No free stretch matches that."
         return "Free: " + "; ".join(self.describe_window(s, e) for s, e in fits) + "."
 
-    def list_schedule(self, **_: Any) -> str:
-        return self.schedule_text()
+    def list_schedule(self, exact: Any = False, **_: Any) -> str:
+        return self.schedule_text(exact=_as_bool(exact))
 
-    def schedule_text(self, upcoming_from: Optional[datetime] = None) -> str:
+    def schedule_text(self, upcoming_from: Optional[datetime] = None, exact: bool = False) -> str:
         """The day's spans and free time as plain text, shared by tools and prompts."""
         plan = self.day_plan
         lines = []
+        shown_blocks = set()
         for s in plan.spans_in_view():
+            if s.duration_minutes < 30 and thirty_of(s.start_dt) == thirty_of(s.end_dt - timedelta(seconds=1)) \
+                    and not s.is_envelope and not exact:
+                block = thirty_of(s.start_dt)
+                if block in shown_blocks:
+                    continue
+                shown_blocks.add(block)
+                group = [x for x in plan.spans_in_view() if x.duration_minutes < 30 and not x.is_envelope
+                         and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
+                lines.append(f"- {format_clock(block)} thirty: " + ", then ".join(
+                    f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
+                    for x in group) + " (short items, in this order; say them by their thirty, not minute times)")
+                continue
             flags = [s.category.value]
             if s.tentative:
                 flags.append("UNCONFIRMED invite")

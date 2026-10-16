@@ -112,6 +112,22 @@ class TestUpdateEvent(unittest.TestCase):
         tomorrow = t.plan_for("tomorrow")
         self.assertEqual([s.status.value for s in tomorrow.spans if s.title == "File taxes"], ["planned"])
 
+    def test_short_items_stack_in_their_thirty(self) -> None:
+        t = tools_for()
+        for title in ("Feed the cats", "Message Brad", "Water the alligator"):
+            self.assertFalse(t.execute("add_event", {"title": title, "start": "5:00 PM", "duration": "5 min"})
+                             .startswith(NOT_DONE))
+        spans = sorted((s for s in t.day_plan.spans if s.duration_minutes == 5), key=lambda s: s.start_dt)
+        self.assertEqual([(s.title, s.start_dt.strftime("%H:%M")) for s in spans],
+                         [("Feed the cats", "17:00"), ("Message Brad", "17:05"), ("Water the alligator", "17:10")])
+        self.assertIn("- 5:00 PM thirty: Feed the cats id=", t.list_schedule())
+        self.assertIn(", then Message Brad id=", t.list_schedule())
+        self.assertIn("5:05 PM – 5:10 PM: Message Brad", t.list_schedule(exact=True))
+        block = t.day_plan.block_at(at("17:01"))
+        self.assertEqual(t.day_plan.display_title(block), "Feed the cats\nMessage Brad\nWater the alligator")
+        out = t.execute("add_event", {"title": "Laundry", "start": "5:00 PM", "duration": "20 min"})
+        self.assertTrue(out.startswith(NOT_DONE), out)  # no room left in that thirty: a conflict, not an overlap
+
     def test_sleep_tonight_crosses_midnight(self) -> None:
         t = tools_for()
         t.execute("update_event", {"event": "Sleep", "start": "10:30 PM", "end": "6:30 AM"})

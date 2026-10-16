@@ -155,6 +155,7 @@ RULES
 15. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
 16. Messages: you can send the user a message later with set_reminder ("remind me Saturday to water the plants"); if they give no time, choose a sensible one and say it. If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
 17. Mornings: if yesterday has items with no outcome, Thirties offers to roll them into today (rollover_proposal shows the plan). When the user agrees, call apply_rollover (with skip for anything they want left out) instead of moving items one by one.
+18. Time is told in thirties. Things shorter than 30 minutes are said by their thirty and in order ("in the 5:00 thirty: feed the cats, then message Brad"), never with minute times like 5:15, unless the user asks for exact times (list_schedule exact=true). Several short things can share a thirty: add each one normally (not alongside) and the tool stacks them in order. Use alongside only for things done at the same time.
 """
 
     def build_backlog_summary(self) -> str:
