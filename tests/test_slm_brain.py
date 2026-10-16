@@ -270,6 +270,12 @@ class TestSchedulingActions(SlmTestCase):
         self.assertNotIn("Work", titles)
         self.assertIn("Reading", titles)
 
+    def test_typos_and_self_corrections(self):
+        out = self.say("meditatoin at 7pm for 20 mins", {"type": "add", "title": "Meditation", "start": "7pm", "duration": "20 mins"})
+        self.assertIn("Added Meditation", out)
+        out = self.say("I need to make meditation happen at some point", {"type": "add", "title": "Meditation"})
+        self.assertNotIn("Moved", out)
+
     def test_no_is_never_yes(self):
         self.rt.pick_replies.append('{"picks": [1, 2]}')
         self.say("ideas for tonight?", {"type": "suggest", "topic": "tonight"})

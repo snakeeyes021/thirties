@@ -40,6 +40,28 @@ CHAT_SYSTEM = ("You are Thirties, a warm, concise personal planning assistant th
                "ask them to say it plainly.")
 
 
+_VOCAB = ("work", "dinner", "lunch", "breakfast", "meditation", "podcast", "audiobook", "laundry", "walk", "reading",
+          "composing", "piano", "guitar", "practice", "shower", "chores", "groceries", "grocery", "exercise", "workout",
+          "meeting", "email", "call", "appointment", "doctor", "dentist", "homework", "cleaning", "cooking")
+
+
+def _close_words(words: List[str]) -> List[str]:
+    """Stems of common planning words that the message misspells ("wokr", "podcsat")."""
+    import difflib
+    out = []
+    for w in words:
+        if len(w) >= 4:
+            out += [_stem(v) for v in difflib.get_close_matches(w, _VOCAB, n=1, cutoff=0.75)]
+    return out
+
+
+def _fuzzy_overlap(title: str, message: str) -> bool:
+    """Some word of the title appears in the message, allowing for typos."""
+    import difflib
+    said = [w for w in _words(message) if len(w) >= 4]
+    return any(difflib.get_close_matches(w, said, n=1, cutoff=0.75) for w in _words(title) if len(w) >= 4)
+
+
 @dataclass
 class DialogState:
     last_ids: List[str] = field(default_factory=list)       # what "it" refers to
@@ -363,13 +385,15 @@ class SlmBrain:
     def _sanity(self, actions: List[Action], message: str) -> List[Action]:
         """Drop or repair actions the message can't support (a small model sometimes invents)."""
         said = {_stem(w) for w in _words(message)}
+        said |= {w for w in _close_words(_words(message))}  # "meditatoin" still says meditation
         refers_back = bool(re.search(r"\b(it|that|those|them|these|this|same|again)\b", message.lower()))
         lowered = message.lower()
         slide = bool(re.search(r"\b(slide|push|shift|bump|move)\b.{0,30}\b(everything|the rest|all|things|what'?s)\b.{0,20}\b(after|later|back|down)\b"
                                r"|\beverything (after|else) (it |that )?(slides?|moves?|gets pushed)", lowered))
         mentions_sleep = bool(re.search(r"\b(sleep|bed|bedtime|wake|asleep)\b", lowered))
-        mentions_work = bool(re.search(r"\b(work|shift|job|office)\b", lowered))
-        starts_no = bool(self._NO_RE.search(lowered))
+        mentions_work = bool(re.search(r"\b(work|shift|job|office)\b", lowered)) or "work" in said
+        starts_no = bool(self._NO_RE.search(lowered)) and \
+            not re.search(r"\b(actually|wait|on second thought)\b.*\b(yes|yeah|go ahead|do it|sure|ok)\b", lowered)
         day_off = bool(re.search(r"\bday off\b|\boff (work|today)\b|\b(pto|vacation|sick day|calling in sick)\b", lowered))
         clear_all = bool(re.search(r"\b(everything|all of it|clear (the|my) (day|schedule|evening|afternoon|morning))\b", lowered))
         again = bool(re.search(r"\b(another|again|second|more|extra|round|too)\b", lowered))
@@ -416,7 +440,8 @@ class SlmBrain:
                 if not (target_words & said) and not (SpanCategory.WORK in cats and day_off):
                     logger.info("[SlmBrain] dropping a removal the user didn't mention: %s", a.fields)
                     continue
-            if a.type == "add" and not again and not a.get("day") and not a.get("alongside"):
+            placed = any(a.get(k) for k in ("start", "end", "after", "before", "duration"))
+            if a.type == "add" and placed and not again and not a.get("day") and not a.get("alongside"):
                 same = [s for s in self.tools.day_plan.spans_in_view()
                         if not s.is_envelope and s.title.lower() == (a.get("title") or "").strip().lower()]
                 if len(same) == 1:  # "put composing after dinner" when Composing is already planned: move it
@@ -439,7 +464,7 @@ class SlmBrain:
                 a.fields["start"], a.fields["end"] = m.group(1), m.group(2)
             if a.type == "add" and not refers_back:
                 title_words = {_stem(w) for w in _words(a.get("title") or "")}
-                if title_words and not (title_words & said):
+                if title_words and not (title_words & said) and not _fuzzy_overlap(a.get("title") or "", message):
                     logger.info("[SlmBrain] dropping invented add: %s", a.fields)
                     continue
             if a.type == "remove" and self.state.proposal and not self._span_candidates(a.get("target") or ""):
@@ -454,7 +479,10 @@ class SlmBrain:
                 same = {_stem(w) for w in _words(a.get("target") or "")}
                 if any(b.type == "add" and same & {_stem(w) for w in _words(b.get("title") or "")} for b in actions):
                     continue  # the add in this message already covers it
-                a = Action("add", {**a.fields, "title": a.get("target")})
+                fields = {k: v for k, v in a.fields.items() if k not in ("target", "to_day")}
+                if a.get("to_day"):
+                    fields["day"] = a.get("to_day")
+                a = Action("add", {**fields, "title": a.get("target")})
             kept.append(a)
         return kept
 
@@ -545,6 +573,13 @@ class SlmBrain:
         return None
 
     def _execute(self, actions: List[Action], message: str) -> str:
+        actions = self._interpret(actions, message)
+        if not actions:
+            return self._chat(message)
+        return self._run_actions(actions, message)
+
+    def _interpret(self, actions: List[Action], message: str) -> List[Action]:
+        """Python's reading of the model's actions: dialog acts, repairs and routing. Changes nothing."""
         act = self._dialog_act(message)
         if act is not None and not any(a.type in ("confirm", "reject", "choose") for a in actions):
             proposed = {p["title"].lower() for p in self.state.proposal}
@@ -577,8 +612,9 @@ class SlmBrain:
             tonight = bool(re.search(r"\b(tonight|this evening|before bed|bedtime)\b", message.lower()))
             actions = actions + [Action("question", {"topic": "free time" + (" tonight" if tonight else ""),
                                                      "day": None})]
-        if not actions:
-            return self._chat(message)
+        return actions
+
+    def _run_actions(self, actions: List[Action], message: str) -> str:
         lines: List[str] = []
         changed = False
         handlers: Dict[str, Callable[[Action], Tuple[str, bool]]] = {

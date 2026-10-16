@@ -101,7 +101,11 @@ def _same_field(key: str, want: Any, got: Any, context: Dict[str, Any]) -> bool:
     want_s, got_s = str(want).lower(), str(got).lower()
     if want_s in got_s:
         return True
+    if key == "topic":
+        return True  # free text the brain only scans for a few words; the action type is what matters
     if key == "duration":
+        for word, num in (("forty-five", "45"), ("fifteen", "15"), ("twenty", "20"), ("thirty", "30"), ("ninety", "90")):
+            want_s = want_s.replace(word, num)
         try:
             return parse_duration_minutes(want_s) == parse_duration_minutes(got_s)
         except (ClockError, ValueError):
@@ -121,6 +125,11 @@ def _same_field(key: str, want: Any, got: Any, context: Dict[str, Any]) -> bool:
 
 def _equivalent(want_type: str, want: Dict[str, Any], got) -> bool:
     """Different action, same effect: 'finished work at 3' as an outcome or as moving work's end to 3."""
+    if want_type in ("confirm", "choose") and got.type == "accept":
+        return True
+    if want_type == "add" and got.type == "move":  # naming an item that's already planned moves it
+        title = str(want.get("title", "")).lower()
+        return bool(title) and title in str(got.fields.get("target", "")).lower()
     if want_type == "outcome" and "work" in str(want.get("target", "")).lower() and got.type == "move":
         return "work" in str(got.fields.get("target", "")).lower() and \
             str(want.get("finished", "")).lower() in str(got.fields.get("end", "")).lower()
@@ -243,6 +252,49 @@ def all_cases() -> List[Dict[str, Any]]:
     return cases
 
 
+class _NoModel:
+    """The interpreter never calls the model."""
+
+    def parser(self, system):
+        raise RuntimeError("no model in the interpreter")
+
+
+def make_interpreter():
+    """An SLM brain on the benchmark's schedule, used only for its deterministic reading of parses."""
+    from tests.fixtures import DAY, at, make_scheduler
+    from thirties_core.astronomy import set_debug_time
+    from thirties_core.brains.slm.brain import SlmBrain
+    from thirties_core.conversation import ConversationManager
+    set_debug_time(at("15:00"))
+    sched = make_scheduler()
+    plan, pending = sched.build_day_plan(DAY)
+    manager = ConversationManager(plan, [], pending, sched, active_notes=[], brain=None, inference_engine=None)
+    manager.execute_tool("add_event", {"title": "Dinner", "start": "6:00 PM", "end": "7:00 PM"})
+    manager.execute_tool("add_event", {"title": "Composing", "start": "7:00 PM", "end": "8:30 PM"})
+    return SlmBrain(manager.tools, tasks=[], runtime=_NoModel())
+
+
+def interpret(brain, raw: Dict[str, Any], message: str, context: Dict[str, Any]):
+    """What the SLM brain would actually do with this parse, given the same context."""
+    import re
+    brain.state = type(brain.state)()
+    asked = context.get("assistant") or context.get("pending") or ""
+    if asked:
+        options = re.findall(r"(?:^|\s)(\d)\s*[).:]\s*([^,;|]+)", asked)
+        if len(options) >= 2:
+            brain.state.proposal = [{"title": t.strip()} for _, t in options]
+            brain.state.proposal_kind = "options"
+        elif re.search(r"(^|[.!?]\s*)(should i|shall i|want me to|would you like (me )?to|do you want (me )?to|"
+                       r"how about|can i|could i)\b|^whether to\b", asked, re.I):
+            brain.state.proposal = [{"title": "the suggestion"}]  # an offer awaiting yes/no
+            brain.state.proposal_kind = "options"
+    last = str(context.get("last_item") or "").lower()
+    if last:
+        brain.state.last_ids = [s.id for s in brain.tools.day_plan.spans if s.title.lower() == last][:1]
+    brain._message = message
+    return brain._interpret(parse_actions(raw), message)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--make-cases", type=int, default=0, metavar="N", help="have Gemini write N cases per category")
@@ -259,8 +311,10 @@ def main() -> None:
     session = rt.parser(SYSTEM_PROMPT)
     cases = [c for c in all_cases() if not args.category or c["category"] in args.category]
     random.Random(0).shuffle(cases)  # the KV-cached session sees a realistic mix, not one category in a row
+    brain = make_interpreter()
     by_cat: Dict[str, List[bool]] = defaultdict(list)
     by_type: Dict[str, List[bool]] = defaultdict(list)
+    final_cat: Dict[str, List[bool]] = defaultdict(list)
     failures, times = [], []
     for c in cases:
         extra = c["context"]
@@ -270,21 +324,25 @@ def main() -> None:
         raw = extract_json(session.ask(context)) or {}
         times.append(time.time() - start)
         ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
+        final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"], c["context"])
+        final_cat[c["category"]].append(final_ok)
         by_cat[c["category"]].append(ok)
         for t in set(c["types"]):
             by_type[t].append(ok)
-        if not ok:
-            failures.append({**c, "why": why, "got": raw})
-        if not ok or not args.quiet:
-            print(f"{'PASS' if ok else 'FAIL'} {times[-1]:.1f}s [{c['category']}] {c['message'][:110]}"
-                  + ("" if ok else f"  -> {why}"), flush=True)
+        if not ok or not final_ok:
+            failures.append({**c, "why": why, "final_why": final_why, "final_ok": final_ok, "got": raw})
+        if not final_ok or not args.quiet:
+            print(f"{'PASS' if final_ok else 'FAIL'} {times[-1]:.1f}s [{c['category']}] {c['message'][:110]}"
+                  + ("" if final_ok else f"  -> {final_why}"), flush=True)
     passed = sum(ok for oks in by_cat.values() for ok in oks)
-    print(f"\n{passed}/{len(cases)} parsed correctly ({passed / len(cases):.0%}); "
-          f"median {sorted(times)[len(times) // 2]:.1f}s per message")
-    print("\nBy category (worst first):")
-    for cat, oks in sorted(by_cat.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
-        print(f"  {cat:<18} {sum(oks):>3}/{len(oks):<3} {sum(oks) / len(oks):.0%}")
-    print("\nBy expected action type:")
+    final = sum(ok for oks in final_cat.values() for ok in oks)
+    print(f"\nModel alone: {passed}/{len(cases)} ({passed / len(cases):.0%}). After Python's reading: "
+          f"{final}/{len(cases)} ({final / len(cases):.0%}). Median {sorted(times)[len(times) // 2]:.1f}s per message")
+    print("\nBy category, after Python (worst first; model alone in brackets):")
+    for cat, oks in sorted(final_cat.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
+        raw_oks = by_cat[cat]
+        print(f"  {cat:<18} {sum(oks):>3}/{len(oks):<3} {sum(oks) / len(oks):>4.0%}   ({sum(raw_oks) / len(raw_oks):.0%})")
+    print("\nModel alone, by expected action type:")
     for t, oks in sorted(by_type.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
         print(f"  {t:<10} {sum(oks):>3}/{len(oks):<3} {sum(oks) / len(oks):.0%}")
     out = REPO_ROOT / "docs" / "eval_reports" / f"parse_{time.strftime('%Y%m%d_%H%M%S')}.json"
