@@ -291,6 +291,17 @@ class TestSchedulingActions(SlmTestCase):
         self.say("dinner at 7 for an hour", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
         self.assertTrue(self.shown.startswith("Added Dinner: 7:00 – 8:00 (1h)."), self.shown)  # it's 4:40 PM
 
+    def test_no_length_given_uses_how_long_it_usually_takes(self):
+        from thirties_core.models import EventSpan, SpanCategory, SpanStatus
+        for d in range(1, 4):
+            start = at("10:00", -d)
+            span = EventSpan(f"r{d}", "Reading", start, start + timedelta(hours=1), SpanCategory.ACTIVITY)
+            span.status, span.time_source = SpanStatus.DONE, "reported"
+            span.actual_start, span.actual_end = start, start + timedelta(minutes=45)
+            self.sched.state_db.upsert_span(span)
+        out = self.say("reading at 8", {"type": "add", "title": "Reading", "start": "8"})
+        self.assertIn("Added Reading: 8:00 PM – 8:45 PM (45m). (about as long as it usually takes you)", out)
+
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
         self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour

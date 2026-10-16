@@ -232,5 +232,30 @@ class TestStores(unittest.TestCase):
         self.assertTrue(ProfileStore(db).is_empty())
 
 
+
+class TestPlanningFromHistory(ToolsTestCase):
+
+    def _history(self, title, minutes_each, days):
+        for d in range(1, days + 1):
+            start = at("10:00", -d)
+            span = EventSpan(f"h{title}{d}", title, start, start + timedelta(minutes=60), SpanCategory.ACTIVITY)
+            span.status, span.time_source = SpanStatus.DONE, "reported"
+            span.actual_start, span.actual_end = start, start + timedelta(minutes=minutes_each)
+            self.sched.state_db.upsert_span(span)
+
+    def test_typical_duration_comes_from_reported_times(self):
+        self._history("Composing", 95, 4)
+        self.assertEqual(self.t.assistant.typical_duration("composing for Natalie"), 90)
+        self.assertIsNone(self.t.assistant.typical_duration("Laundry"))
+        self.assertIn("about 1h 30m", "\n".join(self.t.assistant.statistics_facts()))
+
+    def test_capacity_heads_up_only_when_well_over(self):
+        self._history("Reading", 120, 6)  # about two hours a day gets done
+        self.t.execute("add_event", {"title": "Walk", "start": "6:30 PM", "duration": "1 hour"})
+        self.assertEqual(self.t.assistant.capacity_note(), "")
+        self.t.execute("add_event", {"title": "Painting", "start": "7:30 PM", "duration": "3 hours"})
+        self.assertIn("about 4h of activities are planned", self.t.assistant.capacity_note())
+
+
 if __name__ == "__main__":
     unittest.main()

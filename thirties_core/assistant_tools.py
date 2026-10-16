@@ -630,7 +630,34 @@ class AssistantTools:
         spans = db.get_spans_between(now - timedelta(days=days), now + timedelta(days=1))
         deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2),
                           key=lambda x: -x[1])
-        return fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+        facts = fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+        note = self.capacity_note()
+        return ([note] if note else []) + facts
+
+    def _history(self, days: int = 90):
+        now = self.pt._now()
+        return self.pt.scheduler.state_db.get_spans_between(now - timedelta(days=days), now + timedelta(days=1)), now
+
+    def typical_duration(self, title: str) -> Optional[int]:
+        """Minutes this kind of thing really takes the user (reliable times only), or None if unknown."""
+        if not self.pt.scheduler:
+            return None
+        from thirties_core.stats import typical_minutes
+        spans, _ = self._history()
+        return typical_minutes(spans, title)
+
+    def capacity_note(self) -> str:
+        """A heads-up when today's plan is well beyond what the user usually gets through; else ''."""
+        if not self.pt.scheduler:
+            return ""
+        from thirties_core.stats import daily_capacity_minutes, planned_minutes
+        spans, now = self._history(60)
+        capacity = daily_capacity_minutes([s for s in spans if s.start_dt.date() < self.pt.day_plan.target_date], now)
+        planned = planned_minutes(self.pt.day_plan.active_spans())
+        if capacity is None or planned < capacity * 1.25 or planned - capacity < 60:
+            return ""
+        return (f"Heads-up: about {format_duration(planned)} of activities are planned for this day; on a good day "
+                f"you get through about {format_duration(capacity)}.")
 
     def get_statistics(self, days: Any = 60, **_: Any) -> str:
         try:

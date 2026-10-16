@@ -666,7 +666,26 @@ class SlmBrain:
         actions = self._interpret(actions, message)
         if not actions:
             return self._chat(message)
-        return self._run_actions(actions, message)
+        changes = self.tools.successful_changes
+        reply = self._run_actions(actions, message)
+        if self.tools.successful_changes > changes:
+            reply = self._with_capacity_note(reply)
+        return reply
+
+    def _with_capacity_note(self, reply: str) -> str:
+        """Once a day, say so when the plan holds well beyond what the user usually gets through."""
+        assistant = getattr(self.tools, "assistant", None)
+        db = self.tools.scheduler.state_db if self.tools.scheduler else None
+        if assistant is None or db is None:
+            return reply
+        key = f"capacity_warned:{self.tools.day_plan.target_date.isoformat()}"
+        if db.get_sync_meta(key):
+            return reply
+        note = assistant.capacity_note()
+        if not note:
+            return reply
+        db.set_sync_meta(key, "1")
+        return f"{reply}\n{note} Want me to move something to another day?"
 
     def _interpret(self, actions: List[Action], message: str) -> List[Action]:
         """Python's reading of the model's actions: dialog acts, repairs and routing. Changes nothing."""
@@ -781,6 +800,12 @@ class SlmBrain:
                 parse_duration_minutes(a.get("duration"))
             except ClockError:
                 a.fields["duration"], guessed = "60 minutes", True  # "unknown", "a while": guess and say so
+        learned = None
+        if (not a.get("duration") and not a.get("end")) or guessed:
+            assistant = getattr(self.tools, "assistant", None)
+            learned = assistant.typical_duration(title) if assistant else None
+            if learned:  # how long it really takes the user, from what they've reported
+                a.fields["duration"], guessed = f"{learned} minutes", False
         saved = self.tools.day_plan
         try:
             self.tools.day_plan = self.tools.plan_for(day)
@@ -828,6 +853,8 @@ class SlmBrain:
             text = self._added_line(out)
             if guessed:
                 text += " (I guessed an hour; tell me if it's different.)"
+            elif learned:
+                text += " (about as long as it usually takes you)"
             slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
             if slid:
                 text += "\nTo make room: " + "; ".join(slid) + "."

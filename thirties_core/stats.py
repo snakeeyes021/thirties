@@ -118,10 +118,12 @@ def fact_lines(spans: List[EventSpan], now: datetime, energy_entries: Optional[L
         if len(values) < min_samples:
             continue
         median = statistics.median(values)
+        typical = typical_minutes(spans, key, min_samples)
+        took = f", about {typical // 60}h {typical % 60:02d}m".replace("h 00m", "h").replace("0h ", "") if typical else ""
         if median >= 1.15 or median <= 0.85:
-            facts.append(f"'{key}' usually takes about {median:.1f}x the planned time ({len(values)} times measured).")
+            facts.append(f"'{key}' usually takes about {median:.1f}x the planned time{took} ({len(values)} times measured).")
         else:
-            facts.append(f"'{key}' usually takes about as long as planned ({len(values)} times measured).")
+            facts.append(f"'{key}' usually takes about as long as planned{took} ({len(values)} times measured).")
 
     by_part = completion_by(spans, now, lambda s: part_of_day(s.start_dt))
     rated = {k: v for k, v in by_part.items() if v.reviewed >= min_samples}
@@ -154,3 +156,45 @@ def unreviewed_spans(spans: List[EventSpan], now: datetime, since: datetime) -> 
          and since.timestamp() <= s.end_dt.timestamp() <= now.timestamp()),
         key=lambda s: s.start_dt,
     )
+
+
+def typical_minutes(spans: List[EventSpan], title: str, min_samples: int = 3) -> Optional[int]:
+    """How long this kind of activity really takes, from reliable times: the median, rounded to 15 minutes."""
+    key = set(activity_key(title).split())
+
+    def same_kind(other: str) -> bool:  # "composing" and "composing natalie" are the same kind of thing
+        words = set(activity_key(other).split())
+        return bool(words) and (words <= key or key <= words)
+    actual = [(s.actual_end - s.actual_start).total_seconds() / 60 for s in spans
+              if _trackable(s) and s.status in (SpanStatus.DONE, SpanStatus.PARTIAL)
+              and s.time_source in RELIABLE_TIME_SOURCES and s.actual_start and s.actual_end
+              and same_kind(s.title)]
+    if len(actual) < min_samples:
+        return None
+    return max(15, int(round(statistics.median(actual) / 15)) * 15)
+
+
+def daily_capacity_minutes(spans: List[EventSpan], now: datetime, min_days: int = 5) -> Optional[int]:
+    """Planned activity time the user actually gets through on a good day: the 75th percentile of
+    done (or partly done) minutes per day, over days that had any recorded outcome."""
+    per_day: Dict[str, float] = {}
+    reviewed_days = set()
+    for s in spans:
+        if not _trackable(s) or s.end_dt.timestamp() > now.timestamp():
+            continue
+        day = s.start_dt.date().isoformat()
+        if s.status in (SpanStatus.DONE, SpanStatus.PARTIAL, SpanStatus.SKIPPED):
+            reviewed_days.add(day)
+        if s.status in (SpanStatus.DONE, SpanStatus.PARTIAL):
+            weight = 1.0 if s.status == SpanStatus.DONE else 0.5
+            per_day[day] = per_day.get(day, 0.0) + weight * s.duration_minutes
+    values = sorted(per_day.get(d, 0.0) for d in reviewed_days)
+    if len(values) < min_days:
+        return None
+    return int(values[min(len(values) - 1, int(0.75 * len(values)))])
+
+
+def planned_minutes(spans: List[EventSpan]) -> int:
+    """Activity time planned on a day (not work, sleep or calendar commitments)."""
+    return int(sum(s.duration_minutes for s in spans if _trackable(s) and s.status != SpanStatus.SKIPPED))
+
