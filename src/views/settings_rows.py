@@ -64,6 +64,30 @@ class SettingsContext:
         threading.Thread(target=work, daemon=True).start()
 
 
+def save_as_you_type(row, save, delay=600):
+    """Entry rows save after a pause in typing and when they lose focus; no ✓ to press."""
+    pending = {"id": 0}
+
+    def fire():
+        pending["id"] = 0
+        save(row.get_text().strip())
+        return False
+
+    def changed(*_):
+        if pending["id"]:
+            GLib.source_remove(pending["id"])
+        pending["id"] = GLib.timeout_add(delay, fire)
+
+    def left(*_):
+        if pending["id"]:
+            GLib.source_remove(pending["id"])
+            fire()
+    row.connect("changed", changed)
+    focus = Gtk.EventControllerFocus()
+    focus.connect("leave", left)
+    row.add_controller(focus)
+
+
 def _time_row(title, index):
     row = Adw.ComboRow(title=title, model=Gtk.StringList.new(TIMES))
     row.set_selected(index % 48)
@@ -266,7 +290,7 @@ def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:
     agy = Adw.SwitchRow(title="Use the subscription (Antigravity CLI)",
                         subtitle="Found" if status["agy"] else "Not found: install the Antigravity CLI as `agy`",
                         active="agy" in cfg.inference.sources)
-    key = Adw.PasswordEntryRow(title="Gemini API key", show_apply_button=True)
+    key = Adw.PasswordEntryRow(title="Gemini API key")
     key.set_text(ctx.get("inference.gemini_api_key", "") or "")
     api = Adw.SwitchRow(title="Use the API key", active="api" in cfg.inference.sources)
     first = Adw.ComboRow(title="Try first", model=Gtk.StringList.new(["Subscription", "API key"]))
@@ -282,15 +306,16 @@ def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:
         if on_change:
             GLib.timeout_add(800, lambda: on_change() and False)
 
-    def save_key(_row):
-        ctx.set("inference.gemini_api_key", key.get_text().strip())
-        ctx.toast("API key saved")
+    def save_key(value):
+        if value == (ctx.get("inference.gemini_api_key", "") or ""):
+            return
+        ctx.set("inference.gemini_api_key", value)
         save()
 
     for w in (agy, api):
         w.connect("notify::active", save)
     first.connect("notify::selected", save)
-    key.connect("apply", save_key)
+    save_as_you_type(key, save_key)
     for row in (agy, key, api, first):
         group.add(row)
     first.set_sensitive(agy.get_active() and api.get_active())
@@ -388,10 +413,10 @@ def notebooks_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         expander.add_row(sw)
     if names:
         group.add(expander)
-    someday = Adw.EntryRow(title="“Someday” headings (shown, never suggested)", show_apply_button=True)
+    someday = Adw.EntryRow(title="“Someday” headings (shown, never suggested)")
     someday.set_text(", ".join(cfg.joplin.someday_sections))
-    someday.connect("apply", lambda r: ctx.set("joplin.someday_sections",
-                                               [x.strip() for x in r.get_text().split(",") if x.strip()]))
+    save_as_you_type(someday, lambda text: ctx.set("joplin.someday_sections",
+                                                   [x.strip() for x in text.split(",") if x.strip()]))
     group.add(someday)
     return group
 
@@ -405,9 +430,9 @@ def wishlists_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                media.goodreads_user_id),
                               ("media.letterboxd_username", "Letterboxd username", media.letterboxd_username),
                               ("media.serializd_username", "Serializd username", media.serializd_username)):
-        row = Adw.EntryRow(title=title, show_apply_button=True)
+        row = Adw.EntryRow(title=title)
         row.set_text(value or "")
-        row.connect("apply", lambda r, key=key: ctx.set(key, r.get_text().strip()))
+        save_as_you_type(row, lambda text, key=key: ctx.set(key, text) if text != (ctx.get(key, "") or "") else None)
         group.add(row)
     return group
 
@@ -466,7 +491,7 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     group = Adw.PreferencesGroup(title="Your phone (Telegram)",
                                  description="Optional. Plan from your phone and get check-ins and reminders there.\n\n"
                                              + steps)
-    token = Adw.PasswordEntryRow(title="Bot token", show_apply_button=True)
+    token = Adw.PasswordEntryRow(title="Bot token")
     token.set_text(ctx.get("telegram.bot_token", "") or "")
     pair = Adw.ActionRow(title="Pair your phone")
     pair_btn = Gtk.Button(label="Pair", valign=Gtk.Align.CENTER)
@@ -481,8 +506,9 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         pair.set_subtitle(f"Paired{' with @' + bot['name'] if bot['name'] else ''}" if chats else "Not paired yet")
         pair_btn.set_sensitive(bool(token.get_text().strip()))
 
-    def on_token(_row):
-        value = token.get_text().strip()
+    def on_token(value):
+        if not value or value == (ctx.get("telegram.bot_token", "") or ""):
+            return
 
         def done(me, error):
             if error:
@@ -518,7 +544,7 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
             show()
         ctx.run_async(lambda: pair_by_code(TelegramClient(value), code, timeout=300), done)
 
-    token.connect("apply", on_token)
+    save_as_you_type(token, on_token, delay=900)
     pair_btn.connect("clicked", on_pair)
     here.connect("notify::active", lambda r, _p: ctx.set("telegram.enabled", r.get_active()))
     token.connect("changed", lambda *_: show())
