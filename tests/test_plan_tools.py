@@ -3,6 +3,7 @@
 import unittest
 
 from tests.fixtures import DAY, at, event, make_scheduler, occupant
+from thirties_core.astronomy import set_debug_time
 from thirties_core.models import SpanCategory
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -91,6 +92,25 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertIsNone(occupant(t.day_plan, "17:00"))
         self.assertEqual(occupant(t.day_plan, "19:30"), "Composing")
         self.assertIsNone(occupant(t.day_plan, "20:00"))
+
+    def test_new_start_alone_moves_an_activity(self) -> None:
+        t = tools_for()
+        t.execute("add_event", {"title": "Sort the mail", "start": "6:30 PM", "end": "7:30 PM"})
+        t.execute("update_event", {"event": "sort the mail", "start": "5:00 PM"})
+        self.assertEqual(occupant(t.day_plan, "17:30"), "Sort the mail")
+        self.assertIsNone(occupant(t.day_plan, "18:00"))
+
+    def test_moving_a_missed_item_to_another_day_records_the_skip(self) -> None:
+        set_debug_time(at("17:00"))
+        self.addCleanup(set_debug_time, None)
+        t = tools_for()
+        t.execute("add_event", {"title": "File taxes", "start": "2:00 PM", "end": "3:00 PM"})
+        out = t.execute("update_event", {"event": "file taxes", "to_day": "tomorrow", "start": "8:00 AM"})
+        self.assertIn("marked skipped", out)
+        today = next(s for s in t.day_plan.spans if s.title == "File taxes")
+        self.assertEqual(today.status.value, "skipped")
+        tomorrow = t.plan_for("tomorrow")
+        self.assertEqual([s.status.value for s in tomorrow.spans if s.title == "File taxes"], ["planned"])
 
     def test_sleep_tonight_crosses_midnight(self) -> None:
         t = tools_for()

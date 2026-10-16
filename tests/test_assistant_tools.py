@@ -102,7 +102,7 @@ class TestAnyDay(ToolsTestCase):
         self.assertIn("Piano", sat)
 
     def test_move_to_another_day(self) -> None:
-        self.t.execute("add_event", {"title": "Email recruiter", "start": "3:00 PM", "duration": "30 min"})
+        self.t.execute("add_event", {"title": "Email recruiter", "start": "7:00 PM", "duration": "30 min"})
         out = self.t.execute("update_event", {"event": "Email recruiter", "to_day": "tomorrow", "start": "9:00 AM"})
         self.assertIn("to Friday, October 16, 9:00 AM – 9:30 AM", out)
         self.assertNotIn("Email recruiter", [s.title for s in self.t.day_plan.spans])

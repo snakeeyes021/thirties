@@ -209,6 +209,26 @@ def replies(pattern: str, present: bool = True, list_lines_only: bool = False) -
 # Durations, chunk counts and block numbers inside a plan list: noise when start times already say it.
 BUSY_LIST = r"\bblocks?\s+\d|\b\d+\s+(?:chunks?|thirties)\b|\(\d+\s*(?:h|hrs?|hours?|m|min|minutes)\b"
 
+def no_busy_plan_lines() -> Check:
+    """Lines listing planned items carry no durations, chunk counts or block numbers. Free-time lines
+    ("- 7:00 PM – 8:00 PM (1 hour)") are exempt: there the length is the point."""
+    def check(run: "SimRun") -> Optional[str]:
+        for r, text, _ in run.transcript:
+            if r != "assistant":
+                continue
+            for line in text.splitlines():
+                if not re.match(r"\s*(?:[-*•]|\d+\.)\s", line) or not re.search(BUSY_LIST, line, re.IGNORECASE):
+                    continue
+                words = re.sub(r"\*|\([^)]*\)|\d{1,2}(:\d{2})?\s*(am|pm)?|[-–:•.]", " ", line, flags=re.IGNORECASE)
+                words = re.sub(r"\b(tomorrow|tonight|today|until|from|to|free|open|available|time|chunks?|thirties|"
+                               r"slots?|windows?|blocks?|hours?|minutes?|mins?)\b", " ", words, flags=re.IGNORECASE)
+                if re.search(r"[a-z]{3,}", words, re.IGNORECASE):
+                    return f"busy plan line: {line.strip()[:120]!r}"
+        return None
+    check.__doc__ = "no busy plan lines"
+    return check
+
+
 THU = date(2026, 10, 15)
 SAT = date(2026, 10, 10)
 SUN = date(2026, 10, 11)

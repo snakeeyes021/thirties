@@ -19,8 +19,8 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 
 from thirties_core.clock import format_clock
-from tests.sim_eval import (BUSY_LIST, SimScenario, at, cal, has_item, memory_mentions, new_items, no_item, order,
-                            outcome, replies, work_is)
+from tests.sim_eval import (SimScenario, at, cal, has_item, memory_mentions, new_items, no_busy_plan_lines, no_item,
+                            order, outcome, replies, work_is)
 
 THU, FRI, SAT, SUN = date(2026, 10, 15), date(2026, 10, 16), date(2026, 10, 10), date(2026, 10, 11)
 HALF = timedelta(minutes=30)
@@ -501,7 +501,7 @@ def g_fill(c: Ctx) -> Optional[Goal]:
 
 def g_show_list(c: Ctx) -> Optional[Goal]:
     return Goal("show_list", f"At the end, ask to see {c.rng.choice(['the rest of today', 'your day'])} as a clean list.",
-                [tag("show_list", replies(BUSY_LIST, present=False, list_lines_only=True)),
+                [tag("show_list", no_busy_plan_lines()),
                  tag("show_list", replies(LIST_WITH_TIMES))], order=2)
 
 

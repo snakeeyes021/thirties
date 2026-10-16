@@ -67,7 +67,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Change an existing item: new start and/or end, new duration, a shift, or a new title.",
         "parameters": {
             "event": "The item's id (or its exact title).",
-            "start": "New start clock time. If no end or duration is given, the end stays where it is.",
+            "start": "New start clock time. Without an end or duration, an activity keeps its length (it moves); work and sleep keep their end.",
             "end": "New end clock time. If no start is given, the start stays where it is.",
             "duration": "New length, keeping the start.",
             "shift": "Move the whole item, keeping its length: '+1 hour' is later, '-30 minutes' is earlier.",
@@ -459,6 +459,8 @@ class PlanTools:
                 new_end = self._end(end, new_start)
             elif duration not in (None, ""):
                 new_end = new_start + timedelta(minutes=parse_duration_minutes(duration))
+            elif start not in (None, "") and not span.is_envelope:
+                new_end = new_start + (span.end_dt - span.start_dt)  # "move X to 5" moves it, keeping its length
         if new_end <= new_start:
             raise ToolError(f"That would make {span.title} end ({format_clock(new_end)}) before it starts ({format_clock(new_start)}).")
         if new_start == span.start_dt and new_end == span.end_dt and not title:
@@ -509,6 +511,14 @@ class PlanTools:
         finally:
             self.day_plan = source_plan
         before = self.describe(span)
+        auto_skipped = False
+        if (span.status == SpanStatus.PLANNED and span.end_dt <= self._now() and not span.is_envelope
+                and span.source != "calendar" and target_plan.target_date > source_plan.target_date):
+            # It's over and didn't happen: moving it on is a skip, and it counts as put off.
+            span.status, auto_skipped = SpanStatus.SKIPPED, True
+            self._persist(span)
+            if span.task_id and self._state_db():
+                self._state_db().record_task_deferred(span.task_id)
         if span.status != SpanStatus.PLANNED:
             # Keep today's record (done/skipped) as history; plan a fresh copy on the new day.
             moved.id = new_span_id()
@@ -516,7 +526,8 @@ class PlanTools:
             target_plan.spans.sort(key=lambda s: s.start_dt)
             self._persist(moved)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
-                    f"{format_clock(new_start)} – {format_clock(new_end)} (today's record stays).")
+                    f"{format_clock(new_start)} – {format_clock(new_end)} "
+                    + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays)."))
         source_plan.spans = [s for s in source_plan.spans if s.id != span.id]
         span.title, span.start_dt, span.end_dt, span.source = moved.title, new_start, new_end, "user"
         target_plan.spans.append(span)

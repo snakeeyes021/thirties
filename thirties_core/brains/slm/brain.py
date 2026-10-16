@@ -503,7 +503,8 @@ class SlmBrain:
 
     # Handing the planning over: "fill up my afternoon", "you pick", "where could it go?"
     _FILL_RE = re.compile(r"\b(fill|plan out|line up|load up|put together|block out|pack)\b.{0,50}"
-                          r"\b(afternoon|morning|evening|tonight|day|rest|time|schedule|until|til|till|hours?|gap|window)\b"
+                          r"\b(afternoon|morning|evening|tonight|day|rest|time|schedule|until|til|till|hours?|gap|window|"
+                          r"chunks?|thirties|block|slot|from|between)\b"
                           r"|\bfill (it|that|the rest|in)\b",
                           re.IGNORECASE)
     _PICK_RE = re.compile(r"\b(you pick|just pick|pick (for me|whatever|a few|some|any|something)|whatever (you think|makes sense|works)|"
@@ -513,6 +514,10 @@ class SlmBrain:
                            r"\bwhat times? (are|is|do i have) (free|open)\b", re.IGNORECASE)
     _UNTIL_RE = re.compile(r"\b(?:until|til|till|up to|before)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|dinner|bed(?:time)?)\b",
                            re.IGNORECASE)
+    _T = r"\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon"
+    _SPAN_RE = re.compile(rf"\b(?:from|between)\s+({_T})\s*(?:to|until|til|till|and|-|–)\s*({_T})\b", re.IGNORECASE)
+    _GENERIC_TITLE_RE = re.compile(r"^(?:some |my )?(?:backlog|tasks?|items?|stuff|things|something|todos?|to-dos?)"
+                                   r"(?: (?:tasks?|items?|stuff|things))?$", re.IGNORECASE)
     _LENGTH_RE = re.compile(r"\b(\d+(?:\.\d+)?|an?|one|two|three|four|five|six)\s+(chunks?|thirties|hours?|hrs?|minutes?|mins?)\b",
                             re.IGNORECASE)
     _PARTS = ("morning", "afternoon", "evening", "tonight")
@@ -532,11 +537,16 @@ class SlmBrain:
         pick = bool(self._PICK_RE.search(message))
         if fill or (pick and not self.state.proposal and not edits):
             suggest = Action("suggest", {"topic": part or "today", "fill": True, "apply": pick})
-            m = self._UNTIL_RE.search(message)
+            m = self._SPAN_RE.search(message)
             if m:
-                suggest.fields["until"] = m.group(1)
+                suggest.fields["from"], suggest.fields["until"] = m.group(1), m.group(2)
+            else:
+                m = self._UNTIL_RE.search(message)
+                if m:
+                    suggest.fields["until"] = m.group(1)
             keep = [a for a in actions if a.type not in ("suggest", "chat") and
-                    not (a.type == "question" and not self._SHOW_DAY_RE.search(message))]
+                    not (a.type == "question" and not self._SHOW_DAY_RE.search(message)) and
+                    not (a.type == "add" and self._GENERIC_TITLE_RE.match((a.get("title") or "").strip()))]
             return [a for a in keep if a.type != "question"] + [suggest] + [a for a in keep if a.type == "question"]
         return actions
 
@@ -1104,6 +1114,13 @@ class SlmBrain:
         topic = a.get("topic") or ""
         start, end = self._window_for(topic)
         fill = bool(a.get("fill"))
+        if a.get("from"):
+            try:
+                start = self._loose_time(str(a.get("from")), near=start if start > self.tools.day_plan.day_start else None)
+            except ClockError:
+                pass
+            if self._is_today():
+                start = max(start, self._now())
         if a.get("until"):
             until = str(a.get("until")).lower()
             dinner = next((s for s in self.tools.day_plan.active_spans() if "dinner" in s.title.lower() and s.start_dt > start), None)
@@ -1112,7 +1129,7 @@ class SlmBrain:
                     self._loose_time({"dinner": "6 PM", "bed": "bedtime"}.get(until, until), after=start)
             except ClockError:
                 pass
-            if fill and end > start and not any(p in topic for p in self._PARTS):
+            if fill and end > start and not a.get("from") and not any(p in topic for p in self._PARTS):
                 start = max(self._now(), self.tools.day_plan.day_start) if self._is_today() else start
         windows = [(max(s, start), min(e, end)) for s, e in self.tools.open_windows(after=start, before=end)]
         windows = [(s, e) for s, e in windows if e - s >= timedelta(minutes=30)]

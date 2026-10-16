@@ -398,6 +398,15 @@ class TestProposalsAndOutcomes(SlmTestCase):
         first = next(s for s in self.m.day_plan.spans if s.title == proposal[0]["title"])
         self.assertEqual(first.duration_minutes, 60)
 
+    def test_fill_an_explicit_window_without_a_placeholder_item(self):
+        self.rt.pick_replies.append('{"picks": [1, 2]}')
+        out = self.say("can you fill the four chunks from 7:00 PM to 9:00 PM with tasks from my backlog?",
+                       {"type": "add", "title": "Backlog tasks", "start": "7:00 PM", "end": "9:00 PM"})
+        self.assertTrue(out.startswith("How about:"), out)
+        self.assertNotIn("Backlog tasks", out)
+        starts = [l.split(" – ")[0].split(". ", 1)[1] for l in out.splitlines() if l[:1].isdigit()]
+        self.assertEqual(starts, ["7:00 PM", "8:00 PM"], out)
+
     def test_you_pick_makes_the_plan(self):
         self.rt.pick_replies.append('{"picks": [1]}')
         out = self.say("idk, just pick whatever and put together a schedule for my evening",
