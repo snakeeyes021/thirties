@@ -165,7 +165,10 @@ RULES
         # Map tasks by parent_note_id
         tasks_by_note: Dict[str, List[TaskItem]] = {}
         standalone_tasks: List[TaskItem] = []
+        media = [t for t in self.tasks if t.id.startswith("media:")]
         for t in self.tasks:
+            if t.id.startswith("media:"):
+                continue
             if t.parent_note_id:
                 tasks_by_note.setdefault(t.parent_note_id, []).append(t)
             else:
@@ -265,6 +268,14 @@ RULES
 
         if backlog_sections:
             sections.append("ACTIVE JOPLIN NOTEBOOK HIERARCHY & TASK BACKLOG:\n" + "\n\n".join(backlog_sections))
+        if media:
+            by_list: Dict[str, List[TaskItem]] = {}
+            for t in media:
+                by_list.setdefault(t.source_notebook.split(" > ")[-1], []).append(t)
+            sections.append("WISHLISTS FROM THE USER'S PUBLIC ACCOUNTS (Goodreads, Letterboxd, Serializd; read-only, "
+                            "synced automatically; separate from Joplin):\n" + "\n".join(
+                                f"=== {name} ({len(items)}) ===\n" + "\n".join(f"- [ID: {t.id}] {t.title}" for t in items)
+                                for name, items in by_list.items()))
         elif self.tasks:
             # Fallback if active_notes was empty
             task_lines = [
