@@ -169,8 +169,12 @@ class ChatPanel(Gtk.Box):
         self,
         conversation_manager: ConversationManager | None = None,
         on_plan_updated: Optional[Callable[[DayPlan], None]] = None,
+        external_header: bool = False,
     ) -> None:
+        """With ``external_header``, the conversation picker and buttons are left for the window to put in
+        the chat pane's header bar (``conversations_btn``, ``header_buttons``)."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._external_header = external_header
         self.conversation_manager = conversation_manager
         self.on_plan_updated = on_plan_updated
 
@@ -300,6 +304,14 @@ class ChatPanel(Gtk.Box):
         self.copy_all_btn.connect("clicked", self._on_copy_all_clicked)
         header_box.append(self.copy_all_btn)
 
+        self.header_buttons = [self.new_conv_btn, self.copy_all_btn]
+        if self._external_header:
+            for widget in [self.conversations_btn] + self.header_buttons:
+                header_box.remove(widget)
+            self.conversations_btn.set_hexpand(False)
+            self.conversation_title.set_hexpand(False)
+            self.conversation_title.set_max_width_chars(28)
+            return
         self.append(header_box)
         self.append(Gtk.Separator())
 

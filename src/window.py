@@ -37,6 +37,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     chat_toggle_btn = Gtk.Template.Child()
     split_view = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
+    content_toolbar = Gtk.Template.Child()
+    chat_toolbar = Gtk.Template.Child()
+    chat_header = Gtk.Template.Child()
 
     def __init__(self, core=None, **kwargs):
         super().__init__(**kwargs)
@@ -67,11 +70,14 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
-        self.split_view.set_content(self.day_view)
+        self.content_toolbar.set_content(self.day_view)
 
         self.conv_manager = None
-        self.chat_panel = ChatPanel(on_plan_updated=self._on_plan_updated)
-        self.split_view.set_sidebar(self.chat_panel)
+        self.chat_panel = ChatPanel(on_plan_updated=self._on_plan_updated, external_header=True)
+        self.chat_toolbar.set_content(self.chat_panel)
+        self.chat_header.set_title_widget(self.chat_panel.conversations_btn)
+        for button in reversed(self.chat_panel.header_buttons):
+            self.chat_header.pack_end(button)
 
         # Event connections
         self.prev_day_btn.connect("clicked", self._on_prev_day)
