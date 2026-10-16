@@ -190,6 +190,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "match_backlog",
+        "description": "Before scheduling something the user names, check whether it's already on their lists: "
+                       "returns the same task (schedule it with its task_id), only similar ones (ask), or none (new). "
+                       "Read-only.",
+        "parameters": {"text": "What the user wants to do, in their words."},
+        "required": ["text"],
+    },
+    {
         "name": "search_backlog",
         "description": "Find backlog tasks by keywords. Read-only.",
         "parameters": {"query": "Words to look for."},
@@ -198,7 +206,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
-                       "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal"}
+                       "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal",
+                       "match_backlog"}
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -230,6 +239,18 @@ def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskIt
             scored.append((score, -len(t.title), t))
     scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return [t for _, _, t in scored[:limit]]
+
+
+def backlog_match(text: str, task: TaskItem) -> str:
+    """How a request relates to a backlog task: 'same', 'similar' (shares words but may be a different
+    thing, like 'message Brad back' vs 'Message Brad about a weekend trip') or 'none'."""
+    q = {_stem(w) for w in _words(text)}
+    t = {_stem(w) for w in _words(task.title)}
+    if not q or not t or not (q & t):
+        return "none"
+    if q == t or (q <= t and len(t - q) <= 1) or (t <= q and len(q - t) <= 1):
+        return "same"
+    return "similar"
 
 
 def describe_task(t: TaskItem) -> str:
@@ -328,10 +349,12 @@ class AssistantTools:
         if status in ("not_allowed", "failed"):
             raise ToolError(msg)
         notebook = next((t.source_notebook for t in self.s.tasks if t.parent_note_id == note_id), "")
-        self.s.tasks.append(TaskItem(id=_checkbox_id(note_id, title), source_notebook=notebook, title=title.strip(),
+        new_id = _checkbox_id(note_id, title)
+        self.s.tasks.append(TaskItem(id=new_id, source_notebook=notebook, title=title.strip(),
                                      is_checkbox_item=True, parent_note_title=note_title, parent_note_id=note_id,
                                      section=section or ""))
-        return f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)." if status == "queued" else ".")
+        return (f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)" if status == "queued" else "")
+                + f". To schedule it, use task_id={new_id}.")
 
     def break_down_task(self, task: str, steps: Any, **_: Any) -> str:
         found = self._find_task(str(task))
@@ -701,6 +724,19 @@ class AssistantTools:
             lines.append(head)
         return "\n".join(lines)
 
+    def match_backlog(self, text: str, **_: Any) -> str:
+        """Is the thing the user wants to schedule already on their lists? Decided here, not guessed."""
+        ranked = rank_tasks(self.s.tasks, str(text), limit=6)
+        same = [t for t in ranked if backlog_match(str(text), t) == "same"]
+        similar = [t for t in ranked if backlog_match(str(text), t) == "similar"]
+        if same:
+            t = same[0]
+            return f"Same task: {describe_task(t)}. Schedule it with this task_id."
+        if similar:
+            return ("Only similar tasks, possibly different things. Don't assume: ask whether it's one of these or "
+                    "something new.\n" + "\n".join(f"- {describe_task(t)}" for t in similar[:3]))
+        return "Nothing on the lists matches: treat it as a new item."
+
     def search_backlog(self, query: str, **_: Any) -> str:
         found = rank_tasks(self.s.tasks, str(query))
         if not found:
@@ -796,6 +832,7 @@ class AssistantTools:
             "get_statistics": self.get_statistics,
             "search_backlog": self.search_backlog,
             "add_task": self.add_task,
+            "match_backlog": self.match_backlog,
             "rollover_proposal": self.rollover_proposal,
             "apply_rollover": self.apply_rollover,
             "set_reminder": self.set_reminder,

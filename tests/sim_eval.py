@@ -390,6 +390,16 @@ SCENARIOS: List[SimScenario] = [
         checks=[has_item("", ("13:00", "18:30")), no_busy_plan_lines()],
     ),
     SimScenario(
+        "new_or_existing", THU, "13:00",
+        persona="Matt; knows his own lists well and gets impatient when told he already has something he doesn't.",
+        situation="Thursday 1 PM; work ends at 4. His Errands/Admin list has 'Message Brad about a weekend trip' "
+                  "under Probation, which is NOT what he means: Brad just messaged him and he needs to reply.",
+        goals=["Ask to make sure you message Brad back today, around 5.",
+               "If the assistant thinks it's the weekend-trip item, say it's a different thing.",
+               "Have it put on your Errands/Admin list as well, and scheduled at 5."],
+        checks=[has_item("brad", ("16:30", "17:30"))],
+    ),
+    SimScenario(
         "fits_in_chunks", THU, "12:30",
         persona="Counts time in chunks (the app's 30-minute thirties) and expects the assistant to as well. Brief.",
         situation="Thursday 12:30 PM, a day off (work already cleared). The only thing this afternoon is groceries at 3.",

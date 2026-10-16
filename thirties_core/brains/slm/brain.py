@@ -1258,7 +1258,7 @@ class SlmBrain:
 
     def _do_task_add(self, a: Action) -> Tuple[str, bool]:
         ok, out = self._run("add_task", {"title": a.get("title"), "list": a.get("list")})
-        return out, False
+        return re.sub(r"\s*To schedule it, use task_id=\S+", "", out), False
 
     def _breakdown_target(self, ref: str) -> Optional[TaskItem]:
         if ref and ref.lower() not in PRONOUNS:

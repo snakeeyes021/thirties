@@ -116,8 +116,20 @@ class TestTools(unittest.TestCase):
     def test_add_task_needs_a_clear_list(self):
         self.assertTrue(self.t.execute("add_task", {"title": "Buy stamps", "list": ""}).startswith(NOT_DONE))
         out = self.t.execute("add_task", {"title": "Buy stamps", "list": "errands"})
-        self.assertEqual(out, "Added 'Buy stamps' to Errands.")
+        self.assertTrue(out.startswith("Added 'Buy stamps' to Errands. To schedule it, use task_id="), out)
         self.assertIn("- [ ] Buy stamps", self.api.notes["n1"]["body"])
+
+
+    def test_match_backlog_tells_same_from_merely_similar(self):
+        from thirties_core.models import TaskItem as T
+        self.services.tasks.append(T(id="t_brad", source_notebook="Tasks", title="Message Brad about a weekend trip",
+                                     is_checkbox_item=True, parent_note_title="Errands", parent_note_id="n1"))
+        self.assertTrue(self.t.execute("match_backlog", {"text": "call the bank"}).startswith("Same task: Call the bank"))
+        out = self.t.execute("match_backlog", {"text": "message Brad back"})
+        self.assertTrue(out.startswith("Only similar tasks"), out)
+        self.assertIn("Message Brad about a weekend trip", out)
+        self.assertEqual(self.t.execute("match_backlog", {"text": "feed the cats"}),
+                         "Nothing on the lists matches: treat it as a new item.")
 
 
 if __name__ == "__main__":
