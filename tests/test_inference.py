@@ -3,9 +3,11 @@
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 import urllib.error
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from thirties_core.config import ThirtiesConfig
@@ -117,6 +119,22 @@ class TestTransports(unittest.TestCase):
             res = engine.chat([{"role": "user", "content": "hi"}])
         self.assertIn("HTTP 400", res["content"])
         sleep.assert_not_called()
+
+    def setUp(self) -> None:
+        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(tempfile.mkdtemp()) / "agy_calls.log")
+        self.ledger = ledger.start()
+        self.addCleanup(ledger.stop)
+
+    def test_every_agy_call_is_logged_with_its_outcome(self) -> None:
+        from thirties_core.inference import agy_ledger
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        quota = MagicMock(returncode=3, stdout="", stderr="error: Individual quota reached. Resets in 4h7m.")
+        ok = MagicMock(returncode=0, stdout=json.dumps({"response": "hi"}), stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", side_effect=[ok, quota]):
+            engine.chat([{"role": "user", "content": "a"}])
+            engine.chat([{"role": "user", "content": "b"}])
+        self.assertEqual([o for _, _, o in agy_ledger(60)], ["ok", "quota"])
 
     def test_antigravity_chat_includes_tool_results(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())

@@ -55,6 +55,40 @@ def agy_workspace_dir() -> Path:
     return workspace
 
 
+# Every agy call is logged here, from every client and eval, so evals can stay within a share of the
+# subscription's quota (agy itself can't report usage). Under ~/.local/share so the Flatpak sees the same file.
+AGY_LEDGER = Path.home() / ".local" / "share" / "thirties" / "agy_calls.log"
+AGY_QUOTA_RE = re.compile(r"quota|resource.?exhausted|\b429\b|too many requests|usage limit", re.IGNORECASE)
+
+
+def record_agy_call(model: str, outcome: str) -> None:
+    """Append one call to the ledger: unix time, model, outcome (ok, error, timeout, quota)."""
+    try:
+        AGY_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        if AGY_LEDGER.exists() and AGY_LEDGER.stat().st_size > 1_000_000:
+            cutoff = time.time() - 2 * 86400
+            keep = [l for l in AGY_LEDGER.read_text().splitlines() if l.split("\t", 1)[0].isdigit()
+                    and int(l.split("\t", 1)[0]) >= cutoff]
+            AGY_LEDGER.write_text("\n".join(keep) + ("\n" if keep else ""))
+        with open(AGY_LEDGER, "a") as f:
+            f.write(f"{int(time.time())}\t{model}\t{outcome}\n")
+    except OSError as e:
+        logger.debug("Could not record the agy call: %s", e)
+
+
+def agy_ledger(since_seconds: float) -> List[Tuple[int, str, str]]:
+    """Calls logged in the last ``since_seconds``: (unix time, model, outcome)."""
+    if not AGY_LEDGER.exists():
+        return []
+    cutoff = time.time() - since_seconds
+    rows = []
+    for line in AGY_LEDGER.read_text().splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].isdigit() and int(parts[0]) >= cutoff:
+            rows.append((int(parts[0]), parts[1], parts[2]))
+    return rows
+
+
 def get_host_home() -> Path:
     """Discover host home directory, working inside or outside Flatpak sandbox."""
     if shutil.which("flatpak-spawn"):
@@ -215,6 +249,7 @@ class AntigravityInferenceEngine:
                 cwd=workspace,
             )
         except subprocess.TimeoutExpired:
+            record_agy_call(self.model, "timeout")
             logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)
             return {
                 "role": "assistant",
@@ -231,6 +266,8 @@ class AntigravityInferenceEngine:
 
         raw_output = res.stdout
         raw_reply = ""
+        record_agy_call(self.model, "ok" if res.returncode == 0 else
+                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + raw_output[-2000:]) else "error"))
         if res.returncode == 0 and raw_output.strip():
             try:
                 data = json.loads(raw_output)

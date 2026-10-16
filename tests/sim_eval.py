@@ -40,7 +40,7 @@ from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
 from thirties_core.clock import format_clock
 from thirties_core.config import ThirtiesConfig, load_config
 from thirties_core.conversation import ConversationManager
-from thirties_core.inference import AntigravityInferenceEngine
+from thirties_core.inference import AntigravityInferenceEngine, agy_ledger
 from thirties_core.joplin_engine import JoplinEngine
 from thirties_core.models import SpanCategory, SpanStatus, TaskItem
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
@@ -419,6 +419,32 @@ QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many r
                       re.IGNORECASE)
 
 
+# --- staying within a share of the agy quota (see docs/SLM_BRAIN.md, "Eval budget") ---
+
+QUOTA_WINDOW_SECONDS = 5 * 3600   # agy's quota window
+MEASURED_CAPACITY = 1650          # calls that used up a window on 2026-10-15 (sim/judge on medium then)
+CALLS_PER_CONVERSATION = {"slm": 6, "frontier": 9}  # simulator turns + judge (+ Frontier replies), measured
+
+
+def quota_capacity() -> int:
+    """Calls per window: the count before the last quota stop in the ledger, else the measured figure."""
+    rows = agy_ledger(7 * 86400)
+    stops = [t for t, _, outcome in rows if outcome == "quota"]
+    if not stops:
+        return MEASURED_CAPACITY
+    last = stops[-1]
+    first_stop = min(t for t in stops if t > last - QUOTA_WINDOW_SECONDS)
+    used = sum(1 for t, _, o in rows if first_stop - QUOTA_WINDOW_SECONDS <= t < first_stop and o != "quota")
+    return max(used, 200)
+
+
+def budget_left(share: float) -> Tuple[int, int, int]:
+    """(calls used in the current window, calls allowed by the budget, estimated capacity)."""
+    capacity = quota_capacity()
+    used = sum(1 for _, _, o in agy_ledger(QUOTA_WINDOW_SECONDS) if o != "quota")
+    return used, int(capacity * share), capacity
+
+
 def raise_if_agy_failed(text: str) -> None:
     if text.startswith(AGY_ERROR_PREFIXES):
         raise (QuotaExhausted if QUOTA_RE.search(text) else AgyError)(text[:400])
@@ -615,6 +641,10 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     frontier_engine = AntigravityInferenceEngine(fcfg)
     results = []
     for n, (scn, brain, i) in enumerate(jobs, 1):
+        used, allowed, capacity = budget_left(args.budget)
+        if used + CALLS_PER_CONVERSATION[brain] > allowed:
+            return results, (f"budget reached after {len(results)} finished conversations in this worker: {used} agy calls "
+                             f"in the last 5 h, budget {allowed} ({args.budget:.0%} of ~{capacity})")
         print(f"\n== {scn.id} [{brain}] {i}/{args.repeat}  ({n}/{len(jobs)})", flush=True)
         try:
             run = run_scenario(scn, brain, sim, judge, tasks, notes, frontier_engine)
@@ -689,7 +719,9 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=1, help="parallel worker processes (each SLM worker loads Gemma)")
     ap.add_argument("--shard", default="", help=argparse.SUPPRESS)
     ap.add_argument("--out", default="", help=argparse.SUPPRESS)
-    ap.add_argument("--sim-model", default="gemini-3.8-flash-medium")
+    ap.add_argument("--budget", type=float, default=0.66,
+                    help="stop before agy calls in the last 5 h exceed this share of the quota (default 0.66)")
+    ap.add_argument("--sim-model", default="gemini-3.8-flash-low")
     ap.add_argument("--frontier-model", default="gemini-3.8-flash-low")
     ap.add_argument("--label", default="")
     args = ap.parse_args()
@@ -699,6 +731,14 @@ def main() -> None:
     brains = ["slm", "frontier"] if args.brain == "both" else [args.brain]
     jobs = [(scn, brain, i + 1) for scn in choose_scenarios(args) for i in range(args.repeat) for brain in brains]
     quota_notes: List[str] = []
+    if not args.shard:
+        used, allowed, capacity = budget_left(args.budget)
+        need = sum(CALLS_PER_CONVERSATION[b] for _, b, _ in jobs)
+        print(f"agy: {used} calls in the last 5 h; budget {allowed} ({args.budget:.0%} of ~{capacity}). "
+              f"This run needs about {need}" + ("." if used + need <= allowed else
+                                                f": it will stop at the budget, after roughly "
+                                                f"{max(0, allowed - used) * len(jobs) // max(need, 1)} conversations."),
+              flush=True)
     if args.shard:
         k, n = (int(x) for x in args.shard.split("/"))
         results, quota = run_jobs(args, jobs[k::n])
@@ -735,7 +775,7 @@ def main() -> None:
 
     summarize(results, brains)
     if quota_notes:
-        print(f"\n!!! agy QUOTA ran out: {len(results)} of {len(jobs)} conversations finished before it stopped.")
+        print(f"\n!!! Stopped early (agy budget or quota): {len(results)} of {len(jobs)} conversations finished.")
         for q in quota_notes:
             print("    " + q)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)

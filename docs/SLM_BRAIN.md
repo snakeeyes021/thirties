@@ -89,7 +89,24 @@ Dialog state that must survive restarts (the pending proposal, what "it" refers 
 - **`tests/interactive_eval.py`: step through turns by hand,** with state deltas and an agent or human as the judge.
 - **`tests/legacy_slm/`: the old block-number harnesses.** Source material only; they don't run.
 
-### 4.2 Results (2026-10-15)
+### 4.2 Eval budget
+
+Evals use **at most 66% of agy's quota per 5-hour window**, leaving the rest for real use of the app. To raise it, pass `--budget 0.8` (or change the default in `tests/sim_eval.py`).
+
+- **How it's enforced:** every agy call, from the app, the Telegram bridge or an eval, is logged to `~/.local/share/thirties/agy_calls.log` (agy can't report usage itself). Before each conversation, `sim_eval` counts the calls in the last 5 hours and stops cleanly at the budget, reporting how many conversations finished.
+- **Capacity:** measured at about 1,650 calls on 2026-10-15, when the sim user and judge ran on medium thinking. They now default to `gemini-3.8-flash-low`, which probably costs less per call. Each time a quota stop shows up in the ledger, the capacity estimate recalibrates from it.
+- **What fits in one window** (66% ≈ 1,090 calls; an SLM conversation costs about 6 calls, a Frontier one about 9):
+
+| Run | Conversations per window |
+|---|---|
+| SLM only | ~180 |
+| Frontier only | ~120 |
+| Both brains on the same scenarios | ~70 scenarios |
+
+  A 250-scenario run of one brain therefore takes two windows. Use `--skip-from` the first report to finish it in the next window.
+- **Comparability:** results from a medium-thinking simulator (the 2026-10-15 baseline) aren't directly comparable with low-thinking runs. Compare runs that used the same `--sim-model`.
+
+### 4.3 Results (2026-10-15)
 
 All 13 simulated-user scenarios, judged by Gemini; the Frontier Brain was run on the same scenarios for comparison.
 
@@ -117,7 +134,7 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
-### 4.3 Next experiments
+### 4.4 Next experiments
 
 - **A "voice" pass for natural replies:** Gemma rewrites the template reply, and Python verifies that every clock time and title survived, falling back to the template otherwise.
 - **A smaller model (E2B) for speed, and a check on what accuracy it costs.**
