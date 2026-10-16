@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
 from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.runtime import SlmUnavailable
-from thirties_core.brains.slm.parse import (ACTION_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
+from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
 from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
@@ -229,7 +229,9 @@ class SlmBrain:
             return f"a time for {self.state.awaiting_time.get('title')} (answer with an add action)"
         if not self.state.proposal:
             return None
-        items = "; ".join(f"{p['title']} at {p['start']}" for p in self.state.proposal)
+        if self.state.proposal_kind == "breakdown":
+            return f"whether to add these steps to Joplin under {self.state.proposal[0]['title']}"
+        items = "; ".join(f"{p['title']} at {p['start']}" if p.get("start") else p["title"] for p in self.state.proposal)
         kind = "pick one of" if self.state.proposal_kind == "options" else "whether to add"
         return f"{kind}: {items}"
 
@@ -528,9 +530,23 @@ class SlmBrain:
                             re.IGNORECASE)
     _PARTS = ("morning", "afternoon", "evening", "tonight")
 
+    _ADD_TO_LIST_RE = re.compile(r"\b(?:add|put|throw|stick|write|jot)\s+(?:down\s+)?(?P<task>.+?)\s+(?:to|on|onto|in|into)\s+"
+                                 r"(?:my\s+|the\s+)?(?P<list>[\w/&' -]+?)\s+(?:list|note|backlog|to-?do(?:s| list)?)\b",
+                                 re.IGNORECASE)
+    _BREAKDOWN_RE = re.compile(r"\bbreak\s+(?:(?P<what>.+?)\s+)?(?:down|up|apart)\b|\b(?:too (?:big|much|hard|daunting|overwhelming)"
+                               r"|hard to (?:start|get started)|can'?t (?:get )?start(?:ed)?|don'?t know where to start"
+                               r"|smaller (?:steps|parts|pieces|chunks|bits))\b", re.IGNORECASE)
+
     def _route(self, actions: List[Action], message: str) -> List[Action]:
         """Recognize requests that hand the planning over, which the parser tends to misfile."""
         lowered = message.lower()
+        m = self._ADD_TO_LIST_RE.search(message)
+        if m and not re.search(r"\b(calendar|schedule|plan)\b", m.group("list"), re.IGNORECASE):
+            task = re.sub(r"^(?:a|an|the)\s+", "", m.group("task").strip(" '\""), flags=re.IGNORECASE)
+            return [Action("task_add", {"title": task[:1].upper() + task[1:], "list": m.group("list")})]
+        m = self._BREAKDOWN_RE.search(message)
+        if m and not any(a.type in ("add", "move", "remove", "swap") for a in actions):
+            return [Action("breakdown", {"target": (m.group("what") or "").strip()})]
         part = next((p for p in self._PARTS if p in lowered), "")
         edits = [a for a in actions if a.type in ("add", "move", "remove", "swap", "outcome", "confirm", "reject", "choose")]
         if self._PLACE_RE.search(message) and not any(a.type in ("add", "move") for a in edits):
@@ -641,6 +657,7 @@ class SlmBrain:
             "suggest": self._do_suggest, "question": self._do_question, "remember": self._do_remember,
             "accept": lambda a: self._apply_proposals(a.get("items")),
             "profile": self._do_profile, "energy": self._do_energy,
+            "task_add": self._do_task_add, "breakdown": self._do_breakdown,
         }
         retry: List[Action] = []
         for action in actions:
@@ -1058,9 +1075,73 @@ class SlmBrain:
                     f"{format_clock(invite.end_dt)}." if ok else out), ok
         if not self.state.proposal:
             return "", False
+        if self.state.proposal_kind == "breakdown":
+            return self._write_breakdown(self.state.proposal[0])
         if self.state.proposal_kind == "options":
             return self._apply_proposals(self.state.proposal[:1])
         return self._apply_proposals(self.state.proposal)
+
+    # --- the user's lists in Joplin ---
+
+    def _do_task_add(self, a: Action) -> Tuple[str, bool]:
+        ok, out = self._run("add_task", {"title": a.get("title"), "list": a.get("list")})
+        return out, False
+
+    def _breakdown_target(self, ref: str) -> Optional[TaskItem]:
+        if ref and ref.lower() not in PRONOUNS:
+            ranked = rank_tasks(self.tasks, ref, limit=1)
+            if ranked:
+                return ranked[0]
+        for span_id in self.state.last_ids:  # "it": the item we just talked about
+            span = self.tools.day_plan.get_span(span_id)
+            if span is not None and span.task_id:
+                task = next((t for t in self.tasks if t.id == span.task_id), None)
+                if task:
+                    return task
+            if span is not None:
+                ranked = rank_tasks(self.tasks, span.title, limit=1)
+                if ranked:
+                    return ranked[0]
+        for p in self.state.proposal:  # one of the items we just suggested
+            task = next((t for t in self.tasks if t.id == p.get("task_id")), None)
+            if task:
+                return task
+        return None
+
+    def _do_breakdown(self, a: Action) -> Tuple[str, bool]:
+        task = self._breakdown_target(a.get("target") or "")
+        if task is None:
+            return "Which task should I break down?", False
+        where = " > ".join(x for x in (task.parent_note_title, task.section) if x)
+        raw = self.runtime.json_call(BREAKDOWN_PROMPT, f"Task: {task.title}" + (f"\nFrom: {where}" if where else ""),
+                                     BREAKDOWN_SCHEMA, max_output_tokens=200)
+        steps = [str(x).strip() for x in (raw.get("steps") or []) if str(x).strip()][:6]
+        if len(steps) < 2:
+            return f"I couldn't come up with good steps for {task.title}. What's the first thing it needs?", False
+        self.state.proposal = [{"breakdown": task.id, "title": task.title, "steps": steps}]
+        self.state.proposal_kind = "breakdown"
+        lines = [f"Here's {task.title} in smaller steps:"] + [f"{i}. {x}" for i, x in enumerate(steps, 1)]
+        lines.append("Want me to add these to Joplin as subtasks?")
+        return "\n".join(lines), False
+
+    def _write_breakdown(self, p: Dict[str, Any]) -> Tuple[str, bool]:
+        self.state.proposal, self.state.proposal_kind = [], ""
+        ok, out = self._run("break_down_task", {"task": p["breakdown"], "steps": p["steps"]})
+        if not ok:
+            return out, False
+        first = next((t for t in self.tools.services.tasks if t.title == p["steps"][0]), None) \
+            if self.tools.services else None
+        windows = [(s, e) for s, e in self.tools.open_windows(after=self._now()) if e - s >= timedelta(minutes=30)]
+        if first is None or not windows:
+            return f"Added {len(p['steps'])} steps under {p['title']} in Joplin.", False
+        start = windows[0][0]
+        if start.minute % 30 or start.second:
+            start = start.replace(minute=0 if start.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
+        self.state.proposal = [{"title": first.title, "start": format_clock(start), "duration": "30 minutes",
+                                "task_id": first.id}]
+        self.state.proposal_kind = "plan"
+        return (f"Added {len(p['steps'])} steps under {p['title']} in Joplin. "
+                f"Want to start with \"{first.title}\" at {format_clock(start)}?"), False
 
     def _do_reject(self, a: Action) -> Tuple[str, bool]:
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
@@ -1204,6 +1285,9 @@ class SlmBrain:
             items.append((p_start, p_end, p["title"], why))
         lines = ["How about:"] + agenda_lines(items, numbered=True)
         lines.append("Want all of these, just one (say the number), or something else?")
+        stuck = next((t for t in self.tasks if t.deferred_count >= 3 and any(p["task_id"] == t.id for p in proposal)), None)
+        if stuck:
+            lines.append(f"If {stuck.title} feels too big, I can break it into smaller steps.")
         return "\n".join(lines), False
 
     def _pick(self, candidates: List[TaskItem], topic: str, windows) -> List[TaskItem]:

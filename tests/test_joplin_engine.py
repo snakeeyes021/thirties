@@ -151,7 +151,15 @@ class TestJoplinEngine(unittest.TestCase):
         cfg = ThirtiesConfig()
         cfg.joplin.db_path = str(self.db_path)
         cfg.joplin.api_token = "test_token"
+        cfg.joplin.allowed_notebooks = ["1. Tasks", "2. Dev", "3. Creative", "4. Media", "5. Misc."]
+        cfg.joplin.whitelist_notes = ["30s Completed Log"]
         self.engine = JoplinEngine(cfg)
+
+    def test_no_chosen_notebooks_means_all_but_excluded(self) -> None:
+        self.engine.joplin_cfg.allowed_notebooks = []
+        titles = {t.parent_note_title or t.title for t in self.engine.fetch_tasks(self.db_path)}
+        self.assertIn("Secret Note", titles)  # in "Random Vault", which a fixed list would have hidden
+        self.assertFalse(any("Archive" in t.source_notebook for t in self.engine.fetch_tasks(self.db_path)))
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

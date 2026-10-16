@@ -126,6 +126,20 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "add_task",
+        "description": "Add a task to one of the user's lists (a Joplin note). Only when the user asks or agrees.",
+        "parameters": {"title": "The task.", "list": "Which list (note title).",
+                       "section": "Optional heading within the note."},
+        "required": ["title", "list"],
+    },
+    {
+        "name": "break_down_task",
+        "description": "Break a backlog task into smaller steps, written into Joplin as subtasks under it. Propose "
+                       "the steps first; call this only after the user agrees.",
+        "parameters": {"task": "The task (title or task_id).", "steps": "The steps, as a list of short actions."},
+        "required": ["task", "steps"],
+    },
+    {
         "name": "search_backlog",
         "description": "Find backlog tasks by keywords. Read-only.",
         "parameters": {"query": "Words to look for."},
@@ -178,6 +192,12 @@ def describe_task(t: TaskItem) -> str:
     return f"{t.title} [{where}]" + (f" ({', '.join(flags)})" if flags else "") + f" task_id={t.id}"
 
 
+def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
+    """The id the Joplin reader gives a checklist item (see joplin_engine.checklist_tasks)."""
+    import hashlib
+    return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
+
+
 class AssistantTools:
     """Outcome, review, memory, profile, history and statistics tools."""
 
@@ -211,16 +231,83 @@ class AssistantTools:
             return ranked[0]
         return None
 
+    def _writer(self):
+        if self.pt.scheduler is None or self.s.joplin is None:
+            return None
+        from thirties_core.joplin_writeback import JoplinWriter
+        return JoplinWriter(self.pt.scheduler.config, self._db, self.s.joplin.api_client)
+
     def _complete_backlog_task(self, task: TaskItem) -> str:
         if self._db:
             self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
-        if self.s.joplin is None:
-            return "(not checked off in Joplin: no Joplin connection)"
-        ok, msg = self.s.joplin.complete_task(task)
-        if ok:
+        if task.id.startswith("media:"):
+            return ""
+        writer = self._writer()
+        if writer is None:
+            return "(not checked off in Joplin: Joplin isn't connected)"
+        from thirties_core.joplin_writeback import complete_op
+        status, msg = writer.submit(complete_op(task))
+        if status in ("done", "queued"):
             self.s.tasks = [t for t in self.s.tasks if t.id != task.id]
-            return "and checked it off in Joplin"
-        return f"(could not check it off in Joplin: {msg})"
+        return {"done": "and checked it off in Joplin",
+                "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
+                "not_allowed": "(not checked off in Joplin: Thirties isn't allowed to change Joplin; Preferences → Tasks)",
+                "failed": f"(couldn't check it off in Joplin: {msg})"}[status]
+
+    # --- changing the backlog in Joplin (only when the user asked or agreed) ---
+
+    def _notes(self) -> Dict[str, str]:
+        notes = {t.parent_note_id: t.parent_note_title for t in self.s.tasks if t.parent_note_id and t.parent_note_title}
+        notes.update({t.id: t.title for t in self.s.tasks if not t.is_checkbox_item and not t.id.startswith("media:")})
+        return notes
+
+    def add_task(self, title: str, list: str = "", section: str = "", **_: Any) -> str:
+        notes = self._notes()
+        want = {_stem(w) for w in _words(list)}
+        scored = sorted(((len(want & {_stem(w) for w in _words(name)}), name, nid) for nid, name in notes.items()),
+                        reverse=True)
+        if not list or not scored or scored[0][0] == 0 or (len(scored) > 1 and scored[1][0] == scored[0][0]):
+            options = ", ".join(sorted({name for name in notes.values()})[:12])
+            raise ToolError(f"Which list should '{title}' go on? Lists: {options}.")
+        _, note_title, note_id = scored[0]
+        writer = self._writer()
+        if writer is None:
+            raise ToolError("Joplin isn't connected.")
+        status, msg = writer.submit({"op": "add_task", "note_id": note_id, "title": title.strip(),
+                                     "section": section or None})
+        if status in ("not_allowed", "failed"):
+            raise ToolError(msg)
+        notebook = next((t.source_notebook for t in self.s.tasks if t.parent_note_id == note_id), "")
+        self.s.tasks.append(TaskItem(id=_checkbox_id(note_id, title), source_notebook=notebook, title=title.strip(),
+                                     is_checkbox_item=True, parent_note_title=note_title, parent_note_id=note_id,
+                                     section=section or ""))
+        return f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)." if status == "queued" else ".")
+
+    def break_down_task(self, task: str, steps: Any, **_: Any) -> str:
+        found = self._find_task(str(task))
+        if found is None:
+            raise ToolError(f"There is no backlog task matching '{task}'.")
+        if isinstance(steps, str):
+            steps = [s for s in re.split(r"\s*(?:;|\n|\|)\s*", steps) if s.strip()]
+        steps = [str(s).strip() for s in steps if str(s).strip()]
+        if len(steps) < 2:
+            raise ToolError("Give at least two steps.")
+        writer = self._writer()
+        if writer is None:
+            raise ToolError("Joplin isn't connected.")
+        from thirties_core.joplin_writeback import break_down_op
+        status, msg = writer.submit(break_down_op(found, steps))
+        if status in ("not_allowed", "failed"):
+            raise ToolError(msg)
+        note_id = found.parent_note_id if found.is_checkbox_item else found.id
+        for step in steps:
+            self.s.tasks.append(TaskItem(id=_checkbox_id(note_id, step), source_notebook=found.source_notebook,
+                                         title=step, is_checkbox_item=True,
+                                         parent_note_title=found.parent_note_title or found.title,
+                                         parent_note_id=note_id, section=found.section,
+                                         parent_task_id=found.id if found.is_checkbox_item else None))
+        return (f"Broke '{found.title}' into {len(steps)} steps in Joplin: " + "; ".join(steps)
+                + (" (Joplin will get them when it's open)." if status == "queued" else "."))
 
     # --- outcomes ---
 
@@ -455,6 +542,8 @@ class AssistantTools:
             "read_conversation": self.read_conversation,
             "get_statistics": self.get_statistics,
             "search_backlog": self.search_backlog,
+            "add_task": self.add_task,
+            "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }
 

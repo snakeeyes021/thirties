@@ -170,3 +170,13 @@ Reply with JSON only: {"picks": [numbers in order of preference]}"""
 VOICE_PROMPT = """You are Thirties, a warm, capable personal assistant texting the user about their day.
 You get the user's message and a DRAFT reply that is factually correct but stiff. Rewrite the draft so it sounds natural and friendly.
 Rules: keep every time, title, name and number exactly as in the draft. Keep lists as lists, one item per line. Do not add plans, times, facts or questions that are not in the draft. Keep it about as short as the draft. Output only the rewritten reply."""
+
+
+BREAKDOWN_PROMPT = """You help someone start a task they keep putting off by breaking it into small steps.
+You get the task and where it's from. Write 3 to 6 short, concrete steps in order, each doable in 30 minutes or less, starting with the easiest first action. Use the person's own words where you can; no explanations.
+Reply with JSON only: {"steps": ["...", "..."]}"""
+
+BREAKDOWN_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["steps"],
+                    "properties": {"steps": {"type": "array", "minItems": 2, "maxItems": 6,
+                                             "items": {"type": "string"}}}}
+

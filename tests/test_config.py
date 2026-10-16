@@ -16,7 +16,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.general.timezone, "America/New_York")
         self.assertEqual(cfg.general.work_start_thirty, 17)
         self.assertEqual(cfg.general.work_end_thirty, 31)
-        self.assertIn("1. Tasks", cfg.joplin.allowed_notebooks)
+        self.assertEqual(cfg.joplin.allowed_notebooks, [])  # all notebooks until the user chooses
         self.assertIn("Archive", cfg.joplin.excluded_notebooks)
         self.assertEqual(cfg.inference.backend, "gemini")
         self.assertEqual(cfg.inference.gemini_model, "gemini-3.8-flash-low")

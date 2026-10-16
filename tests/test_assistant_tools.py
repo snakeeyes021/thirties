@@ -4,7 +4,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler, occupant
+from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler, occupant
 from thirties_core.assistant_tools import Services, rank_tasks
 from thirties_core.astronomy import set_debug_time
 from thirties_core.memory import ConversationStore, EnergyLog, MemoryStore, ProfileStore
@@ -29,7 +29,10 @@ class ToolsTestCase(unittest.TestCase):
         self.sched = make_scheduler()
         plan, pending = self.sched.build_day_plan(DAY)
         self.joplin = MagicMock()
-        self.joplin.complete_task.return_value = (True, "ok")
+        self.api = FakeJoplinAPI({"t_taxes": {"id": "t_taxes", "body": ""},
+                                  "n_errands": {"id": "n_errands", "body": "# Errands\n- [ ] Call the bank\n"}})
+        self.joplin.api_client = self.api
+        self.sched.config.joplin.write_back, self.sched.config.joplin.api_token = True, "token"
         self.services = Services.for_db(self.sched.state_db, list(TASKS), self.joplin)
         self.t = PlanTools(plan, pending, self.sched, services=self.services)
 
@@ -41,7 +44,7 @@ class TestOutcomes(ToolsTestCase):
         out = self.t.execute("log_outcome", {"event": "Taxes", "status": "done", "started": "4:15 PM", "finished": "5:45 PM"})
         self.assertIn("Marked Taxes done (4:15 PM – 5:45 PM, reported)", out)
         self.assertIn("checked it off in Joplin", out)
-        self.joplin.complete_task.assert_called_once()
+        self.assertEqual([u[0] for u in self.api.updates], ["t_taxes"])
         span = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Taxes")
         self.assertEqual((span.status, span.actual_start, span.time_source), (SpanStatus.DONE, at("16:15"), "reported"))
         # The schedule now shows what really happened; the plan is kept for statistics
@@ -58,7 +61,7 @@ class TestOutcomes(ToolsTestCase):
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
         self.assertIn("put off 1 times", out)
-        self.joplin.complete_task.assert_not_called()
+        self.assertEqual(self.api.updates, [])
 
     def test_unscheduled_backlog_task_done(self) -> None:
         out = self.t.execute("log_outcome", {"event": "the taxes", "status": "done", "finished": "3:00 PM"})

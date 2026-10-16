@@ -47,3 +47,25 @@ def occupant(plan: DayPlan, hhmm: str, day_offset: int = 0) -> Optional[str]:
     block = plan.block_at(at(hhmm, day_offset) + timedelta(minutes=1))
     span = plan.display_span(block) if block else None
     return span.title if span else None
+
+
+class FakeJoplinAPI:
+    """Joplin's local Data API, in memory: notes by id; ``up`` says whether Joplin is running."""
+
+    def __init__(self, notes=None, up=True):
+        self.notes = {k: dict(v) for k, v in (notes or {}).items()}
+        self.up = up
+        self.updates = []
+
+    def ping(self):
+        return self.up
+
+    def get_note(self, note_id, fields=""):
+        return dict(self.notes[note_id]) if self.up and note_id in self.notes else None
+
+    def update_note(self, note_id, data):
+        if not self.up or note_id not in self.notes:
+            return False
+        self.notes[note_id].update(data)
+        self.updates.append((note_id, data))
+        return True

@@ -4,7 +4,7 @@ import json
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, event, make_scheduler, occupant
+from tests.fixtures import DAY, FakeJoplinAPI, at, event, make_scheduler, occupant
 from thirties_core.astronomy import set_debug_time
 from thirties_core.brains.slm.brain import SlmBrain
 from thirties_core.brains.slm.parse import extract_json
@@ -56,8 +56,10 @@ class FakeRuntime:
             return self.voice
         return self.pick if system.startswith("You help choose") else self.parse
 
+    json_replies = []
+
     def json_call(self, system, user, schema, max_output_tokens=256):
-        return {"actions": []}
+        return self.json_replies.pop(0) if self.json_replies else {"actions": []}
 
     def text_call(self, system, user, max_output_tokens=120):
         return "Happy to help!"
@@ -472,6 +474,43 @@ class TestParsingHelpers(unittest.TestCase):
         self.assertEqual(extract_json('```json\n{"actions": []}\n```'), {"actions": []})
         self.assertEqual(extract_json('Sure! {"a": {"b": 1}} trailing'), {"a": {"b": 1}})
         self.assertIsNone(extract_json("no json here"))
+
+
+
+class TestJoplinLists(SlmTestCase):
+
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock
+        self.api = FakeJoplinAPI({"n1": {"id": "n1", "body": "- [ ] Costco customer service\n"},
+                                  "n2": {"id": "n2", "body": "- [ ] Text search for Natalie's piece\n"}})
+        joplin = MagicMock()
+        joplin.api_client = self.api
+        self.m.tools.services.joplin = joplin
+        self.sched.config.joplin.write_back, self.sched.config.joplin.api_token = True, "tok"
+        self.rt.json_replies = []
+        natalie = TaskItem(id="t3c", source_notebook="3. Creative", title="Text search for Natalie's piece",
+                           parent_note_title="Natalie Piece", parent_note_id="n2", is_checkbox_item=True, deferred_count=3)
+        self.brain.tasks = [t for t in self.brain.tasks if t.id != "t3"] + [natalie]
+        self.m.tools.services.tasks = [t for t in self.m.tools.services.tasks if t.id != "t3"] + [natalie]
+
+    def test_add_to_a_list(self):
+        out = self.say("add buy stamps to my errands/admin list", {"type": "add", "title": "Buy stamps"})
+        self.assertEqual(out, "Added 'Buy stamps' to Errands/Admin.")
+        self.assertIn("- [ ] Buy stamps", self.api.notes["n1"]["body"])
+
+    def test_break_down_then_schedule_the_first_step(self):
+        self.say("natalie text search at 5", {"type": "add", "title": "Text search for Natalie's piece", "start": "5"})
+        self.rt.json_replies.append({"steps": ["List three poets", "Read one poem aloud", "Note lines that fit"]})
+        out = self.say("ugh, that's too big, I can't get started", {"type": "chat"})
+        self.assertIn("1. List three poets", out)
+        self.assertIn("add these to Joplin", out)
+        out = self.say("yes please", {"type": "confirm"})
+        self.assertIn("Added 3 steps under Text search for Natalie's piece in Joplin", out)
+        self.assertIn("    - [ ] List three poets", self.api.notes["n2"]["body"])
+        self.assertIn('Want to start with "List three poets"', out)
+        out = self.say("sure", {"type": "confirm"})
+        self.assertIn("List three poets", out)
 
 
 if __name__ == "__main__":

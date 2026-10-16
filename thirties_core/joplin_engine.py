@@ -289,11 +289,12 @@ class JoplinEngine:
             is_todo = bool(row["is_todo"])
             todo_completed = row["todo_completed"]
 
-            # Filter by allowed notebooks whitelist
-            is_allowed_notebook = any(
+            # Filter by the chosen notebooks (none chosen: all but the excluded ones)
+            excluded = any(full_path == nb or full_path.startswith(f"{nb} >") for nb in self.joplin_cfg.excluded_notebooks)
+            is_allowed_notebook = not excluded and (not allowed_notebooks or any(
                 full_path == nb or full_path.startswith(f"{nb} >")
                 for nb in allowed_notebooks
-            )
+            ))
             is_whitelisted_note = title in whitelist_notes
 
             if not (is_allowed_notebook or is_whitelisted_note):
@@ -346,10 +347,11 @@ class JoplinEngine:
             is_todo = bool(row["is_todo"])
             todo_completed = row["todo_completed"]
 
-            is_allowed = any(
+            excluded = any(full_path == nb or full_path.startswith(f"{nb} >") for nb in self.joplin_cfg.excluded_notebooks)
+            is_allowed = not excluded and (not allowed_notebooks or any(
                 full_path == nb or full_path.startswith(f"{nb} >")
                 for nb in allowed_notebooks
-            )
+            ))
             is_whitelisted = title in whitelist_notes
 
             if not (is_allowed or is_whitelisted):

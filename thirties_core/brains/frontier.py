@@ -138,7 +138,7 @@ Tools:
 {render_tool_specs()}
 
 RULES
-1. Change the schedule only when the user asks or agrees to a proposal. When they ask for ideas or suggestions, propose and ask; don't change anything.
+1. Change the schedule, or the user's lists in Joplin (add_task, break_down_task), only when the user asks or agrees to a proposal. When they ask for ideas or suggestions, propose and ask; don't change anything.
 2. Every change needs a CALL. Never say something was scheduled, moved or removed without the CALL that does it.
 3. Give times as clock times with AM/PM. Never work out end times or durations yourself; the tools do all time math and report the exact result.
 4. To change something already on the schedule, use update_event or remove_event with its id. For example, "work went til 4:30" means updating the work item's end. Don't recreate items, and don't touch items the user didn't mention.
@@ -151,6 +151,7 @@ RULES
 11. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
 12. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned. For bigger-picture planning (goals over weeks), look at week_overview, statistics and the profile, and spread work across days. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 13. Things done at the same time (an audiobook during dinner, a podcast on a walk) can share the time: add the second one with alongside=true.
+14. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
 """
 
     def build_backlog_summary(self) -> str:

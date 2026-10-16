@@ -138,6 +138,15 @@ class StateDatabase:
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            -- Changes for Joplin waiting until it's running (see joplin_writeback.py).
+            CREATE TABLE IF NOT EXISTS joplin_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                op TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'pending'
+            );
             CREATE TABLE IF NOT EXISTS event_decisions (
                 event_id TEXT PRIMARY KEY,
                 decision TEXT NOT NULL,
@@ -310,6 +319,29 @@ class StateDatabase:
         with self._get_connection() as conn:
             conn.execute("INSERT INTO local_settings (key, value) VALUES (?, ?) "
                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    # --- Joplin outbox ---
+
+    def outbox_add(self, op: str, created_at: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO joplin_outbox (op, created_at) VALUES (?, ?)", (op, created_at))
+
+    def outbox_pending(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT id, op, attempts FROM joplin_outbox WHERE state = 'pending' ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def outbox_done(self, op_id: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM joplin_outbox WHERE id = ?", (op_id,))
+
+    def outbox_attempt(self, op_id: int, error: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?", (error, op_id))
+
+    def outbox_fail(self, op_id: int, error: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE joplin_outbox SET state = 'failed', last_error = ? WHERE id = ?", (error, op_id))
 
     def delete_setting(self, key: str) -> None:
         with self._get_connection() as conn:

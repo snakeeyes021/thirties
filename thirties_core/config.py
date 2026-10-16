@@ -31,21 +31,10 @@ class JoplinConfig:
     api_host: str = "127.0.0.1"
     write_back: bool = False          # the user allowed Thirties to check off, add and break down tasks
     launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
-    allowed_notebooks: List[str] = field(
-        default_factory=lambda: [
-            "1. Tasks",
-            "2. Dev",
-            "3. Creative",
-            "4. Media",
-            "5. Misc.",
-        ]
-    )
-    excluded_notebooks: List[str] = field(
-        default_factory=lambda: ["Archive"]
-    )
-    whitelist_notes: List[str] = field(
-        default_factory=lambda: ["30s Completed Log"]
-    )
+    # Notebooks to read tasks from (empty: all of them except the excluded ones), and single notes to add.
+    allowed_notebooks: List[str] = field(default_factory=list)
+    excluded_notebooks: List[str] = field(default_factory=lambda: ["Archive"])
+    whitelist_notes: List[str] = field(default_factory=list)
     # Note headings whose checklist items are "someday/maybe": kept visible, never pushed.
     someday_sections: List[str] = field(
         default_factory=lambda: ["Probation", "Someday", "Maybe", "Someday/Maybe", "Backburner"]
