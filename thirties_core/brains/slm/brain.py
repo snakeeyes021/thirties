@@ -631,9 +631,19 @@ class SlmBrain:
         rest = [a for a in actions if a not in readds and a.type not in ("confirm", "choose")]
         return [Action("accept", {"items": chosen})] + rest
 
+    def _rollover_pending(self) -> bool:
+        assistant = getattr(self.tools, "assistant", None)
+        return bool(assistant is not None and assistant.rollover_pending())
+
     def _dialog_act(self, message: str) -> Optional[Action]:
         """Answers to our own pending question: yes / no / which option."""
         if not self.state.proposal:
+            if self._rollover_pending():  # the morning offer to roll yesterday into today
+                lowered = message.lower().strip()
+                if self._NO_RE.search(lowered) and len(lowered) < 60:
+                    return Action("reject", {})
+                if self._YES_RE.search(lowered) or self._ALL_YES_RE.search(lowered):
+                    return Action("confirm", {})
             return None
         lowered = message.lower().strip()
         m = re.search(r"\b(?:option|number|#)\s*(\d)\b|^\s*(\d)\s*(?:[.!),:]|$|\s+(?:please|works|sounds|is good|then|and|also))", lowered)
@@ -1121,6 +1131,10 @@ class SlmBrain:
             ok, out = self._run("resolve_calendar_event", {"event": invite.id, "attend": True})
             return (f"Great, {invite.title} is confirmed: {format_clock(invite.start_dt)} – "
                     f"{format_clock(invite.end_dt)}." if ok else out), ok
+        if not self.state.proposal and self._rollover_pending():
+            m = re.search(r"\b(?:except|but not|but skip|skip|without|leave out|not the)\s+(.+)$", getattr(self, "_message", ""), re.I)
+            ok, out = self._run("apply_rollover", {"skip": m.group(1)} if m else {})
+            return out, ok
         if not self.state.proposal:
             return "", False
         if self.state.proposal_kind == "breakdown":
@@ -1214,6 +1228,9 @@ class SlmBrain:
                 f"Want to start with \"{first.title}\" at {format_clock(start)}?"), False
 
     def _do_reject(self, a: Action) -> Tuple[str, bool]:
+        if not self.state.proposal and self._rollover_pending():
+            self.tools.assistant.decline_rollover()
+            return "Okay, I'll leave yesterday's items where they are.", False
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         if not self.state.proposal and invites:
             ok, out = self._run("resolve_calendar_event", {"event": invites[0].id, "attend": False})

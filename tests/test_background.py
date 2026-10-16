@@ -80,3 +80,45 @@ class TestReminderTools(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRollover(unittest.TestCase):
+
+    def setUp(self):
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        self.sched = make_scheduler()
+        y = lambda hhmm: at(hhmm, -1)
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", y("17:00"), y("18:00"), SpanCategory.TASK))
+        self.sched.state_db.upsert_span(EventSpan("ml", "Email Mom", y("19:00"), y("19:30"), SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("dn", "Dishes", y("20:00"), y("20:30"), SpanCategory.ACTIVITY))
+        from thirties_core.conversation import ConversationManager
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.m = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(), active_notes=[])
+
+    def test_proposal_keeps_times_that_are_free_then_applies_in_one_go(self):
+        text = self.m.execute_tool("rollover_proposal", {})
+        self.assertIn("- 5:00 PM – Taxes", text)  # same time today: it's free
+        self.assertIn("- 7:00 PM – Email Mom", text)
+        out = self.m.execute_tool("apply_rollover", {"skip": "dishes"})
+        self.assertIn("Rolled into today", out)
+        self.assertIn("Back to your lists: Dishes.", out)
+        today = {s.title: s for s in self.sched.build_day_plan(DAY)[0].spans}
+        self.assertEqual(today["Taxes"].start_dt, at("17:00"))
+        yesterday = {s.title: s.status.value for s in self.sched.build_day_plan(DAY - timedelta(days=1))[0].spans
+                     if s.title in ("Taxes", "Dishes")}
+        self.assertEqual(yesterday, {"Taxes": "skipped", "Dishes": "skipped"})
+        self.assertIn("already rolled over", self.m.execute_tool("apply_rollover", {}))
+
+    def test_offered_once_after_waking(self):
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        sent = []
+        svc = BackgroundService(self.sched.config, lambda t, b, k: sent.append((k, b)), scheduler=self.sched,
+                                joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        svc.rollover(at("07:10"))  # before waking (7:00) + 30 minutes
+        svc.rollover(at("08:00"))
+        svc.rollover(at("08:15"))
+        self.assertEqual([k for k, _ in sent], ["rollover"])
+        self.assertTrue(sent[0][1].startswith("☀️ Good morning! From yesterday, still open:"))

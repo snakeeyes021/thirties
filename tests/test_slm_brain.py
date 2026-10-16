@@ -539,5 +539,17 @@ class TestMessages(SlmTestCase):
         self.assertIn("No more check-ins until", out)
 
 
+    def test_yes_to_the_morning_rollover(self):
+        y = DAY - timedelta(days=1)
+        from tests.fixtures import TZ
+        from datetime import datetime, time as _t
+        from thirties_core.models import EventSpan, SpanCategory
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", datetime.combine(y, _t(19), TZ),
+                                                  datetime.combine(y, _t(20), TZ), SpanCategory.TASK))
+        self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
+        out = self.say("yes please", {"type": "chat"})
+        self.assertIn("Rolled into today:\n- 7:00 PM – Taxes", out)
+
+
 if __name__ == "__main__":
     unittest.main()

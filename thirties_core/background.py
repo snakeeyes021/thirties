@@ -175,6 +175,25 @@ class BackgroundService:
                 text = f"🔔 {span.title} starts now ({format_clock(span.start_dt)} – {format_clock(span.end_dt)})"
             self.send(text, "start", to_conversation=False, now=now)
 
+    def rollover(self, now: datetime) -> None:
+        """Once a day, after waking: offer to roll yesterday's unfinished items into today."""
+        db = self.scheduler.state_db
+        manager = self.manager()
+        day = manager.day_plan.target_date
+        key = f"rollover_offered:{day.isoformat()}"
+        if db.get_sync_meta(key):
+            return
+        gen = self.config.general
+        wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
+            timedelta(minutes=30 * gen.sleep_end_thirty + 30)
+        if now < wake:
+            return
+        db.set_sync_meta(key, "1")
+        text = manager.execute_tool("rollover_proposal", {})
+        if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
+            return
+        self.send("☀️ Good morning! " + text, "rollover", now=now)
+
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
             return
@@ -198,7 +217,7 @@ class BackgroundService:
 
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
-        for duty in (self.check_ins, self.reminders, self.starts):
+        for duty in (self.rollover, self.check_ins, self.reminders, self.starts):
             try:
                 duty(now)
             except Exception as e:

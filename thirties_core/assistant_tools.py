@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+NOT_DONE_PREFIX = "NOT_DONE"  # plan_tools.NOT_DONE (not imported here: plan_tools imports this module)
+
+
 class ToolError(Exception):
     """A tool call that cannot be carried out; nothing was changed."""
 
@@ -144,6 +147,20 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["task", "steps"],
     },
     {
+        "name": "rollover_proposal",
+        "description": "Yesterday's planned items with no outcome, each placed in today's open time (or back to the "
+                       "lists if nothing fits). Read-only; remembered so apply_rollover does exactly this.",
+        "parameters": {},
+        "required": [],
+    },
+    {
+        "name": "apply_rollover",
+        "description": "Apply today's rollover proposal (after the user agrees). Items the user doesn't want today "
+                       "go back to their lists.",
+        "parameters": {"skip": "Titles or words of items to leave out (optional)."},
+        "required": [],
+    },
+    {
         "name": "set_reminder",
         "description": "Send the user a message at a given time (desktop notification, and Telegram if paired). "
                        "If they don't say a time, pick a sensible one and tell them.",
@@ -181,7 +198,7 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
-                       "get_statistics", "search_backlog", "week_overview", "list_reminders"}
+                       "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal"}
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -459,6 +476,99 @@ class AssistantTools:
             out += "\nIf unfinished, suggested rollover:\n" + "\n".join(proposals)
         return out
 
+    # --- rollover: yesterday's unfinished items, as one proposal ---
+
+    def rollover_plan(self) -> List[Dict[str, Any]]:
+        """Yesterday's planned items that ended with no outcome, each placed today: at the same time if that's
+        open and still ahead, else in the first open stretch long enough; no start if nothing fits."""
+        from datetime import datetime as _dt
+        today = self._today()
+        if self.pt.day_plan.target_date != today:
+            return []
+        yesterday = self.pt.plan_for(today - timedelta(days=1))
+        now = self.pt._now()
+        pending = unreviewed_spans(yesterday.spans, now, yesterday.day_start)
+        floor = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
+        windows = [(max(a, floor), b) for a, b in self.pt.open_windows() if b > floor]
+        plan = []
+        for s in pending:
+            need = timedelta(minutes=max(30, s.duration_minutes))
+            same = _dt.combine(today, s.start_dt.timetz())
+            slot = next(((a, b) for a, b in windows if a <= same and same + need <= b), None)
+            start = same if slot else None
+            if slot is None:
+                slot = next(((a, b) for a, b in windows if b - a >= need), None)
+                start = slot[0] if slot else None
+            if slot:
+                i = windows.index(slot)
+                windows[i:i + 1] = [w for w in ((slot[0], start), (start + need, slot[1])) if w[1] - w[0] >= timedelta(minutes=30)]
+            plan.append({"span_id": s.id, "title": s.title, "minutes": int(need.total_seconds() // 60),
+                         "start": start.isoformat() if start else None})
+        return plan
+
+    def _rollover_key(self) -> str:
+        return f"rollover:{self._today().isoformat()}"
+
+    def rollover_proposal(self, **_: Any) -> str:
+        """The proposal, as text; it's remembered so a 'yes' can apply exactly this."""
+        plan = self.rollover_plan()
+        if not plan:
+            return "Nothing from yesterday is waiting: everything has an outcome."
+        if self._db:
+            import json
+            self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "state": "offered"}))
+        from datetime import datetime as _dt
+        lines = ["From yesterday, still open:"]
+        fits = [p for p in plan if p["start"]]
+        lines += [f"- {format_clock(_dt.fromisoformat(p['start']))} – {p['title']}" for p in fits]
+        lines += [f"- {p['title']} (no room today: back to your lists)" for p in plan if not p["start"]]
+        lines.append("Want me to put them in today like that?")
+        return "\n".join(lines)
+
+    def apply_rollover(self, skip: Any = None, **_: Any) -> str:
+        """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists."""
+        import json
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        if not raw:
+            raise ToolError("There's no rollover proposal for today; ask for one first.")
+        data = json.loads(raw)
+        if data.get("state") == "applied":
+            return "Yesterday's items were already rolled over."
+        skip_words = {_stem(w) for w in _words(" ".join(skip) if isinstance(skip, list) else str(skip or ""))}
+        from datetime import datetime as _dt
+        yesterday = (self._today() - timedelta(days=1)).isoformat()
+        moved, back = [], []
+        for p in data["plan"]:
+            skipped = skip_words and skip_words & {_stem(w) for w in _words(p["title"])}
+            if p["start"] and not skipped:
+                start = _dt.fromisoformat(p["start"])
+                out = self.pt.execute("update_event", {"event": p["span_id"], "day": yesterday, "to_day": "today",
+                                                       "start": format_clock(start)})
+                if not out.startswith(NOT_DONE_PREFIX):
+                    moved.append(f"{format_clock(start)} – {p['title']}")
+                    continue
+            self.pt.execute("log_outcome", {"event": p["span_id"], "day": yesterday, "status": "skipped"})
+            back.append(p["title"])
+        self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
+        parts = []
+        if moved:
+            parts.append("Rolled into today:\n" + "\n".join(f"- {m}" for m in moved))
+        if back:
+            parts.append("Back to your lists: " + ", ".join(back) + ".")
+        return "\n".join(parts) or "Nothing to roll over."
+
+    def rollover_pending(self) -> bool:
+        """A proposal was offered today and not yet applied or declined."""
+        import json
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        return bool(raw) and json.loads(raw).get("state") == "offered"
+
+    def decline_rollover(self) -> None:
+        import json
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        if raw:
+            self._db.set_sync_meta(self._rollover_key(), json.dumps({**json.loads(raw), "state": "declined"}))
+
     # --- memory & profile ---
 
     def remember(self, note: str, **_: Any) -> str:
@@ -648,6 +758,8 @@ class AssistantTools:
             "get_statistics": self.get_statistics,
             "search_backlog": self.search_backlog,
             "add_task": self.add_task,
+            "rollover_proposal": self.rollover_proposal,
+            "apply_rollover": self.apply_rollover,
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,
