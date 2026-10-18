@@ -211,7 +211,7 @@ class BackgroundService:
                       and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
             on_thirty = event.start_dt == thirty_of(event.start_dt)
             text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else
-                    f"⏰ {event.title}, in the {format_clock(thirty_of(event.start_dt))} thirty.")
+                    f"⏰ {event.title}, in the {format_clock(thirty_of(event.start_dt))} block.")
             if behind:
                 text += " (" + (", ".join(behind[:-1]) + " and " + behind[-1] if len(behind) > 1 else behind[0]) + \
                         (" aren't" if len(behind) > 1 else " isn't") + " reported yet.)"

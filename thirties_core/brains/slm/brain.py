@@ -933,11 +933,11 @@ class SlmBrain:
         m = re.search(r"\b(chunks?|thirties)\b", getattr(self, "_message", "").lower())
         if not m:
             return None
-        return "chunks" if m.group(1).startswith("chunk") else "thirties"
+        return "chunks" if m.group(1).startswith("chunk") else "blocks"  # "1 thirty" next to a time misreads
 
     def _in_user_units(self, minutes: int) -> str:
         n, unit = minutes // 30, self._user_unit()
-        return f"{n} {unit if n != 1 else {'chunks': 'chunk', 'thirties': 'thirty'}[unit]}"
+        return f"{n} {unit if n != 1 else {'chunks': 'chunk', 'blocks': 'block'}[unit]}"
 
     def _added_line(self, out: str) -> str:
         day = ""

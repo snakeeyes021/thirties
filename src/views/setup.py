@@ -101,7 +101,7 @@ class SetupWindow(Adw.ApplicationWindow):
         self.ctx = ctx
 
         welcome = Adw.StatusPage(icon_name="tech.redfoxlabs.Thirties", title="Welcome to Thirties",
-                                 description="Thirties plans your day in thirty-minute “thirties”, shaped around "
+                                 description="Thirties plans your day in half-hour blocks (“thirties”), shaped around "
                                              "daylight and dark, and takes care of the organizing for you: what to do "
                                              "next, what slipped, and where it should go.\n\nA few questions first. "
                                              "You can change every answer later in Preferences.")

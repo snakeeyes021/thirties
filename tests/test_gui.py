@@ -162,7 +162,7 @@ class DayViewTests(unittest.TestCase):
     def test_now_highlight_and_tallies_follow_the_clock(self) -> None:
         view = DayView(self.plan)
         current = [r for r in view._rows if r.is_current]
-        self.assertEqual([r.title_label.get_text() for r in current], ["Open Dark Thirty"])
+        self.assertEqual([r.title_label.get_text() for r in current], ["Open dark block"])
         self.assertTrue(current[0].has_css_class("block-current"))
         before = view.dark_pill.get_text()
 

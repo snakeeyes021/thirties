@@ -156,13 +156,13 @@ class TestMessageLevels(unittest.TestCase):
         self.run_day("14:45", "20:30")
         self.assertEqual([k for k, _ in self.sent], ["heads_up"])
 
-    def test_a_calendar_event_is_told_by_its_thirty(self):
+    def test_a_calendar_event_is_told_by_its_block(self):
         self.sched.state_db.set_event_decision("dentist", "attend")
         from thirties_core.calendar_engine import MockCalendarEngine
         self.sched.calendar_engine = MockCalendarEngine([event("vet", "16:45", "17:15", "Vet")])
         self.svc._manager = None
         self.run_day("16:30", "16:40")
-        self.assertIn(("heads_up", "⏰ Vet, in the 4:30 thirty."), self.sent)  # the thirty it's in; minutes if asked
+        self.assertIn(("heads_up", "⏰ Vet, in the 4:30 block."), self.sent)  # the block it is in; minutes if asked
 
     def test_the_old_start_message_switch_doesnt_silence_everything(self):
         self.sched.config.telegram.notify_block_transitions = False  # someone who'd turned start messages off

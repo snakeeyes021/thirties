@@ -134,7 +134,7 @@ class BlockWidget(Gtk.Box):
             return self.title
         if self.span is not None:
             return self.span.title
-        return "Open Daylight Thirty" if self.block.is_sunlight else "Open Dark Thirty"
+        return "Open daylight block" if self.block.is_sunlight else "Open dark block"
 
     def _apply_styling(self) -> None:
         self.add_css_class("block-sunlight" if self.block.is_sunlight else "block-dark")
@@ -250,7 +250,7 @@ class GroupedBlockWidget(Gtk.Box):
 
         minutes = int((self.end_dt.timestamp() - self.start_dt.timestamp()) // 60)
         summary = (f"{format_clock(self.start_dt)} – {format_clock(self.end_dt)} · "
-                   f"{format_duration(minutes)} · {len(self.blocks)} thirties")
+                   f"{format_duration(minutes)} · {len(self.blocks)} blocks")
         self.range_label = Gtk.Label(label=summary)
         self.range_label.add_css_class("caption")
         self.range_label.add_css_class("dim-label")
@@ -278,7 +278,7 @@ class GroupedBlockWidget(Gtk.Box):
         self.toggle_btn = Gtk.Button(icon_name="pan-down-symbolic")
         self.toggle_btn.add_css_class("flat")
         self.toggle_btn.set_valign(Gtk.Align.CENTER)
-        self.toggle_btn.set_tooltip_text("Expand individual thirties")
+        self.toggle_btn.set_tooltip_text("Show each block")
         self.toggle_btn.connect("clicked", self._on_toggle)
         header_row.append(self.toggle_btn)
 
@@ -311,7 +311,7 @@ class GroupedBlockWidget(Gtk.Box):
     def set_expanded(self, expanded: bool) -> None:
         self.revealer.set_reveal_child(expanded)
         self.toggle_btn.set_icon_name("pan-up-symbolic" if expanded else "pan-down-symbolic")
-        self.toggle_btn.set_tooltip_text("Collapse" if expanded else "Expand individual thirties")
+        self.toggle_btn.set_tooltip_text("Collapse" if expanded else "Show each block")
 
     def update_now(self, now_block_idx: int) -> None:
         """Move the gold "now" highlight without rebuilding the card."""

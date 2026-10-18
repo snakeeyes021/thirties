@@ -336,7 +336,7 @@ class PlanTools:
     def describe(self, span: EventSpan) -> str:
         """An item as the user sees it: in thirties (exact minutes are only for the record)."""
         if span.duration_minutes < 30 and thirty_of(span.start_dt) == thirty_of(span.end_dt - timedelta(seconds=1)):
-            return f"{span.title}, at {format_clock(thirty_of(span.start_dt))} (under 30m, sharing that thirty)"
+            return f"{span.title}, at {format_clock(thirty_of(span.start_dt))} (under 30m, sharing that block)"
         start, end = thirty_of(span.start_dt), thirty_ceil(span.end_dt)
         return f"{span.title}, {format_clock(start)} – {format_clock(end)} ({format_duration(int((end - start).total_seconds() // 60))})"
 
@@ -932,7 +932,7 @@ class PlanTools:
                          and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
                 lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
                     f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
-                    for x in group) + " (short items sharing this thirty, in this order)")
+                    for x in group) + " (short items sharing this block, in this order)")
                 continue
             flags = [s.category.value]
             if s.tentative:
