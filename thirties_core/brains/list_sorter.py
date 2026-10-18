@@ -14,6 +14,7 @@ A guess is only a starting point: the user confirms or corrects it.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +37,12 @@ URGENCY_PROMPT = f"""You help a planning assistant judge how pressing each item 
 {URGENCY_LINES}
 Most items on a list are "whenever". Use "now" only for something that clearly can't wait past tomorrow (a deadline, something broken or unsafe, a reply someone is waiting for), and "soon" only when there's a reason it should happen within a couple of weeks.
 Read the note the way its owner wrote it: headings ("Active", "Probation", "Someday", "Do I want?"), groups separated by blank lines (an item set apart at the top is often the pressing one), nesting (sub-items share their parent's urgency unless they say otherwise), and the wording ("for THIS winter", "before the trip", "need to call"). Medical, money and deadline items lean soon; home improvements and purchases lean whenever unless something makes them pressing; anything under a someday, probation or maybe heading is someday."""
+
+
+# Signs in an item's own words that it can't wait: a time word, a reply someone's waiting for, something broken.
+NOW_CUE = re.compile(r"\b(today|tonight|tomorrow|asap|urgent|now|this week|deadline|due|overdue|before|by "
+                     r"(mon|tue|wed|thu|fri|sat|sun)\w*|back|reply|respond|return|broken|leak\w*|expir\w*|"
+                     r"renew\w*|refill)\b", re.I)
 
 
 def note_outline(body: str, mark: Optional[str] = None, numbered: Optional[List[str]] = None,
@@ -110,8 +117,11 @@ class GemmaListSorter:
             user = (f"List: {note.get('title', '')} ({role})\n{note_outline(note.get('body') or '', mark=t.title)}\n\n"
                     f"How pressing is the item marked →, '{t.title}'?")
             got = self.runtime.json_call(URGENCY_PROMPT, user, self.URGENCY_SCHEMA, max_output_tokens=24)
-            if got.get("urgency") in URGENCIES:
-                out[t.id] = (got["urgency"], None)
+            urgency = got.get("urgency")
+            if urgency == "now" and not NOW_CUE.search(t.title):
+                urgency = "soon"  # Gemma says "now" far too often; it stands only with a sign of urgency
+            if urgency in URGENCIES:
+                out[t.id] = (urgency, None)
         return out
 
 

@@ -64,6 +64,12 @@ class TestSorters(unittest.TestCase):
         self.assertEqual(out, {"a": ("soon", None)})  # a bad answer is left for next time
         self.assertIn("→ Thermals for THIS winter", rt.asked[0])
 
+    def test_gemmas_now_needs_a_sign_of_urgency(self):
+        rt = FakeRuntime([{"urgency": "now"}, {"urgency": "now"}])
+        out = GemmaListSorter(rt).urgencies({"title": "Errands", "body": ""}, "list",
+                                            [item("a", "Message Brad back"), item("b", "Wash sweaters")], TODAY)
+        self.assertEqual(out, {"a": ("now", None), "b": ("soon", None)})
+
     def test_gemini_a_whole_note_per_call(self):
         reply = json.dumps({"items": [{"n": 1, "urgency": "now", "due": "2026-11-01"}, {"n": 2, "urgency": "whenever"},
                                       {"n": 9, "urgency": "soon"}]})
