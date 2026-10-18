@@ -74,6 +74,44 @@ def stored_conversation(db_path: Path, day: str) -> str:
     return "\n".join(lines)
 
 
+def sort_real_lists(brain: str, model: str) -> None:
+    """Sort the user's real Joplin lists with one model into docs/eval_reports/day_scripts/lists_<brain>.sqlite."""
+    import time
+    from collections import Counter
+    from thirties_core.brains.list_sorter import FrontierListSorter, GemmaListSorter
+    from thirties_core.config import load_config
+    from thirties_core.joplin_engine import JoplinEngine
+    from thirties_core.lists import ListCatalog, sort_lists
+    from thirties_core.scheduler import StateDatabase
+    cfg = load_config()
+    engine = JoplinEngine(cfg)
+    notes, tasks = engine.fetch_active_notes(), engine.fetch_tasks()
+    path = OUT_DIR / f"lists_{brain}.sqlite"
+    path.unlink(missing_ok=True)
+    catalog = ListCatalog(StateDatabase(path))
+    if brain == "slm":
+        from thirties_core.brains.slm.runtime import GemmaRuntime
+        sorter = GemmaListSorter(GemmaRuntime.shared(cfg.assistant.slm_model_path))
+    else:
+        from thirties_core.inference import AntigravityInferenceEngine
+        from thirties_core.config import ThirtiesConfig
+        fcfg = ThirtiesConfig()
+        fcfg.inference.gemini_model, fcfg.inference.timeout_seconds = model, 600
+        sorter = FrontierListSorter(AntigravityInferenceEngine(fcfg))
+    start = time.time()
+    counts = sort_lists(catalog, notes, tasks, sorter, date.today())
+    print(f"{counts['roles']} roles and {counts['items']} urgencies in {time.time() - start:.0f}s -> {path}")
+    roles = catalog.roles()
+    for n in sorted(notes, key=lambda n: (n["source_notebook"], n["title"])):
+        print(f"  {roles.get(n['id'], {}).get('role', '?'):<9} {n['source_notebook']} / {n['title']}")
+    by_note = Counter((u["note_id"], u["urgency"]) for u in catalog.urgencies().values())
+    titles = {n["id"]: n["title"] for n in notes}
+    for nid in sorted({k[0] for k in by_note}, key=lambda i: titles.get(i, "")):
+        print(f"  {titles.get(nid, nid)}: " + ", ".join(f"{u} {by_note[(nid, u)]}"
+                                                       for u in ("now", "soon", "whenever", "someday")
+                                                       if by_note[(nid, u)]))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -84,8 +122,13 @@ def main() -> None:
     va = sub.add_parser("vary")
     va.add_argument("script")
     va.add_argument("--n", type=int, default=4)
+    so = sub.add_parser("lists", help="sort the real lists once (roles and urgency) for the day sim's --lists-from")
+    so.add_argument("--brain", choices=["slm", "frontier"], default="slm")
     ap.add_argument("--model", default="gemini-3.8-flash")
     args = ap.parse_args()
+    if args.cmd == "lists":
+        sort_real_lists(args.brain, args.model)
+        return
     llm = make_llm(args.model, timeout=900)  # long prompts, long answers
     fmt = FORMAT.format(example=EXAMPLE)
     OUT_DIR.mkdir(parents=True, exist_ok=True)

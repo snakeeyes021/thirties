@@ -226,10 +226,18 @@ def _hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
 
-def start_day(script: DayScript, brain: str, tasks, notes, engine) -> DayRun:
+def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str = "") -> DayRun:
     run = DayRun(script, brain)
     set_debug_time(at(script.day, script.wake))
     run.manager, run.scheduler = build_manager(script.scenario(), brain, tasks, notes, engine)
+    if lists_db:  # the lists sorted once (tests/day_scripts.py lists), as if the app had sorted them
+        try:
+            from thirties_core.lists import ListCatalog
+            mine = ListCatalog(run.scheduler.state_db)
+            for record in ListCatalog(StateDatabase(Path(lists_db))).all_records():
+                mine.merge_record(record)
+        except ImportError:
+            pass  # a version without list roles
     cfg = run.scheduler.config
     cfg.assistant.checkins = True
     cfg.telegram.notify_block_transitions = True
@@ -397,6 +405,12 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     sched = DeterministicScheduler(cfg, StateDatabase(Path(__import__("tempfile").mkdtemp()) / "s.sqlite"),
                                    MockCalendarEngine([]))
     tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)
+    if args.lists_from:
+        from thirties_core.lists import ListCatalog
+        catalog = ListCatalog(StateDatabase(Path(args.lists_from)))
+        tasks = catalog.apply(tasks)
+        ignored = {nid for nid, r in catalog.roles().items() if r["role"] == "ignore"}
+        notes = [n for n in notes if n["id"] not in ignored]
     sim, judge = make_llm(args.sim_model), make_llm(args.sim_model)
     fcfg = ThirtiesConfig()
     fcfg.inference.gemini_model = args.frontier_model
@@ -411,7 +425,7 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         print(f"\n== {script.id} [{brain}] ({n}/{len(jobs)})", flush=True)
         run = None
         try:
-            run = start_day(script, brain, tasks, notes, engine)
+            run = start_day(script, brain, tasks, notes, engine, args.lists_from)
             live_day(run, sim, args.max_moves)
             run.facts = measure(run)
             judge_day(run, judge, sim)
@@ -465,6 +479,8 @@ def main() -> None:
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--max-moves", type=int, default=MAX_MOVES, help="cut each day short (for a quick smoke run)")
+    ap.add_argument("--lists-from", default="", help="list roles and urgency from this database "
+                                                      "(tests/day_scripts.py lists makes one)")
     ap.add_argument("--shard", default="", help=argparse.SUPPRESS)
     ap.add_argument("--out", default="", help=argparse.SUPPRESS)
     ap.add_argument("--budget", type=float, default=0.66)

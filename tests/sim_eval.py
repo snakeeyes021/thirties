@@ -23,7 +23,6 @@ import re
 import sys
 import tempfile
 import time as time_mod
-from types import SimpleNamespace
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -550,9 +549,13 @@ class SimJoplinAPI:
     """Joplin's API in memory, seeded from the backlog, so list edits work in evals and never touch the
     user's real notes."""
 
-    def __init__(self, tasks: List[TaskItem]) -> None:
+    def __init__(self, tasks: List[TaskItem], real_notes: Optional[List[Dict[str, Any]]] = None) -> None:
         self.notes: Dict[str, Dict[str, str]] = {}
+        for n in real_notes or []:  # the user's notes as they are: headings, ticked items, Today, routines
+            self.notes[n["id"]] = {"id": n["id"], "body": n.get("body") or ""}
         for t in tasks:
+            if t.parent_note_id in self.notes or t.id in self.notes:
+                continue
             if t.is_checkbox_item and t.parent_note_id:
                 note = self.notes.setdefault(t.parent_note_id, {"id": t.parent_note_id, "body": ""})
                 note["body"] += f"- [ ] {t.title}\n"
@@ -570,6 +573,22 @@ class SimJoplinAPI:
         return True
 
 
+class SimJoplin:
+    """The Joplin connector over SimJoplinAPI: the notes Thirties reads, as edited during the sim."""
+
+    def __init__(self, tasks: List[TaskItem], notes: List[Dict[str, Any]]) -> None:
+        self.api_client = SimJoplinAPI(tasks, notes)
+        self.meta = {n["id"]: n for n in notes}
+
+    def fetch_active_notes(self) -> List[Dict[str, Any]]:
+        return [dict(self.meta[nid], body=n["body"]) for nid, n in self.api_client.notes.items() if nid in self.meta]
+
+    def fetch_tasks(self) -> List[TaskItem]:
+        from thirties_core.joplin_engine import checklist_tasks
+        return [t for n in self.fetch_active_notes()
+                for t in checklist_tasks(n["id"], n["title"], n.get("source_notebook", ""), n["body"], [])]
+
+
 def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: List[Dict], engine) -> Tuple[Any, Any]:
     cfg = load_config()
     cfg.assistant.brain = brain
@@ -581,7 +600,7 @@ def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: Li
     hidden = {h.lower() for h in scn.hide_tasks}
     tasks = [TaskItem(**t.to_dict()) for t in tasks if t.title.lower() not in hidden]
     cfg.joplin.write_back, cfg.joplin.api_token = True, "sim"
-    joplin = SimpleNamespace(api_client=SimJoplinAPI(tasks))
+    joplin = SimJoplin(tasks, notes)
     manager = ConversationManager(plan, tasks, pending, sched, inference_engine=engine, active_notes=notes)
     manager.tools.services.joplin = joplin
     for tool, args in scn.setup:
