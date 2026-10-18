@@ -127,6 +127,22 @@ class TestBrains(TodayTestCase):
                       "Routine (Morning Routine):\n- [done] Shower\n- PT", text)
 
 
+class TestWhatsLeft(TodayTestCase):
+
+    def test_the_slm_answers_from_the_plan_and_todays_list(self):
+        from thirties_core.brains.slm import SlmBrain
+        from thirties_core.brains.slm.parse import Action
+        self.t.execute("add_to_today", {"items": ["Call the bank", "Clip cat nails"]})
+        self.t.execute("add_event", {"title": "Shower", "start": "9:00 AM", "duration": "30 min"})
+        self.t.execute("add_event", {"title": "Call the bank", "start": "2:00 PM", "duration": "30 min",
+                                     "task_id": "t_bank"})
+        brain = SlmBrain(self.t)
+        brain._message = "back. what's still left for today?"
+        out, _ = brain._do_question(Action("question", {"topic": "what's still left for today"}))
+        self.assertEqual(out, "Still planned today:\n- 2:00 PM – Call the bank\nNot reported yet: Shower.\n"
+                              "On today's list, no time yet: Clip cat nails.")
+
+
 class TestMorning(TodayTestCase):
 
     def setUp(self):

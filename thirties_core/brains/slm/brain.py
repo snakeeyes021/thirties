@@ -27,7 +27,7 @@ from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
 from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes, thirty_of
-from thirties_core.models import EventSpan, SpanCategory, TaskItem
+from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,9 @@ REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|
                        r"( else)? (back|later)|just figure it out|undo the (re-?plan|redraw))\b", re.I)
 NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\w.!?]+\w+){0,3}[^\w.!?]+"
                     r"(re-?plan|redraw|re-?do|push|just figure)", re.I)  # within one sentence
+
+
+LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
 
 class SlmBrain:
@@ -1590,6 +1593,9 @@ class SlmBrain:
                 a, b = windows[0]
                 return f"You're free from {format_clock(a)} to {format_clock(b)} ({length(a, b)}).", False
             return "You're free:\n" + "\n".join(f"- {format_clock(a)} – {format_clock(b)} ({length(a, b)})" for a, b in windows), False
+        message = getattr(self, "_message", "")
+        if (not day or day == "today") and LEFT_TODAY_RE.search(f"{topic} {message}"):
+            return self._left_today(), False
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:
@@ -1601,6 +1607,30 @@ class SlmBrain:
             ok, out = self._run("search_history", {"query": topic})
             return out, False
         return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    def _left_today(self) -> str:
+        """What's left today: the rest of the plan (what's past and not reported, then what's ahead), and
+        what's on today's list (the Today note) with no time yet."""
+        from thirties_core.today import note_items
+        now = self._now()
+        plan = self.tools.plan_for(None) if self._is_today() else self.tools.day_plan
+        flexible = [s for s in plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+                    and s.status == SpanStatus.PLANNED and not s.tentative]
+        behind = [s.title for s in flexible if s.end_dt <= now]
+        ahead = sorted((s for s in flexible if s.end_dt > now), key=lambda s: s.start_dt)
+        planned = {s.title.lower() for s in flexible}
+        assistant = getattr(self.tools, "assistant", None)
+        note = assistant._today_note() if assistant else None
+        listed = [text for text, ticked in note_items(note) if not ticked and text.lower() not in planned]
+        lines = []
+        if ahead:
+            lines.append("Still planned today:")
+            lines += [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
+        if behind:
+            lines.append("Not reported yet: " + ", ".join(behind) + ".")
+        if listed:
+            lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
+        return "\n".join(lines) or "Nothing left for today: the plan and today's list are clear."
 
     def _schedule_answer(self, day: Optional[str], wording: str) -> str:
         """A clean, line-per-item view of a day (or part of it), without sleep or ids."""
