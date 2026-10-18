@@ -203,6 +203,15 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["task"],
     },
     {
+        "name": "add_to_today",
+        "description": "Put things on today's list (the user's Today note), when the user says they mean to do them "
+                       "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
+                       "item for today adds it on its own.",
+        "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
+                                "user's words."},
+        "required": ["items"],
+    },
+    {
         "name": "get_weather",
         "description": "The forecast for a day (default: the rest of today), as plain facts. Read-only.",
         "parameters": {},
@@ -242,6 +251,10 @@ def _stem(word: str) -> str:
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
             return word[: -len(suffix)]
     return word
+
+
+def _stem_words(text: str) -> set:
+    return {_stem(w) for w in _words(text)}
 
 
 def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskItem]:
@@ -339,10 +352,96 @@ class AssistantTools:
         status, msg = writer.submit(complete_op(task))
         if status in ("done", "queued"):
             self.s.tasks = [t for t in self.s.tasks if t.id != task.id]
+            self._tick_twin(task, writer)
         return {"done": "and checked it off in Joplin",
                 "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
                 "not_allowed": "(not checked off in Joplin: Thirties isn't allowed to change Joplin; Preferences → Tasks)",
                 "failed": f"(couldn't check it off in Joplin: {msg})"}[status]
+
+    # --- the day's list: the Today note ---
+
+    def _today_note(self) -> Optional[Dict[str, Any]]:
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import notes_with_role
+        if self._db is None:
+            return None
+        found = notes_with_role(ListCatalog(self._db).roles(), self._joplin_notes(), "today")
+        return found[0] if found else None
+
+    def _tick_twin(self, task: TaskItem, writer) -> None:
+        """A done item ticks its twin: the home item of a Today item, or the Today item of a home item."""
+        from thirties_core.joplin_writeback import complete_op
+        from thirties_core.today import TodayLinks, note_items
+        today = self._today_note()
+        if today is None or self._db is None:
+            return
+        links = TodayLinks(self._db)
+        if task.parent_note_id == today["id"]:
+            link = links.home_of(task.title)
+            home = next((t for t in self.s.tasks if link and t.id == link["home_id"]), None)
+            if home is not None:
+                writer.submit(complete_op(home))
+                self.s.tasks = [t for t in self.s.tasks if t.id != home.id]
+            return
+        title = links.today_title_of(task.id)
+        exact = next((text for text, ticked in note_items(today) if title and text.lower() == title and not ticked), None)
+        if exact:
+            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
+            self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
+
+    def add_to_today(self, items: Any, **_: Any) -> str:
+        from thirties_core.today import TodayLinks, note_items
+        note = self._today_note()
+        if note is None:
+            raise ToolError("There's no Today note yet: make a note for today's list in Joplin, or mark one as "
+                            "Today in Profile → Lists.")
+        writer = self._writer()
+        if writer is None:
+            raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
+                            "Connect it in Preferences → Tasks.")
+        if isinstance(items, str):
+            items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
+        on_today = {text.lower() for text, _ in note_items(note)}
+        on_today |= {t.title.lower() for t in self.s.tasks if t.parent_note_id == note["id"]}
+        added, already, queued = [], [], False
+        for name in items or []:
+            task = self._find_task(str(name))
+            if task is not None and task.parent_note_id != note["id"] and _stem_words(str(name)) - _stem_words(task.title):
+                task = None  # only similar to a list item: it's something new
+            title = task.title if task is not None else str(name).strip()
+            if title.lower() in on_today:
+                already.append(title)
+                continue
+            status, msg = writer.submit({"op": "add_task", "note_id": note["id"], "title": title})
+            if status in ("not_allowed", "failed"):
+                raise ToolError(msg)
+            queued = queued or status == "queued"
+            if task is not None and task.parent_note_id != note["id"]:
+                TodayLinks(self._db).link(title, task)
+            self.s.tasks.append(TaskItem(id=_checkbox_id(note["id"], title), source_notebook=note.get("source_notebook", ""),
+                                         title=title, is_checkbox_item=True, parent_note_title=note["title"],
+                                         parent_note_id=note["id"], list_role="today", urgency="now"))
+            on_today.add(title.lower())
+            added.append(title)
+        parts = []
+        if added:
+            parts.append("Added to today's list: " + ", ".join(added) + (" (Joplin will get it when it's open)"
+                                                                            if queued else "") + ".")
+        if already:
+            parts.append("Already on it: " + ", ".join(already) + ".")
+        return " ".join(parts) or "Nothing to add."
+
+    def put_on_today(self, task_id: str) -> str:
+        """Quietly: a list item scheduled for today goes on today's list too (if there is a Today note and
+        Thirties may write to it). Returns a short note for the tool result, or ''."""
+        task = next((t for t in self.s.tasks if t.id == task_id), None)
+        if task is None or task.id.startswith("media:") or task.list_role in ("today", "routine"):
+            return ""
+        try:
+            out = self.add_to_today([task.title])
+        except ToolError:
+            return ""
+        return "(also added to today's list)" if out.startswith("Added") else ""
 
     # --- changing the backlog in Joplin (only when the user asked or agreed) ---
 
@@ -958,6 +1057,7 @@ class AssistantTools:
             "cancel_reminder": self.cancel_reminder,
             "mute_checkins": self.mute_checkins,
             "set_urgency": self.set_urgency,
+            "add_to_today": self.add_to_today,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }

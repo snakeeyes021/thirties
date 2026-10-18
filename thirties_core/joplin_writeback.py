@@ -125,6 +125,59 @@ def append_task(body: str, title: str, section: Optional[str] = None, more: Opti
     return "\n".join(out) + "\n"
 
 
+def _item_end(lines: List[str], i: int) -> int:
+    """The line after item ``i`` and the items nested under it."""
+    m = CHECKBOX_REGEX.match(lines[i]) or DONE_CHECKBOX_REGEX.match(lines[i])
+    width = len(m.group(1).replace("\t", "    "))
+    end = i + 1
+    while end < len(lines):
+        child = CHECKBOX_REGEX.match(lines[end]) or DONE_CHECKBOX_REGEX.match(lines[end])
+        if not (child and len(child.group(1).replace("\t", "    ")) > width):
+            break
+        end += 1
+    return end
+
+
+def remove_item(body: str, title: str) -> Optional[str]:
+    """Take an item (open or ticked) and anything nested under it off the list; None if it's gone."""
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if _open_item(line, title, ticked_too=True):
+            out = lines[:i] + lines[_item_end(lines, i):]
+            return "\n".join(out) + ("\n" if body.endswith("\n") and out else "")
+    return None
+
+
+def uncheck(body: str, title: str) -> Optional[str]:
+    """Untick one item; None if it's gone."""
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = DONE_CHECKBOX_REGEX.match(line.rstrip("\r\n"))
+        if m and m.group(2).strip() == title.strip():
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[i] = f"{m.group(1)}- [ ] {m.group(2).strip()}{ending}"
+            return "".join(lines)
+    return body if any(_open_item(l.rstrip("\r\n"), title) for l in lines) else None
+
+
+def untick_all(body: str) -> str:
+    """Every item open again (a routine note, each morning)."""
+    return "".join(re.sub(r"^([ \t]*)-\s*\[[xX]\]", r"\1- [ ]", line) for line in body.splitlines(keepends=True))
+
+
+def clear_ticked(body: str) -> str:
+    """Drop ticked items and what's nested under them (the day's list, once the day is over)."""
+    lines = body.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        if DONE_CHECKBOX_REGEX.match(lines[i]):
+            i = _item_end(lines, i)
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out) + ("\n" if body.endswith("\n") and out else "")
+
+
 # --- launching Joplin ---
 
 def _in_flatpak() -> bool:
@@ -281,6 +334,14 @@ class JoplinWriter:
             return ok, "" if ok else "Joplin didn't accept the change."
         if kind == "add_task":
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
+        if kind == "remove":
+            return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"]))
+        if kind == "uncheck":
+            return self._edit_body(op["note_id"], lambda b: uncheck(b, op["title"]))
+        if kind == "untick_all":
+            return self._edit_body(op["note_id"], untick_all)
+        if kind == "clear_ticked":
+            return self._edit_body(op["note_id"], clear_ticked)
         if kind == "break_down":
             return self._edit_body(op["note_id"], lambda b: insert_subtasks(b, op.get("parent_title"), op["steps"],
                                                                               op.get("occurrence", 0),

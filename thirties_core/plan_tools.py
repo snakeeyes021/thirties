@@ -494,6 +494,9 @@ class PlanTools:
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
+        if task_id and self.assistant and self.day_plan.target_date == self.today():
+            listed = self.assistant.put_on_today(task_id)
+            extra += f" {listed}" if listed else ""
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
     def update_event(
