@@ -105,9 +105,11 @@ class TestTurnLoop(ConversationTestCase):
         self.manager = self.make_manager(events=[event("dentist", "15:00", "16:00", "Dentist")])
         self.engine.set_next_response(reply('All set!\nCALL add_event {"title": "Gym", "start": "3:00 PM", "duration": "1 hour"}'))
         self.engine.set_next_response(reply(""))
+        self.engine.set_next_response(reply("The dentist is at 3, so the gym can't go then. How about 4?"))
         out = self.manager.send_user_message("gym at 3")
-        self.assertNotIn("All set", out)
-        self.assertTrue(out.startswith("I couldn't do that:") and "Dentist" in out, out)
+        self.assertNotIn("All set", out)  # the draft was written before the refusal
+        self.assertEqual(out, "The dentist is at 3, so the gym can't go then. How about 4?")
+        self.assertIn("didn't write a reply", self.engine.call_history[-1][-1]["content"])
 
     def test_claim_without_calls_triggers_one_correction(self) -> None:
         self.engine.set_next_response(reply("I've scheduled your walk."))
@@ -139,14 +141,29 @@ class TestTurnLoop(ConversationTestCase):
     def test_empty_reply_falls_back_to_tool_result(self) -> None:
         self.engine.set_next_response(reply('CALL remove_event {"event": "Work"}'))
         self.engine.set_next_response(reply(""))
+        self.engine.set_next_response(reply(""))
         out = self.manager.send_user_message("day off")
-        self.assertTrue(out.startswith("Removed Work"), out)
+        self.assertEqual(out, "Done.")  # never raw tool output, never "Understood."
+        self.assertIsNone(occupant(self.manager.day_plan, "10:00"))
+
+    def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
+        self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
+        self.engine.set_next_response(reply("You're free all afternoon."))
+        out = self.manager.send_user_message("am I free later?")
+        self.assertEqual(out, "You're free all afternoon.")
+
+    def test_call_written_mid_sentence_still_runs(self) -> None:
+        self.engine.set_next_response(reply('Moving it now.CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
+        self.engine.set_next_response(reply("Walk is at 5."))
+        out = self.manager.send_user_message("walk at 5")
+        self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
+        self.assertNotIn("CALL", out)
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
             self.engine.set_next_response(reply("CALL list_schedule"))
         self.manager.send_user_message("show me")
-        self.assertEqual(len(self.engine.call_history), 3)
+        self.assertEqual(len(self.engine.call_history), 4)  # three rounds, then one ask for the missing reply
 
 
 class TestPersistence(ConversationTestCase):

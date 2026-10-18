@@ -171,7 +171,7 @@ class TestTransports(unittest.TestCase):
         self.assertNotIn("--print", cmd)  # the prompt goes on stdin, never as an argument
         sent = json.loads(run.call_args.kwargs["input"])
         self.assertEqual(sent["event"], "user")
-        self.assertIn("[Result of list_schedule]", sent["message"]["content"])
+        self.assertIn("(Result of list_schedule, for the assistant only: Scheduled: Work)", sent["message"]["content"])
         self.assertIn("--sandbox", cmd)
         self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
 

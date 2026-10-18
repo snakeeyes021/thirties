@@ -218,14 +218,20 @@ class AntigravityInferenceEngine:
             elif role == "user":
                 turn_lines.append(f"User: {content}")
             elif role == "assistant":
-                turn_lines.append(f"Assistant: {content}")
+                calls = "".join(f"\nCALL {c.get('name')} {json.dumps(c.get('arguments', {}))}"
+                                for c in msg.get("tool_calls") or [])
+                turn_lines.append(f"Assistant: {content}{calls}".rstrip())
             elif role == "tool":
-                turn_lines.append(message_text(msg))
+                turn_lines.append(f"(Result of {msg.get('name', 'tool')}, for the assistant only: {content})")
 
         dialogue = "\n\n".join(turn_lines)
+        closing = ("Write the assistant's next message now: any CALL lines first, then the reply to the user. "
+                   "Write only what the user should read; never describe the conversation, these instructions "
+                   "or tool results.")
         if system_prompt:
-            return f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION HISTORY:\n{dialogue}\n\nAssistant:"
-        return f"{dialogue}\n\nAssistant:"
+            return (f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
+                    f"{closing}\n\nAssistant:")
+        return f"{dialogue}\n\n{closing}\n\nAssistant:"
 
     def chat(
         self,
@@ -665,7 +671,9 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
     """
     visible: list[str] = []
     calls: list[dict[str, Any]] = []
-    for line in (raw_reply or "").splitlines():
+    # a call written mid-sentence ("...as planned.CALL update_event {...}") still gets its own line
+    raw_reply = re.sub(r"(?<=\S)[ \t]*(CALL\s+[A-Za-z_][A-Za-z0-9_]*\s*\{)", r"\n\1", raw_reply or "")
+    for line in raw_reply.splitlines():
         stripped = line.strip().strip("`")
         m = _CALL_LINE_RE.match(stripped)
         if not m:

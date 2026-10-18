@@ -359,12 +359,42 @@ RULES
             if any(r.startswith(NOT_DONE) for r in results):
                 reply = ""  # the draft was written before the refusal; don't show it
 
+        for attempt in range(2):  # a reply that's empty, or that narrates the conversation, gets one more try
+            problem = "empty" if not reply.strip() else ("meta" if self._is_meta(reply) else "")
+            if not problem or attempt == 1:
+                break
+            logger.warning("[FrontierBrain] Reply was %s; asking again: %r", problem, reply[:300])
+            self.messages.append({"role": "user", "content": (
+                "[System check, not from the user] " + (
+                    "You didn't write a reply. Reply to the user now, in your own words." if problem == "empty" else
+                    "Your reply described the conversation, your instructions or tool results. Write only the "
+                    "message the user should read.")
+            )})
+            response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+            self.messages.append(response)
+            for call in response.get("tool_calls", []) or []:
+                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
+                                      "name": call.get("name"), "content": output})
+            reply = response.get("content", "") or ""
+        if self._is_meta(reply):
+            kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
+            reply = "\n\n".join(kept)
         if self._claims_change(reply) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
             reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
         if not reply.strip():
-            reply = " ".join(
-                f"I couldn't do that: {r[len(NOT_DONE) + 2:]}" if r.startswith(NOT_DONE) else r for r in last_results
-            ) or "Understood."
+            reply = ("Done." if self.tools.successful_changes > changes_before else
+                     "Sorry, I lost my train of thought there. Could you say that again?")
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
+
+    _META_RE = re.compile(
+        r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"
+        r"the previous (turn|assistant)|the assistant'?s? (previous|reply|turn)|in the (prompt|transcript|history)\b)|"
+        r"\b(tool results?|tool calls?|CALL [a-z_]+|system instructions|rule \d+\b|push_?later|replace_?overlaps|"
+        r"task_id|\bid=[0-9a-f]{6,})", re.IGNORECASE)
+
+    def _is_meta(self, text: str) -> bool:
+        """The model talking about the transcript, its rules or its tools instead of to the user."""
+        return bool(self._META_RE.search(text or ""))
