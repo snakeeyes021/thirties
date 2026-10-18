@@ -1381,7 +1381,7 @@ class SlmBrain:
         return start, end
 
     def _score_task(self, task: TaskItem, topic_words: set, goal_words: set, scheduled_titles: set) -> float:
-        if task.someday or task.list_role == "reference" or task.title.lower() in scheduled_titles:
+        if task.someday or task.list_role in ("reference", "backlog") or task.title.lower() in scheduled_titles:
             return -1.0
         words = {_stem(w) for w in _words(f"{task.title} {task.parent_note_title or ''} {task.section}")}
         score = 1.0

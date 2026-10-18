@@ -29,6 +29,7 @@ ROLES = {
     "menu": "a menu of things to pick from when there's free time",
     "list": "a list of things to get done",
     "project": "a one-off project with an end",
+    "backlog": "a project's backlog of tickets: planned as time on the project ('Thirties dev'), never ticket by ticket",
     "reference": "reference or wishlist: never pushed, only mentioned when asked",
     "ignore": "not a to-do list: Thirties doesn't read it",
 }
@@ -40,7 +41,7 @@ URGENCIES = {
 }
 # Roles whose items get an urgency each; the others' items take it from the role.
 SORTED_ROLES = ("list", "project", "menu")
-ROLE_URGENCY = {"today": "now", "routine": "now", "reference": "someday"}
+ROLE_URGENCY = {"today": "now", "routine": "now", "reference": "someday", "backlog": "whenever"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS list_roles (

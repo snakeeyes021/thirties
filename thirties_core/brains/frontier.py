@@ -50,6 +50,7 @@ ROLE_BADGES = {
     "menu": " [Menu: options to pick from when there's free time]",
     "list": " [List]",
     "project": " [Project: a one-off with an end]",
+    "backlog": " [Project backlog: plan time on the project as one item ('<project> dev'), never single tickets]",
     "reference": " [Reference / wishlist: never suggest unless asked]",
 }
 

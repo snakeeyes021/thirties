@@ -132,6 +132,9 @@ class TestBrainsUseThem(unittest.TestCase):
         self.assertIn("'Call the bank' [soon]", text)
         self.assertIn("'Buy stamps'\n", text + "\n")  # no hurry: no tag
         self.assertIn('"Wishlist" [Reference / wishlist: never suggest unless asked]', text)
+        ListCatalog(self.sched.state_db).set_role("n_wish", "backlog", "Wishlist")
+        text = FrontierBrain(self.tools, None, tasks=self.tasks, active_notes=notes).build_backlog_summary()
+        self.assertIn("[Project backlog: plan time on the project as one item", text)
 
     def test_the_slm_favours_whats_pressing_and_never_offers_reference_items(self):
         from thirties_core.brains.slm import SlmBrain
