@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
@@ -692,25 +692,84 @@ class AssistantTools:
     def _rollover_key(self) -> str:
         return f"rollover:{self._today().isoformat()}"
 
+    def today_carryover(self) -> Dict[str, List[str]]:
+        """For the morning: what's still open on the Today note ("keep"), and pressing list items that aren't on it
+        yet ("add": now, or due within two days; at most three)."""
+        from thirties_core.today import note_items
+        note = self._today_note()
+        if note is None:
+            return {"keep": [], "add": []}
+        keep = [text for text, ticked in note_items(note) if not ticked]
+        on = {k.lower() for k in keep}
+        today = self._today()
+
+        def pressing(t: TaskItem) -> bool:
+            if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference"):
+                return False
+            if t.due:
+                try:
+                    return (date.fromisoformat(t.due) - today).days <= 2
+                except ValueError:
+                    return False
+            return t.urgency == "now"
+        add = [t.id for t in self.s.tasks if pressing(t) and t.title.lower() not in on][:3]
+        return {"keep": keep, "add": add}
+
+    def start_the_day(self) -> str:
+        """Each morning, before the proposal: routine notes start unticked (if the user allows it) and the Today
+        note drops what was ticked off (the record keeps it). Returns what was done, for the log."""
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import notes_with_role
+        writer = self._writer()
+        if writer is None or self._db is None or not writer.allowed:
+            return ""
+        roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
+        done = []
+        if getattr(self.pt.scheduler.config.joplin, "reset_routines", True):
+            for note in notes_with_role(roles, notes, "routine"):
+                if re.search(r"^\s*-\s*\[[xX]\]", note.get("body") or "", re.M):
+                    writer.submit({"op": "untick_all", "note_id": note["id"], "title": note["title"]})
+                    done.append(f"unticked {note['title']}")
+        today = self._today_note()
+        if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
+            writer.submit({"op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
+            done.append(f"cleared what was done from {today['title']}")
+        return "; ".join(done)
+
     def rollover_proposal(self, **_: Any) -> str:
-        """The proposal, as text; it's remembered so a 'yes' can apply exactly this."""
+        """The proposal, as text; it's remembered so a 'yes' can apply exactly this. With a Today note it's the
+        start of today's list: yesterday's planned items with no outcome, what's still on the Today note, and
+        anything pressing."""
         plan = self.rollover_plan()
-        if not plan:
+        carry = self.today_carryover()
+        planned = {p["title"].lower() for p in plan}
+        carry["keep"] = [k for k in carry["keep"] if k.lower() not in planned]
+        tasks = {t.id: t for t in self.s.tasks}
+        carry["add"] = [tid for tid in carry["add"] if tid in tasks and tasks[tid].title.lower() not in planned]
+        if not plan and not carry["keep"] and not carry["add"]:
             return "Nothing from yesterday is waiting: everything has an outcome."
         if self._db:
             import json
-            self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "state": "offered"}))
+            self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "today": carry, "state": "offered"}))
         from datetime import datetime as _dt
-        lines = ["From yesterday, still open:"]
-        fits = [p for p in plan if p["start"]]
-        lines += [f"- {format_clock(_dt.fromisoformat(p['start']))} – {p['title']}" for p in fits]
-        lines += [f"- {p['title']} (no room today: back to your lists)" for p in plan if not p["start"]]
-        lines.append("Want me to put them in today like that?")
+        from thirties_core.lists import urgency_label
+        lines = []
+        if plan or carry["keep"]:
+            lines.append("From yesterday, still open:")
+            lines += [f"- {format_clock(_dt.fromisoformat(p['start']))} – {p['title']}" for p in plan if p["start"]]
+            lines += [f"- {p['title']} (no room today: back to your lists)" for p in plan if not p["start"]]
+            lines += [f"- {k}" for k in carry["keep"]]
+        if carry["add"]:
+            lines.append("Also pressing: " + ", ".join(
+                f"{tasks[t].title} ({urgency_label(tasks[t])})" for t in carry["add"]) + ".")
+        lines.append("Want today like that?" if carry["keep"] or carry["add"] else "Want me to put them in today like that?")
         return "\n".join(lines)
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
-        """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists."""
+        """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
+        Today note)."""
         import json
+        from thirties_core.today import TodayLinks
         raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
         if not raw:
             raise ToolError("There's no rollover proposal for today; ask for one first.")
@@ -718,12 +777,14 @@ class AssistantTools:
         if data.get("state") == "applied":
             return "Yesterday's items were already rolled over."
         skip_words = {_stem(w) for w in _words(" ".join(skip) if isinstance(skip, list) else str(skip or ""))}
+
+        def skipped(title: str) -> bool:
+            return bool(skip_words and skip_words & {_stem(w) for w in _words(title)})
         from datetime import datetime as _dt
         yesterday = (self._today() - timedelta(days=1)).isoformat()
         moved, back = [], []
         for p in data["plan"]:
-            skipped = skip_words and skip_words & {_stem(w) for w in _words(p["title"])}
-            if p["start"] and not skipped:
+            if p["start"] and not skipped(p["title"]):
                 start = _dt.fromisoformat(p["start"])
                 out = self.pt.execute("update_event", {"event": p["span_id"], "day": yesterday, "to_day": "today",
                                                        "start": format_clock(start)})
@@ -732,13 +793,33 @@ class AssistantTools:
                     continue
             self.pt.execute("log_outcome", {"event": p["span_id"], "day": yesterday, "status": "skipped"})
             back.append(p["title"])
+        carry = data.get("today") or {"keep": [], "add": []}
+        homeless, dropped = [], []
+        note = self._today_note() if carry["keep"] else None
+        writer = self._writer() if note else None
+        for title in carry["keep"]:
+            if not skipped(title) or writer is None:
+                continue
+            writer.submit({"op": "remove", "note_id": note["id"], "title": title})
+            self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == note["id"] and t.title == title)]
+            links = TodayLinks(self._db)
+            (dropped if links.home_of(title) else homeless).append(title)
+            links.unlink(title)
+        tasks = {t.id: t for t in self.s.tasks}
+        add = [tasks[t].title for t in carry["add"] if t in tasks and not skipped(tasks[t].title)]
+        added = self.add_to_today(add) if add else ""
         self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
         parts = []
         if moved:
             parts.append("Rolled into today:\n" + "\n".join(f"- {m}" for m in moved))
-        if back:
-            parts.append("Back to your lists: " + ", ".join(back) + ".")
-        return "\n".join(parts) or "Nothing to roll over."
+        if back or dropped:
+            parts.append("Back to your lists: " + ", ".join(back + dropped) + ".")
+        if added:
+            parts.append(added)
+        if homeless:
+            parts.append("Off today's list, with no other list to go back to: " + ", ".join(homeless)
+                         + ". Propose a list for each (add_task), or let them go.")
+        return "\n".join(parts) or "Today's list stays as it is."
 
     def rollover_pending(self) -> bool:
         """A proposal was offered today and not yet applied or declined."""

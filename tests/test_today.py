@@ -11,7 +11,7 @@ from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.today import TodayLinks
 
-TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin"}
+TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Morning Routine"}
 
 
 def item(tid, title, note="n_errands"):
@@ -87,6 +87,40 @@ class TestTickingTwins(TodayTestCase):
         self.t.assistant._complete_backlog_task(home)
         self.assertIn("- [x] Call the bank", self.body("n_errands"))
         self.assertEqual(self.body("n_today"), "- [x] Call the bank\n")
+
+
+class TestMorning(TodayTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.t.execute("add_to_today", {"items": ["Call the bank", "Clip cat nails"]})
+        self.api.notes["n_today"]["body"] = "- [x] Feed the cats\n" + self.body("n_today")
+        self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] PT\n"}
+        catalog = ListCatalog(self.sched.state_db)
+        catalog.set_role("n_routine", "routine", "Morning Routine")
+        catalog.set_urgency("t_stamps", "now")
+        self.services.tasks = catalog.apply(self.services.tasks)
+
+    def test_routines_start_unticked_and_whats_done_leaves_today(self):
+        self.t.assistant.start_the_day()
+        self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] PT\n")
+        self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n- [ ] Clip cat nails\n")
+        self.sched.config.joplin.reset_routines = False
+        self.api.notes["n_routine"]["body"] = "- [x] Shower\n"
+        self.t.assistant.start_the_day()
+        self.assertEqual(self.body("n_routine"), "- [x] Shower\n")  # not allowed: left alone
+
+    def test_the_morning_proposal_keeps_drops_and_adds(self):
+        self.t.assistant.start_the_day()
+        out = self.t.execute("rollover_proposal", {})
+        self.assertEqual(out, "From yesterday, still open:\n- Call the bank\n- Clip cat nails\n"
+                              "Also pressing: Buy stamps (now).\nWant today like that?")
+        out = self.t.execute("apply_rollover", {"skip": ["bank", "nails"]})
+        self.assertIn("Back to your lists: Call the bank.", out)
+        self.assertIn("Added to today's list: Buy stamps.", out)
+        self.assertIn("with no other list to go back to: Clip cat nails", out)
+        self.assertEqual(self.body("n_today"), "- [ ] Buy stamps\n")
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # still on its home list
 
 
 if __name__ == "__main__":

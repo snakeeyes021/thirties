@@ -396,6 +396,11 @@ def joplin_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                            active=bool(cfg.joplin.launch_when_needed))
     launch.connect("notify::active", lambda r, _p: ctx.set("joplin.launch_when_needed", r.get_active()))
     group.add(launch)
+    routines = Adw.SwitchRow(title="Untick routines each morning",
+                             subtitle="Your routine notes start each day with every item open again.",
+                             active=bool(getattr(cfg.joplin, "reset_routines", True)))
+    routines.connect("notify::active", lambda r, _p: ctx.set("joplin.reset_routines", r.get_active()))
+    group.add(routines)
     return group
 
 

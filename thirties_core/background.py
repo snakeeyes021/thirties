@@ -222,6 +222,10 @@ class BackgroundService:
         if now < wake:
             return
         db.set_sync_meta(key, "1")
+        if manager.tools.assistant is not None:
+            started = manager.tools.assistant.start_the_day()
+            if started:
+                logger.info("Morning: %s.", started)
         text = manager.execute_tool("rollover_proposal", {})
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
             return
