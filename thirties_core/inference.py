@@ -191,6 +191,11 @@ class InferenceEngine(Protocol):
         ...
 
 
+AGY_NO_TOOLS = ("(You are answering as a text model: you have no tools here, no commands, files or browser, and "
+                "none are needed. Reply in text only.)")
+AGY_TOOL_RETRY = "\n\n(You tried to use a tool, but there are none here. Answer now, in text only.)"
+
+
 class AntigravityInferenceEngine:
     """Dispatches conversation turns to Gemini (e.g. Gemini 3.8 Flash) via the Antigravity CLI."""
 
@@ -229,9 +234,16 @@ class AntigravityInferenceEngine:
                    "Write only what the user should read; never describe the conversation, these instructions "
                    "or tool results.")
         if system_prompt:
-            return (f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
+            return (f"{AGY_NO_TOOLS}\n\nSYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
                     f"{closing}\n\nAssistant:")
-        return f"{dialogue}\n\n{closing}\n\nAssistant:"
+        return f"{AGY_NO_TOOLS}\n\n{dialogue}\n\n{closing}\n\nAssistant:"
+
+    def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
+        stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
+        res = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True, timeout=self.timeout, cwd=workspace)
+        record_agy_call(self.model, "ok" if res.returncode == 0 else
+                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + res.stdout[-2000:]) else "error"))
+        return res
 
     def chat(
         self,
@@ -256,7 +268,6 @@ class AntigravityInferenceEngine:
             "--model", self.model,
             "--disable-slash-commands",
         ]
-        stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
         # agy is a coding agent: run it in an empty private directory, never in the
         # repository or wherever Thirties happened to be started.
         workspace = agy_workspace_dir()
@@ -264,14 +275,14 @@ class AntigravityInferenceEngine:
             cmd = ["flatpak-spawn", "--host", f"--directory={workspace}"] + cmd
 
         try:
-            res = subprocess.run(
-                cmd,
-                input=stdin_text,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                cwd=workspace,
-            )
+            res = self._run(cmd, prompt_text, workspace)
+            result = _stream_result(res.stdout)
+            if (res.returncode == 0 and result is not None and not str(result.get("response", "")).strip()
+                    and "denied" in (res.stderr or "")):
+                # It tried to use one of its own tools (headless mode denies them) and ended without
+                # answering: ask once more, plainly.
+                logger.warning("agy tried to use a tool instead of answering; asking again.")
+                res = self._run(cmd, prompt_text + AGY_TOOL_RETRY, workspace)
         except subprocess.TimeoutExpired:
             record_agy_call(self.model, "timeout")
             logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)
@@ -290,8 +301,6 @@ class AntigravityInferenceEngine:
 
         raw_output = res.stdout
         raw_reply = ""
-        record_agy_call(self.model, "ok" if res.returncode == 0 else
-                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + raw_output[-2000:]) else "error"))
         result = _stream_result(raw_output)
         if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
             raw_reply = result.get("response", "")

@@ -186,6 +186,20 @@ class TestTransports(unittest.TestCase):
         self.assertIn("--sandbox", cmd)
         self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
 
+    def test_antigravity_asked_again_when_it_tries_a_tool_instead_of_answering(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        empty = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": ""}}),
+                          stderr='no output produced — a tool required the "command" permission … auto-denied.')
+        answer = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": "Sure."}}),
+                           stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", side_effect=[empty, answer]) as run:
+            res = engine.chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(res["content"], "Sure.")
+        first, second = (json.loads(c.kwargs["input"])["message"]["content"] for c in run.call_args_list)
+        self.assertTrue(first.startswith("(You are answering as a text model: you have no tools here"))
+        self.assertTrue(second.endswith("Answer now, in text only.)"))
+
     def test_antigravity_timeout(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())
         with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
