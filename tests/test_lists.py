@@ -142,6 +142,10 @@ class TestBrainsUseThem(unittest.TestCase):
         score = {t.id: brain._score_task(t, set(), set(), set()) for t in self.tasks}
         self.assertGreater(score["t_bank"], score["t_stamps"])
         self.assertEqual(score["t_pedal"], -1.0)
+        ListCatalog(self.sched.state_db).set_role("n_errands", "backlog", "Errands")
+        brain.tasks = ListCatalog(self.sched.state_db).apply(brain.tasks)
+        self.assertEqual([t.title for t in brain._project_blocks()], ["Errands dev"])
+        self.assertEqual(brain._score_task(brain.tasks[0], set(), set(), set()), -1.0)  # no single tickets
 
 
 if __name__ == "__main__":

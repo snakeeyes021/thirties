@@ -1405,6 +1405,16 @@ class SlmBrain:
             score -= 1.5 if not (topic_words & {"watch", "read", "relax", "movi", "show", "book"}) else -1.0
         return score
 
+    def _project_blocks(self) -> List[TaskItem]:
+        """A project backlog is offered as time on the project ("Thirties dev"), never as single tickets."""
+        seen, out = set(), []
+        for t in self.tasks:
+            if t.list_role == "backlog" and t.parent_note_id and t.parent_note_id not in seen:
+                seen.add(t.parent_note_id)
+                out.append(TaskItem(id=f"project:{t.parent_note_id}", source_notebook=t.source_notebook,
+                                    title=f"{t.parent_note_title} dev", list_role="list", estimated_thirties=2))
+        return out
+
     def _do_suggest(self, a: Action) -> Tuple[str, bool]:
         topic = a.get("topic") or ""
         start, end = self._window_for(topic)
@@ -1445,7 +1455,7 @@ class SlmBrain:
         from thirties_core.weather import OUTDOOR_RE
         scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled)
                           - (6.0 if rainy and OUTDOOR_RE.search(t.title) else 0.0), i, t)  # nothing outdoors in the rain
-                         for i, t in enumerate(self.tasks)),
+                         for i, t in enumerate(self.tasks + self._project_blocks())),
                         key=lambda x: (-x[0], x[1]))
         ranked, seen_notes = [], set()
         for score, _, t in scored:
