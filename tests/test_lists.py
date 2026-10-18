@@ -98,5 +98,38 @@ class TestInUse(unittest.TestCase):
         self.assertEqual([n["id"] for n in notes], ["n_errands"])
 
 
+class TestBrainsUseThem(unittest.TestCase):
+
+    def setUp(self):
+        set_debug_time(at("10:00"))
+        self.addCleanup(set_debug_time, None)
+        self.sched = make_scheduler()
+        catalog = ListCatalog(self.sched.state_db)
+        catalog.set_role("n_errands", "list", "Errands")
+        catalog.set_role("n_wish", "reference", "Wishlist")
+        catalog.set_urgency("t_bank", "soon")
+        catalog.set_urgency("t_stamps", "whenever")
+        self.tasks = catalog.apply([item("t_bank", "Call the bank"), item("t_stamps", "Buy stamps"),
+                                    item("t_pedal", "Buy a pedal", "n_wish", "Wishlist")])
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.tools = PlanTools(plan, pending, self.sched, services=Services.for_db(self.sched.state_db, self.tasks))
+
+    def test_frontier_sees_what_each_list_is_for_and_whats_pressing(self):
+        from thirties_core.brains.frontier import FrontierBrain
+        notes = [{"id": "n_errands", "source_notebook": "Tasks", "title": "Errands", "body": ""},
+                 {"id": "n_wish", "source_notebook": "Tasks", "title": "Wishlist", "body": ""}]
+        text = FrontierBrain(self.tools, None, tasks=self.tasks, active_notes=notes).build_backlog_summary()
+        self.assertIn("'Call the bank' [soon]", text)
+        self.assertIn("'Buy stamps'\n", text + "\n")  # no hurry: no tag
+        self.assertIn('"Wishlist" [Reference / wishlist: never suggest unless asked]', text)
+
+    def test_the_slm_favours_whats_pressing_and_never_offers_reference_items(self):
+        from thirties_core.brains.slm import SlmBrain
+        brain = SlmBrain(self.tools, tasks=self.tasks)
+        score = {t.id: brain._score_task(t, set(), set(), set()) for t in self.tasks}
+        self.assertGreater(score["t_bank"], score["t_stamps"])
+        self.assertEqual(score["t_pedal"], -1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

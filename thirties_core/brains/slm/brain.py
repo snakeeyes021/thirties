@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
@@ -1369,15 +1369,22 @@ class SlmBrain:
         return start, end
 
     def _score_task(self, task: TaskItem, topic_words: set, goal_words: set, scheduled_titles: set) -> float:
-        if task.someday or task.title.lower() in scheduled_titles:
+        if task.someday or task.list_role == "reference" or task.title.lower() in scheduled_titles:
             return -1.0
         words = {_stem(w) for w in _words(f"{task.title} {task.parent_note_title or ''} {task.section}")}
         score = 1.0
         score += 4.0 * len(topic_words & words)
         score += 2.0 * len(goal_words & words)
         score += min(task.deferred_count, 4) * 0.75
-        if (task.parent_note_title or "").lower() in ("today to-do", "today"):
+        if task.list_role == "today" or (not task.list_role and (task.parent_note_title or "").lower() in ("today to-do", "today")):
             score += 3.0
+        score += {"now": 3.0, "soon": 1.5}.get(task.urgency, 0.0)
+        if task.due:
+            try:
+                days = (date.fromisoformat(task.due) - self.tools.today()).days
+                score += 3.0 if days <= 2 else 1.5 if days <= 7 else 0.0
+            except ValueError:
+                pass
         if task.parent_task_id:
             score -= 0.5  # prefer whole tasks over sub-steps
         if not task.is_checkbox_item and not task.id.startswith("media:"):

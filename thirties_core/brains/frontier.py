@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.clock import format_clock
 from thirties_core.inference import InferenceEngine
+from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS, TOOL_SPECS, PlanTools
 
@@ -41,6 +42,16 @@ def render_tool_specs() -> str:
         for p, desc in params.items():
             lines.append(f"    {p}: {desc}")
     return "\n".join(lines)
+
+
+ROLE_BADGES = {
+    "routine": " [Routine: done every day, in order]",
+    "today": " [Today's list: what the user means to do today]",
+    "menu": " [Menu: options to pick from when there's free time]",
+    "list": " [List]",
+    "project": " [Project: a one-off with an end]",
+    "reference": " [Reference / wishlist: never suggest unless asked]",
+}
 
 
 class FrontierBrain:
@@ -152,7 +163,7 @@ RULES
 7. Daylight and dark are physical facts, not rules about what belongs when. Only consider them when it physically matters (a daylight hike) or the user has said what they prefer.
 8. Changes are live the moment you make them. There is no separate step to save, confirm, "lock in" or finalize a plan, so never offer one.
 9. Scheduling versus lists. When the user names something to do, call match_backlog. "Same task": schedule it with that task_id. "Only similar": don't assume or correct them; ask whether it's that item (quote it) or something new. "Nothing": schedule it as a new item. Add to a list (add_task) when they ask, or offer once if it sounds like a to-do they'll want to track (not meals or routines); when they want it both added and scheduled, add it first, then schedule it with the task_id add_task returns.
-10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
+10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. Each note says what it's for, and items say how pressing they are (now, soon, by a date; unmarked is no hurry): favour what's pressing, and never push someday or reference items. When the user says how pressing something is, record it with set_urgency. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or thirties, so do you ("you have three open chunks at 4:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed cat"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
 12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome. If they don't say when, estimate and pass estimated=true. If you're unsure whether something happened, ask a short check-in question ("Did you get to X, or are you still on Y?"). If they mention how they feel, log_energy.
 13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
@@ -215,6 +226,9 @@ RULES
                     "todo_completed": 0,
                 })
 
+        roles: Dict[str, str] = {}
+        if self.tools.scheduler is not None:
+            roles = {nid: r["role"] for nid, r in ListCatalog(self.tools.scheduler.state_db).roles().items()}
         backlog_sections = []
         for nb_path in sorted(notes_by_notebook.keys()):
             nb_notes = notes_by_notebook[nb_path]
@@ -229,9 +243,11 @@ RULES
 
                 note_tasks = tasks_by_note.get(n_id, [])
 
-                # Classify note intent (Reference list vs Actionable note vs Routine)
+                # What the note is for: the role the user confirmed or the model guessed, else a guess from the title
                 lower_title = title.lower()
-                if "routine" in lower_title:
+                if roles.get(n_id) in ROLE_BADGES:
+                    note_type_badge = ROLE_BADGES[roles[n_id]]
+                elif "routine" in lower_title:
                     note_type_badge = " [Daily Routine Checklist]"
                 elif "shopping" in lower_title or "wishlist" in lower_title or "purchas" in lower_title:
                     note_type_badge = " [Reference / Purchasing Wishlist - NOT an immediate daily errand]"
@@ -258,7 +274,9 @@ RULES
                         indent = "  " * (depth[t.id] + 1)
                         def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
                         maybe = " [someday]" if t.someday and not t.section else ""
-                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}")
+                        pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else ""
+                        pressing = f" [{pressing}]" if pressing and t.list_role not in ("today", "routine") else ""
+                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}{pressing}")
                 elif is_todo and todo_comp == 0:
                     nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
                     if body.strip():
