@@ -105,6 +105,11 @@ Evals use **at most 66% of agy's quota per 5-hour window**, leaving the rest for
 | Both brains on the same scenarios | ~70 scenarios |
 
   A 250-scenario run of one brain therefore takes two windows. Use `--skip-from` the first report to finish it in the next window.
+- **Weekly limit:** agy also has a weekly quota, about 6,400 calls (3,469 since the reset showed as 54% used on 2026-10-18). Evals stop at 70% of it (`WEEKLY_EVAL_SHARE` in `tests/sim_eval.py`), leaving the rest of the week for real use of the app.
+- **The milestone day-sim run** (the user's rule, 2026-10-18): a target of 100 days (50 scripts on both brains), run across weeks within the weekly limit. If a new version is ready before the run finishes, the run ends with what it has. For that to compare fairly:
+  - One run, one version: it's pinned to a commit (its own worktree) for its whole life, however many weeks it takes.
+  - Scripts run in a fixed shuffled order, the same for every version, mixing the user's days and other people's and both brains, so any first N days are a fair sample of the 100.
+  - Versions are compared on the days both have run (paired: the same script and brain), with the uncertainty that comes with N stated. 40 paired days is a real result, just a less certain one.
 - **Comparability:** results from a medium-thinking simulator (the 2026-10-15 baseline) aren't directly comparable with low-thinking runs. Compare runs that used the same `--sim-model`.
 
 ### 4.3 Results (2026-10-15)

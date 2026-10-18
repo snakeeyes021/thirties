@@ -46,7 +46,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.sim_eval import (QuotaExhausted, SimScenario, at, budget_left, build_manager, cal, make_llm,
-                            raise_if_agy_failed)
+                            raise_if_agy_failed, weekly_left)
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService
 from thirties_core.backlog import load_backlog
@@ -506,6 +506,10 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     engine = AntigravityInferenceEngine(fcfg)
     results = []
     for n, (script, brain) in enumerate(jobs, 1):
+        week_used, week_allowed = weekly_left()
+        if week_used + CALLS_PER_DAY[brain] > week_allowed:
+            return results, (f"weekly guard after {len(results)} finished days in this worker: {week_used} agy calls "
+                             f"since the weekly reset, limit {week_allowed} for evals")
         used, allowed, capacity = budget_left(args.budget)
         if used + CALLS_PER_DAY[brain] > allowed:
             return results, (f"budget reached after {len(results)} finished days in this worker: {used} agy calls in "

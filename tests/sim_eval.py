@@ -451,6 +451,20 @@ def quota_capacity() -> int:
     return max(used, 200)
 
 
+WEEKLY_CAPACITY = 6400            # calls per week: 3,469 since the weekly reset showed as 54% used (2026-10-18)
+WEEKLY_RESET = datetime(2026, 10, 16, 17, 20)  # local time; the weekly quota resets every 7 days from here
+WEEKLY_EVAL_SHARE = 0.70          # evals stop here, leaving the rest of the week for real use of the app
+
+
+def weekly_left() -> Tuple[int, int]:
+    """(calls since this week's reset, calls evals may reach this week)."""
+    now = datetime.now()
+    weeks = int((now - WEEKLY_RESET).total_seconds() // (7 * 86400))
+    start = (WEEKLY_RESET + timedelta(days=7 * weeks)).timestamp()
+    used = sum(1 for t, _, o in agy_ledger(8 * 86400) if t >= start and o != "quota")
+    return used, int(WEEKLY_CAPACITY * WEEKLY_EVAL_SHARE)
+
+
 def budget_left(share: float) -> Tuple[int, int, int]:
     """(calls used in the current window, calls allowed by the budget, estimated capacity)."""
     capacity = quota_capacity()
@@ -704,6 +718,10 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     frontier_engine = AntigravityInferenceEngine(fcfg)
     results = []
     for n, (scn, brain, i) in enumerate(jobs, 1):
+        week_used, week_allowed = weekly_left()
+        if week_used + CALLS_PER_CONVERSATION[brain] > week_allowed:
+            return results, (f"weekly guard after {len(results)} finished conversations in this worker: {week_used} "
+                             f"agy calls since the weekly reset, limit {week_allowed} for evals")
         used, allowed, capacity = budget_left(args.budget)
         if used + CALLS_PER_CONVERSATION[brain] > allowed:
             return results, (f"budget reached after {len(results)} finished conversations in this worker: {used} agy calls "
