@@ -175,6 +175,30 @@ class ListCatalog:
         return True
 
 
+def sort_lists(catalog: ListCatalog, notes: List[Dict[str, Any]], tasks: List[TaskItem], sorter, today: date,
+               max_notes: Optional[int] = None) -> Dict[str, int]:
+    """Guess what's missing: the role of each new note, then the urgency of each new item in sorted lists
+    (a whole note at a time). A note the model couldn't answer for is tried again next time."""
+    counts = {"roles": 0, "items": 0}
+    for note in catalog.notes_without_role(notes)[:max_notes]:
+        role = sorter.role(note)
+        if role is not None:
+            catalog.set_role(note["id"], role, note.get("title", ""), source="guess")
+            counts["roles"] += 1
+    by_id, roles = {n["id"]: n for n in notes}, catalog.roles()
+    for note_id, items in list(catalog.items_without_urgency(tasks).items())[:max_notes]:
+        if note_id not in by_id:
+            continue
+        guesses = sorter.urgencies(by_id[note_id], roles[note_id]["role"], items, today)
+        if not guesses:
+            continue
+        for t in items:
+            urgency, due = guesses.get(t.id, ("whenever", None))  # one it skipped: don't keep asking
+            catalog.set_urgency(t.id, urgency, due, note_id=note_id, title=t.title, source="guess")
+            counts["items"] += 1
+    return counts
+
+
 def urgency_label(task: TaskItem) -> str:
     """How a task's urgency reads to a model or the user: 'soon', 'by Oct 30', or ''."""
     if task.due:
@@ -185,4 +209,4 @@ def urgency_label(task: TaskItem) -> str:
     return task.urgency or ""
 
 
-__all__ = ["ListCatalog", "ROLES", "URGENCIES", "SORTED_ROLES", "ROLE_URGENCY", "urgency_label"]
+__all__ = ["ListCatalog", "ROLES", "URGENCIES", "SORTED_ROLES", "ROLE_URGENCY", "sort_lists", "urgency_label"]

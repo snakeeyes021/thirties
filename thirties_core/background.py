@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -39,6 +40,7 @@ class BackgroundService:
     TICK_SECONDS = 15
     OUTBOX_EVERY = 60
     SYNC_EVERY = 300
+    LISTS_EVERY = 1800
 
     def __init__(self, config, desktop_notify: Optional[DesktopNotify] = None, *, scheduler=None, joplin_engine=None,
                  inference_engine=None, sync_engine=None) -> None:
@@ -59,6 +61,9 @@ class BackgroundService:
         self._lock = threading.RLock()
         self._last_outbox = 0.0
         self._last_sync = 0.0
+        self._last_lists = 0.0
+        self._sorting = False
+        self.sort_lists_enabled = not os.environ.get("THIRTIES_OFFLINE")  # off in tests and evals
         self._threads: List[threading.Thread] = []
         self.running = False
 
@@ -243,6 +248,35 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Background sync failed: %s", e)
 
+    def sort_lists(self) -> None:
+        """Every half hour, in its own thread: the chosen model guesses the role of new notes and the urgency
+        of new items (lists.sort_lists). The user confirms or corrects them in Profile → Your lists."""
+        if not self.sort_lists_enabled or self._sorting or time.time() - self._last_lists < self.LISTS_EVERY:
+            return
+        self._last_lists, self._sorting = time.time(), True
+
+        def run() -> None:
+            try:
+                from thirties_core.brains.list_sorter import list_sorter_for
+                from thirties_core.lists import ListCatalog, sort_lists
+                notes, tasks = self.joplin_engine.fetch_active_notes(), self.joplin_engine.fetch_tasks()
+                if not notes:
+                    return
+                sorter = list_sorter_for(self.config, self.scheduler.state_db, self.inference_engine)
+                if sorter is None:
+                    return
+                counts = sort_lists(ListCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today())
+                if any(counts.values()):
+                    logger.info("Sorted lists: %d note roles and %d item urgencies guessed.",
+                                counts["roles"], counts["items"])
+                    with self._lock:
+                        self._manager = None  # the next turn sees them
+            except Exception as e:
+                logger.warning("Sorting lists failed: %s", e)
+            finally:
+                self._sorting = False
+        threading.Thread(target=run, daemon=True, name="ListSorting").start()
+
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
         for duty in (self.rollover, self.check_ins, self.reminders, self.starts):
@@ -252,6 +286,7 @@ class BackgroundService:
                 logger.exception("Background duty %s failed: %s", duty.__name__, e)
         self.deliver_outbox()
         self.sync()
+        self.sort_lists()
 
     # --- running ---
 
