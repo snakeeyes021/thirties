@@ -350,7 +350,8 @@ RULES
         (older ones are spent; the schedule in the prompt is current)."""
         user_idx = [i for i, m in enumerate(self.messages) if m.get("role") == "user"]
         cutoff = user_idx[-self.RECENT_TURNS] if len(user_idx) > self.RECENT_TURNS else 0
-        return [m for i, m in enumerate(self.messages) if i >= cutoff or m.get("role") != "tool"]
+        return [m for i, m in enumerate(self.messages) if (i >= cutoff or m.get("role") != "tool")
+                and not m.get("display_only")]
 
     def respond(self, user_text: str) -> str:
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
@@ -358,6 +359,7 @@ RULES
         changes_before = self.tools.successful_changes
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
+        turn_start = len(self.messages)
 
         reply = ""
         last_results: List[str] = []
@@ -428,14 +430,28 @@ RULES
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
+
+    def _show_only(self, turn_start: int, reply: str) -> None:
+        """A turn can take several rounds (a draft, tool calls, a retry); the model keeps them all as context, but
+        the user sees one message: the final reply. Without this the chat showed every draft, repeated or
+        half-finished ones and the model's notes to itself included."""
+        rounds = [m for m in self.messages[turn_start:] if m.get("role") == "assistant"]
+        for m in rounds:
+            m["hidden"] = True
+        final = next((m for m in reversed(rounds) if str(m.get("content", "")).strip() == reply.strip()), None)
+        if final is not None:
+            final.pop("hidden", None)
+        else:  # the reply was cleaned up or replaced: show it, but don't feed it back to the model as said twice
+            self.messages.append({"role": "assistant", "content": reply, "display_only": True})
 
     _META_RE = re.compile(
         r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"
         r"the previous (turn|assistant)|the assistant'?s? (previous|reply|turn)|in the (prompt|transcript|history)\b)|"
         r"\b(tool results?|tool calls?|CALL [a-z_]+|system instructions|rule \d+\b|push_?later|replace_?overlaps|"
-        r"task_id|\bid=[0-9a-f]{6,})", re.IGNORECASE)
+        r"task_id|\bid=[0-9a-f]{6,})|\(Result of [a-z_]+|for the assistant only", re.IGNORECASE)
 
     def _is_meta(self, text: str) -> bool:
         """The model talking about the transcript, its rules or its tools instead of to the user."""

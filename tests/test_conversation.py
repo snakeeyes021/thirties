@@ -159,6 +159,18 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
         self.assertNotIn("CALL", out)
 
+    def test_the_chat_shows_one_reply_per_turn(self) -> None:
+        self.engine.responses = [
+            {"role": "assistant", "content": "Let me check your day.",
+             "tool_calls": [{"name": "list_schedule", "arguments": {}}]},
+            reply("Wait, looking at the transcript, the user asked about tonight."),
+            reply("You're free from 4:00 until 11:00."),
+        ]
+        out = self.manager.send_user_message("am I free tonight?")
+        self.assertEqual(out, "You're free from 4:00 until 11:00.")
+        self.assertEqual([m["content"] for m in self.manager.history()],
+                         ["am I free tonight?", "You're free from 4:00 until 11:00."])  # no drafts, no notes to itself
+
     def test_minutes_are_said_as_thirties_unless_asked(self) -> None:
         self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
         self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:30 tonight.")

@@ -124,7 +124,7 @@ class ConversationManager:
         return [{"role": m["role"], "content": m.get("content", "")}
                 for m in self.brain.messages
                 if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
-                and not str(m.get("content", "")).startswith("[System check")]
+                and not m.get("hidden") and not str(m.get("content", "")).startswith("[System check")]
 
     def conversations_for_day(self) -> List[Conversation]:
         return self._store.for_day(self.day_plan.target_date) if self._store else []
