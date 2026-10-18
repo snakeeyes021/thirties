@@ -47,11 +47,31 @@ def message_text(msg: Dict[str, Any]) -> str:
     return content
 
 
+# agy's own agent wraps every call in about 12,000 tokens of system prompt and tool definitions. Thirties needs
+# none of it (it parses its own CALL lines), so calls go to this agent, which opts out of all of that:
+# the same call measured 12,611 input tokens with agy's default agent and 574 with this one (2026-10-18).
+AGY_AGENT = "thirties-plain"
+AGY_AGENT_FILE = f"""---
+name: {AGY_AGENT}
+description: Answers the prompt it's given, in plain text, with no tools.
+excludeDefaultComponents: true
+subagent: false
+---
+
+# Thirties
+
+Answer the message you're given, in plain text. You have no tools and need none.
+"""
+
+
 def agy_workspace_dir() -> Path:
-    """An empty directory that agy runs in, so the agent never sees real files."""
+    """An empty directory that agy runs in, so the agent never sees real files; it holds only Thirties' agent."""
     cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     workspace = cache / "thirties" / "agy-workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
+    agent = workspace / ".agents" / "agents" / f"{AGY_AGENT}.md"
+    if not agent.is_file() or agent.read_text() != AGY_AGENT_FILE:
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text(AGY_AGENT_FILE)
     return workspace
 
 
@@ -245,7 +265,7 @@ class AntigravityInferenceEngine:
         if not agy_bin:
             raise RuntimeError("Antigravity CLI (agy) binary not found.")
         cmd = [agy_bin, "--sandbox", "--input-format", "stream-json", "--output-format", "stream-json",
-               "--model", self.model, "--disable-slash-commands"]
+               "--model", self.model, "--disable-slash-commands", "--agent", AGY_AGENT]
         workspace = agy_workspace_dir()
         prompt = f"{AGY_NO_TOOLS}\n\n{prompt}"
         try:
@@ -291,6 +311,7 @@ class AntigravityInferenceEngine:
             "--output-format", "stream-json",
             "--model", self.model,
             "--disable-slash-commands",
+            "--agent", AGY_AGENT,  # no agy system prompt or tools: about 12,000 fewer tokens per call
         ]
         # agy is a coding agent: run it in an empty private directory, never in the
         # repository or wherever Thirties happened to be started.

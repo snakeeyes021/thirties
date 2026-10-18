@@ -184,7 +184,11 @@ class TestTransports(unittest.TestCase):
         self.assertEqual(sent["event"], "user")
         self.assertIn("(Result of list_schedule, for the assistant only: Scheduled: Work)", sent["message"]["content"])
         self.assertIn("--sandbox", cmd)
-        self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
+        self.assertEqual(cmd[cmd.index("--agent") + 1], "thirties-plain")  # agy's own agent costs ~12k tokens a call
+        workspace = run.call_args.kwargs["cwd"]
+        self.assertTrue(str(workspace).endswith("thirties/agy-workspace"))
+        self.assertIn("excludeDefaultComponents: true",
+                      (workspace / ".agents" / "agents" / "thirties-plain.md").read_text())
 
     def test_antigravity_asked_again_when_it_tries_a_tool_instead_of_answering(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())
