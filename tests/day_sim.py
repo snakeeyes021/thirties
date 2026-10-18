@@ -404,8 +404,8 @@ def live_day(run: DayRun, sim, max_moves: int = MAX_MOVES) -> None:
 
 CLOCK_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\b")
 EXACT_ASKED_RE = re.compile(r"exact|minute|precise|to the min", re.IGNORECASE)
-LEAK_RE = re.compile(r"\bCALL \w+|NOT_DONE|\bid[= ][0-9a-f]{6}|\[id |for the assistant only|\[System check|"
-                     r"tool result|the (previous|last) turn|conversation history", re.IGNORECASE)
+LEAK_RE = re.compile(r"\bCALL [a-z_]+ ?\{|(?i:NOT_DONE|\bid[= ][0-9a-f]{6}|\[id |for the assistant only|\[System check|"
+                     r"tool result|the (previous|last) turn|conversation history)")  # "Call the landlord" is fine
 JOINED_RE = re.compile(r"\s/\s|\s&\s")
 
 

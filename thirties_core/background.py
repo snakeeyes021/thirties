@@ -130,11 +130,12 @@ class BackgroundService:
     def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
              to_conversation: bool = True, now: Optional[datetime] = None) -> None:
         """Send a message to the desktop and, if a phone is paired here, to Telegram."""
-        from thirties_core.clock import to_thirties, trim_meridiems
+        from thirties_core.clock import calendar_times, to_thirties, trim_meridiems
         try:
             now = now or self.now()
-            text = trim_meridiems(to_thirties(text), now)
-            telegram_text = trim_meridiems(to_thirties(telegram_text), now) if telegram_text else None
+            keep = calendar_times(self.manager().day_plan)  # a dentist at 10:45 is at 10:45
+            text = trim_meridiems(to_thirties(text, keep), now)
+            telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
         except Exception:
             pass
         if to_conversation:

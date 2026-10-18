@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 
 class ClockError(ValueError):
@@ -174,12 +174,13 @@ EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minu
 _CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
 
 
-def to_thirties(text: str) -> str:
+def to_thirties(text: str, keep: Optional[Set[str]] = None) -> str:
     """Only :00 and :30 are ever said: any other clock time is rounded to the nearest thirty ("sunset at 6:28"
-    is said "6:30"). For replies when the user hasn't asked for exact minutes."""
+    is said "6:30"). For replies when the user hasn't asked for exact minutes. Times in ``keep`` ("10:45", the
+    ones the user said themselves: a break at 10:45 is a break at 10:45) stay as they are."""
     def fix(m: re.Match) -> str:
         h, mm, suffix = int(m.group(1)), int(m.group(2)), m.group(3) or ""
-        if mm in (0, 30):
+        if mm in (0, 30) or f"{h}:{mm:02d}" in (keep or set()):
             return m.group(0)
         total = h * 60 + int(round(mm / 30.0)) * 30
         nh, nm = (total // 60), total % 60
@@ -190,6 +191,17 @@ def to_thirties(text: str) -> str:
             suffix = re.sub(r"AM|PM|am|pm|a\.m\.|p\.m\.", lambda x: swap[x.group(0)], suffix)
         return f"{nh}:{nm:02d}{suffix}"
     return _CLOCK_MINUTES_RE.sub(fix, text)
+
+
+def times_said(texts: Iterable[str]) -> Set[str]:
+    """Clock times ("10:45") someone wrote, without AM/PM."""
+    return {f"{int(m.group(1))}:{m.group(2)}" for t in texts for m in _CLOCK_MINUTES_RE.finditer(t or "")}
+
+
+def calendar_times(plan) -> Set[str]:
+    """The start and end times of a day's calendar events ("10:45"): facts from the calendar, said as they are."""
+    return {f"{t.hour % 12 or 12}:{t.minute:02d}" for s in plan.spans if s.source == "calendar"
+            for t in (s.start_dt, s.end_dt)}
 
 
 def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:

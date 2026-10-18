@@ -175,6 +175,9 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
         self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:30 tonight.")
         self.assertEqual(self.manager.send_user_message("what's the exact time of sunset?"), "Sunset is at 6:28 tonight.")
+        self.engine.responses = [reply("Enjoy your break at 10:45, back at 11:00.")]
+        self.assertEqual(self.manager.send_user_message("my break is 10:45 to 11, strictly"),
+                         "Enjoy your break at 10:45, back at 11:00.")  # a time the user said stays as said
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
