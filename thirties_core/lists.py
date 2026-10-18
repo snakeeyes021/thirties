@@ -156,10 +156,10 @@ class ListCatalog:
             u = urgencies.get(t.id)
             t.urgency = u["urgency"] if u else ROLE_URGENCY.get(role, "")
             t.due = u["due"] if u else ""
-            if u:  # what's recorded (the user's choice, or a guess) wins over the heading it sits under
+            if u and u["source"] == "user":  # the user's choice wins over the heading it sits under
                 t.someday = u["urgency"] == "someday"
             elif t.urgency == "someday":
-                t.someday = True
+                t.someday = True  # a guess can add "someday", never take a Someday heading away
             kept.append(t)
         return kept
 

@@ -52,6 +52,10 @@ class TestCatalog(unittest.TestCase):
         gutter.someday = True  # it sits under a Someday heading
         self.c.set_urgency("t_gutter", "now", source="user")
         self.assertFalse(self.c.apply([gutter])[0].someday)
+        maybe = item("t_trip", "Plan a trip")
+        maybe.someday = True
+        self.c.set_urgency("t_trip", "soon", source="guess")
+        self.assertTrue(self.c.apply([maybe])[0].someday)  # a guess doesn't take the heading away
 
     def test_what_still_needs_a_guess(self):
         self.c.set_role("n_errands", "list", "Errands")

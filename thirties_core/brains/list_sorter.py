@@ -34,6 +34,7 @@ Notes are usually organized by area of life (home, errands, medical, a project).
 
 URGENCY_PROMPT = f"""You help a planning assistant judge how pressing each item on a person's to-do list is:
 {URGENCY_LINES}
+Most items on a list are "whenever". Use "now" only for something that clearly can't wait past tomorrow (a deadline, something broken or unsafe, a reply someone is waiting for), and "soon" only when there's a reason it should happen within a couple of weeks.
 Read the note the way its owner wrote it: headings ("Active", "Probation", "Someday", "Do I want?"), groups separated by blank lines (an item set apart at the top is often the pressing one), nesting (sub-items share their parent's urgency unless they say otherwise), and the wording ("for THIS winter", "before the trip", "need to call"). Medical, money and deadline items lean soon; home improvements and purchases lean whenever unless something makes them pressing; anything under a someday, probation or maybe heading is someday."""
 
 
