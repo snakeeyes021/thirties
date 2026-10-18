@@ -2,19 +2,59 @@
 
 from __future__ import annotations
 
-from gi.repository import Gtk, Adw, Pango
+from datetime import datetime
+from typing import Callable, Optional
 
-from thirties_core.models import BlockKind, ThirtyBlock
+from gi.repository import Gtk, Pango
+
+from thirties_core.models import EventSpan, SpanCategory, ThirtyBlock
+
+
+def format_clock(dt: datetime) -> str:
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def format_duration(minutes: int) -> str:
+    """Human duration: "30 min", "1 h", "1 h 30 min"."""
+    hours, mins = divmod(max(0, minutes), 60)
+    if hours and mins:
+        return f"{hours} h {mins} min"
+    if hours:
+        return f"{hours} h"
+    return f"{mins} min"
+
+
+def span_icon_name(span: EventSpan | None, block: ThirtyBlock) -> str:
+    if span is None:
+        if block.is_sunlight:
+            return "weather-clear-symbolic"
+        if block.is_twilight:
+            return "weather-few-clouds-symbolic"
+        return "weather-clear-night-symbolic"
+    return {
+        SpanCategory.SLEEP: "night-light-symbolic",
+        SpanCategory.WORK: "view-grid-symbolic",
+        SpanCategory.CALENDAR: "x-office-calendar-symbolic",
+    }.get(span.category, "starred-symbolic")
 
 
 class BlockWidget(Gtk.Box):
     """Visual pill representing a single Thirty block."""
 
-    def __init__(self, block: ThirtyBlock, is_current: bool = False, display_index: int = -1) -> None:
+    def __init__(
+        self,
+        block: ThirtyBlock,
+        span: EventSpan | None = None,
+        is_current: bool = False,
+        display_index: int = -1,
+        title: str | None = None,
+    ) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.block = block
-        self.is_current = is_current
+        self.span = span
+        self.is_current = False
         self.display_index = display_index
+        self.title = title
 
         self.set_margin_start(8)
         self.set_margin_end(8)
@@ -26,6 +66,7 @@ class BlockWidget(Gtk.Box):
 
         self._build_ui()
         self._apply_styling()
+        self.set_current(is_current)
 
     def _build_ui(self) -> None:
         # 1. Index and Time Column
@@ -38,7 +79,7 @@ class BlockWidget(Gtk.Box):
         idx_label.add_css_class("dim-label")
         idx_label.set_xalign(0.0)
 
-        start_time_str = self.block.start_dt.strftime("%I:%M %p").lstrip("0")
+        start_time_str = format_clock(self.block.start_dt)
         time_label = Gtk.Label(label=start_time_str)
         time_label.add_css_class("heading")
         time_label.set_xalign(0.0)
@@ -48,8 +89,7 @@ class BlockWidget(Gtk.Box):
         self.append(time_box)
 
         # 2. Kind / Solar Indicator Icon
-        icon_name = self._get_icon_name()
-        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon = Gtk.Image.new_from_icon_name(span_icon_name(self.span, self.block))
         icon.set_pixel_size(20)
         self.append(icon)
 
@@ -57,113 +97,105 @@ class BlockWidget(Gtk.Box):
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         content_box.set_hexpand(True)
 
-        display_title = self._get_display_title()
-        title_label = Gtk.Label(label=display_title)
-        title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_xalign(0.0)
-        title_label.add_css_class("body")
+        self.title_label = Gtk.Label(label=self._get_display_title())
+        self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.title_label.set_xalign(0.0)
+        self.title_label.add_css_class("body")
 
-        end_time_str = self.block.end_dt.strftime("%I:%M %p").lstrip("0")
-        range_str = f"{start_time_str} – {end_time_str}"
+        range_str = f"{start_time_str} – {format_clock(self.block.end_dt)}"
         subtitle_label = Gtk.Label(label=range_str)
         subtitle_label.add_css_class("caption")
         subtitle_label.add_css_class("dim-label")
         subtitle_label.set_xalign(0.0)
 
-        content_box.append(title_label)
+        content_box.append(self.title_label)
         content_box.append(subtitle_label)
         self.append(content_box)
 
-        # 4. Status Badge if locked, assigned, or ambiguous
-        badge = self._build_status_badge()
-        if badge:
-            self.append(badge)
+        # 4. Status badges: "Now" while current, otherwise "Planned" for assigned thirties
+        self.now_badge = Gtk.Label(label="Now")
+        self.now_badge.add_css_class("badge-current")
+        self.now_badge.set_valign(Gtk.Align.CENTER)
+        self.append(self.now_badge)
 
-    def _get_icon_name(self) -> str:
-        kind = self.block.kind
-        if kind == BlockKind.SLEEP:
-            return "night-light-symbolic"
-        elif kind == BlockKind.WORK:
-            return "view-grid-symbolic"
-        elif kind == BlockKind.BUSY_CALENDAR:
-            return "x-office-calendar-symbolic"
-        elif kind == BlockKind.AMBIGUOUS_CALENDAR:
-            return "dialog-question-symbolic"
-        elif self.block.is_assigned:
-            return "starred-symbolic"
-        else:
-            if self.block.is_sunlight:
-                return "weather-clear-symbolic"
-            elif self.block.is_twilight:
-                return "weather-few-clouds-symbolic"
-            else:
-                return "weather-clear-night-symbolic"
+        self.planned_badge = None
+        if self._is_assigned:
+            self.planned_badge = Gtk.Label(label="Planned")
+            self.planned_badge.add_css_class("badge-assigned")
+            self.planned_badge.set_valign(Gtk.Align.CENTER)
+            self.append(self.planned_badge)
+
+    @property
+    def _is_assigned(self) -> bool:
+        return self.span is not None and not self.span.is_envelope
 
     def _get_display_title(self) -> str:
-        if self.block.label:
-            return self.block.label
-
-        kind = self.block.kind
-        if kind == BlockKind.SLEEP:
-            return "Sleep"
-        elif kind == BlockKind.WORK:
-            return "Work"
-        elif kind == BlockKind.DAYLIGHT_DISCRETIONARY:
-            return "Open Daylight Thirty"
-        elif kind == BlockKind.DARK_DISCRETIONARY:
-            return "Open Dark Thirty"
-        elif self.block.is_assigned:
-            return "Assigned Task"
-        elif kind == BlockKind.AMBIGUOUS_CALENDAR:
-            return "Unconfirmed Event"
-        return "Discretionary"
-
-    def _build_status_badge(self) -> Gtk.Widget | None:
-        if self.block.kind == BlockKind.AMBIGUOUS_CALENDAR:
-            pill = Gtk.Label(label="Needs Action")
-            pill.add_css_class("badge-warning")
-            return pill
-        elif self.block.is_assigned:
-            pill = Gtk.Label(label="Allocated")
-            pill.add_css_class("badge-assigned")
-            return pill
-        elif self.is_current:
-            pill = Gtk.Label(label="Now")
-            pill.add_css_class("badge-current")
-            return pill
-        return None
+        if self.title:
+            return self.title
+        if self.span is not None:
+            return self.span.title
+        return "Open Daylight Thirty" if self.block.is_sunlight else "Open Dark Thirty"
 
     def _apply_styling(self) -> None:
-        if self.block.is_sunlight:
-            self.add_css_class("block-sunlight")
-        else:
-            self.add_css_class("block-dark")
-
-        if self.block.is_locked:
+        self.add_css_class("block-sunlight" if self.block.is_sunlight else "block-dark")
+        if self.span is not None and (self.span.is_envelope or self.span.is_firm):
             self.add_css_class("block-locked")
-
-        if self.block.is_assigned:
+        if self._is_assigned:
             self.add_css_class("block-assigned")
 
-        if self.is_current:
+    def set_current(self, is_current: bool) -> None:
+        """Move the gold "now" highlight on or off this thirty without rebuilding it."""
+        self.is_current = is_current
+        if is_current:
             self.add_css_class("block-current")
+        else:
+            self.remove_css_class("block-current")
+        self.now_badge.set_visible(is_current)
+        if self.planned_badge is not None:
+            self.planned_badge.set_visible(not is_current)
+
+    def update_now(self, now_block_idx: int) -> None:
+        self.set_current(self.block.index == now_block_idx)
 
 
 class GroupedBlockWidget(Gtk.Box):
-    """Consolidated card for contiguous locked blocks (Sleep or Work) with optional drilldown."""
+    """One collapsible card for consecutive thirties showing the same thing.
+
+    Used for work and sleep envelopes and for anything planned that runs longer
+    than one thirty (a two-thirty dinner, a three-thirty movie). Expanding it
+    shows the individual thirties.
+    """
 
     def __init__(
         self,
+        span: EventSpan,
         blocks_with_indices: list[tuple[ThirtyBlock, int]],
         now_block_idx: int = -1,
+        title: str | None = None,
+        start_dt: datetime | None = None,
+        end_dt: datetime | None = None,
+        context: str | None = None,
+        block_titles: list[str] | None = None,
+        block_spans: list[EventSpan | None] | None = None,
+        expanded: bool = False,
+        on_expanded_changed: Optional[Callable[["GroupedBlockWidget", bool], None]] = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.span = span
         self.items = blocks_with_indices
         self.blocks = [b for b, _ in blocks_with_indices]
         self.indices = [idx for _, idx in blocks_with_indices]
-        self.kind = self.blocks[0].kind
-        self.now_block_idx = now_block_idx
-        self.is_current = any(b.index == self.now_block_idx for b in self.blocks)
+        self.is_sleep = span.category == SpanCategory.SLEEP
+        self.is_envelope = span.is_envelope
+        self.title = title or span.title
+        self.start_dt = start_dt or max(span.start_dt, self.blocks[0].start_dt)
+        self.end_dt = end_dt or min(span.end_dt, self.blocks[-1].end_dt)
+        self.context = context
+        self.block_titles = block_titles
+        self.block_spans = block_spans
+        self.on_expanded_changed = on_expanded_changed
+        self.is_current = False
+        self.sub_widgets: list[BlockWidget] = []
 
         self.set_margin_start(8)
         self.set_margin_end(8)
@@ -172,11 +204,13 @@ class GroupedBlockWidget(Gtk.Box):
 
         self.add_css_class("card")
         self.add_css_class("block-grouped")
-
-        if self.is_current:
-            self.add_css_class("block-current")
+        if not self.is_envelope:
+            self.add_css_class("block-assigned")
 
         self._build_ui()
+        self.update_now(now_block_idx)
+        if expanded:
+            self.set_expanded(True)
 
     def _build_ui(self) -> None:
         # Header Row
@@ -186,20 +220,22 @@ class GroupedBlockWidget(Gtk.Box):
         header_row.set_margin_top(10)
         header_row.set_margin_bottom(10)
 
-        # 1. Logical Range Pill (e.g. #33–#48)
-        start_idx = self.indices[0]
-        end_idx = self.indices[-1]
-        range_tag = f"#{start_idx:02d}–#{end_idx:02d}"
-        count_pill = Gtk.Label(label=range_tag)
+        # 1. Logical Range Pill (e.g. #33–#48) above the start time
+        range_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        range_box.set_size_request(80, -1)
+        count_pill = Gtk.Label(label=f"#{self.indices[0]:02d}–#{self.indices[-1]:02d}")
         count_pill.add_css_class("caption")
         count_pill.add_css_class("dim-label")
-        count_pill.set_size_request(80, -1)
         count_pill.set_xalign(0.0)
-        header_row.append(count_pill)
+        start_lbl = Gtk.Label(label=format_clock(self.start_dt))
+        start_lbl.add_css_class("heading")
+        start_lbl.set_xalign(0.0)
+        range_box.append(count_pill)
+        range_box.append(start_lbl)
+        header_row.append(range_box)
 
         # 2. Icon
-        icon_name = "night-light-symbolic" if self.kind == BlockKind.SLEEP else "view-grid-symbolic"
-        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon = Gtk.Image.new_from_icon_name(span_icon_name(self.span, self.blocks[0]))
         icon.set_pixel_size(20)
         header_row.append(icon)
 
@@ -207,32 +243,41 @@ class GroupedBlockWidget(Gtk.Box):
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         title_box.set_hexpand(True)
 
-        title_text = "Sleep Window" if self.kind == BlockKind.SLEEP else "Work Schedule"
-        title_lbl = Gtk.Label(label=title_text)
-        title_lbl.add_css_class("heading")
-        title_lbl.set_xalign(0.0)
+        self.title_label = Gtk.Label(label=self.title)
+        self.title_label.add_css_class("heading")
+        self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.title_label.set_xalign(0.0)
 
-        start_str = self.blocks[0].start_dt.strftime("%I:%M %p").lstrip("0")
-        end_str = self.blocks[-1].end_dt.strftime("%I:%M %p").lstrip("0")
-        total_hours = len(self.blocks) * 0.5
-        range_lbl = Gtk.Label(label=f"{start_str} – {end_str} ({total_hours:.1f} hours, {len(self.blocks)} Thirties)")
-        range_lbl.add_css_class("caption")
-        range_lbl.add_css_class("dim-label")
-        range_lbl.set_xalign(0.0)
+        minutes = int((self.end_dt.timestamp() - self.start_dt.timestamp()) // 60)
+        summary = (f"{format_clock(self.start_dt)} – {format_clock(self.end_dt)} · "
+                   f"{format_duration(minutes)} · {len(self.blocks)} thirties")
+        self.range_label = Gtk.Label(label=summary)
+        self.range_label.add_css_class("caption")
+        self.range_label.add_css_class("dim-label")
+        self.range_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.range_label.set_xalign(0.0)
 
-        title_box.append(title_lbl)
-        title_box.append(range_lbl)
+        title_box.append(self.title_label)
+        title_box.append(self.range_label)
+        if self.context:
+            context_lbl = Gtk.Label(label=self.context)
+            context_lbl.add_css_class("caption")
+            context_lbl.add_css_class("dim-label")
+            context_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            context_lbl.set_xalign(0.0)
+            title_box.append(context_lbl)
         header_row.append(title_box)
 
         # 4. "Now" indicator if current time is inside this collapsed block
-        if self.is_current:
-            now_badge = Gtk.Label(label="Now")
-            now_badge.add_css_class("badge-current")
-            header_row.append(now_badge)
+        self.now_badge = Gtk.Label(label="Now")
+        self.now_badge.add_css_class("badge-current")
+        self.now_badge.set_valign(Gtk.Align.CENTER)
+        header_row.append(self.now_badge)
 
         # 5. Expand / Collapse Button
         self.toggle_btn = Gtk.Button(icon_name="pan-down-symbolic")
         self.toggle_btn.add_css_class("flat")
+        self.toggle_btn.set_valign(Gtk.Align.CENTER)
         self.toggle_btn.set_tooltip_text("Expand individual thirties")
         self.toggle_btn.connect("clicked", self._on_toggle)
         header_row.append(self.toggle_btn)
@@ -249,14 +294,37 @@ class GroupedBlockWidget(Gtk.Box):
         sub_list.set_margin_end(8)
         sub_list.set_margin_bottom(8)
 
-        for b, disp_idx in self.items:
-            is_cur = (b.index == self.now_block_idx)
-            sub_list.append(BlockWidget(b, is_current=is_cur, display_index=disp_idx))
+        for i, (b, disp_idx) in enumerate(self.items):
+            span = self.block_spans[i] if self.block_spans else self.span
+            title = self.block_titles[i] if self.block_titles else self.title
+            child = BlockWidget(b, span=span, display_index=disp_idx, title=title)
+            self.sub_widgets.append(child)
+            sub_list.append(child)
 
         self.revealer.set_child(sub_list)
         self.append(self.revealer)
 
+    @property
+    def expanded(self) -> bool:
+        return self.revealer.get_reveal_child()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.revealer.set_reveal_child(expanded)
+        self.toggle_btn.set_icon_name("pan-up-symbolic" if expanded else "pan-down-symbolic")
+        self.toggle_btn.set_tooltip_text("Collapse" if expanded else "Expand individual thirties")
+
+    def update_now(self, now_block_idx: int) -> None:
+        """Move the gold "now" highlight without rebuilding the card."""
+        self.is_current = any(b.index == now_block_idx for b in self.blocks)
+        if self.is_current:
+            self.add_css_class("block-current")
+        else:
+            self.remove_css_class("block-current")
+        self.now_badge.set_visible(self.is_current)
+        for child in self.sub_widgets:
+            child.update_now(now_block_idx)
+
     def _on_toggle(self, _btn: Gtk.Button) -> None:
-        is_revealed = self.revealer.get_reveal_child()
-        self.revealer.set_reveal_child(not is_revealed)
-        self.toggle_btn.set_icon_name("pan-up-symbolic" if not is_revealed else "pan-down-symbolic")
+        self.set_expanded(not self.expanded)
+        if self.on_expanded_changed:
+            self.on_expanded_changed(self, self.expanded)

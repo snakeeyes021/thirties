@@ -1,10 +1,10 @@
 {
-    "id" : "tech.redfoxlabs.Thirties",
-    "runtime" : "org.gnome.Platform",
-    "runtime-version" : "50",
-    "sdk" : "org.gnome.Sdk",
-    "command" : "thirties",
-    "finish-args" : [
+    "id": "tech.redfoxlabs.Thirties",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "50",
+    "sdk": "org.gnome.Sdk",
+    "command": "thirties",
+    "finish-args": [
         "--share=network",
         "--share=ipc",
         "--socket=fallback-x11",
@@ -15,12 +15,13 @@
         "--talk-name=org.gnome.evolution.dataserver.Subprocess.Backend.*",
         "--talk-name=org.gnome.OnlineAccounts",
         "--talk-name=org.freedesktop.Flatpak",
+        "--talk-name=org.kde.StatusNotifierWatcher",
         "--filesystem=~/.config/joplin-desktop:ro",
         "--filesystem=~/.var/app/net.cozic.joplin_desktop/config/joplin-desktop:ro",
         "--filesystem=xdg-config/thirties:create",
         "--filesystem=xdg-data/thirties:create"
     ],
-    "cleanup" : [
+    "cleanup": [
         "/include",
         "/lib/pkgconfig",
         "/man",
@@ -31,15 +32,106 @@
         "*.la",
         "*.a"
     ],
-    "modules" : [
+    "modules": [
         {
-            "name" : "thirties",
-            "builddir" : true,
-            "buildsystem" : "meson",
-            "sources" : [
+            "name": "libical",
+            "buildsystem": "cmake-ninja",
+            "config-opts": [
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DCMAKE_INSTALL_LIBDIR=lib",
+                "-DSHARED_ONLY=ON",
+                "-DICAL_GLIB=ON",
+                "-DGOBJECT_INTROSPECTION=ON",
+                "-DICAL_GLIB_VAPI=OFF",
+                "-DICAL_BUILD_DOCS=OFF",
+                "-DLIBICAL_BUILD_TESTING=OFF",
+                "-DENABLE_GTK_DOC=OFF",
+                "-DLIBICAL_BUILD_EXAMPLES=OFF"
+            ],
+            "cleanup": [
+                "/lib/cmake",
+                "/include",
+                "/lib/pkgconfig",
+                "/share/gir-1.0"
+            ],
+            "sources": [
                 {
-                    "type" : "dir",
-                    "path" : "."
+                    "type": "archive",
+                    "url": "https://github.com/libical/libical/releases/download/v3.0.20/libical-3.0.20.tar.gz",
+                    "sha256": "e73de92f5a6ce84c1b00306446b290a2b08cdf0a80988eca0a2c9d5c3510b4c2"
+                }
+            ]
+        },
+        {
+            "name": "evolution-data-server",
+            "buildsystem": "cmake-ninja",
+            "config-opts": [
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DENABLE_TESTS=OFF",
+                "-DENABLE_GTK=OFF",
+                "-DENABLE_GTK4=OFF",
+                "-DENABLE_OAUTH2_WEBKITGTK=OFF",
+                "-DENABLE_OAUTH2_WEBKITGTK4=OFF",
+                "-DENABLE_EXAMPLES=OFF",
+                "-DENABLE_GOA=OFF",
+                "-DENABLE_WEATHER=OFF",
+                "-DENABLE_CANBERRA=OFF",
+                "-DENABLE_VALA_BINDINGS=OFF",
+                "-DENABLE_INTROSPECTION=ON",
+                "-DENABLE_GTK_DOC=OFF",
+                "-DWITH_LIBDB=OFF",
+                "-DWITH_PHONENUMBER=OFF",
+                "-DWITH_OPENLDAP=OFF",
+                "-DWITH_KRB5=OFF",
+                "-DWITH_SYSTEMDUSERUNITDIR=OFF",
+                "-DENABLE_MAINTAINER_MODE=OFF"
+            ],
+            "cleanup": [
+                "/include",
+                "/lib/pkgconfig",
+                "/share/gir-1.0",
+                "/lib/evolution-data-server/*-backends",
+                "/libexec",
+                "/share/dbus-1",
+                "/share/GConf",
+                "/share/glib-2.0/schemas/org.gnome.evolution.shell*",
+                "/share/pixmaps",
+                "/share/applications",
+                "/lib/systemd"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://download.gnome.org/sources/evolution-data-server/3.60/evolution-data-server-3.60.2.tar.xz",
+                    "sha256": "2084dbdac396371b365d504c1ff45866ba8dca2f1252e5da1d3d9c33abdc1286"
+                }
+            ]
+        },
+        {
+            "name": "python3-litert-lm-api",
+            "buildsystem": "simple",
+            "build-commands": [
+                "pip3 install --verbose --exists-action=i --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} litert-lm-api --no-build-isolation"
+            ],
+            "sources": [
+                {
+                    "type": "file",
+                    "url": "https://files.pythonhosted.org/packages/c9/8f/eb7a5203be1d48440c6b8d6e6382c3f744dd6d338fe400555718b4d695a1/litert_lm_api-0.18.0-py3-none-manylinux_2_27_x86_64.whl",
+                    "sha256": "b64e2cf6d7dcb90ff094b74af595cc5d53faa07e0889f967d15df8d3e696b53c",
+                    "only-arches": [
+                        "x86_64"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "thirties",
+            "builddir": true,
+            "buildsystem": "meson",
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "."
                 }
             ]
         }

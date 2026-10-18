@@ -1,8 +1,8 @@
 """Astronomical and solar phase calculations for the Thirties grid.
 
 Calculates dawn (civil twilight), sunrise, solar noon, sunset, and dusk,
-and partitions a given local day into 48 discrete 30-minute intervals
-anchored against sunlight and twilight.
+and builds the solar canvas for a diurnal day: 48 discrete 30-minute
+intervals starting at the thirty that contains sunrise.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from thirties_core.models import BlockKind, DayPlan, ThirtyBlock
+from thirties_core.models import DayPlan, ThirtyBlock
 
 
 _SIMULATED_DEBUG_TIME: Optional[str] = None
@@ -218,37 +218,42 @@ def get_diurnal_date(
     return cal_date
 
 
+def diurnal_day_start(sunrise: datetime) -> datetime:
+    """Start of the diurnal day: sunrise rounded down to the half hour, in local wall time."""
+    return sunrise.replace(minute=0 if sunrise.minute < 30 else 30, second=0, microsecond=0)
+
+
 def build_base_thirties(
     lat: float,
     lon: float,
     target_date: date,
     tz_name: str | ZoneInfo = "UTC",
 ) -> List[ThirtyBlock]:
-    """Construct the foundational 48 Thirty blocks for target_date.
-    
-    Each block is tagged with sunlight and twilight properties based on
-    its midpoint relative to the calculated solar phases.
+    """Construct the 48-thirty solar canvas for the diurnal day target_date.
+
+    Block 0 is the thirty containing sunrise on target_date; the canvas then
+    runs 24 hours, through the night, into the early morning of the next
+    calendar date. Blocks are spaced in absolute time, so DST changes never
+    produce duplicated or missing thirties.
     """
     tz = _get_zoneinfo(tz_name)
     phases = get_solar_phases(lat, lon, target_date, tz)
-    sunrise = phases["sunrise"]
-    sunset = phases["sunset"]
-    dawn = phases["dawn"]
-    dusk = phases["dusk"]
+    next_phases = get_solar_phases(lat, lon, target_date + timedelta(days=1), tz)
+    sunrise, sunset = phases["sunrise"], phases["sunset"]
 
-    day_start = datetime.combine(target_date, time.min, tzinfo=tz)
+    start_utc = diurnal_day_start(sunrise).astimezone(timezone.utc)
     blocks: List[ThirtyBlock] = []
-
     for index in range(48):
-        block_start = day_start + timedelta(minutes=30 * index)
-        block_end = block_start + timedelta(minutes=30)
+        block_start = (start_utc + timedelta(minutes=30 * index)).astimezone(tz)
+        block_end = (start_utc + timedelta(minutes=30 * (index + 1))).astimezone(tz)
         midpoint = block_start + timedelta(minutes=15)
 
-        is_sunlight = (sunrise <= midpoint <= sunset)
-        is_twilight = (dawn <= midpoint < sunrise) or (sunset < midpoint <= dusk)
-
-        kind = BlockKind.DAYLIGHT_DISCRETIONARY if is_sunlight else BlockKind.DARK_DISCRETIONARY
-
+        is_sunlight = sunrise <= midpoint <= sunset
+        is_twilight = (
+            (sunset < midpoint <= phases["dusk"])
+            or (next_phases["dawn"] <= midpoint < next_phases["sunrise"])
+            or (phases["dawn"] <= midpoint < sunrise)
+        )
         blocks.append(
             ThirtyBlock(
                 index=index,
@@ -256,7 +261,6 @@ def build_base_thirties(
                 end_dt=block_end,
                 is_sunlight=is_sunlight,
                 is_twilight=is_twilight,
-                kind=kind,
             )
         )
 
@@ -269,16 +273,12 @@ def create_base_day_plan(
     target_date: date,
     tz_name: str | ZoneInfo = "UTC",
 ) -> DayPlan:
-    """Create a pristine DayPlan populated with 48 base blocks and solar boundaries."""
+    """Create an empty DayPlan: the solar canvas with no spans."""
     tz = _get_zoneinfo(tz_name)
     phases = get_solar_phases(lat, lon, target_date, tz)
-    blocks = build_base_thirties(lat, lon, target_date, tz)
-
-    plan = DayPlan(
+    return DayPlan(
         target_date=target_date,
-        blocks=blocks,
+        blocks=build_base_thirties(lat, lon, target_date, tz),
         sunrise=phases["sunrise"],
         sunset=phases["sunset"],
     )
-    plan.recalculate_counts()
-    return plan

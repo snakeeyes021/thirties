@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta, timezone
-from gi.repository import Gtk
+import gi
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gtk, Pango, PangoCairo
 
 from thirties_core.astronomy import get_current_time
 from thirties_core.models import DayPlan
@@ -64,7 +66,9 @@ class SolarArcWidget(Gtk.DrawingArea):
         now = get_current_time(self.day_plan.sunrise.tzinfo)
         sunrise = self.day_plan.sunrise
         sunset = self.day_plan.sunset
-        is_today = (self.day_plan.target_date == now.date())
+        # "Today" means now falls on this plan's diurnal canvas (sunrise to the next
+        # sunrise), not the calendar date, so the moon still shows after midnight.
+        is_today = self.day_plan.day_start.timestamp() <= now.timestamp() < self.day_plan.day_end.timestamp()
 
         is_night = (now < sunrise or now > sunset) if is_today else False
 
@@ -141,17 +145,13 @@ class SolarArcWidget(Gtk.DrawingArea):
 
                 # Single Moon Phase Glyph centered directly on the trajectory!
                 phase_glyph, _ = get_moon_phase(now)
-                cr.set_font_size(16.0)
-                m_ext = cr.text_extents(phase_glyph)
-                cr.move_to(
-                    moon_x - (m_ext.x_bearing + m_ext.width / 2.0),
-                    moon_y - (m_ext.y_bearing + m_ext.height / 2.0)
-                )
-                cr.show_text(phase_glyph)
+                layout = self._layout(cr, phase_glyph, 16.0)
+                ink, _logical = layout.get_pixel_extents()
+                cr.move_to(moon_x - (ink.x + ink.width / 2.0), moon_y - (ink.y + ink.height / 2.0))
+                PangoCairo.show_layout(cr, layout)
 
         # 4. Labels for Horizon bounds and Apex (Midday / Midnight)
         cr.set_source_rgba(0.75, 0.75, 0.75, 0.9)
-        cr.set_font_size(11.0)
 
         if is_night:
             if now > sunset:
@@ -172,16 +172,23 @@ class SolarArcWidget(Gtk.DrawingArea):
             right_text = f"☾ {sunset.strftime('%I:%M %p').lstrip('0')}"
             center_text = f"Solar Midday {solar_mid.strftime('%I:%M %p').lstrip('0')}"
 
-        # Left label
-        cr.move_to(margin_x, horizon_y + 18)
-        cr.show_text(left_text)
+        # Left label, right label (right-aligned) and apex label (centered at top)
+        self._draw_text(cr, left_text, margin_x, horizon_y + 18, 0.0)
+        self._draw_text(cr, right_text, width - margin_x, horizon_y + 18, 1.0)
+        self._draw_text(cr, center_text, center_x, peak_y - 8, 0.5)
 
-        # Right label (dynamically right-aligned)
-        r_ext = cr.text_extents(right_text)
-        cr.move_to(width - margin_x - r_ext.width, horizon_y + 18)
-        cr.show_text(right_text)
+    def _layout(self, cr, text: str, size_px: float) -> Pango.Layout:
+        # Pango (unlike Cairo's toy text API) falls back to fonts that have the ☼ ☾ and moon glyphs.
+        layout = PangoCairo.create_layout(cr)
+        desc = self.get_pango_context().get_font_description().copy()
+        desc.set_absolute_size(size_px * Pango.SCALE)
+        layout.set_font_description(desc)
+        layout.set_text(text, -1)
+        return layout
 
-        # Apex label (dynamically centered at top)
-        c_ext = cr.text_extents(center_text)
-        cr.move_to(center_x - c_ext.width / 2.0, peak_y - 8)
-        cr.show_text(center_text)
+    def _draw_text(self, cr, text: str, x: float, baseline_y: float, align: float, size_px: float = 11.0) -> None:
+        """Draw text with its baseline at baseline_y; align 0 = left edge at x, 0.5 = centered, 1 = right edge."""
+        layout = self._layout(cr, text, size_px)
+        text_width, _h = layout.get_pixel_size()
+        cr.move_to(x - text_width * align, baseline_y - layout.get_baseline() / Pango.SCALE)
+        PangoCairo.show_layout(cr, layout)

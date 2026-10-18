@@ -28,13 +28,16 @@ if str(REPO_ROOT) not in sys.path:
 from thirties_core.astronomy import get_current_time, get_diurnal_date, get_solar_phases, set_debug_time
 from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
-from thirties_core.conversation import ACTION_CLAIM_PATTERN, ConversationManager, PlanSnapshot, StateDelta
+from thirties_core.brains.frontier import ACTION_CLAIM_PATTERN
+from thirties_core.conversation import ConversationManager
+from thirties_core.plan_tools import PlanSnapshot, StateDelta
 from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine, parse_model_directives
-from thirties_core.models import BlockKind, DayPlan, TaskItem, ThirtyBlock
+from thirties_core.clock import format_clock
+from thirties_core.models import DayPlan, TaskItem
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 
 try:
-    from tests.run_eval_harness import FastHybridInferenceEngine, PersistentGemmaEngine
+    from tests.legacy_slm.run_eval_harness import FastHybridInferenceEngine, PersistentGemmaEngine
     HAS_PERSISTENT_ENGINE = True
 except Exception:
     HAS_PERSISTENT_ENGINE = False
@@ -237,11 +240,6 @@ def detect_anomalies(
         if not re.search(r"\byou asked\b|\byou requested\b", r_lower):
             anomalies.append("PASSIVE PHRASING: Assistant phrased its own scheduling actions as having been completed by the user ('You have...').")
 
-    # 5. Potential literal number confusion (e.g. 8am -> block 8)
-    if "8am" in u_lower or "8:00 am" in u_lower or "8 to 4" in u_lower or "8-4" in u_lower:
-        modified_blocks = delta_summary.get("modified_blocks", [])
-        if 8 in modified_blocks and 3 not in modified_blocks:
-            anomalies.append("NUMBER CONFUSION: User requested 8am (Block 3), but model modified Block 8 (10:30 AM).")
 
     return anomalies
 
@@ -373,7 +371,7 @@ class InteractiveEvaluator:
         conv.messages = list(session.messages)
 
         # Snapshot before
-        snap_before = conv._capture_plan_snapshot()
+        snap_before = conv.tools.capture_snapshot()
         msg_count_before = len(conv.messages)
 
         # Execute turn
@@ -382,8 +380,8 @@ class InteractiveEvaluator:
         turn_duration = round(time.time() - t0, 2)
 
         # Snapshot after
-        snap_after = conv._capture_plan_snapshot()
-        delta = conv._compute_state_delta(snap_before, snap_after)
+        snap_after = conv.tools.capture_snapshot()
+        delta = conv.tools.compute_delta(snap_before, snap_after)
 
         # Extract executed tools from newly added messages
         executed_tools = []
@@ -394,27 +392,21 @@ class InteractiveEvaluator:
                     "output": m.get("content", ""),
                 })
 
+        def describe(state) -> str:
+            return f"{state.title} {format_clock(state.start_dt)} – {format_clock(state.end_dt)} [{state.category}]"
+
+        span_diffs = (
+            [f"added {describe(snap_after.spans[i])}" for i in delta.added]
+            + [f"removed {describe(snap_before.spans[i])}" for i in delta.removed]
+            + [f"changed {describe(snap_before.spans[i])} -> {describe(snap_after.spans[i])}" for i in delta.changed]
+        )
         delta_summary = {
-            "modified_blocks": delta.modified_blocks,
+            "span_diffs": span_diffs,
             "resolved_events": delta.resolved_events,
             "finalized_changed": delta.finalized_changed,
             "total_changes": delta.total_changes,
             "duration_seconds": turn_duration,
         }
-
-        # Human-readable block diffs
-        block_diffs = []
-        for b_idx in delta.modified_blocks:
-            old_b = snap_before.blocks[b_idx]
-            new_b = snap_after.blocks[b_idx]
-            blk_obj = day_plan.get_block(b_idx)
-            log_idx = day_plan.get_logical_index(blk_obj)
-            s_clk = blk_obj.start_dt.strftime('%I:%M %p').lstrip('0')
-            e_clk = blk_obj.end_dt.strftime('%I:%M %p').lstrip('0')
-            block_diffs.append(
-                f"Block {log_idx} ({s_clk}–{e_clk}): {old_b.kind.name} (label='{old_b.label}') -> {new_b.kind.name} (label='{new_b.label}') [locked={new_b.is_locked}]"
-            )
-        delta_summary["block_diffs"] = block_diffs
 
         anomalies = detect_anomalies(user_message, assistant_reply, executed_tools, delta_summary)
 
@@ -522,7 +514,7 @@ class InteractiveEvaluator:
                 content.append("")
 
             content.append("**State Delta**:")
-            diffs = t.delta_summary.get("block_diffs", [])
+            diffs = t.delta_summary.get("span_diffs", [])
             if diffs:
                 for d in diffs:
                     content.append(f"- {d}")
@@ -588,7 +580,7 @@ def format_turn_output(turn: TurnRecord, session_id: str) -> str:
         lines.append(f"EXECUTED DIRECTIVES: None")
 
     lines.append(f"STATE DELTA (Total Changes: {turn.delta_summary.get('total_changes', 0)}):")
-    diffs = turn.delta_summary.get("block_diffs", [])
+    diffs = turn.delta_summary.get("span_diffs", [])
     if diffs:
         for d in diffs:
             lines.append(f"  • {d}")
@@ -707,12 +699,8 @@ def main():
         day_plan = DayPlan.from_dict(session.day_plan_dict) if session.day_plan_dict else None
         print(f"Session: {session.session_id} | Date: {session.target_date} | Turns: {len(session.turns)}")
         if day_plan:
-            work_blocks = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.kind == BlockKind.WORK]
-            sleep_blocks = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.kind == BlockKind.SLEEP]
-            assigned_blocks = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.is_assigned or (b.label and b.kind not in (BlockKind.WORK, BlockKind.SLEEP))]
-            print(f"Work Blocks: {work_blocks or 'None'}")
-            print(f"Sleep Blocks: {sleep_blocks or 'None'}")
-            print(f"Assigned Task Blocks: {assigned_blocks or 'None'}")
+            for span in day_plan.spans_in_view():
+                print(f"  {format_clock(span.start_dt)} – {format_clock(span.end_dt)}: {span.title} [{span.category.value}]")
             print(f"Daylight Available: {day_plan.daylight_available_count} | Dark Available: {day_plan.dark_available_count}")
 
     elif args.subcommand == "finish":
@@ -762,8 +750,8 @@ def main():
             elif user_input == "/status":
                 day_plan = DayPlan.from_dict(session.day_plan_dict) if session.day_plan_dict else None
                 if day_plan:
-                    work_blocks = [day_plan.get_logical_index(b) for b in day_plan.blocks if b.kind == BlockKind.WORK]
-                    print(f"Work Blocks: {work_blocks}")
+                    for span in day_plan.spans_in_view():
+                        print(f"  {format_clock(span.start_dt)} – {format_clock(span.end_dt)}: {span.title} [{span.category.value}]")
                 continue
             elif user_input.startswith("/grade"):
                 # e.g. /grade a=4 t=5 adh=3 n="critique"

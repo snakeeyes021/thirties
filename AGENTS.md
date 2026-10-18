@@ -105,23 +105,46 @@ The language model handles **dialogue, intent extraction, and fuzzy negotiation*
 
 ---
 
-## 4. The Dual-Branch Strategy: Two Tracks, One Compass
+## 4. One Shared Core, Two Brains
 
-To balance long-term interest in a robust (and privacy-focused) solution with the short term user need to have a working prototype TODAY (in the sense of "yes, I understand the car is in the shop until Tuesday, but I still need something to drive until then"), the project maintains two parallel tracks. Agents must understand the distinct mission of each branch:
+To balance long-term interest in a robust (and privacy-focused) solution with the short term user need to have a working prototype TODAY (in the sense of "yes, I understand the car is in the shop until Tuesday, but I still need something to drive until then"), the project runs two tracks. They are **two brains on one shared core**, living side by side on `main`, not two long-lived branches.
 
-| Dimension | Track 1: Practical Assistant (`feat/practical-gemini-assistant`) | Track 2: Research SLM (`feat/longterm-slm-architecture`) |
+The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the frontier prompt will not work for it. Its brain has to be a structurally different, heavily scaffolded harness. That difference lives entirely in the brain layer; everything below it is shared.
+
+```
+   Clients (GTK app, Telegram bridge, eval harnesses)
+                         │
+              ConversationManager  (thirties_core/conversation.py)
+                         │
+        ┌────────────────┴────────────────┐
+  FrontierBrain                       SLM brain
+  (brains/frontier.py)                (brains/slm/, planned)
+  one rich prompt, full backlog,      a scaffolded pipeline: tiny constrained
+  direct tool calls                   decisions, Python does the rest
+        └────────────────┬────────────────┘
+                         │  tool calls only
+              PlanTools  (thirties_core/plan_tools.py)
+                         │
+        Deterministic core: astronomy, models, scheduler, state DB,
+        connectors (Joplin, EDS calendar), sync
+```
+
+| Dimension | Frontier Brain (the daily driver) | SLM Brain (the research track) |
 | :--- | :--- | :--- |
 | **Primary Mission** | Production-ready daily driver for user's actual planning today. | Research testbed for privacy-first 4B SLMs running locally on edge hardware. |
 | **Model Backend** | **Gemini 3.8 Flash** (via Antigravity `agy` CLI bridge or direct API). | **Gemma 4B / 2B** (via LiteRT-LM Vulkan/GPU). |
 | **Context Window** | **1M+ tokens**: Ingests complete task hierarchies and notes without artificial truncation. | **2K–4K tokens**: Highly constrained budget requiring strict token conservation. |
-| **Backlog Strategy** | Full ingestion with taxonomy and checklist extraction. | Need to research and test various strategies, given token/context constraints of SLM. |
-| **Scheduling Model**| Flexible block tool calls (`modify_blocks`, `clear_blocks`, `resolve_event`). | **Uniform Canvas**: Universe owns Daylight/Dark; model only schedules clock-time `EventSpan`s. |
-| **Validation Engine**| Real daily usage, multi-turn stress dialogues, cross-device sync. | Autonomous combinatorial matrix (`run_eval_harness.py`) and stepping judge (`interactive_eval.py`). This is the real driving force of getting this branch running correctly; in both branches, we are leveraging MASSIVE generative intelligence; in the other branch, we do it "because we need *something* that works *now*," and in this branch we do it to step in where a human normally would and provide mountains of qualitative data to hone the exact workings of our SLM and the division of labor across the model and hyper efficient/effective, well curated, and smartly selected deterministic helper tools. |
+| **Backlog Strategy** | Full ingestion with taxonomy and checklist extraction. | Need to research and test various strategies, given token/context constraints of SLM. Python pre-scores; the model sees a handful of candidates. |
+| **Model's Job** | Reads the whole situation, converses, calls tools. | Makes one tiny, schema-constrained decision per call; Python handles selection, time resolution, conflicts and as much of the reply as possible. |
+| **Validation Engine**| Real daily usage, multi-turn stress dialogues, cross-device sync. | Autonomous combinatorial matrix (`run_eval_harness.py`) and stepping judge (`interactive_eval.py`), with the Frontier Brain's result on the same scenario as a reference answer. This is the real driving force of getting the SLM running correctly; in both tracks, we are leveraging MASSIVE generative intelligence; for the daily driver, we do it "because we need *something* that works *now*," and for the SLM we do it to step in where a human normally would and provide mountains of qualitative data to hone the exact workings of our SLM and the division of labor across the model and hyper efficient/effective, well curated, and smartly selected deterministic helper tools. |
 
-### 4.1. Rules for Working Across Branches
-1. **Never Cripple the Practical Branch with SLM Constraints**: In `feat/practical-gemini-assistant`, leverage Gemini's massive reasoning capacity. Do not artificially truncate notes or limit backlog ingestion unless performance demands it.
-2. **Never Blindly Feed Massive Contexts to the SLM Branch**: In `feat/longterm-slm-architecture`, dumping 50 notes into Gemma 4B causes catastrophic context saturation. Respect pre-scoring and concise candidate feeds.
-3. **Strict Decoupling of Shared Components**: Shared core logic (`thirties_core/astronomy.py`, `thirties_core/calendar_engine.py`, `thirties_core/models.py`) must remain completely decoupled from model-specific inference logic.
+Both brains use the **same tool API** (`PlanTools`). The Frontier Brain shows in real use which tools are actually needed; the SLM Brain inherits exactly those. See `docs/ROADMAP.md` for sequencing and `docs/SLM_BRAIN.md` for the research design.
+
+### 4.1. Rules for Working Across Brains
+1. **Never Cripple the Frontier Brain with SLM Constraints**: Leverage Gemini's massive reasoning capacity. Do not artificially truncate notes or limit backlog ingestion unless performance demands it. SLM scaffolding stays inside the SLM brain.
+2. **Never Blindly Feed Massive Contexts to the SLM Brain**: Dumping 50 notes into Gemma 4B causes catastrophic context saturation. Respect pre-scoring and concise candidate feeds.
+3. **Brains Own Prompts; the Core Owns Math and State**: A brain never mutates the `DayPlan` directly. Every change goes through `PlanTools`. Shared core logic (`astronomy.py`, `calendar_engine.py`, `models.py`, `scheduler.py`, `plan_tools.py`) contains no prompts and no model-specific logic.
+4. **Core Changes Land Once, on `main`**: Short-lived feature branches are fine. Long-lived per-brain branches are not; they force cherry-picking shared code between diverging copies.
 
 ---
 
@@ -150,7 +173,7 @@ Future agents frequently fall into predictable traps. **Never make these five ar
 ### 🚫 Anti-Pattern 5: "Vibe Testing"
 *The Symptom*: Making an edit to `conversation.py`, trying a single prompt in the chat panel, saying "looks good to me", and committing.
 *The Consequence*: Silent regressions in timezone handling, edge-case block calculations, or sync payloads.
-*The Correct Fix*: Always run the automated unit test suite (`.venv/bin/python -m unittest discover tests`) and relevant evaluation batteries (`tests/interactive_eval.py`) before declaring victory.
+*The Correct Fix*: Always run the automated unit test suite (`python3 -m unittest discover tests`) and relevant evaluation harnesses (`tests/interactive_eval.py`) before declaring victory.
 
 ---
 
@@ -159,43 +182,74 @@ Future agents frequently fall into predictable traps. **Never make these five ar
 ### 6.1. Directory Structure
 ```
 Thirties/
-├── AGENTS.md                          # This file: core operational compass
+├── AGENTS.md                          # This file: core operational compass (wins over every other doc)
+├── README.md                          # What Thirties is and what "working" means for the user
 ├── docs/
-│   ├── BRANCH_STRATEGY_AND_DESIGN.md  # Detailed branch-specific technical specs
-│   └── archive/                       # Historical architectural blueprints
+│   ├── ROADMAP.md                     # The single ordered backlog
+│   ├── SLM_BRAIN.md                   # Research design for the on-device SLM brain and its evals
+│   └── archive/                       # Superseded plans; history only, never instructions
 ├── src/                               # GTK4 / Libadwaita Desktop GUI (Presentation Client)
-│   ├── main.py                        # GUI entrypoint
-│   ├── window.py                      # Main application window & stack
-│   ├── views/                         # DayView, ChatPanel
+│   ├── main.py                        # GUI entrypoint: setup on first run, background mode, notifications
+│   ├── portal.py                      # The Background portal (run in background, autostart) over D-Bus
+│   ├── window.py                      # Main application window (schedule and chat panes)
+│   ├── views/                         # DayView, ChatPanel, setup, Preferences (shared settings rows)
 │   └── widgets/                       # BlockWidget, SolarArc
-├── thirties_core/                     # Pure Python deterministic business logic & engine
+├── thirties_core/                     # Pure Python core: zero GUI imports
+│   ├── app_core.py                    # What a running app shares: config + settings, engines, background service
+│   ├── assistant_tools.py             # Outcomes, rollover, memory, profile, history, statistics, reminders, Joplin edits
+│   ├── background.py                  # Background service: check-ins, reminders, start nudges, Joplin outbox, sync
 │   ├── astronomy.py                   # NOAA solar equations & diurnal dates
-│   ├── calendar_engine.py             # Calendar connector (EDS & mock)
+│   ├── backlog.py                     # One loader for every task source (Joplin, media wishlists)
+│   ├── brains/                        # Model-specific layer: prompts & turn logic
+│   │   ├── frontier.py                # FrontierBrain: single rich prompt for Gemini
+│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (runtime, parse, brain, model download)
+│   ├── calendar_engine.py             # Calendars via EDS / GNOME Online Accounts; events -> spans
+│   ├── clock.py                       # Clock-time & duration parsing: the model says "4:30 PM", Python does the math
 │   ├── config.py                      # TOML configuration & dataclasses
-│   ├── conversation.py                # Conversation state machine & tool execution
-│   ├── inference.py                   # Modular inference engines (Gemini, LiteRT, Mock)
-│   ├── joplin_engine.py               # Joplin connector (SQLite & REST ingestion)
-│   ├── models.py                      # Domain models (ThirtyBlock, DayPlan, TaskItem)
-│   ├── scheduler.py                   # Deterministic scheduler & SQLite StateDatabase
-│   ├── sync_engine.py                 # Cross-device state sync engine
-│   └── telegram_bridge.py             # Temporary headless mobile Telegram bot & notifier
+│   ├── conversation.py                # ConversationManager: client entry point, wires tools to a brain
+│   ├── inference.py                   # Model transports (agy CLI, Gemini API, LiteRT, Mock) & directive parser
+│   ├── joplin_engine.py               # Joplin connector (SQLite read)
+│   ├── joplin_writeback.py            # Writing to Joplin through its API: check off, add, break down; outbox
+│   ├── location.py                    # City search and naming (OpenStreetMap), system time zone
+│   ├── legacy.py                      # Converts pre-span (block-kind) saved plans into spans
+│   ├── media_sources.py               # Goodreads / Letterboxd / Serializd wishlists (public, no login)
+│   ├── memory.py                      # Conversations (per day), user profile, memory notes, energy log
+│   ├── models.py                      # Solar canvas (ThirtyBlock), EventSpan, DayPlan, TaskItem
+│   ├── plan_tools.py                  # PlanTools: the shared clock-time tool API & invariants
+│   ├── runner.py                      # Host-side LiteRT runner (used from the Flatpak sandbox)
+│   ├── scheduler.py                   # Span store (StateDatabase) & day builder (DeterministicScheduler)
+│   ├── settings.py                    # App settings: per device or synced, secrets in the keyring
+│   ├── stats.py                       # Statistics from what actually happened, as plain facts
+│   ├── sync_engine.py                 # Cross-device state sync via a chosen folder or a Joplin note
+│   └── telegram_bridge.py             # Telegram bot (run by the background service), pairing
 └── tests/                             # Unit tests & evaluation harnesses
     ├── test_*.py                      # Standard unit test suite
-    ├── run_eval_harness.py            # Combinatorial multi-persona stress matrix
-    └── interactive_eval.py            # Turn-by-turn stepping & LLM-as-a-judge
+    ├── fixtures.py                    # Shared test fixtures (a scheduler on a temp DB for a fixed day)
+    ├── frontier_eval.py               # Live-model "real day" scenarios, checked deterministically on the schedule
+    ├── sim_eval.py                    # Gemini role-plays the user (hidden goals) vs either brain, then judges
+    ├── interactive_eval.py            # Turn-by-turn stepping with state deltas; an agent or human is the judge
+    └── legacy_slm/                    # Pre-span SLM harnesses: source material only, they do not run
 ```
 
 ### 6.2. Common Execution Commands
+Use `.venv/bin/python` instead of `python3` if you have a project virtualenv.
 ```bash
 # 1. Run full unit test suite (Fast, sandboxed, mock-backed)
-.venv/bin/python -m unittest discover tests
+python3 -m unittest discover tests
 
 # 2. Run Headless Mobile Bridge (Temporary Telegram daemon)
-.venv/bin/python -m thirties_core.telegram_bridge
+python3 -m thirties_core.telegram_bridge
 
-# 3. Run Turn-by-Turn Stepping Evaluation Harness (Research branch)
-.venv/bin/python tests/interactive_eval.py --mode interactive
+# 3. Frontier Brain eval against a live model (needs GEMINI_API_KEY; ~35 requests per run)
+python3 -m tests.frontier_eval
 
-# 4. Run Desktop GTK Application
-python3 src/main.py
+# 4. Simulated-user eval of either or both brains (needs agy; SLM needs the LiteRT venv)
+~/.local/share/thirties/venv/bin/python -m tests.sim_eval --brain both
+
+# 5. Step through an evaluation session (start / step / grade / finish, or an interactive REPL)
+python3 -m tests.interactive_eval repl --no-gpu
 ```
+
+The desktop app is built with meson and installs `src/` as the `thirties` package (build it with GNOME Builder or `flatpak-builder` using `tech.redfoxlabs.Thirties.json`). `python3 src/main.py` does not work directly because of the package-relative imports.
+
+Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commit only curated summaries, never raw transcripts or SQLite files.

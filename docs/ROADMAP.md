@@ -1,0 +1,167 @@
+# Thirties Roadmap
+
+> The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
+>
+> Last revised: 2026-10-15.
+
+---
+
+## Where We Are
+
+Both brains run on one shared core, and both are measured with simulated users: Gemini, through `agy`, role-plays the user with hidden goals across 13 multi-turn scenarios built from real use, then judges the outcome. Raw reports are in `docs/eval_reports/sim/` (gitignored).
+
+| Brain | Goals met | Deterministic checks | Judge: accuracy / understanding / clarity / efficiency / tone (of 5) | Time per reply |
+|---|---|---|---|---|
+| Frontier (gemini-3.8-flash-low via agy) | **0.98** | 12/13 | 4.5 / 4.3 / 4.9 / 4.5 / 4.8 | ~9 s |
+| SLM (Gemma 4 E4B on the laptop's iGPU), round 5 | **0.97** | 12/13 | 4.3 / 4.0 / 4.6 / 4.1 / 4.4 | ~13 s |
+
+**Scaled up on 2026-10-15** (see `docs/SLM_BRAIN.md` §4.2): generated scenarios (`tests/sim_generator.py`) and a 546-case parse benchmark. On 90 generated conversations the SLM met 0.88 of goals (63/90 passed every check, and the simulated user gave up 12 times); on 139 the Frontier met 0.98. The hand-written 13 had overstated the SLM.
+
+The SLM went from 0.39 to 0.89–0.94 on the hardest scenario (the user's real Sunday conversation), and from 0.33 to 1.0 on "work ran long", over five rounds. Each fix came from reading transcripts and the judge's notes. Its one remaining check failure came from a check that was too strict, since relaxed.
+
+The first real day of use (before 2026-10-14) was about 75% usable, on the old core. Everything below has changed since.
+
+---
+
+## Done
+
+### Phase 0: Restructure
+- **One trunk.** The practical branch was merged in. The SLM branch held only docs, which are now archived.
+- **The core split.** The shared tool API (`plan_tools.py`) is separated from the brains (`brains/`).
+
+### Phase 1: Event spans on a solar canvas
+- **The canvas** is 48 thirties from the sunrise thirty into the next morning, DST-safe. Blocks hold only physical facts.
+- **Spans.** Work, sleep, calendar events, tasks and activities are all `EventSpan`s, kept in a global store (so spans can cross midnight) with tombstones. Old block-based plans migrate once on startup.
+- **Routines** (default work and sleep) apply on configured **work days only**, with deterministic ids, so a day off always wins.
+- **Sync** is last-write-wins per item, and covers spans, days, decisions, conversations, profile, memory and energy.
+
+### Phase 2: Clock-time tools and a clean Frontier prompt
+- **Tools:**
+  - `add_event` (with `alongside`, `push_later`)
+  - `update_event` (start, end, duration, shift, `push_later`, `to_day`)
+  - `remove_event`, `swap_events`, `clear_time`, `find_open_time`, `list_schedule`, `resolve_calendar_event`
+  - Every one takes a `day` argument.
+- **One text grammar** for all models: `CALL tool {json}`.
+- **The Frontier prompt** has no block numbers, no arithmetic lessons, no fixed daylight/dark rules and no "lock in" step. It is rebuilt every turn.
+- **Reply style, for both brains:** answer in the user's terms, with only what the reply needs. If the user counts in chunks, answer in chunks ("three open chunks at 4:00 PM"). A plan is listed by start time ("- 4:00 PM – Feed cat"), with an end time only where it isn't implied (`clock.agenda_lines`). The sim's `fill_afternoon` and `fits_in_chunks` scenarios check this.
+
+### Phase 3: Closing the loop (first version)
+- **`log_outcome`** records done, partial or skipped:
+  - Reported or estimated times are shown on the schedule; the original plan is kept for statistics.
+  - Finished tasks are checked off in Joplin (this needs `[joplin] api_token`).
+  - Skips count as deferrals.
+  - Moving a done or skipped item to another day keeps the record and plans a fresh copy.
+- **`review_day`** lists items with no outcome yet and suggests rollovers. Both brains are told about anything waiting for an outcome.
+- **Telegram check-ins:** "did you get to X, or are you still on it?" after a planned item ends.
+- **`log_energy`.**
+
+### Phase 4: Learning (first version)
+- **`stats.py`** computes:
+  - completion rates
+  - real versus planned duration per activity (reliable times only)
+  - completion by part of the day and by energy level
+  - chronically deferred tasks
+- **The facts reach both brains** through `get_statistics`, the Frontier prompt, and the SLM's suggestion scoring.
+- **Assistant memory** (`remember`/`forget`) and **a user profile** (habits, near- and long-term goals, preferences, observations):
+  - Both are shown to the Frontier Brain every turn.
+  - You can view and edit both in the desktop app (menu → Profile & Memory).
+- **`week_overview`**, plus any-day tools, for planning beyond one day.
+
+### Conversations
+- **Stored per diurnal day.** A day reopens its latest conversation, and the desktop app and Telegram share it.
+- **Starting fresh:** "New conversation" in the app, `/new` in Telegram. The app also has a picker for the day's conversations.
+- **History tools** for both brains: `search_history`, `list_conversations`, `read_conversation`.
+
+### Backlog and connectors
+- **Joplin parsing:**
+  - keeps headings and nesting
+  - **"someday" sections** (Probation and similar) are visible but never pushed
+  - stable task ids
+  - completion keeps the item's indentation
+- **Media wishlists** from Goodreads (RSS), Letterboxd (public pages) and Serializd (its web app's API), with no logins.
+- **Google calendars through GNOME Online Accounts:**
+  - recurring events expanded
+  - real time zones
+  - all-day events and birthdays skipped
+  - your RSVP decides invites
+  - other people's calendars need a decision
+
+### SLM brain (see `docs/SLM_BRAIN.md`)
+- **Gemma parses; Python does the rest.** One parse per message, in a long-lived session that reuses the KV cache: about 12 s for the first message and about 3.5 s after that in the benchmark. The context window is 8k tokens, with a safe budget and a fresh session if a call fails.
+- **Python handles:**
+  - references ("it", "the first X", "the 9 PM one")
+  - loose times ("7", "later this morning", "after work")
+  - relative placement and sliding, swaps, moves to other days
+  - conflict options
+  - a scored backlog with Gemma picking the best few
+  - dialog acts (yes/no/option N)
+  - repairing misfiled fields, retrying actions that depend on later ones
+  - guards against invented changes or unasked sleep/work changes
+  - plain-word errors
+- **A verified voice:** Gemma rewrites short replies; Python keeps every time and title.
+
+### Clients
+- **Desktop app:**
+  - chat beside the schedule (hideable)
+  - multi-thirty items collapsed into cards, with concurrent items shown together
+  - the "now" highlight and the sun position update live
+  - availability counts only thirties still ahead
+  - other days can be viewed and edited, each with its own conversation
+- **Telegram bridge:**
+  - locked to your chat, with `--check`
+  - continues the desktop conversation, with `/new`
+  - check-ins and "starts now" notifications
+
+---
+
+## MVP: released as 0.0.1, an alpha (agreed 2026-10-16; done 2026-10-17)
+
+Done means a generic user can install Thirties fresh and use it daily, with no config files, dev tools or hand-run setup. Work happens on `restructure/one-core-two-brains`, in roughly this order:
+
+1. **Fix Gemma in the Flatpak, the right way:** the LiteRT runtime is bundled in the Flatpak (the wheel is pure-py3 manylinux) and runs inside the sandbox. The model (not gated) is downloaded on first run, with progress. This replaces the host-process workaround.
+2. **First-run setup and real Preferences.** No hand-edited TOML: brain; sync storage (a folder the user picks, or a Joplin note); Joplin connection and permission to check items off; Telegram; location (auto-detected, or a city); work days and hours; sleep; media wishlist usernames (profiles must be public). Everything is editable later in Preferences.
+3. **Brains:** Gemma is the default. Gemini through agy is a developer option: selectable only when `agy` is installed and signed in, with a one-line note on how to set it up and no walkthrough. The user chooses which Gemini sources it uses and in what order: subscription through agy, API key, or both.
+4. **Joplin write-back:** connect through Joplin's local API (Web Clipper service), queue anything that can't be delivered, and retry. With the user's permission, Thirties starts Joplin minimized when it needs it and Joplin isn't running.
+5. **Telegram:** setup in the app (BotFather steps, token check, pairing your phone's chat, saved), and the bridge running as the app's background mode through the Background portal (autostart at login, switchable in GNOME Settings).
+6. **Messages:** keep the check-in 10 minutes after an item ends; add reminders the user asks for at any time, on any day, and suppression on request.
+7. **Chat panel as its own full-height pane** with its own header bar (the libadwaita split-view pattern), holding new conversation, the conversation picker and the brain.
+8. **Sync to a user-chosen folder** (Drive via Insync, for example), with the Joplin note as the fallback.
+9. **AM/PM only where it could be mistaken:** the first time when it isn't obvious from now, wherever a time crosses noon or midnight relative to the time before it, and on ambiguous bare hours.
+10. **Rollover as a batch:** yesterday's unfinished items proposed together, confirmed in one go.
+11. **Statistics in planning:** real durations in proposals; a warning when a plan exceeds the capacity you've actually shown.
+12. **Conversation summaries** for history search.
+13. **The release build, last:** a Flatpak manifest and GitHub Actions workflow like Pianola's (`.github/workflows/flatpak.yml`: tests, a `.flatpak` bundle on every push, an OCI image on GHCR from `main` and tags, and a GitHub Release from a `v*` tag, marked pre-release while the version is 0.x). Then a human PR and merge to `main`, then a fresh eval baseline (both brains, sim/judge on flash-low, within the 66% budget).
+
+**Not yet tried by hand** (anything broken here is tech debt for the branch current when it's found): background permission and autostart, Detect location, pairing a phone by code, starting Joplin when needed, folder sync, and notifications from the installed app.
+
+**Deferred until after the MVP:** contextual check-ins ("have you started?"), a headless Joplin CLI sync peer, calendar refinements (no calendar write-back), per-weekday routines, the connector abstraction beyond the storage transport, further SLM research (E2B only if E4B doesn't fit a device), Flathub, translations, a native mobile app, and housekeeping.
+
+---
+
+## Next
+
+1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
+2. **SLM understanding and efficiency** (judge: understanding 3.4, efficiency 3.4 on generated scenarios). First, rerun the generated baseline's SLM scenarios on the fixes made since (`--only-from` the baseline report), then finish the remaining 160:
+   - Decision fatigue: when the user says "you pick" or is low on energy, propose one low-effort plan and apply it on "sure". Tasks need a rough effort estimate for this.
+   - Multi-part messages drop a part (50% on the parse benchmark: "work ran until 4:30, and move budget review to 4:30" loses the work change). Add a "did I cover everything in the message?" check in Python: look for nouns from the message that matched no action.
+   - "Dinner, cooking and eating, listening to X" becomes three items; it should be one item with X alongside.
+   - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
+3. **Messages to the user (check-ins and reminders):**
+   - Keep: one check-in 10 minutes after a planned item ends with no outcome.
+   - User-requested messages at any time, on any day ("remind me next week to water the alligator" → "3 PM on Saturday").
+   - Suppression on request ("no need to keep asking about X"; "I'll do it tomorrow").
+   - Later, once there's a rule for it: contextual messages ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
+4. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).
+5. **Statistics in planning:** use real durations from history when proposing how long things take, and warn when a plan exceeds the capacity you've actually shown.
+6. **Conversation summaries** when a conversation ends, so history search works on summaries instead of raw messages.
+7. **Calendar refinements:**
+   - remember "not mine" decisions per recurring series, not per occurrence
+   - (not planned for now: writing events back to Google Calendar; task write-back, Joplin first, is what matters)
+8. **Connector abstraction (Anti-Pattern 1):** `TaskSource`, `CalendarSource` and `SyncTransport` interfaces. The user mentioned "a cloud location with much more storage" as another configurable option, probably a sync or storage transport; waiting on the user to say what it is.
+9. **Weekly patterns:** different routines per weekday (work hours, sleep).
+10. **Housekeeping:**
+   - `pyproject.toml` dependencies are stale (`astral` is unused; `litert-lm-api` should be optional)
+   - `inference.py` hard-codes `~/dev/Thirties` runner paths
+   - unused imports
+   - the DST fall-back hour edge case: same-zone comparisons use wall time
+   - the desktop app's periodic refresh runs on the UI thread

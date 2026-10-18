@@ -56,6 +56,15 @@ def create_mock_joplin_db(db_path: Path) -> None:
     cur.execute("INSERT INTO folders VALUES ('f_unallowed', '', 'Random Vault', 0)")
 
     # Notes
+    # 9. Todo note with internal checkboxes in "1. Tasks"
+    cur.execute('''
+    INSERT INTO notes VALUES (
+        'note_9', 'f_tasks', 'Errands/Admin',
+        '## Active\n- [ ] Call Costco\n- [ ] Print recipes',
+        1, 0, 0, 0, 0, 0, 9000
+    )
+    ''')
+
     # 1. Active Markdown note with checkboxes in "1. Tasks"
     cur.execute("""
     INSERT INTO notes VALUES (
@@ -142,7 +151,15 @@ class TestJoplinEngine(unittest.TestCase):
         cfg = ThirtiesConfig()
         cfg.joplin.db_path = str(self.db_path)
         cfg.joplin.api_token = "test_token"
+        cfg.joplin.allowed_notebooks = ["1. Tasks", "2. Dev", "3. Creative", "4. Media", "5. Misc."]
+        cfg.joplin.whitelist_notes = ["30s Completed Log"]
         self.engine = JoplinEngine(cfg)
+
+    def test_no_chosen_notebooks_means_all_but_excluded(self) -> None:
+        self.engine.joplin_cfg.allowed_notebooks = []
+        titles = {t.parent_note_title or t.title for t in self.engine.fetch_tasks(self.db_path)}
+        self.assertIn("Secret Note", titles)  # in "Random Vault", which a fixed list would have hidden
+        self.assertFalse(any("Archive" in t.source_notebook for t in self.engine.fetch_tasks(self.db_path)))
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -155,7 +172,7 @@ class TestJoplinEngine(unittest.TestCase):
         # 2. "Write Joplin integration" (checkbox in note_1)
         # 3. "Fix CI builds" (todo note_2)
         titles = [t.title for t in tasks]
-        self.assertEqual(len(tasks), 3)
+        self.assertEqual(len(tasks), 5)
         self.assertIn("Ship MVP models", titles)
         self.assertIn("Write Joplin integration", titles)
         self.assertIn("Fix CI builds", titles)
@@ -244,5 +261,65 @@ class TestJoplinEngine(unittest.TestCase):
             self.assertIn("todo_completed", call_args[1])
 
 
+    def test_fetch_active_notes(self) -> None:
+        notes = self.engine.fetch_active_notes(self.db_path)
+        titles = [n["title"] for n in notes]
+        self.assertIn("Weekly Sprint", titles)
+        self.assertIn("Fix CI builds", titles)
+        self.assertIn("Errands/Admin", titles)
+        self.assertNotIn("Archived Note", titles)
+        self.assertNotIn("Secret Note", titles)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChecklistStructure(unittest.TestCase):
+
+    BODY = """## Active
+- [ ] Help Abbi get her computer reformatted
+\t- [ ] Requires getting everything merged to main
+- [x] Already done thing
+\t- [ ] Child of a done item
+- [ ] Costco customer service
+
+## Probation
+- [ ] Message Brad about a weekend trip
+"""
+
+    def test_sections_nesting_and_someday(self) -> None:
+        from thirties_core.joplin_engine import checklist_tasks
+        tasks = checklist_tasks("n1", "Errands/Admin", "1. Tasks", self.BODY, ["Probation"])
+        by_title = {t.title: t for t in tasks}
+        self.assertEqual(list(by_title), ["Help Abbi get her computer reformatted", "Requires getting everything merged to main",
+                                          "Child of a done item", "Costco customer service", "Message Brad about a weekend trip"])
+        self.assertEqual(by_title["Requires getting everything merged to main"].parent_task_id,
+                         by_title["Help Abbi get her computer reformatted"].id)
+        self.assertIsNone(by_title["Child of a done item"].parent_task_id)
+        self.assertEqual(by_title["Costco customer service"].section, "Active")
+        self.assertTrue(by_title["Message Brad about a weekend trip"].someday)
+        self.assertFalse(by_title["Costco customer service"].someday)
+
+    def test_ids_survive_edits_elsewhere_in_the_note(self) -> None:
+        from thirties_core.joplin_engine import checklist_tasks
+        before = {t.title: t.id for t in checklist_tasks("n1", "N", "nb", self.BODY, [])}
+        edited = "Some new intro paragraph\n\n" + self.BODY.replace("- [ ] Costco", "- [ ] New first item\n- [ ] Costco")
+        after = {t.title: t.id for t in checklist_tasks("n1", "N", "nb", edited, [])}
+        self.assertEqual(before["Costco customer service"], after["Costco customer service"])
+
+    def test_completing_a_nested_item_keeps_indentation(self) -> None:
+        from unittest.mock import MagicMock
+        from thirties_core.config import ThirtiesConfig
+        from thirties_core.joplin_engine import JoplinEngine, checklist_tasks
+        cfg = ThirtiesConfig()
+        cfg.joplin.api_token = "t"
+        engine = JoplinEngine(cfg)
+        engine.api_client = MagicMock()
+        engine.api_client.get_note.return_value = {"id": "n1", "body": self.BODY}
+        engine.api_client.update_note.return_value = True
+        child = next(t for t in checklist_tasks("n1", "N", "nb", self.BODY, []) if t.title.startswith("Requires"))
+        ok, _ = engine.complete_task(child)
+        self.assertTrue(ok)
+        new_body = engine.api_client.update_note.call_args[0][1]["body"]
+        self.assertIn("\t- [x] Requires getting everything merged to main", new_body)

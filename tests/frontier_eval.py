@@ -1,0 +1,383 @@
+"""Frontier Brain eval: replayable "real day" scenarios against a live model.
+
+Each scenario sets a simulated clock, sends one or more user turns through
+ConversationManager with a real inference engine, and then checks the final
+schedule deterministically: "what occupies 4:15 PM?", "is sleep untouched?".
+Checks never grade wording. Transcripts are saved for an agent or human judge.
+
+Not part of the unit suite (it needs network access and an API key):
+
+    python3 -m tests.frontier_eval                      # all scenarios via agy, gemini-3.8-flash-low
+    python3 -m tests.frontier_eval --only work_ran_long --repeat 3
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import tempfile
+import time as time_mod
+from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from thirties_core.astronomy import set_debug_time
+from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
+from thirties_core.config import ThirtiesConfig
+from thirties_core.conversation import ConversationManager
+from thirties_core.inference import AntigravityInferenceEngine, GeminiInferenceEngine
+from thirties_core.models import TaskItem
+from thirties_core.scheduler import DeterministicScheduler, StateDatabase
+
+REPORTS_DIR = REPO_ROOT / "docs" / "eval_reports" / "frontier"
+TZ = ZoneInfo("America/New_York")
+TRANSPORT_ERRORS = ("Encountered an error communicating with Gemini API", "Error contacting model via Antigravity CLI",
+                    "Failed invoking Antigravity CLI", "The Antigravity assistant timed out")
+LIVE_ENGINES = {"agy": AntigravityInferenceEngine, "api": GeminiInferenceEngine}
+ENGINE_CHOICE = "agy"
+DAY = date(2026, 10, 15)  # a Thursday
+
+
+def at(hhmm: str, day_offset: int = 0) -> datetime:
+    """Clock time on the scenario day (day_offset=1 for after midnight)."""
+    h, m = (int(x) for x in hhmm.split(":"))
+    return datetime.combine(DAY + timedelta(days=day_offset), time(h, m), tzinfo=TZ)
+
+
+# ------------------------------------------------------------------------------
+# Plan inspection, independent of how the core stores the schedule
+# ------------------------------------------------------------------------------
+
+def occupancy(plan, t: datetime) -> Tuple[str, str]:
+    """Return (category, title) of what occupies instant t; ("open", "") if free.
+
+    Categories: work, sleep, calendar, activity (tasks count as activities), open,
+    outside (t is not on this day's canvas).
+    """
+    if not (plan.day_start <= t < plan.day_end):
+        return ("outside", "")
+    block = plan.block_at(t)
+    covering = [s for s in plan.spans_overlapping(t, t + timedelta(minutes=1))]
+    if not covering or block is None:
+        return ("open", "")
+    rank = {"calendar": 0, "task": 1, "activity": 1, "work": 2, "sleep": 3}
+    s = min(covering, key=lambda s: rank[s.category.value])
+    cat = "activity" if s.category.value == "task" else s.category.value
+    same = sorted({c.title for c in covering if rank[c.category.value] == rank[s.category.value]})
+    return (cat, " + ".join(same))
+
+
+Check = Callable[["Run"], Optional[str]]  # returns None if OK, else a failure message
+
+
+def occupied_by(hhmm: str, category: str, title_contains: str = "", day_offset: int = 0) -> Check:
+    def check(run: "Run") -> Optional[str]:
+        cat, title = occupancy(run.plan, at(hhmm, day_offset))
+        if cat != category:
+            return f"{hhmm}{'+1d' if day_offset else ''}: expected {category}, got {cat} ({title!r})"
+        if title_contains and title_contains.lower() not in title.lower():
+            return f"{hhmm}{'+1d' if day_offset else ''}: expected title containing {title_contains!r}, got {title!r}"
+        return None
+    check.__doc__ = f"{hhmm}{'+1d' if day_offset else ''} is {category}{' ~ ' + title_contains if title_contains else ''}"
+    return check
+
+
+def unchanged_outside(windows: List[Tuple[str, str]]) -> Check:
+    """Every half hour outside the given windows looks the same as before the turns."""
+    def inside(t: datetime) -> bool:
+        return any(at(a) <= t < (at(b) if at(b) > at(a) else at(b, 1)) for a, b in windows)
+
+    def check(run: "Run") -> Optional[str]:
+        diffs = []
+        for t, before in run.baseline.items():
+            if inside(t):
+                continue
+            after = occupancy(run.plan, t)
+            if after != before:
+                diffs.append(f"{t.strftime('%a %I:%M %p')}: {before} -> {after}")
+        return ("unexpected changes: " + "; ".join(diffs[:6])) if diffs else None
+    check.__doc__ = f"nothing changed outside {windows}"
+    return check
+
+
+def occupied_on_day(day_offset: int, hhmm: str, category: str, title_contains: str = "") -> Check:
+    """Like occupied_by, but on another diurnal day's plan (day_offset days after the scenario day)."""
+    def check(run: "Run") -> Optional[str]:
+        plan, _ = run.scheduler.build_day_plan(DAY + timedelta(days=day_offset))
+        cat, title = occupancy(plan, at(hhmm, day_offset))
+        if cat != category or title_contains.lower() not in title.lower():
+            return f"day+{day_offset} {hhmm}: expected {category} ~ {title_contains!r}, got {cat} ({title!r})"
+        return None
+    check.__doc__ = f"day+{day_offset} {hhmm} is {category} ~ {title_contains}"
+    return check
+
+
+def no_changes() -> Check:
+    c = unchanged_outside([])
+    c.__doc__ = "schedule unchanged"
+    return c
+
+
+def nothing_overlaps(title: str) -> Check:
+    def check(run: "Run") -> Optional[str]:
+        target = next((s for s in run.plan.spans if s.title.lower() == title.lower()), None)
+        if target is None:
+            return f"{title} is missing"
+        clashes = [s.title for s in run.plan.spans_overlapping(target.start_dt, target.end_dt)
+                   if s.id != target.id and not s.is_envelope]
+        return f"{title} overlaps {clashes}" if clashes else None
+    check.__doc__ = f"nothing overlaps {title}"
+    return check
+
+
+def reply_avoids(*phrases: str) -> Check:
+    def check(run: "Run") -> Optional[str]:
+        said = " ".join(run.replies).lower()
+        found = [p for p in phrases if p in said]
+        return f"replies mention {found}" if found else None
+    check.__doc__ = f"replies avoid {phrases}"
+    return check
+
+
+# ------------------------------------------------------------------------------
+# Scenarios
+# ------------------------------------------------------------------------------
+
+@dataclass
+class Scenario:
+    id: str
+    description: str
+    now: str  # simulated clock on DAY, "HH:MM"
+    turns: List[str]
+    checks: List[Check]
+    events: List[CalendarEvent] = field(default_factory=list)
+    setup: List[Tuple[str, dict]] = field(default_factory=list)  # (tool, args) run before the turns, bypassing the model
+
+
+def _event(eid: str, summary: str, start: str, end: str, ambiguous: bool = False) -> CalendarEvent:
+    return CalendarEvent(
+        id=eid, summary=summary, start_dt=at(start), end_dt=at(end),
+        is_ambiguous=ambiguous, response_status="needsAction" if ambiguous else "accepted",
+    )
+
+
+# Default day from config: work 8:30 AM - 4:00 PM, sleep 11:00 PM - 7:00 AM.
+SCENARIOS: List[Scenario] = [
+    Scenario(
+        "work_ran_long", "Work overran; only the work end moves.",
+        now="16:35",
+        turns=["oh shoot, work actually went til 4:30 today"],
+        checks=[occupied_by("16:15", "work"), occupied_by("16:45", "open"), occupied_by("23:30", "sleep"),
+                occupied_by("06:30", "sleep", day_offset=1), unchanged_outside([("16:00", "16:30")])],
+    ),
+    Scenario(
+        "work_starts_late", "Late start; work start moves, sleep untouched.",
+        now="07:30",
+        turns=["I'm starting work at 10 today instead of 8:30"],
+        checks=[occupied_by("09:00", "open"), occupied_by("10:15", "work"), occupied_by("23:30", "sleep"),
+                occupied_by("06:30", "sleep", day_offset=1)],
+    ),
+    Scenario(
+        "day_off", "Day off clears work only.",
+        now="07:45",
+        turns=["I took the day off work today"],
+        checks=[occupied_by("09:00", "open"), occupied_by("14:00", "open"), unchanged_outside([("08:30", "16:00")])],
+    ),
+    Scenario(
+        "duration_task", "Duration converted by the system, not the model.",
+        now="09:00",
+        turns=["put 2 hours of composing in my evening starting at 5pm"],
+        checks=[occupied_by("17:15", "activity", "compos"), occupied_by("18:45", "activity", "compos"),
+                occupied_by("19:15", "open"), unchanged_outside([("17:00", "19:00")])],
+    ),
+    Scenario(
+        "push_back", "Relative shift of an existing activity.",
+        now="09:00",
+        setup=[("add_event", {"title": "Composing", "start": "5:00 PM", "end": "7:00 PM"})],
+        turns=["push composing back an hour"],
+        checks=[occupied_by("17:15", "open"), occupied_by("18:15", "activity", "compos"),
+                occupied_by("19:45", "activity", "compos"), occupied_by("20:15", "open"),
+                unchanged_outside([("17:00", "20:00")])],
+    ),
+    Scenario(
+        "sleep_tonight", "Tonight's sleep window crosses midnight into tomorrow.",
+        now="20:00",
+        turns=["I'm going to bed at 10:30 tonight and getting up at 6:30 tomorrow"],
+        checks=[occupied_by("22:00", "open"), occupied_by("22:45", "sleep"), occupied_by("03:00", "sleep", day_offset=1),
+                occupied_by("06:15", "sleep", day_offset=1)],
+    ),
+    Scenario(
+        "suggestion_no_mutation", "Asking for ideas must not change anything.",
+        now="17:00",
+        turns=["what should I do with my evening?"],
+        checks=[no_changes()],
+    ),
+    Scenario(
+        "calendar_protected", "A request overlapping a firm appointment keeps the appointment.",
+        now="09:00",
+        events=[_event("dentist", "Dentist", "15:00", "16:00")],
+        turns=["I'm off work today. Schedule the gym from 2:30 to 4"],
+        # Shortening the gym to 2:30-3:00 or asking the user first are both fine; overlapping the dentist is not.
+        checks=[occupied_by("15:15", "calendar", "dentist"), occupied_by("15:45", "calendar", "dentist"),
+                occupied_by("10:00", "open"), nothing_overlaps("Dentist")],
+    ),
+    Scenario(
+        "travel_buffer", "Buffer goes before the appointment.",
+        now="09:00",
+        events=[_event("dentist", "Dentist", "15:00", "16:00")],
+        turns=["I'm off work today. Add 30 minutes of travel time before my dentist appointment"],
+        checks=[occupied_by("14:45", "activity", "travel"), occupied_by("15:15", "calendar", "dentist"),
+                occupied_by("14:15", "open")],
+    ),
+    Scenario(
+        "cancel_and_replace", "Remove one activity and add another in one message.",
+        now="09:00",
+        setup=[("add_event", {"title": "Composing", "start": "5:00 PM", "end": "7:00 PM"})],
+        turns=["actually cancel composing, and put laundry at 7:30 for an hour instead"],
+        checks=[occupied_by("17:30", "open"), occupied_by("18:30", "open"), occupied_by("19:45", "activity", "laundry"),
+                occupied_by("20:15", "activity", "laundry"), occupied_by("20:45", "open")],
+    ),
+    Scenario(
+        "attend_ambiguous", "Confirming an unconfirmed invite makes it firm.",
+        now="09:00",
+        events=[_event("dinner", "Team dinner", "19:00", "21:00", ambiguous=True)],
+        turns=["yeah I'm going to the team dinner tonight"],
+        checks=[occupied_by("19:30", "calendar", "dinner"), occupied_by("20:30", "calendar", "dinner")],
+    ),
+    Scenario(
+        "wrap_up_without_ceremony", "Finishing planning needs no 'lock in' step: changes are already live.",
+        now="08:00",
+        turns=["let's put a 30 minute walk at 5pm", "great, that's everything"],
+        checks=[occupied_by("17:15", "activity", "walk"), reply_avoids("lock it in", "lock in", "finalize")],
+    ),
+    Scenario(
+        "together_at_once", "Two things at the same time (dinner with an audiobook) both stay on the schedule.",
+        now="17:00",
+        turns=["dinner from 6 to 7 tonight, and I'll listen to Dungeon Crawler Carl while I cook and eat"],
+        checks=[occupied_by("18:15", "activity", "dinner"), occupied_by("18:15", "activity", "carl"),
+                unchanged_outside([("18:00", "19:00")])],
+    ),
+    Scenario(
+        "tomorrow_not_today", "Plans for another day land on that day, not today.",
+        now="09:00",
+        turns=["tomorrow morning, put 1 hour of NAS and router moving at 9am"],
+        checks=[no_changes(), occupied_on_day(1, "09:15", "activity", "nas")],
+    ),
+]
+
+
+# ------------------------------------------------------------------------------
+# Runner
+# ------------------------------------------------------------------------------
+
+@dataclass
+class Run:
+    scenario: Scenario
+    plan: object = None
+    scheduler: object = None
+    baseline: dict = field(default_factory=dict)
+    replies: List[str] = field(default_factory=list)
+    transcript: list = field(default_factory=list)
+    failures: List[str] = field(default_factory=list)
+    error: str = ""
+    seconds: float = 0.0
+
+
+def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
+    """Run one scenario. ``engine`` overrides the live Gemini engine (used to test the checks themselves)."""
+    run = Run(scn)
+    set_debug_time(at(scn.now))
+    try:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_model = model
+        db = StateDatabase(Path(tempfile.mkdtemp(prefix="frontier_eval_")) / "state.sqlite")
+        sched = DeterministicScheduler(config=cfg, state_db=db, calendar_engine=MockCalendarEngine(list(scn.events)))
+        plan, ambiguous = sched.build_day_plan(DAY)
+        tasks = [
+            TaskItem(id="t_taxes", source_notebook="1. Tasks", title="File quarterly taxes"),
+            TaskItem(id="t_bridge", source_notebook="3. Creative", title="Compose the bridge section", deferred_count=3),
+            TaskItem(id="t_cables", source_notebook="4. Chores", title="Tidy studio cables"),
+        ]
+        mgr = ConversationManager(
+            day_plan=plan, tasks=tasks, ambiguous_events=ambiguous, scheduler=sched,
+            inference_engine=engine or LIVE_ENGINES[ENGINE_CHOICE](cfg), active_notes=[],
+        )
+        for tool, args in scn.setup:
+            mgr.execute_tool(tool, args)
+        mgr.brain.reset()  # system prompt reflects the setup state
+
+        probe_times = [at("00:00") + timedelta(minutes=15 + 30 * i) for i in range(48)]
+        probe_times += [t + timedelta(days=1) for t in probe_times if t.hour < 7]
+        run.baseline = {t: occupancy(mgr.day_plan, t) for t in probe_times}
+
+        start = time_mod.time()
+        for turn in scn.turns:
+            run.replies.append(mgr.send_user_message(turn))
+            failed = [str(m.get("content", "")) for m in mgr.messages
+                      if any(err in str(m.get("content", "")) for err in TRANSPORT_ERRORS)]
+            if failed:
+                raise RuntimeError("model transport failed: " + failed[0][:300])
+        run.seconds = time_mod.time() - start
+        run.plan = mgr.day_plan
+        run.scheduler = sched
+        run.transcript = [m for m in mgr.messages if m.get("role") != "system"]
+        for check in scn.checks:
+            msg = check(run)
+            if msg:
+                run.failures.append(msg)
+    except Exception as e:  # keep going; one broken scenario must not stop the batch
+        run.error = f"{type(e).__name__}: {e}"
+    finally:
+        set_debug_time(None)
+    return run
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--engine", choices=sorted(LIVE_ENGINES), default="agy",
+                    help="agy: the Antigravity CLI on your subscription (default); api: GEMINI_API_KEY")
+    ap.add_argument("--model", default="gemini-3.8-flash-low")
+    ap.add_argument("--only", nargs="*", help="Scenario ids to run.")
+    ap.add_argument("--repeat", type=int, default=1, help="Runs per scenario (models are not deterministic).")
+    ap.add_argument("--label", default="", help="Tag for the report file name.")
+    args = ap.parse_args()
+
+    global ENGINE_CHOICE
+    ENGINE_CHOICE = args.engine
+    scenarios = [s for s in SCENARIOS if not args.only or s.id in args.only]
+    results = []
+    for scn in scenarios:
+        for i in range(args.repeat):
+            run = run_scenario(scn, args.model)
+            ok = not run.failures and not run.error
+            print(f"{'PASS' if ok else ('ERROR' if run.error else 'FAIL')}  {scn.id} [{i + 1}/{args.repeat}] ({run.seconds:.1f}s)")
+            for f in run.failures:
+                print(f"      - {f}")
+            if run.error:
+                print(f"      ! {run.error}")
+            results.append({
+                "scenario": scn.id, "description": scn.description, "repeat": i + 1, "pass": ok,
+                "failures": run.failures, "error": run.error, "turns": scn.turns, "replies": run.replies,
+                "transcript": run.transcript, "seconds": round(run.seconds, 1),
+            })
+
+    passed = sum(r["pass"] for r in results)
+    errored = sum(bool(r["error"]) for r in results)
+    print(f"\n{passed}/{len(results) - errored} passed ({args.model}); {errored} not scored due to errors")
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = REPORTS_DIR / f"frontier_{stamp}{'_' + args.label if args.label else ''}.json"
+    out.write_text(json.dumps({"model": args.model, "passed": passed, "total": len(results), "results": results},
+                              indent=2, default=str))
+    print(f"Report: {out.relative_to(REPO_ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

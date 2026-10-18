@@ -1,0 +1,73 @@
+# Thirties configuration. Copy to ~/.config/thirties/config.toml and `chmod 600` it:
+# it holds secrets (bot token, API keys).
+
+[general]
+# Sunrise and sunset are computed from this. Use your own location and timezone.
+latitude = 38.8799
+longitude = -77.1067
+timezone = "America/New_York"
+# Default work and sleep, as half-hour indexes from midnight (17 = 8:30 AM).
+# work_end_thirty is the LAST work thirty (31 = 3:30-4:00 PM, so work ends at 4:00 PM).
+work_start_thirty = 17
+work_end_thirty = 31
+sleep_start_thirty = 46   # 11:00 PM
+sleep_end_thirty = 14     # sleep ends at 7:00 AM
+work_days = ["mon", "tue", "wed", "thu", "fri"]   # other days start without work
+
+[assistant]
+# "frontier": a large model (Gemini) with one rich prompt.
+# "slm": on-device Gemma 4 through LiteRT-LM (see docs/SLM_BRAIN.md; needs litert-lm-api and a model file).
+brain = "frontier"
+slm_voice = true          # SLM: natural wording, with every time and title verified
+checkins = true           # Telegram: "did you get to X?" after a planned item ends
+checkin_after_minutes = 10
+
+[calendar]
+# Calendars come from GNOME Online Accounts (Settings > Online Accounts > Google > Calendar).
+# include_calendars = []                              # names or uids; empty means all enabled calendars
+exclude_calendars = ["Birthdays & Anniversaries"]
+# default_ignore_secondary = true                     # ignore calendars that aren't yours (e.g. a partner's)
+
+[inference]
+# "gemini" uses the agy CLI (your Antigravity / Google AI subscription) when it is
+# installed and signed in, and falls back to the API key. "gemini_api" always uses the key.
+backend = "gemini"
+gemini_model = "gemini-3.8-flash-low"   # see `agy models`
+gemini_api_key = ""        # optional fallback; free keys allow ~20 requests/day: https://aistudio.google.com/apikey
+
+[telegram]
+enabled = true
+bot_token = ""             # from @BotFather
+allowed_chat_ids = []      # your chat ID; the bot shows it to you on /start
+notify_block_transitions = true
+
+[joplin]
+# Needed to check finished tasks off in Joplin, and for [sync].
+# Joplin > Settings > Web Clipper: enable it, then copy the authorization token.
+api_token = ""
+# Headings whose checklist items are "someday/maybe": visible to the assistant, never pushed.
+someday_sections = ["Probation", "Someday", "Maybe", "Someday/Maybe", "Backburner"]
+
+[sync]
+# Syncs Thirties state between computers through a note in Joplin.
+# Leave off unless you run Thirties on more than one computer.
+enabled = false
+
+# [media]
+# Public "want to read / want to watch" lists, read without logins or tokens.
+# Each list must be public. Leave a value empty to skip that service.
+# Lists are cached in ~/.cache/thirties/media/ and refreshed every cache_hours.
+#
+# Goodreads: the number in your profile URL, e.g. goodreads.com/user/show/12345-jane -> "12345".
+# goodreads_user_id = ""
+# goodreads_shelves = ["to-read"]
+#
+# Letterboxd: your username, as in letterboxd.com/<username>/watchlist/.
+# letterboxd_username = ""
+#
+# Serializd: your username (uses Serializd's unofficial web API, which may change).
+# serializd_username = ""
+#
+# cache_hours = 12.0
+# Extra page loads per refresh to fill in Letterboxd directors and Serializd years.
+# detail_lookups_per_refresh = 25

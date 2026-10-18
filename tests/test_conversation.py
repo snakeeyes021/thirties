@@ -1,511 +1,268 @@
-"""Unit tests for thirties_core.conversation planning state machine and orthogonal primitives."""
+"""Unit tests for ConversationManager and the FrontierBrain turn loop."""
 
-import tempfile
 import unittest
-from datetime import date, datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
 
-from thirties_core.astronomy import get_current_time
-from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
-from thirties_core.config import ThirtiesConfig
+from tests.fixtures import DAY, TZ, at, event, make_scheduler, occupant
+from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.conversation import ConversationManager
-from thirties_core.inference import MockInferenceEngine
-from thirties_core.models import BlockKind, TaskItem
-from thirties_core.scheduler import DeterministicScheduler, StateDatabase
+from thirties_core.inference import MockInferenceEngine, parse_model_directives
+from thirties_core.models import TaskItem
 
 
-class TestConversation(unittest.TestCase):
+def reply(text: str) -> dict:
+    """A model response as a text transport would deliver it."""
+    content, calls = parse_model_directives(text)
+    return {"role": "assistant", "content": content, "tool_calls": calls}
+
+
+class ConversationTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.temp_dir.name) / "test_state.sqlite"
-        self.state_db = StateDatabase(self.db_path)
-
-        self.cfg = ThirtiesConfig()
-        self.mock_cal = MockCalendarEngine()
-        self.scheduler = DeterministicScheduler(
-            config=self.cfg,
-            state_db=self.state_db,
-            calendar_engine=self.mock_cal,
-        )
-
-        self.target_date = date(2026, 10, 8)
-        self.tz = ZoneInfo("America/New_York")
-
-        # Build day plan
-        self.plan, self.ambiguous = self.scheduler.build_day_plan(self.target_date)
-
-        self.task1 = TaskItem(
-            id="t1",
-            source_notebook="3. Creative",
-            title="Compose bridge in Dorico",
-            deferred_count=1,
-        )
-
-        self.ambiguous_event = CalendarEvent(
-            id="e_doc",
-            summary="Doctor Appointment",
-            start_dt=datetime(2026, 10, 8, 16, 0, tzinfo=self.tz),
-            end_dt=datetime(2026, 10, 8, 16, 30, tzinfo=self.tz),
-            is_ambiguous=True,
-        )
-
-        # Mark block 19 with the ambiguous event for testing
-        b19 = self.plan.get_logical_block(19)
-        b19.kind = BlockKind.AMBIGUOUS_CALENDAR
-        b19.source_event_id = "e_doc"
-        b19.label = "Doctor Appointment"
-
-        self.mock_inf = MockInferenceEngine()
-        self.manager = ConversationManager(
-            day_plan=self.plan,
-            tasks=[self.task1],
-            ambiguous_events=[self.ambiguous_event],
-            scheduler=self.scheduler,
-            inference_engine=self.mock_inf,
-        )
-
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
-
-    def test_system_prompt_contains_context(self) -> None:
-        sys_msg = self.manager.messages[0]["content"]
-        self.assertIn("Thursday, October 08, 2026", sys_msg)
-        self.assertIn("Available Daylight Thirties:", sys_msg)
-        self.assertIn("Available Dark Thirties:", sys_msg)
-        self.assertIn("Compose bridge in Dorico", sys_msg)
-        self.assertIn("Doctor Appointment", sys_msg)
-
-    def test_modify_blocks_single_block(self) -> None:
-        out = self.manager.execute_tool(
-            "modify_blocks",
-            {"start_block": 33, "task_id": "t1", "label": "Dorico Compose"},
-        )
-        self.assertIn("Allocated block 33", out)
-
-        b33 = self.plan.get_logical_block(33)
-        self.assertTrue(b33.is_assigned)
-        self.assertEqual(b33.assigned_task_id, "t1")
-        self.assertEqual(b33.label, "Dorico Compose")
-
-    def test_modify_blocks_multiple_blocks(self) -> None:
-        out = self.manager.execute_tool(
-            "modify_blocks",
-            {"start_block": 28, "end_block": 31, "label": "Composing in Dorico"},
-        )
-        self.assertIn("Allocated blocks 28 through 31", out)
-        for idx in range(28, 32):
-            b = self.plan.get_logical_block(idx)
-            self.assertTrue(b.is_assigned)
-            self.assertEqual(b.label, "Composing in Dorico")
-
-    def test_modify_blocks_work_envelope(self) -> None:
-        # First clear all work blocks
-        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
-        self.assertEqual(len([b for b in self.plan.blocks if b.kind == BlockKind.WORK]), 0)
-
-        # Assign work blocks
-        out = self.manager.execute_tool(
-            "modify_blocks",
-            {"start_block": 4, "end_block": 18, "kind": "WORK", "is_locked": True},
-        )
-        self.assertIn("Work is now scheduled", out)
-        work_restored = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
-        self.assertEqual(len(work_restored), 15)
-        self.assertEqual(work_restored[0].label, "Work")
-        self.assertTrue(work_restored[0].is_locked)
-
-    def test_modify_blocks_preserves_assigned_tasks(self) -> None:
-        # Clear all work blocks
-        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
-        # Schedule an appointment in Block 17
-        self.manager.execute_tool("modify_blocks", {"start_block": 17, "end_block": 17, "label": "Doctor Appointment"})
-        self.assertTrue(self.plan.get_logical_block(17).is_assigned)
-
-        # Set work blocks
-        out = self.manager.execute_tool("modify_blocks", {"start_block": 4, "end_block": 18, "kind": "WORK"})
-        self.assertIn("keeping your existing Block 17 ('Doctor Appointment') intact", out)
-
-        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(17).label, "Doctor Appointment")
-        self.assertEqual(self.plan.get_logical_block(10).kind, BlockKind.WORK)
-
-    def test_modify_blocks_custom_time_range(self) -> None:
-        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
-        out = self.manager.execute_tool("modify_blocks", {"start_time": "7am", "end_time": "3pm", "kind": "WORK"})
-        self.assertIn("Blocks 1–16", out)
-        for idx in range(1, 17):
-            b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.kind, BlockKind.WORK)
-
-    def test_work_window_moves_clearing_old_work_blocks(self) -> None:
-        # Initial work blocks 4-18 are set
-        # Schedule composing in Block 3
-        self.manager.execute_tool("modify_blocks", {"start_block": 3, "end_block": 3, "label": "Composing"})
-        # Move work window to 7am to 3pm (Blocks 1-16) with explicit clear_existing_envelope=True
-        out = self.manager.execute_tool(
-            "modify_blocks",
-            {"start_time": "7am", "end_time": "3pm", "kind": "WORK", "clear_existing_envelope": True},
-        )
-        self.assertIn("Blocks 1–16", out)
-        self.assertIn("Composing", out)
-
-        for idx in range(1, 17):
-            b = self.plan.get_logical_block(idx)
-            self.assertEqual(b.kind, BlockKind.WORK, f"Block {idx} should be WORK")
-
-        self.assertEqual(self.plan.get_logical_block(3).label, "Composing")
-        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
-        self.assertNotEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
-        self.assertTrue(self.plan.get_logical_block(17).is_discretionary)
-        self.assertTrue(self.plan.get_logical_block(18).is_discretionary)
-
-    def test_calendar_lock_protection_in_modify_and_clear(self) -> None:
-        b12 = self.plan.get_logical_block(12)
-        b12.kind = BlockKind.BUSY_CALENDAR
-        b12.is_locked = True
-        b12.label = "Dentist Appointment"
-
-        # Attempt to modify block 12 without force_calendar
-        out = self.manager.modify_blocks(start_block=12, end_block=12, label="Gaming")
-        self.assertIn("Cannot modify block(s) [12]: locked by calendar event", out)
-        self.assertEqual(b12.label, "Dentist Appointment")
-        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
-
-        # Attempt to clear block 12 without force_calendar
-        out_clear = self.manager.clear_blocks(start_block=12, end_block=12)
-        self.assertIn("0 blocks", out_clear)
-        self.assertEqual(b12.kind, BlockKind.BUSY_CALENDAR)
-
-    def test_clear_work_blocks_tool(self) -> None:
-        initial_daylight = self.plan.daylight_available_count
-        out = self.manager.execute_tool(
-            "clear_blocks",
-            {"clear_kind": "WORK"},
-        )
-        self.assertIn("Cleared and opened", out)
-        work_remaining = [b for b in self.plan.blocks if b.kind == BlockKind.WORK]
-        self.assertEqual(len(work_remaining), 0)
-        self.assertGreater(self.plan.daylight_available_count, initial_daylight)
-
-    def test_clear_specific_blocks_tool(self) -> None:
-        self.manager.execute_tool(
-            "modify_blocks",
-            {"start_block": 28, "end_block": 30, "label": "Composing"},
-        )
-        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
-
-        out = self.manager.execute_tool(
-            "clear_blocks",
-            {"start_block": 28, "end_block": 30},
-        )
-        self.assertIn("Cleared and opened 3 blocks", out)
-        for idx in range(28, 31):
-            b = self.plan.get_logical_block(idx)
-            self.assertIn(b.kind, (BlockKind.DAYLIGHT_DISCRETIONARY, BlockKind.DARK_DISCRETIONARY))
-            self.assertEqual(b.label, "")
-
-    def test_resolve_event_declined(self) -> None:
-        out = self.manager.execute_tool(
-            "resolve_event",
-            {"event_id": "e_doc", "action": "decline"},
-        )
-        self.assertTrue("opened as discretionary" in out)
-
-        b19 = self.plan.get_logical_block(19)
-        self.assertEqual(b19.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-        self.assertFalse(b19.is_locked)
-        self.assertEqual(len(self.manager.ambiguous_events), 0)
-
-    def test_resolve_event_accepted(self) -> None:
-        out = self.manager.execute_tool(
-            "resolve_event",
-            {"event_id": "e_doc", "action": "attend"},
-        )
-        self.assertIn("locked as busy calendar block", out)
-
-        b19 = self.plan.get_logical_block(19)
-        self.assertEqual(b19.kind, BlockKind.BUSY_CALENDAR)
-        self.assertTrue(b19.is_locked)
-        self.assertEqual(len(self.manager.ambiguous_events), 0)
-
-    def test_resolve_event_preserves_other_ambiguous_events(self) -> None:
-        e2 = CalendarEvent(
-            id="e_dentist",
-            summary="Dentist",
-            start_dt=datetime(2026, 10, 8, 17, 0, tzinfo=self.tz),
-            end_dt=datetime(2026, 10, 8, 17, 30, tzinfo=self.tz),
-            is_ambiguous=True,
-        )
-        self.manager.ambiguous_events.append(e2)
-        self.assertEqual(len(self.manager.ambiguous_events), 2)
-
-        out = self.manager.resolve_event(event_id="e_doc", action="attend")
-        self.assertIn("Event e_doc resolved: locked as busy calendar block", out)
-        self.assertEqual(len(self.manager.ambiguous_events), 1)
-        self.assertEqual(self.manager.ambiguous_events[0].id, "e_dentist")
-
-    def test_inspect_blocks_tool(self) -> None:
-        out = self.manager.execute_tool(
-            "inspect_blocks",
-            {"start_block": 1, "end_block": 3},
-        )
-        self.assertIn("Block 1", out)
-        self.assertIn("Block 2", out)
-        self.assertIn("Block 3", out)
-
-    def test_finalize_day_plan_tool(self) -> None:
-        out = self.manager.execute_tool(
-            "finalize_day_plan",
-            {"notes": "Productive daylight session"},
-        )
-        self.assertIn("finalized", out)
-        self.assertTrue(self.plan.is_finalized)
-        self.assertEqual(self.plan.notes, "Productive daylight session")
-
-        # Snapshot saved to DB
-        saved = self.state_db.get_day_snapshot(self.target_date)
-        self.assertIsNotNone(saved)
-        self.assertTrue(saved.is_finalized)
-
-    def test_send_user_message_triggers_tool_dispatch(self) -> None:
-        reply = self.manager.send_user_message("Let's allocate 19 to Dorico")
-        self.assertIn("block 19", reply.lower())
-
-        b19 = self.plan.get_logical_block(19)
-        self.assertTrue(b19.is_assigned)
-        self.assertEqual(b19.label, "Dorico Compose")
-
-    def test_system_prompt_contains_scheduled_commitments(self) -> None:
-        self.manager.execute_tool("modify_blocks", {"start_block": 24, "end_block": 27, "label": "Game Night"})
-        self.manager.execute_tool("modify_blocks", {"start_block": 28, "end_block": 28, "label": "Composing"})
-
-        prompt = self.manager._build_system_prompt()
-        self.assertIn("CURRENTLY SCHEDULED TASKS & COMMITMENTS:", prompt)
-        self.assertIn("Game Night", prompt)
-        self.assertIn("Composing", prompt)
-        self.assertIn("Blocks 24 through 27", prompt)
-        self.assertIn("Block 28", prompt)
-
-    def test_slash_command_night_and_reset(self) -> None:
-        reply_night = self.manager.send_user_message("/night")
-        self.assertIn("Simulated time set to 10:30 PM", reply_night)
-        sim_now = get_current_time(self.tz)
-        self.assertEqual(sim_now.hour, 22)
-        self.assertEqual(sim_now.minute, 30)
-
-        reply_reset = self.manager.send_user_message("/reset")
-        self.assertIn("Simulated time cleared", reply_reset)
-
-    def test_user_message_sets_custom_work_hours(self) -> None:
-        self.manager.execute_tool("clear_blocks", {"clear_kind": "WORK"})
-        reply = self.manager.send_user_message("Oh shoot, turns out work today is from 7am to 3pm.")
-        self.assertIn("Blocks 1–16", reply)
-        self.assertIn("7:00 AM", reply)
-        self.assertIn("3:00 PM", reply)
-        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
-
-    def test_discretionary_totals(self) -> None:
-        self.assertGreater(self.plan.daylight_discretionary_total, 0)
-        self.assertGreater(self.plan.dark_discretionary_total, 0)
-
-    def test_react_loop_on_inspect_blocks(self) -> None:
-        mock_engine = MockInferenceEngine([
-            {
-                "role": "assistant",
-                "content": "Let me inspect.",
-                "tool_calls": [
-                    {"id": "insp_1", "name": "inspect_blocks", "arguments": {"start_block": 1, "end_block": 5}}
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": "I have verified blocks 1 to 5 are open.",
-                "tool_calls": [],
-            }
-        ])
-        self.manager.inference_engine = mock_engine
-        reply = self.manager.send_user_message("Can you check blocks 1 to 5?")
-        self.assertEqual(reply, "I have verified blocks 1 to 5 are open.")
-
-
-    def test_modify_blocks_with_clock_times(self) -> None:
-        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK", clear_existing_envelope=True)
-        self.assertIn("Blocks 1–16", out)
-        self.assertIn("16 chunks", out)
-        self.assertIn("7:00 AM to 3:00 PM", out)
-
-        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
-        self.assertNotEqual(self.plan.get_logical_block(17).kind, BlockKind.WORK)
-
-    def test_clear_and_inspect_blocks_with_clock_times(self) -> None:
-        # First assign tasks to blocks 28 to 30
-        self.manager.modify_blocks(start_block=28, end_block=30, label="Deep Work")
-        self.assertTrue(self.plan.get_logical_block(28).is_assigned)
-
-        # Inspect using clock times (8:30 PM to 10:00 PM corresponds to blocks 28 to 30)
-        insp_out = self.manager.inspect_blocks(start_time="8:30 PM", end_time="10:00 PM")
-        self.assertIn("Block 28", insp_out)
-        self.assertIn("Block 30", insp_out)
-
-        # Clear using clock times
-        clear_out = self.manager.clear_blocks(start_time="8:30 PM", end_time="10:00 PM")
-        self.assertIn("3 blocks", clear_out)
-        self.assertIn("Blocks 28–30", clear_out)
-        self.assertFalse(self.plan.get_logical_block(28).is_assigned)
-
-    def test_react_self_correction_on_discrepancy(self) -> None:
-        # Simulates the transcript issue: Model draft claimed 15 chunks (Blocks 1-15),
-        # but the tool executed 16 chunks (Blocks 1-16).
-        mock_engine = MockInferenceEngine([
-            {
-                "role": "assistant",
-                "content": "I have scheduled Work blocks from 07:00 AM to 03:00 PM (Blocks 1-15). This encompasses 15 chunks.",
-                "tool_calls": [
-                    {
-                        "id": "call_work",
-                        "name": "modify_blocks",
-                        "arguments": {"start_time": "7am", "end_time": "3pm", "kind": "WORK"},
-                    }
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": "I have updated the schedule: Work is set from 07:00 AM to 03:00 PM (Blocks 1–16) for 16 chunks.",
-                "tool_calls": [],
-            }
-        ])
-        self.manager.inference_engine = mock_engine
-        reply = self.manager.send_user_message("I actually did have work though, from 7 to 3")
-        self.assertEqual(
-            reply,
-            "I have updated the schedule: Work is set from 07:00 AM to 03:00 PM (Blocks 1–16) for 16 chunks.",
-        )
-        # Ensure that blocks 1 through 16 are indeed WORK
-        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
-
-
-    def test_clear_blocks_all_preserves_work_and_sleep(self) -> None:
-        # Assign task inside work (block 10)
-        self.manager.modify_blocks(start_block=10, end_block=10, label="Work Task", task_id="task_work")
-        # Assign daylight task (block 21: 5:00 PM - 5:30 PM, before sunset)
-        self.manager.modify_blocks(start_block=21, end_block=21, label="Outdoor Walk", task_id="task_walk")
-        # Assign dark task (block 25: 7:00 PM - 7:30 PM, after sunset)
-        self.manager.modify_blocks(start_block=25, end_block=25, label="Dorico Composing", task_id="task_music")
-
-        # Clear kind = ALL
-        out = self.manager.clear_blocks(clear_kind="ALL")
-        self.assertIn("Cleared all scheduled tasks and custom events", out)
-
-        # Daylight discretionary block 21 is cleared back to daylight discretionary
-        b21 = self.plan.get_logical_block(21)
-        self.assertEqual(b21.kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-        self.assertEqual(b21.label, "")
-        self.assertIsNone(b21.assigned_task_id)
-
-        # Dark discretionary block 25 is cleared back to dark discretionary
-        b25 = self.plan.get_logical_block(25)
-        self.assertEqual(b25.kind, BlockKind.DARK_DISCRETIONARY)
-        self.assertEqual(b25.label, "")
-        self.assertIsNone(b25.assigned_task_id)
-
-        # Work block 10 task is cleared, but remains WORK
-        b10 = self.plan.get_logical_block(10)
-        self.assertEqual(b10.kind, BlockKind.WORK)
-        self.assertEqual(b10.label, "Work")
-        self.assertIsNone(b10.assigned_task_id)
-
-        # Other work blocks remain WORK
-        b4 = self.plan.get_logical_block(4)
-        self.assertEqual(b4.kind, BlockKind.WORK)
-
-    def test_modify_blocks_work_defaults_to_clear_existing_envelope(self) -> None:
-        # Work envelope is initially blocks 4-18 (8am-4pm)
-        self.assertEqual(self.plan.get_logical_block(18).kind, BlockKind.WORK)
-        
-        # Modify work without explicitly passing clear_existing_envelope
-        out = self.manager.modify_blocks(start_time="7am", end_time="3pm", kind="WORK")
-        self.assertIn("Blocks 1–16", out)
-
-        # Blocks 1-16 are work
-        self.assertEqual(self.plan.get_logical_block(1).kind, BlockKind.WORK)
-        self.assertEqual(self.plan.get_logical_block(16).kind, BlockKind.WORK)
-
-        # Blocks 17 and 18 are replaced and restored to discretionary
-        self.assertEqual(self.plan.get_logical_block(17).kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-        self.assertEqual(self.plan.get_logical_block(18).kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-
-    def test_contract_verifier_triggers_reflection_on_hallucinated_action(self) -> None:
-        # Mock engine claims it cleared tasks, but emitted no tool calls (hallucination)
-        mock_engine = MockInferenceEngine([
-            {
-                "role": "assistant",
-                "content": "I have cleared all tasks for today.",
-                "tool_calls": [],
-            },
-            {
-                "role": "assistant",
-                "content": "I have now cleared all tasks for today.",
-                "tool_calls": [
-                    {
-                        "id": "clear_call",
-                        "name": "clear_blocks",
-                        "arguments": {"clear_kind": "ALL"},
-                    }
-                ],
-            }
-        ])
-        self.manager.inference_engine = mock_engine
-        reply = self.manager.send_user_message("Please clear all my tasks.")
-        
-        # Verify reflection turn happened by inspecting message history
-        user_msgs = [m["content"] for m in self.manager.messages if m.get("role") == "user"]
-        self.assertTrue(any("[CONTRACT VERIFICATION NOTICE]" in str(m) for m in user_msgs))
-        self.assertEqual(reply, "I have now cleared all tasks for today.")
-
-    def test_contract_verifier_suppresses_persistent_hallucination(self) -> None:
-        # Mock engine claims it cleared tasks on turn 1 AND turn 2 without ever calling a tool
-        mock_engine = MockInferenceEngine([
-            {
-                "role": "assistant",
-                "content": "I have cleared all tasks for today.",
-                "tool_calls": [],
-            },
-            {
-                "role": "assistant",
-                "content": "I have cleared all tasks for today as requested.",
-                "tool_calls": [],
-            }
-        ])
-        self.manager.inference_engine = mock_engine
-        reply = self.manager.send_user_message("Please clear all my tasks.")
-        
-        # Final verifier guard intercepts the hallucination
-        self.assertIn("I was unable to update your schedule because no valid modification directive could be executed", reply)
-
-    def test_system_prompt_diurnal_today_alignment(self) -> None:
-        from thirties_core.astronomy import set_debug_time
-        from zoneinfo import ZoneInfo
-        from datetime import datetime
-        # At 12:23 AM on 2026-10-10, diurnal today is 2026-10-09
-        set_debug_time(datetime(2026, 10, 10, 0, 23, tzinfo=ZoneInfo("America/New_York")))
-        try:
-            # Plan is for 2026-10-09 (Friday)
-            self.manager.day_plan.target_date = date(2026, 10, 9)
-            prompt = self.manager._build_system_prompt()
-            self.assertIn("PLANNING DATE: Today (Friday, October 09, 2026)", prompt)
-
-            # Plan is for 2026-10-10 (Saturday) -> Not diurnal today!
-            self.manager.day_plan.target_date = date(2026, 10, 10)
-            prompt_future = self.manager._build_system_prompt()
-            self.assertIn("PLANNING DATE: Saturday, October 10, 2026", prompt_future)
-            self.assertNotIn("PLANNING DATE: Today", prompt_future)
-        finally:
-            set_debug_time(None)
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        self.engine = MockInferenceEngine()
+        self.manager = self.make_manager()
+
+    def make_manager(self, events=None, tasks=None, notes=None) -> ConversationManager:
+        sched = make_scheduler(events)
+        plan, pending = sched.build_day_plan(DAY)
+        return ConversationManager(plan, tasks or [], pending, sched, inference_engine=self.engine, active_notes=notes or [])
+
+    def work_id(self) -> str:
+        return next(s.id for s in self.manager.day_plan.spans if s.title == "Work")
+
+
+class TestSystemPrompt(ConversationTestCase):
+
+    def test_prompt_has_schedule_in_clock_time_and_no_block_math(self) -> None:
+        prompt = self.manager.messages[0]["content"]
+        self.assertIn("Today, Thursday, October 15, 2026. Current time: 9:00 AM.", prompt)
+        self.assertIn("8:30 AM – 4:00 PM: Work", prompt)
+        self.assertIn(f"id={self.work_id()}", prompt)
+        self.assertIn("Free time remaining: 4:00 PM – 11:00 PM", prompt)
+        self.assertIn("CALL add_event", prompt)
+        self.assertNotIn("Block 1", prompt)
+        self.assertNotIn("2 blocks = 1 hour", prompt)
+
+    def test_prompt_for_another_day(self) -> None:
+        set_debug_time(at("09:00", 3))
+        prompt = self.manager.brain.build_system_prompt()
+        self.assertIn("(not today; today is Sunday, October 18)", prompt)
+        self.assertIn("Free time: 7:00 AM", prompt)
+
+    def test_prompt_is_refreshed_every_turn(self) -> None:
+        self.manager.execute_tool("update_event", {"event": "Work", "end": "4:30 PM"})
+        self.manager.send_user_message("thanks")
+        self.assertIn("8:30 AM – 4:30 PM: Work", self.manager.messages[0]["content"])
+
+    def test_unconfirmed_invites_listed(self) -> None:
+        manager = self.make_manager(events=[event("dinner", "19:00", "21:00", "Team dinner", invite=True)])
+        self.assertIn("- Team dinner, 7:00 PM – 9:00 PM id=cal:dinner", manager.messages[0]["content"])
+
+    def test_backlog_presentation(self) -> None:
+        tasks = [
+            TaskItem(id="t_def", source_notebook="1. Tasks > Taxes", title="File 2025 Tax Return", deferred_count=4),
+            TaskItem(id="t_creat", source_notebook="3. Creative > Music", title="Compose String Quartet Mvt 2",
+                     parent_note_title="Current Commissions", parent_note_id="note_comm", deferred_count=1),
+        ]
+        notes = [
+            {"id": "note_comm", "source_notebook": "3. Creative > Music", "title": "Current Commissions",
+             "body": "- [ ] Compose String Quartet Mvt 2", "is_todo": False, "todo_completed": 0},
+            {"id": "note_shop", "source_notebook": "1. Tasks", "title": "Shopping List",
+             "body": "- [ ] Two suits", "is_todo": True, "todo_completed": 0},
+        ]
+        prompt = self.make_manager(tasks=tasks, notes=notes).messages[0]["content"]
+        self.assertIn("[CHRONIC DEFERRAL: 4x]", prompt)
+        self.assertIn("=== NOTEBOOK: 3. Creative > Music ===", prompt)
+        self.assertIn("Reference / Purchasing Wishlist", prompt)
+        self.assertIn("Compose String Quartet Mvt 2", prompt)
+
+
+class TestTurnLoop(ConversationTestCase):
+
+    def test_tool_calls_execute_and_reply_is_shown(self) -> None:
+        self.engine.set_next_response(reply(f'Got it.\nCALL update_event {{"event": "{self.work_id()}", "end": "4:30 PM"}}'))
+        self.assertEqual(self.manager.send_user_message("work went til 4:30"), "Got it.")
+        self.assertEqual(occupant(self.manager.day_plan, "16:00"), "Work")
+        self.assertEqual(len(self.engine.call_history), 1)  # no follow-up needed
+
+    def test_read_only_tool_gets_a_follow_up_with_results(self) -> None:
+        self.engine.set_next_response(reply('CALL find_open_time {"duration": "2 hours"}'))
+        self.engine.set_next_response(reply("You're free from 4 to 11 PM."))
+        self.assertEqual(self.manager.send_user_message("when am I free?"), "You're free from 4 to 11 PM.")
+        follow_up_messages = self.engine.call_history[1]
+        self.assertTrue(any(m.get("role") == "tool" and "Free:" in m["content"] for m in follow_up_messages))
+
+    def test_not_done_gets_a_follow_up(self) -> None:
+        self.manager = self.make_manager(events=[event("dentist", "15:00", "16:00", "Dentist")])
+        self.engine.set_next_response(reply('Done!\nCALL add_event {"title": "Gym", "start": "2:30 PM", "end": "4:00 PM"}'))
+        self.engine.set_next_response(reply("The dentist is at 3, so I can only fit 2:30 to 3. Want that?"))
+        out = self.manager.send_user_message("gym 2:30 to 4")
+        self.assertIn("only fit", out)
+        self.assertNotIn("Gym", [s.title for s in self.manager.day_plan.spans])
+
+    def test_stale_draft_is_not_shown_after_a_refusal(self) -> None:
+        self.manager = self.make_manager(events=[event("dentist", "15:00", "16:00", "Dentist")])
+        self.engine.set_next_response(reply('All set!\nCALL add_event {"title": "Gym", "start": "3:00 PM", "duration": "1 hour"}'))
+        self.engine.set_next_response(reply(""))
+        self.engine.set_next_response(reply("The dentist is at 3, so the gym can't go then. How about 4?"))
+        out = self.manager.send_user_message("gym at 3")
+        self.assertNotIn("All set", out)  # the draft was written before the refusal
+        self.assertEqual(out, "The dentist is at 3, so the gym can't go then. How about 4?")
+        self.assertIn("didn't write a reply", self.engine.call_history[-1][-1]["content"])
+
+    def test_claim_without_calls_triggers_one_correction(self) -> None:
+        self.engine.set_next_response(reply("I've scheduled your walk."))
+        self.engine.set_next_response(reply('CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
+        self.engine.set_next_response(reply("Walk is on for 5 PM."))
+        out = self.manager.send_user_message("walk at 5")
+        self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
+        self.assertIn("[System check", self.engine.call_history[1][-1]["content"])
+        self.assertEqual(out, "Walk is on for 5 PM.")
+
+    def test_persistent_false_claim_is_not_shown_to_user(self) -> None:
+        self.engine.set_next_response(reply("I've scheduled your walk."))
+        self.engine.set_next_response(reply("I've scheduled your walk."))
+        out = self.manager.send_user_message("walk at 5")
+        self.assertIn("wasn't able to change", out)
+
+    def test_changes_to_other_days_are_not_mistaken_for_no_change(self) -> None:
+        self.engine.set_next_response(reply("I've added the NAS move tomorrow at 9.\n"
+                                            'CALL add_event {"title": "Move NAS", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow"}'))
+        out = self.manager.send_user_message("NAS tomorrow at 9")
+        self.assertEqual(out, "I've added the NAS move tomorrow at 9.")
+
+    def test_suggestion_without_changes_passes_through(self) -> None:
+        self.engine.set_next_response(reply("How about composing from 5 to 7?"))
+        out = self.manager.send_user_message("what should I do tonight?")
+        self.assertEqual(out, "How about composing from 5 to 7?")
+        self.assertEqual(len(self.engine.call_history), 1)
+
+    def test_empty_reply_falls_back_to_tool_result(self) -> None:
+        self.engine.set_next_response(reply('CALL remove_event {"event": "Work"}'))
+        self.engine.set_next_response(reply(""))
+        self.engine.set_next_response(reply(""))
+        out = self.manager.send_user_message("day off")
+        self.assertEqual(out, "Done.")  # never raw tool output, never "Understood."
+        self.assertIsNone(occupant(self.manager.day_plan, "10:00"))
+
+    def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
+        self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
+        self.engine.set_next_response(reply("You're free all afternoon."))
+        out = self.manager.send_user_message("am I free later?")
+        self.assertEqual(out, "You're free all afternoon.")
+
+    def test_call_written_mid_sentence_still_runs(self) -> None:
+        self.engine.set_next_response(reply('Moving it now.CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
+        self.engine.set_next_response(reply("Walk is at 5."))
+        out = self.manager.send_user_message("walk at 5")
+        self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
+        self.assertNotIn("CALL", out)
+
+    def test_rounds_are_capped(self) -> None:
+        for _ in range(5):
+            self.engine.set_next_response(reply("CALL list_schedule"))
+        self.manager.send_user_message("show me")
+        self.assertEqual(len(self.engine.call_history), 4)  # three rounds, then one ask for the missing reply
+
+
+class TestPersistence(ConversationTestCase):
+
+    def test_turns_survive_a_new_manager(self) -> None:
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        engine = MockInferenceEngine([reply("Sure thing.")])
+        first = ConversationManager(plan, [], pending, sched, inference_engine=engine, active_notes=[])
+        first.send_user_message("plan my evening")
+        again = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        self.assertEqual(again.history(), [{"role": "user", "content": "plan my evening"},
+                                           {"role": "assistant", "content": "Sure thing."}])
+
+    def test_an_opening_greeting_is_kept_and_seen_by_the_model(self) -> None:
+        sched = make_scheduler()
+        engine = MockInferenceEngine([reply("Got it, you're going.")])
+        first = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        first.add_assistant_message("You have an unconfirmed event: 'Dinner'. Are you attending?")
+        first.send_user_message("yes")
+        self.assertIn("Are you attending?", str(engine.call_history[0]))
+        again = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        self.assertEqual([m["role"] for m in again.history()], ["assistant", "user", "assistant"])
+
+    def test_refresh_follows_new_conversations_but_keeps_a_chosen_old_one(self) -> None:
+        sched = make_scheduler()
+        engine = MockInferenceEngine()
+        desk = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        desk.send_user_message("morning planning")
+        morning = desk.conversation.id
+        phone = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        phone.new_conversation()
+        phone.send_user_message("evening from the phone")
+        desk.refresh()
+        self.assertEqual(desk.history()[0]["content"], "evening from the phone")  # followed the new one
+        desk.switch_conversation(morning)
+        phone.send_user_message("more from the phone")
+        desk.refresh()
+        self.assertEqual(desk.conversation.id, morning)  # kept the deliberate choice
+
+
+class TestSlashCommands(ConversationTestCase):
+
+    def test_night_and_reset(self) -> None:
+        self.assertIn("10:30 PM", self.manager.send_user_message("/night"))
+        now = get_current_time(TZ)
+        self.assertEqual((now.hour, now.minute), (22, 30))
+        self.assertIn("cleared", self.manager.send_user_message("/reset"))
+        self.assertEqual(self.engine.call_history, [])
+
+
+
+class TestChoosingTheBrain(ConversationTestCase):
+
+    def setUp(self) -> None:
+        super().setUp()
+        from unittest.mock import patch
+        warm = patch.object(ConversationManager, "warm_in_background")  # don't load Gemma in unit tests
+        warm.start()
+        self.addCleanup(warm.stop)
+
+    def test_switching_keeps_the_conversation_and_sticks_on_this_device(self) -> None:
+        self.engine.set_next_response(reply("Morning!"))
+        self.manager.send_user_message("hi")
+        self.assertEqual(self.manager.brain_name, "frontier")
+        out = self.manager.send_user_message("/brain gemma")
+        self.assertIn("Gemma (on this device)", out)
+        self.assertEqual(type(self.manager.brain).__name__, "SlmBrain")
+        self.assertIn("hi", [m["content"] for m in self.manager.history()])
+        # Another client on the same database (the Telegram bridge) follows on its next refresh.
+        sched = self.manager.scheduler
+        other = ConversationManager(self.manager.day_plan, [], [], sched, inference_engine=self.engine, active_notes=[])
+        self.assertEqual(other.brain_name, "slm")
+        from thirties_core.settings import Settings
+        Settings(sched.state_db).set("assistant.brain", "frontier")
+        other.refresh()
+        self.assertEqual(type(other.brain).__name__, "FrontierBrain")
+        self.assertIn("hi", [m["content"] for m in other.history()])
+
+    def test_unknown_brain_is_refused(self) -> None:
+        self.assertIn("Unknown brain", self.manager.send_user_message("/brain gpt"))
+        self.assertEqual(self.manager.brain_name, "frontier")
+
+
+
+class TestSummaries(ConversationTestCase):
+
+    def test_new_conversation_summarizes_the_old_one_and_search_finds_it(self):
+        self.engine.set_next_response(reply('CALL add_event {"title": "Dentist prep", "start": "5:00 PM", "duration": "30 min"}'))
+        self.engine.set_next_response(reply("Added Dentist prep at 5."))
+        self.manager.send_user_message("can you add dentist prep at 5")
+        old = self.manager.conversation.id
+        self.manager.new_conversation()
+        from thirties_core.memory import ConversationStore
+        summary = ConversationStore(self.manager.scheduler.state_db).get(old).summary
+        self.assertIn('started with "can you add dentist prep at 5"', summary)
+        self.assertIn("Added Dentist prep", summary)
+        out = self.manager.execute_tool("search_history", {"query": "dentist"})
+        self.assertTrue(out.splitlines()[1].startswith("- 2026-10-15 (summary"), out)
 
 
 if __name__ == "__main__":

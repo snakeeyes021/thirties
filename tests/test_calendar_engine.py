@@ -4,14 +4,13 @@ import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from thirties_core.astronomy import build_base_thirties
 from thirties_core.calendar_engine import (
     CalendarEvent,
     EDSCalendarEngine,
     MockCalendarEngine,
-    map_events_to_blocks,
+    events_to_spans,
 )
-from thirties_core.models import BlockKind
+from thirties_core.models import SpanCategory
 
 
 class TestCalendarEngine(unittest.TestCase):
@@ -19,7 +18,6 @@ class TestCalendarEngine(unittest.TestCase):
     def setUp(self) -> None:
         self.tz = ZoneInfo("America/New_York")
         self.target_date = date(2026, 10, 8)
-        self.blocks = build_base_thirties(38.8799, -77.1067, self.target_date, self.tz)
 
     def test_overlap_calculation(self) -> None:
         start = datetime(2026, 10, 8, 10, 0, tzinfo=self.tz)
@@ -42,71 +40,41 @@ class TestCalendarEngine(unittest.TestCase):
             datetime(2026, 10, 8, 12, 0, tzinfo=self.tz),
         ))
 
-    def test_map_busy_calendar_event(self) -> None:
-        # Event from 10:00 AM to 11:30 AM (blocks 20, 21, 22)
-        start = datetime(2026, 10, 8, 10, 0, tzinfo=self.tz)
-        end = datetime(2026, 10, 8, 11, 30, tzinfo=self.tz)
-        event = CalendarEvent(
-            id="e_work",
-            summary="Architecture Sync",
-            start_dt=start,
-            end_dt=end,
-            response_status="accepted",
+    def _event(self, eid, start_h, end_h, **kw) -> CalendarEvent:
+        return CalendarEvent(
+            id=eid, summary=kw.pop("summary", eid),
+            start_dt=datetime(2026, 10, 8, *start_h, tzinfo=self.tz),
+            end_dt=datetime(2026, 10, 8, *end_h, tzinfo=self.tz), **kw,
         )
 
-        ambiguous = map_events_to_blocks(self.blocks, [event])
-        self.assertEqual(len(ambiguous), 0)
+    def test_accepted_event_becomes_firm_span(self) -> None:
+        spans, pending = events_to_spans([self._event("e_work", (10, 0), (11, 30), summary="Architecture Sync")])
+        self.assertEqual(pending, [])
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+        self.assertEqual(span.category, SpanCategory.CALENDAR)
+        self.assertEqual(span.title, "Architecture Sync")
+        self.assertEqual(span.source_event_id, "e_work")
+        self.assertTrue(span.is_firm)
+        self.assertFalse(span.tentative)
 
-        # Check blocks 20, 21, 22
-        for idx in [20, 21, 22]:
-            b = self.blocks[idx]
-            self.assertEqual(b.kind, BlockKind.BUSY_CALENDAR)
-            self.assertEqual(b.label, "Architecture Sync")
-            self.assertEqual(b.source_event_id, "e_work")
-            self.assertTrue(b.is_locked)
+    def test_declined_event_ignored(self) -> None:
+        spans, pending = events_to_spans([self._event("e_declined", (14, 0), (15, 0), response_status="declined")])
+        self.assertEqual((spans, pending), ([], []))
 
-        # Preceding block 19 and succeeding block 23 are unaffected
-        self.assertNotEqual(self.blocks[19].kind, BlockKind.BUSY_CALENDAR)
-        self.assertNotEqual(self.blocks[23].kind, BlockKind.BUSY_CALENDAR)
+    def test_invite_is_tentative_until_decided(self) -> None:
+        invite = self._event("e_doc", (11, 30), (12, 0), is_ambiguous=True, response_status="needsAction")
+        spans, pending = events_to_spans([invite])
+        self.assertEqual([e.id for e in pending], ["e_doc"])
+        self.assertTrue(spans[0].tentative)
+        self.assertFalse(spans[0].is_firm)
 
-    def test_map_declined_event_ignored(self) -> None:
-        start = datetime(2026, 10, 8, 14, 0, tzinfo=self.tz)
-        end = datetime(2026, 10, 8, 15, 0, tzinfo=self.tz)
-        event = CalendarEvent(
-            id="e_declined",
-            summary="Skipped Webinar",
-            start_dt=start,
-            end_dt=end,
-            response_status="declined",
-        )
+        spans, pending = events_to_spans([invite], {"e_doc": "attend"})
+        self.assertEqual(pending, [])
+        self.assertTrue(spans[0].is_firm)
 
-        ambiguous = map_events_to_blocks(self.blocks, [event])
-        self.assertEqual(len(ambiguous), 0)
-        # Block 28 (14:00 - 14:30) must remain discretionary
-        self.assertEqual(self.blocks[28].kind, BlockKind.DAYLIGHT_DISCRETIONARY)
-
-    def test_map_ambiguous_event(self) -> None:
-        # Spouse / family event at 11:30 AM (block 23)
-        start = datetime(2026, 10, 8, 11, 30, tzinfo=self.tz)
-        end = datetime(2026, 10, 8, 12, 0, tzinfo=self.tz)
-        event = CalendarEvent(
-            id="e_doc",
-            summary="Doctor Appointment",
-            start_dt=start,
-            end_dt=end,
-            is_primary=False,
-            is_ambiguous=True,
-            response_status="needsAction",
-        )
-
-        ambiguous = map_events_to_blocks(self.blocks, [event])
-        self.assertEqual(len(ambiguous), 1)
-        self.assertEqual(ambiguous[0].id, "e_doc")
-
-        b23 = self.blocks[23]
-        self.assertEqual(b23.kind, BlockKind.AMBIGUOUS_CALENDAR)
-        self.assertEqual(b23.label, "Doctor Appointment")
-        self.assertFalse(b23.is_locked)
+        spans, pending = events_to_spans([invite], {"e_doc": "decline"})
+        self.assertEqual((spans, pending), ([], []))
 
     def test_mock_calendar_engine(self) -> None:
         engine = MockCalendarEngine()
@@ -138,3 +106,36 @@ class TestCalendarEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEDSHelpers(unittest.TestCase):
+    """RSVP and time conversion on real iCal components (no calendar server needed)."""
+
+    def setUp(self) -> None:
+        try:
+            import gi
+            gi.require_version("ICalGLib", "3.0")
+            from gi.repository import ICalGLib
+        except Exception:
+            self.skipTest("ICalGLib not available")
+        self.ical = ICalGLib
+        self.tz = ZoneInfo("America/New_York")
+
+    def comp(self, attendees: str = "") -> object:
+        return self.ical.Component.new_from_string(
+            "BEGIN:VEVENT\nUID:x1\nSUMMARY:Team dinner\n"
+            "DTSTART;TZID=America/New_York:20261015T190000\nDTEND;TZID=America/New_York:20261015T210000\n"
+            + attendees + "END:VEVENT\n")
+
+    def test_partstat_for_my_address(self) -> None:
+        me = {"me@example.com"}
+        cases = {"NEEDS-ACTION": "needsAction", "ACCEPTED": "accepted", "DECLINED": "declined", "TENTATIVE": "tentative"}
+        for raw, expected in cases.items():
+            comp = self.comp(f"ATTENDEE;PARTSTAT={raw}:mailto:Me@Example.com\nATTENDEE;PARTSTAT=ACCEPTED:mailto:other@x.com\n")
+            self.assertEqual(EDSCalendarEngine._my_partstat(comp, me), expected, raw)
+        self.assertIsNone(EDSCalendarEngine._my_partstat(self.comp(), me))
+
+    def test_time_conversion_uses_utc_epoch(self) -> None:
+        t = self.ical.Time.new_from_string("20261015T230000Z")
+        dt = EDSCalendarEngine._to_datetime(t, self.tz)
+        self.assertEqual((dt.hour, dt.minute, dt.tzinfo), (19, 0, self.tz))

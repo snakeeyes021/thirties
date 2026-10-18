@@ -1,308 +1,240 @@
 """Unit tests for thirties_core.inference."""
 
+import json
+import subprocess
+import sys
+import tempfile
 import unittest
+import urllib.error
+from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from thirties_core.config import ThirtiesConfig
-from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine, parse_model_directives
+from thirties_core.inference import (
+    AntigravityInferenceEngine,
+    GeminiInferenceEngine,
+    LiteRTInferenceEngine,
+    MockInferenceEngine,
+    get_inference_engine,
+    parse_model_directives,
+    split_thinking_level,
+)
 
 
-class TestInference(unittest.TestCase):
+def _api_response(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.read.return_value = json.dumps({"candidates": [{"content": {"parts": [{"text": text}]}}]}).encode("utf-8")
+    resp.__enter__.return_value = resp
+    return resp
 
-    def test_mock_inference_engine(self) -> None:
-        engine = MockInferenceEngine()
-        resp = engine.chat([{'role': 'user', 'content': 'allocate block 32 to Dorico'}])
-        self.assertIn('Dorico', resp['content'])
-        self.assertEqual(len(resp['tool_calls']), 1)
-        self.assertEqual(resp['tool_calls'][0]['name'], 'modify_blocks')
-        self.assertEqual(resp['tool_calls'][0]['arguments']['start_block'], 32)
+
+class TestDirectiveParsing(unittest.TestCase):
+
+    def test_call_lines_are_extracted_in_order_and_hidden(self) -> None:
+        text, calls = parse_model_directives(
+            'Sure, moving it.\n'
+            'CALL update_event {"event": "abc", "shift": "+1 hour"}\n'
+            '```\nCALL add_event {"title": "Laundry", "start": "7:30 PM", "duration": "1 hour"}\n```\n'
+            'Done.'
+        )
+        self.assertEqual(text, "Sure, moving it.\n\nDone.")
+        self.assertEqual([c["name"] for c in calls], ["update_event", "add_event"])
+        self.assertEqual(calls[1]["arguments"], {"title": "Laundry", "start": "7:30 PM", "duration": "1 hour"})
+
+    def test_call_without_arguments_and_plain_replies(self) -> None:
+        self.assertEqual(parse_model_directives("CALL list_schedule")[1][0]["arguments"], {})
+        self.assertEqual(parse_model_directives("You're free after 4."), ("You're free after 4.", []))
+        # Mentioning a tool in prose is not a call
+        self.assertEqual(parse_model_directives("I could CALL you later")[1], [])
+
+    def test_malformed_arguments_are_reported_not_dropped(self) -> None:
+        _, calls = parse_model_directives("CALL add_event {title: Gym}")
+        self.assertIn("_parse_error", calls[0]["arguments"])
+
+
+class TestTransports(unittest.TestCase):
+
+    def test_mock_engine_replays_queue_then_plain_text(self) -> None:
+        engine = MockInferenceEngine([{"role": "assistant", "content": "first", "tool_calls": []}])
+        self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "first")
+        second = engine.chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(second["tool_calls"], [])
+        self.assertEqual(len(engine.call_history), 2)
+
+    def test_split_thinking_level(self) -> None:
+        self.assertEqual(split_thinking_level("gemini-3.8-flash-low"), ("gemini-3.8-flash", "low"))
+        self.assertEqual(split_thinking_level("gemini-3.8-flash"), ("gemini-3.8-flash", None))
+
+    def test_gemini_api_payload_and_parsing(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        cfg.inference.gemini_model = "gemini-3.8-flash-low"
+        engine = GeminiInferenceEngine(cfg)
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "free?"},
+            {"role": "assistant", "content": "", "tool_calls": [{"name": "list_schedule"}]},
+            {"role": "tool", "name": "list_schedule", "content": "Free: 4:00 PM – 11:00 PM"},
+        ]
+        with patch("urllib.request.urlopen", return_value=_api_response('Sure.\nCALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}')) as urlopen:
+            res = engine.chat(messages)
+        self.assertEqual(res["content"], "Sure.")
+        self.assertEqual(res["tool_calls"][0]["name"], "add_event")
+
+        req = urlopen.call_args[0][0]
+        self.assertIn("models/gemini-3.8-flash:generateContent", req.full_url)
+        self.assertNotIn("fake", req.full_url)  # key travels in a header, not the URL
+        payload = json.loads(req.data)
+        self.assertEqual(payload["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+        # Empty assistant text is skipped; the tool result reaches the model
+        self.assertEqual([c["role"] for c in payload["contents"]], ["user"])
+        texts = [p["text"] for p in payload["contents"][0]["parts"]]
+        self.assertTrue(any("[Result of list_schedule]" in t for t in texts))
+
+    def test_gemini_api_conversation_may_open_with_the_assistant(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        messages = [{"role": "system", "content": "sys"},
+                    {"role": "assistant", "content": "Are you attending?"}, {"role": "user", "content": "yes"}]
+        with patch("urllib.request.urlopen", return_value=_api_response("Noted.")) as urlopen:
+            engine.chat(messages)
+        payload = json.loads(urlopen.call_args[0][0].data)
+        self.assertEqual([c["role"] for c in payload["contents"]], ["user", "model", "user"])
+
+    def test_gemini_api_retries_rate_limits(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        busy = urllib.error.HTTPError("u", 429, "Too Many Requests", {}, BytesIO(b"{}"))
+        with patch("urllib.request.urlopen", side_effect=[busy, _api_response("ok")]), patch("time.sleep") as sleep:
+            res = engine.chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(res["content"], "ok")
+        sleep.assert_called_once()
+
+    def test_gemini_api_retries_timeouts(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        with patch("urllib.request.urlopen", side_effect=[TimeoutError("read timed out"), _api_response("ok")]), \
+                patch("time.sleep"):
+            self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "ok")
+
+    def test_gemini_api_gives_up_on_client_errors(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        bad = urllib.error.HTTPError("u", 400, "Bad Request", {}, BytesIO(b'{"error": "nope"}'))
+        with patch("urllib.request.urlopen", side_effect=[bad]), patch("time.sleep") as sleep:
+            res = engine.chat([{"role": "user", "content": "hi"}])
+        self.assertIn("HTTP 400", res["content"])
+        sleep.assert_not_called()
+
+    def setUp(self) -> None:
+        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(tempfile.mkdtemp()) / "agy_calls.log")
+        self.ledger = ledger.start()
+        self.addCleanup(ledger.stop)
+
+    def test_every_agy_call_is_logged_with_its_outcome(self) -> None:
+        from thirties_core.inference import agy_ledger
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        quota = MagicMock(returncode=3, stdout="", stderr="error: Individual quota reached. Resets in 4h7m.")
+        huge = MagicMock(returncode=0, stderr="",
+                         stdout='{"event":"init"}\n{"event":"result","result":{"status":"SUCCESS","response":"ok"}}\n')
+        ok = MagicMock(returncode=0, stdout=json.dumps({"response": "hi"}), stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", side_effect=[ok, quota]):
+            engine.chat([{"role": "user", "content": "a"}])
+            engine.chat([{"role": "user", "content": "b"}])
+        self.assertEqual([o for _, _, o in agy_ledger(60)], ["ok", "quota"])
+
+    def test_gemini_sources_in_the_users_order_with_fallback(self) -> None:
+        from thirties_core.inference import GeminiSourcesEngine
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "k"
+        cfg.inference.sources = ["api", "agy"]
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
+            engine = GeminiSourcesEngine(cfg)
+        self.assertEqual([n for n, _ in engine.engines], ["api", "agy"])
+        api, agy = engine.engines[0][1], engine.engines[1][1]
+        with patch.object(api, "chat", return_value={"content": "Encountered an error communicating with Gemini API: 429",
+                                                    "tool_calls": []}), \
+                patch.object(agy, "chat", return_value={"content": "hello", "tool_calls": []}):
+            self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "hello")
+        cfg.inference.sources = ["agy"]  # the user unticked the API: it's never used
+        with patch("thirties_core.inference.find_agy_binary", return_value=None):
+            self.assertFalse(GeminiSourcesEngine(cfg).is_available())
+
+    def test_antigravity_chat_includes_tool_results(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        payload = {"response": 'CALL remove_event {"event": "Work"}\nEnjoy the day off.'}
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=json.dumps(payload), stderr="")) as run:
+            res = engine.chat([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "day off"},
+                {"role": "tool", "name": "list_schedule", "content": "Scheduled: Work"},
+            ])
+        self.assertEqual(res["content"], "Enjoy the day off.")
+        self.assertEqual(res["tool_calls"][0]["arguments"], {"event": "Work"})
+        cmd = run.call_args[0][0]
+        self.assertNotIn("--print", cmd)  # the prompt goes on stdin, never as an argument
+        sent = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(sent["event"], "user")
+        self.assertIn("(Result of list_schedule, for the assistant only: Scheduled: Work)", sent["message"]["content"])
+        self.assertIn("--sandbox", cmd)
+        self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
+
+    def test_antigravity_timeout(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["agy"], timeout=10)):
+            res = engine.chat([{"role": "user", "content": "hello"}])
+        self.assertIn("timed out", res["content"])
+        self.assertEqual(res["tool_calls"], [])
 
     def test_litert_availability_detection(self) -> None:
         engine = LiteRTInferenceEngine()
+        if not engine.is_available():
+            self.skipTest("No LiteRT-LM runtime or Gemma model installed on this machine.")
         self.assertTrue(engine.is_available())
 
-    def test_modify_blocks_directive_parsing(self) -> None:
+    def test_litert_chat_parses_calls(self) -> None:
         engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 24 | label=Writing Session
-Sure, I scheduled that for you.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Please allocate block 24 to Writing Session'}])
-                self.assertEqual(res['content'], 'Sure, I scheduled that for you.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 24)
-                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Writing Session')
+        session = MagicMock()
+        session.send_message.return_value = 'CALL add_event {"title": "Writing", "start": "8:00 PM", "duration": "1 hour"}\nScheduled.'
+        with patch.dict(sys.modules, {"litert_lm": MagicMock()}), \
+                patch.object(engine, "_ensure_initialized"), patch.object(engine, "_conv_session", session):
+            res = engine.chat([{"role": "user", "content": "writing at 8"}])
+        self.assertEqual(res["content"], "Scheduled.")
+        self.assertEqual(res["tool_calls"][0]["name"], "add_event")
 
-    def test_multi_block_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 28-31 | label=Composing Session
-Allocated 2 hours of composing.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': "Let's go block 28, I'll probably want to go for at least two hours"}])
-                self.assertEqual(res['content'], 'Allocated 2 hours of composing.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 28)
-                self.assertEqual(res['tool_calls'][0]['arguments']['end_block'], 31)
-                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Composing Session')
+    def test_get_inference_engine_factory(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.backend = "gemini"
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
+            engine = get_inference_engine(cfg)
+            self.assertIsInstance(engine.engines[0][1], AntigravityInferenceEngine)
+        with patch("thirties_core.inference.find_agy_binary", return_value=None):
+            cfg.inference.gemini_api_key = "test_key"
+            self.assertIsInstance(get_inference_engine(cfg).engines[0][1], GeminiInferenceEngine)
 
-    def test_clear_work_blocks_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-CLEAR_BLOCKS: WORK
-I have deallocated all your work blocks for today.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': "I don't actually have work today. Can you deallocate all my work blocks from work?"}])
-                self.assertEqual(res['content'], 'I have deallocated all your work blocks for today.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'clear_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['clear_kind'], 'WORK')
+        cfg_api = ThirtiesConfig()
+        cfg_api.inference.backend = "gemini_api"
+        cfg_api.inference.gemini_api_key = "test_key"
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"):
+            self.assertIsInstance(get_inference_engine(cfg_api), GeminiInferenceEngine)
 
-    def test_work_envelope_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 7-18 | kind=WORK locked=true
-Work scheduled from 10:00 AM to 4:00 PM.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'My work hours are from 10:00 AM to 4:00 PM today.'}])
-                self.assertEqual(res['content'], 'Work scheduled from 10:00 AM to 4:00 PM.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 7)
-                self.assertEqual(res['tool_calls'][0]['arguments']['end_block'], 18)
-                self.assertEqual(res['tool_calls'][0]['arguments']['kind'], 'WORK')
-                self.assertTrue(res['tool_calls'][0]['arguments']['is_locked'])
+        cfg_litert = ThirtiesConfig()
+        cfg_litert.inference.backend = "litert"
+        with patch.object(LiteRTInferenceEngine, "is_available", return_value=True):
+            self.assertIsInstance(get_inference_engine(cfg_litert), LiteRTInferenceEngine)
 
-    def test_sleep_envelope_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 32-47 | kind=SLEEP locked=true
-Sleep window set from 10:00 PM to 6:00 AM.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'I am going to bed at 10pm and waking up at 6am.'}])
-                self.assertEqual(res['content'], 'Sleep window set from 10:00 PM to 6:00 AM.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['kind'], 'SLEEP')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 32)
-                self.assertEqual(res['tool_calls'][0]['arguments']['end_block'], 47)
-
-    def test_resolve_event_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-RESOLVE_EVENT: evt_123 | attend
-Confirmed doctor appointment.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Yes, I will attend the doctor appointment.'}])
-                self.assertEqual(res['content'], 'Confirmed doctor appointment.')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'resolve_event')
-                self.assertEqual(res['tool_calls'][0]['arguments']['event_id'], 'evt_123')
-                self.assertEqual(res['tool_calls'][0]['arguments']['action'], 'attend')
-
-    def test_inspect_and_finalize_directive_parsing(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout='''---THIRTIES_RESPONSE_START---
-INSPECT_BLOCKS: 1-12
-FINALIZE_PLAN
-Here is your plan.
----THIRTIES_RESPONSE_END---''',
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': "Looks good, let's lock it in."}])
-                self.assertEqual(res['content'], 'Here is your plan.')
-                self.assertEqual(len(res['tool_calls']), 2)
-                self.assertEqual(res['tool_calls'][0]['name'], 'inspect_blocks')
-                self.assertEqual(res['tool_calls'][1]['name'], 'finalize_day_plan')
+        cfg_mock = ThirtiesConfig()
+        cfg_mock.inference.backend = "mock"
+        self.assertIsInstance(get_inference_engine(cfg_mock), MockInferenceEngine)
 
 
-    def test_multiple_modify_directives_in_single_turn(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout="""---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 19-21 | label=Composing
-MODIFY_BLOCKS: 22 | label=Lunch
-I scheduled both.
----THIRTIES_RESPONSE_END---""",
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Schedule composing 19-21 and lunch 22'}])
-                self.assertEqual(res['content'], 'I scheduled both.')
-                self.assertEqual(len(res['tool_calls']), 2)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 19)
-                self.assertEqual(res['tool_calls'][0]['arguments']['end_block'], 21)
-                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Composing')
-
-                self.assertEqual(res['tool_calls'][1]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][1]['arguments']['start_block'], 22)
-                self.assertEqual(res['tool_calls'][1]['arguments']['end_block'], 22)
-                self.assertEqual(res['tool_calls'][1]['arguments']['label'], 'Lunch')
-
-    def test_space_separated_attributes_no_greedy_swallow(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout="""---THIRTIES_RESPONSE_START---
-MODIFY_BLOCKS: 19-22 | label=Composing Session locked=true
-Scheduled composing session.
----THIRTIES_RESPONSE_END---""",
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Schedule composing'}])
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Composing Session')
-                self.assertTrue(res['tool_calls'][0]['arguments']['is_locked'])
-
-    def test_combined_clear_and_modify_directives(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout="""---THIRTIES_RESPONSE_START---
-CLEAR_BLOCKS: WORK
-MODIFY_BLOCKS: 25-28 | label=Gym Session
-Cleared work and added gym.
----THIRTIES_RESPONSE_END---""",
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'No work today, let us do gym at 25-28'}])
-                self.assertEqual(res['content'], 'Cleared work and added gym.')
-                self.assertEqual(len(res['tool_calls']), 2)
-                self.assertEqual(res['tool_calls'][0]['name'], 'clear_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['clear_kind'], 'WORK')
-                self.assertEqual(res['tool_calls'][1]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][1]['arguments']['start_block'], 25)
-                self.assertEqual(res['tool_calls'][1]['arguments']['label'], 'Gym Session')
-
-    def test_lowercase_directive_handling(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout="""---THIRTIES_RESPONSE_START---
-modify_blocks: 10 | label=Break
-Enjoy your break!
----THIRTIES_RESPONSE_END---""",
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Block 10 break'}])
-                self.assertEqual(res['content'], 'Enjoy your break!')
-                self.assertEqual(len(res['tool_calls']), 1)
-                self.assertEqual(res['tool_calls'][0]['name'], 'modify_blocks')
-                self.assertEqual(res['tool_calls'][0]['arguments']['start_block'], 10)
-                self.assertEqual(res['tool_calls'][0]['arguments']['label'], 'Break')
-
-    def test_conversational_reply_with_no_directives(self) -> None:
-        engine = LiteRTInferenceEngine()
-        with patch.object(engine, '_find_host_runner', return_value={'python': 'mock_py', 'script': 'mock_sc'}):
-            with patch('subprocess.run') as mock_subproc:
-                mock_subproc.return_value = MagicMock(
-                    stdout="""---THIRTIES_RESPONSE_START---
-I recommend scheduling that during the daylight hours around 2:00 PM.
----THIRTIES_RESPONSE_END---""",
-                    stderr='',
-                    returncode=0,
-                )
-                res = engine.chat([{'role': 'user', 'content': 'Where should I compose?'}])
-                self.assertEqual(res['content'], 'I recommend scheduling that during the daylight hours around 2:00 PM.')
-                self.assertEqual(len(res['tool_calls']), 0)
-
-
-    def test_modify_blocks_clock_time_directive_parsing(self) -> None:
-        raw = """I have scheduled your work shift for today.
-MODIFY_BLOCKS: 07:00 AM - 03:00 PM | kind=WORK locked=true
-Have a productive shift!"""
-        clean, calls = parse_model_directives(raw)
-        self.assertIn("I have scheduled your work shift for today.", clean)
-        self.assertIn("Have a productive shift!", clean)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["name"], "modify_blocks")
-        self.assertEqual(calls[0]["arguments"]["start_time"], "07:00 AM")
-        self.assertEqual(calls[0]["arguments"]["end_time"], "03:00 PM")
-        self.assertEqual(calls[0]["arguments"]["kind"], "WORK")
-        self.assertTrue(calls[0]["arguments"]["is_locked"])
-
-    def test_modify_blocks_natural_clock_time_parsing(self) -> None:
-        raw = "MODIFY_BLOCKS: 7am - 3pm | kind=WORK"
-        clean, calls = parse_model_directives(raw)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["arguments"]["start_time"], "7am")
-        self.assertEqual(calls[0]["arguments"]["end_time"], "3pm")
-        self.assertEqual(calls[0]["arguments"]["kind"], "WORK")
-
-    def test_clear_blocks_kinds_directive_parsing(self) -> None:
-        raw = "CLEAR_BLOCKS: ALL\nCLEAR_BLOCKS: TASKS\nCLEAR_BLOCKS: EVENTS"
-        clean, calls = parse_model_directives(raw)
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[0]["name"], "clear_blocks")
-        self.assertEqual(calls[0]["arguments"]["clear_kind"], "ALL")
-        self.assertEqual(calls[1]["name"], "clear_blocks")
-        self.assertEqual(calls[1]["arguments"]["clear_kind"], "TASKS")
-        self.assertEqual(calls[2]["name"], "clear_blocks")
-        self.assertEqual(calls[2]["arguments"]["clear_kind"], "EVENTS")
-
-    def test_clear_and_inspect_clock_time_directive_parsing(self) -> None:
-        raw = """CLEAR_BLOCKS: 02:00 PM - 03:00 PM
-INSPECT_BLOCKS: 10:00 AM - 12:00 PM"""
-        clean, calls = parse_model_directives(raw)
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["name"], "clear_blocks")
-        self.assertEqual(calls[0]["arguments"]["start_time"], "02:00 PM")
-        self.assertEqual(calls[0]["arguments"]["end_time"], "03:00 PM")
-        self.assertEqual(calls[1]["name"], "inspect_blocks")
-        self.assertEqual(calls[1]["arguments"]["start_time"], "10:00 AM")
-        self.assertEqual(calls[1]["arguments"]["end_time"], "12:00 PM")
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
