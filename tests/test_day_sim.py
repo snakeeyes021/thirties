@@ -74,6 +74,24 @@ class TestDaySim(unittest.TestCase):
         self.assertEqual(facts["done_items_recorded"], "1/1")
         self.assertEqual(facts["mean_time_error_min"], 5.0)  # started 10:15 against 10:05; ended right on 10:35
 
+    def test_someone_else_with_their_own_lists(self):
+        from tests.day_sim import validate
+        nurse = DayScript(id="nurse", day=date(2026, 10, 10), wake="07:00", bed="22:00", persona="Pat", situation="Off.",
+                          life=["07:00 Wake."], truth=[{"item": "Laundry", "start": "09:00", "end": "10:00"}],
+                          notes=[{"notebook": "Home", "title": "Chores", "role": "list",
+                                  "body": "- [ ] Laundry\n- [ ] Pay the water bill\n## Someday\n- [ ] Paint the hall\n"},
+                                 {"notebook": "Home", "title": "Today", "role": "today", "body": ""}])
+        run = start_day(nurse, "frontier", [], [], MockInferenceEngine())
+        tasks = {t.title: t for t in run.manager.tools.services.tasks}
+        self.assertEqual(set(tasks), {"Laundry", "Pay the water bill", "Paint the hall"})
+        self.assertTrue(tasks["Paint the hall"].someday)
+        self.assertEqual(tasks["Laundry"].list_role, "list")
+        self.assertIsNotNone(run.manager.tools.assistant._today_note())  # their Today note works too
+        self.assertEqual(validate({"id": "x", "date": "2026-13-01", "wake": "7:00", "bed": "22:00", "persona": "p",
+                                   "situation": "s", "life": ["morning: wake"], "truth": [{"item": "a"}]}),
+                         ["date '2026-13-01' isn't YYYY-MM-DD", "wake '7:00' isn't HH:MM",
+                          "life beat without a time first: 'morning: wake'"])
+
     def test_committed_scripts_load(self):
         scripts = find_scripts([Path(__file__).parent / "day_scripts"])
         self.assertTrue(scripts)

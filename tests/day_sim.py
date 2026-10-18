@@ -56,11 +56,12 @@ from thirties_core.clock import format_clock
 from thirties_core.config import ThirtiesConfig, load_config
 from thirties_core.inference import AntigravityInferenceEngine
 from thirties_core.joplin_engine import JoplinEngine
-from thirties_core.models import SpanCategory, SpanStatus
+from thirties_core.models import SpanCategory, SpanStatus, TaskItem
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 
 REPORTS_DIR = REPO_ROOT / "docs" / "eval_reports" / "day"
-SCRIPT_DIRS = [REPO_ROOT / "tests" / "day_scripts", REPO_ROOT / "docs" / "eval_reports" / "day_scripts"]
+SCRIPT_DIRS = [REPO_ROOT / "tests" / "day_scripts", REPO_ROOT / "tests" / "day_scripts" / "people",
+               REPO_ROOT / "docs" / "eval_reports" / "day_scripts"]
 STEP = timedelta(minutes=5)
 MAX_MOVES = 160         # simulator decisions per day (waits included)
 MAX_MESSAGES = 80       # user messages per day
@@ -88,6 +89,18 @@ class DayScript:
     setup: List[List[Any]] = field(default_factory=list)        # [tool, args] before the day starts
     profile: Dict[str, str] = field(default_factory=dict)
     source: str = ""
+    # The person's own lists, if not the user's real Joplin: {"notebook", "title", "role", "body" (markdown)}
+    notes: List[Dict[str, str]] = field(default_factory=list)
+
+    def own_backlog(self) -> Tuple[List[TaskItem], List[Dict[str, Any]]]:
+        """Tasks and notes from the script's own lists (note ids are made up and stable)."""
+        from thirties_core.joplin_engine import checklist_tasks
+        notes = [{"id": f"{self.id}-note{i}", "source_notebook": n.get("notebook", "Lists"), "title": n["title"],
+                  "body": n.get("body", ""), "is_todo": False, "todo_completed": 0}
+                 for i, n in enumerate(self.notes)]
+        tasks = [t for n in notes for t in checklist_tasks(n["id"], n["title"], n["source_notebook"], n["body"],
+                                                             ["Someday", "Maybe", "Someday/Maybe"])]
+        return tasks, notes
 
     @classmethod
     def load(cls, path: Path) -> "DayScript":
@@ -108,9 +121,51 @@ class DayScript:
                            extra_events=events, setup=setup, profile=dict(self.profile))
 
 
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def validate(data: Dict[str, Any]) -> List[str]:
+    """What's wrong with a script (an empty list if nothing): for scripts written elsewhere."""
+    problems = []
+    for key in ("id", "date", "wake", "bed", "persona", "situation", "life", "truth"):
+        if not data.get(key):
+            problems.append(f"missing {key}")
+    try:
+        date.fromisoformat(str(data.get("date")))
+    except ValueError:
+        problems.append(f"date {data.get('date')!r} isn't YYYY-MM-DD")
+    for key in ("wake", "bed"):
+        if data.get(key) and not HHMM.match(str(data[key])):
+            problems.append(f"{key} {data[key]!r} isn't HH:MM")
+    for beat in data.get("life") or []:
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d\b", str(beat)):
+            problems.append(f"life beat without a time first: {str(beat)[:40]!r}")
+    for t in data.get("truth") or []:
+        if not t.get("item"):
+            problems.append("truth item without a name")
+        for key in ("start", "end"):
+            if t.get(key) and not HHMM.match(str(t[key])):
+                problems.append(f"truth {t.get('item')!r} {key} {t[key]!r} isn't HH:MM")
+    work = data.get("work")
+    if work is not None and not (isinstance(work, list) and len(work) == 2 and all(HHMM.match(str(w)) for w in work)):
+        problems.append(f"work {work!r} isn't null or [HH:MM, HH:MM]")
+    for e in data.get("events") or []:
+        if not (e.get("summary") and HHMM.match(str(e.get("start", ""))) and HHMM.match(str(e.get("end", "")))):
+            problems.append(f"event {e!r} needs summary, start and end (HH:MM)")
+    roles = {"routine", "today", "menu", "list", "project", "backlog", "reference", "ignore"}
+    for n in data.get("notes") or []:
+        if not n.get("title") or "body" not in n:
+            problems.append(f"note {str(n)[:40]!r} needs a title and a body")
+        if n.get("role") and n["role"] not in roles:
+            problems.append(f"note {n.get('title')!r} role {n['role']!r} isn't one of {sorted(roles)}")
+    return problems
+
+
 def find_scripts(dirs: List[Path], only: Optional[List[str]] = None) -> List[DayScript]:
     scripts = []
     for d in dirs:
+        if not Path(d).exists():
+            continue
         for path in sorted(Path(d).glob("*.json")) if Path(d).is_dir() else [Path(d)]:
             script = DayScript.load(path)
             if not only or script.id in only:
@@ -231,7 +286,20 @@ def _hhmm(dt: datetime) -> str:
 def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str = "") -> DayRun:
     run = DayRun(script, brain)
     set_debug_time(at(script.day, script.wake))
+    if script.notes:  # someone else's life: their own lists, with the roles they'd confirm at setup
+        tasks, notes = script.own_backlog()
+        lists_db = ""
     run.manager, run.scheduler = build_manager(script.scenario(), brain, tasks, notes, engine)
+    if script.notes:
+        try:
+            from thirties_core.lists import ListCatalog
+            catalog = ListCatalog(run.scheduler.state_db)
+            for n, given in zip(notes, script.notes):
+                if given.get("role"):
+                    catalog.set_role(n["id"], given["role"], n["title"], source="user")
+            run.manager.tools.services.tasks = catalog.apply(run.manager.tools.services.tasks)
+        except ImportError:
+            pass  # a version without list roles
     if lists_db:  # the lists sorted once (tests/day_scripts.py lists), as if the app had sorted them
         try:
             from thirties_core.lists import ListCatalog
