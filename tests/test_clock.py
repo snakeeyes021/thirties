@@ -85,10 +85,14 @@ class TestClock(unittest.TestCase):
         self.assertEqual(agenda_lines(items), [
             "- 4:00 PM – Feed cat",
             "- 5:00 PM – Wash car (until 5:30 PM)",
-            "- 6:00 PM – Dinner",
-            "- 6:00 PM – Audiobook",
+            "- 6:00 PM – Dinner + Audiobook",          # sounding together
             "- 7:00 PM – Team dinner (unconfirmed)",  # the last item's end isn't worth the noise
         ])
+        # the piano roll: note1 ends and note2 begins in the 10:30 thirty, note3 spans it: note3 joins the first line
+        notes = [(at("10:00"), at("10:40"), "note1", ""), (at("10:40"), at("11:30"), "note2", ""),
+                 (at("10:30"), at("11:00"), "note3", "")]
+        self.assertEqual(agenda_lines(notes), ["- 10:00 AM – note1", "- 10:30 AM –", "  note1 + note3", "  note2",
+                                               "- 11:00 AM – note2"])
         nested = [(at("08:30"), at("16:00"), "Work", ""), (at("10:00"), at("11:00"), "Meeting", "")]
         self.assertEqual(agenda_lines(nested, numbered=True),
                          ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting"])

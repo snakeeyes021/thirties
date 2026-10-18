@@ -126,58 +126,54 @@ def thirty_ceil(dt: datetime) -> datetime:
     return dt if start == dt else start + SHORT
 
 
-def group_short_items(items: Sequence[Tuple[datetime, datetime, str, str]]) -> List[Tuple[datetime, datetime, str, str]]:
-    """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one row at the
-    thirty's start, ending when the thirty ends. In the row's title, things one after another are on their own
-    lines ("Thing 1\nBreak") and things at the same time are joined with + ("Personal call + Break")."""
-    out: List[Tuple[datetime, datetime, str, str]] = []
-    rows: List[Optional[List[Tuple[datetime, datetime, str]]]] = []  # parallel to out: the short items of a thirty
-    for start, end, title, note in items:
-        if end - start < SHORT and thirty_of(start) == thirty_of(end - timedelta(seconds=1)):
-            block = thirty_of(start)
-            label = f"{title} ({note})" if note else title
-            if out and rows[-1] is not None and out[-1][0] == block:
-                rows[-1].append((start, end, label))
-                continue
-            out.append((block, block + SHORT, label, ""))
-            rows.append([(start, end, label)])
+def slice_lines(events: Sequence[Tuple[datetime, datetime, str]]) -> List[str]:
+    """What's sounding in a thirty, read like a piano roll: things at the same time joined with +, and when one
+    thing ends and the next begins, the next on a new line. Something spanning the slice joins only the first
+    line it overlaps ("note1 + note3" then "note2", not note3 on both)."""
+    lines: List[List[Tuple[datetime, datetime, str]]] = []
+    for e in sorted(events, key=lambda e: (e[0], -(e[1] - e[0]).total_seconds())):
+        if lines and e[0] < min(end for _, end, _ in lines[-1]):
+            lines[-1].append(e)
         else:
-            out.append((start, end, title, note))
-            rows.append(None)
-    for i, row in enumerate(rows):
-        if row and len(row) > 1:
-            lines: List[List[Tuple[datetime, datetime, str]]] = []
-            for item in sorted(row, key=lambda r: r[0]):
-                if lines and item[0] < max(e for _, e, _ in lines[-1]):  # overlaps what's on this line
-                    lines[-1].append(item)
-                else:
-                    lines.append([item])
-            out[i] = (out[i][0], out[i][1], "\n".join(" + ".join(t for _, _, t in line) for line in lines), "")
-    return out
+            lines.append([e])
+    return [" + ".join(title for _, _, title in line) for line in lines]
 
 
 def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered: bool = False) -> List[str]:
-    """A plan as a reader expects it: '- 4:00 PM – Feed cat', one line per item, in order.
-
-    Items are (start, end, title, note). Each item ends when the next one starts, so an end
-    time is added only where it isn't implied: before a gap or under an overlap (the last
-    item's end isn't worth the noise). Items under 30 minutes are shown by their thirty.
-    """
-    items = group_short_items(items)
-    lines = []
-    for i, (start, end, title, note) in enumerate(items):
-        next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)
-        extras = [note] if note else []
-        if next_start is not None and next_start != end:
-            extras.append(f"until {format_clock(end)}")
-        prefix = f"{i + 1}. " if numbered else "- "
-        tail = f" ({', '.join(extras)})" if extras else ""
-        if "\n" in title:  # several things one after another in this thirty: the thirty, then each on its own line
-            lines.append(f"{prefix}{format_clock(start)} –{tail}")
-            lines += [f"  {line}" for line in title.split("\n")]
-        else:
-            lines.append(f"{prefix}{format_clock(start)} – {title}{tail}")
-    return lines
+    """A plan as a reader expects it, by thirties: each row is a thirty and what's sounding in it (consecutive
+    thirties with the same things are one row); an end time only before a gap. Items are (start, end, title,
+    note). Numbered lists (options to choose from) keep one line per item."""
+    if numbered:
+        out = []
+        for i, (start, end, title, note) in enumerate(items):
+            next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)
+            extras = [note] if note else []
+            if next_start is not None and next_start != end:
+                extras.append(f"until {format_clock(thirty_ceil(end))}")
+            out.append(f"{i + 1}. {format_clock(thirty_of(start))} – {title}" + (f" ({', '.join(extras)})" if extras else ""))
+        return out
+    events = [(start, end, f"{title} ({note})" if note else title) for start, end, title, note in items if end > start]
+    if not events:
+        return []
+    rows: List[Tuple[datetime, datetime, Tuple[int, ...]]] = []
+    t, last = thirty_of(min(e[0] for e in events)), max(e[1] for e in events)
+    while t < last:
+        sounding = tuple(i for i, (s, e, _) in enumerate(events) if s < t + SHORT and e > t)
+        if rows and rows[-1][2] == sounding and rows[-1][1] == t:
+            rows[-1] = (rows[-1][0], t + SHORT, sounding)
+        elif sounding:
+            rows.append((t, t + SHORT, sounding))
+        t += SHORT
+    out = []
+    for n, (start, end, sounding) in enumerate(rows):
+        lines = slice_lines([events[i] for i in sounding])
+        until = f" (until {format_clock(end)})" if n + 1 < len(rows) and rows[n + 1][0] != end else ""
+        if len(lines) == 1:
+            out.append(f"- {format_clock(start)} – {lines[0]}{until}")
+        else:  # one thing after another in this thirty: the thirty, then each line
+            out.append(f"- {format_clock(start)} –{until}")
+            out += [f"  {line}" for line in lines]
+    return out
 
 
 _TIME_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\s?(AM|PM)\b")
