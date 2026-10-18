@@ -129,6 +129,8 @@ class TestTransports(unittest.TestCase):
         from thirties_core.inference import agy_ledger
         engine = AntigravityInferenceEngine(ThirtiesConfig())
         quota = MagicMock(returncode=3, stdout="", stderr="error: Individual quota reached. Resets in 4h7m.")
+        huge = MagicMock(returncode=0, stderr="",
+                         stdout='{"event":"init"}\n{"event":"result","result":{"status":"SUCCESS","response":"ok"}}\n')
         ok = MagicMock(returncode=0, stdout=json.dumps({"response": "hi"}), stderr="")
         with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
                 patch("subprocess.run", side_effect=[ok, quota]):
@@ -166,7 +168,10 @@ class TestTransports(unittest.TestCase):
         self.assertEqual(res["content"], "Enjoy the day off.")
         self.assertEqual(res["tool_calls"][0]["arguments"], {"event": "Work"})
         cmd = run.call_args[0][0]
-        self.assertIn("[Result of list_schedule]", cmd[cmd.index("--print") + 1])
+        self.assertNotIn("--print", cmd)  # the prompt goes on stdin, never as an argument
+        sent = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(sent["event"], "user")
+        self.assertIn("[Result of list_schedule]", sent["message"]["content"])
         self.assertIn("--sandbox", cmd)
         self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
 

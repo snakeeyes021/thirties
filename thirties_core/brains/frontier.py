@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
@@ -280,9 +280,13 @@ RULES
             by_list: Dict[str, List[TaskItem]] = {}
             for t in media:
                 by_list.setdefault(t.source_notebook.split(" > ")[-1], []).append(t)
+            import random
+            pick = random.Random(date.today().toordinal())  # a different handful each day
             sections.append("WISHLISTS FROM THE USER'S PUBLIC ACCOUNTS (Goodreads, Letterboxd, Serializd; read-only, "
-                            "synced automatically; separate from Joplin):\n" + "\n".join(
-                                f"=== {name} ({len(items)}) ===\n" + "\n".join(f"- [ID: {t.id}] {t.title}" for t in items)
+                            "synced automatically; separate from Joplin). A sample of each; search_backlog finds the "
+                            "rest:\n" + "\n".join(
+                                f"=== {name} ({len(items)} in all) ===\n" + "\n".join(
+                                    f"- [ID: {t.id}] {t.title}" for t in (items if len(items) <= 15 else pick.sample(items, 15)))
                                 for name, items in by_list.items()))
         elif self.tasks:
             # Fallback if active_notes was empty
@@ -297,6 +301,15 @@ RULES
     def _claims_change(self, text: str) -> bool:
         return bool(ACTION_CLAIM_PATTERN.search(text or ""))
 
+    RECENT_TURNS = 8
+
+    def _for_model(self) -> List[Dict[str, Any]]:
+        """What the model sees: the whole conversation, but tool results only for the last few user turns
+        (older ones are spent; the schedule in the prompt is current)."""
+        user_idx = [i for i, m in enumerate(self.messages) if m.get("role") == "user"]
+        cutoff = user_idx[-self.RECENT_TURNS] if len(user_idx) > self.RECENT_TURNS else 0
+        return [m for i, m in enumerate(self.messages) if i >= cutoff or m.get("role") != "tool"]
+
     def respond(self, user_text: str) -> str:
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
@@ -308,7 +321,7 @@ RULES
         last_results: List[str] = []
         reflected = False
         for round_index in range(MAX_ROUNDS):
-            response = self.inference_engine.chat(messages=self.messages, tools=TOOL_SPECS)
+            response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
             content = response.get("content", "") or ""
             calls = response.get("tool_calls", []) or []
             self.messages.append(response)

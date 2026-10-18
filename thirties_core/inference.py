@@ -89,6 +89,20 @@ def agy_ledger(since_seconds: float) -> List[Tuple[int, str, str]]:
     return rows
 
 
+def _stream_result(output: str) -> Optional[Dict[str, Any]]:
+    """The final "result" event from agy's stream-json output (or a plain json object), if any."""
+    for line in reversed(output.strip().splitlines()):
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("event") == "result":
+            return data.get("result") or {}
+        if isinstance(data, dict) and "response" in data and "event" not in data:
+            return data
+    return None
+
+
 def get_host_home() -> Path:
     """Discover host home directory, working inside or outside Flatpak sandbox."""
     if shutil.which("flatpak-spawn"):
@@ -226,14 +240,17 @@ class AntigravityInferenceEngine:
         prompt_text = self._format_prompt(messages)
         is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
 
+        # The prompt goes in on stdin (one stream-json message): as a command-line argument it
+        # can exceed the system's argument size limit once the conversation and backlog grow.
         cmd = [
             agy_bin,
             "--sandbox",
-            "--print", prompt_text,
-            "--output-format", "json",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
             "--model", self.model,
             "--disable-slash-commands",
         ]
+        stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
         # agy is a coding agent: run it in an empty private directory, never in the
         # repository or wherever Thirties happened to be started.
         workspace = agy_workspace_dir()
@@ -243,6 +260,7 @@ class AntigravityInferenceEngine:
         try:
             res = subprocess.run(
                 cmd,
+                input=stdin_text,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -268,13 +286,12 @@ class AntigravityInferenceEngine:
         raw_reply = ""
         record_agy_call(self.model, "ok" if res.returncode == 0 else
                         ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + raw_output[-2000:]) else "error"))
-        if res.returncode == 0 and raw_output.strip():
-            try:
-                data = json.loads(raw_output)
-                raw_reply = data.get("response", "")
-            except Exception:
-                raw_reply = raw_output
+        result = _stream_result(raw_output)
+        if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
+            raw_reply = result.get("response", "")
         else:
+            if result is not None and result.get("error"):
+                raw_output = f"{result.get('error')}\n{raw_output[-1000:]}"
             err_msg = res.stderr or raw_output or "Unknown CLI failure"
             logger.error("Antigravity CLI returned exit code %s: %s", res.returncode, err_msg)
             return {

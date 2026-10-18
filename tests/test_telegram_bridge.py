@@ -87,9 +87,15 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
             )
         )
 
+        from tests.fixtures import at
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.calendar_engine import MockCalendarEngine
+        set_debug_time(at("09:00"))  # a fixed workday, never the real date or calendar
+        self.addCleanup(set_debug_time, None)
         self.scheduler = DeterministicScheduler(
             config=self.config,
             state_db=self.state_db,
+            calendar_engine=MockCalendarEngine([]),
         )
 
         self.mock_joplin = MagicMock()
