@@ -451,18 +451,50 @@ def quota_capacity() -> int:
     return max(used, 200)
 
 
-WEEKLY_CAPACITY = 6400            # calls per week: 3,469 since the weekly reset showed as 54% used (2026-10-18)
-WEEKLY_RESET = datetime(2026, 10, 16, 17, 20)  # local time; the weekly quota resets every 7 days from here
-WEEKLY_EVAL_SHARE = 0.70          # evals stop here, leaving the rest of the week for real use of the app
+def agy_quota() -> Dict[str, Dict[str, Tuple[float, str]]]:
+    """agy's real quota, from its /quota command (free: no agent turn, no quota spent):
+    {group name: {"5h" | "weekly": (fraction remaining, reset time)}}; {} if it can't be read."""
+    import subprocess
+    from thirties_core.inference import agy_workspace_dir, find_agy_binary
+    agy = find_agy_binary(None)
+    if not agy:
+        return {}
+    try:
+        res = subprocess.run([agy, "-p", "/quota", "--output-format", "json"], capture_output=True, text=True,
+                             timeout=60, cwd=agy_workspace_dir())
+        data = json.loads(res.stdout)
+    except (subprocess.SubprocessError, ValueError, OSError):
+        return {}
+    out: Dict[str, Dict[str, Tuple[float, str]]] = {}
+    for group in ((data.get("command") or {}).get("data") or {}).get("groups", []):
+        for bucket in group.get("buckets", []):
+            out.setdefault(group["name"], {})[bucket["window"]] = (float(bucket["remaining_fraction"]),
+                                                                    bucket.get("reset_time", ""))
+    return out
 
 
-def weekly_left() -> Tuple[int, int]:
-    """(calls since this week's reset, calls evals may reach this week)."""
-    now = datetime.now()
-    weeks = int((now - WEEKLY_RESET).total_seconds() // (7 * 86400))
-    start = (WEEKLY_RESET + timedelta(days=7 * weeks)).timestamp()
-    used = sum(1 for t, _, o in agy_ledger(8 * 86400) if t >= start and o != "quota")
-    return used, int(WEEKLY_CAPACITY * WEEKLY_EVAL_SHARE)
+def quota_group(model: str) -> str:
+    """Which of agy's quota groups a model draws on."""
+    if model.startswith("gemini-4-argon"):
+        return "Gemini 4 Argon"
+    if model.startswith(("claude", "gpt")):
+        return "Claude and GPT models"
+    return "Gemini Models"
+
+
+def quota_stop(models: List[str], five_hour_share: float, weekly_share: float = 0.70) -> Optional[str]:
+    """Why evals should stop now (a group's 5-hour or weekly use past its share), or None to carry on. Reads the
+    real quota; if agy can't report it, falls back to the call-count estimate."""
+    quota = agy_quota()
+    if not quota:
+        used, allowed, capacity = budget_left(five_hour_share)
+        return None if used < allowed else f"estimated budget reached: {used} calls in 5 h (budget {allowed})"
+    for group in {quota_group(m) for m in models}:
+        for window, share in (("5h", five_hour_share), ("weekly", weekly_share)):
+            remaining, reset = quota.get(group, {}).get(window, (1.0, ""))
+            if 1 - remaining >= share:
+                return f"{group} {window} quota {1 - remaining:.0%} used (limit for evals {share:.0%}; resets {reset})"
+    return None
 
 
 def budget_left(share: float) -> Tuple[int, int, int]:
@@ -718,14 +750,10 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     frontier_engine = AntigravityInferenceEngine(fcfg)
     results = []
     for n, (scn, brain, i) in enumerate(jobs, 1):
-        week_used, week_allowed = weekly_left()
-        if week_used + CALLS_PER_CONVERSATION[brain] > week_allowed:
-            return results, (f"weekly guard after {len(results)} finished conversations in this worker: {week_used} "
-                             f"agy calls since the weekly reset, limit {week_allowed} for evals")
-        used, allowed, capacity = budget_left(args.budget)
-        if used + CALLS_PER_CONVERSATION[brain] > allowed:
-            return results, (f"budget reached after {len(results)} finished conversations in this worker: {used} agy calls "
-                             f"in the last 5 h, budget {allowed} ({args.budget:.0%} of ~{capacity})")
+        models = [args.sim_model] + ([args.frontier_model] if brain == "frontier" else [])
+        stop = quota_stop(models, args.budget) if n == 1 or n % 5 == 0 else None  # /quota every few conversations
+        if stop:
+            return results, f"stopped after {len(results)} finished conversations in this worker: {stop}"
         print(f"\n== {scn.id} [{brain}] {i}/{args.repeat}  ({n}/{len(jobs)})", flush=True)
         try:
             run = run_scenario(scn, brain, sim, judge, tasks, notes, frontier_engine)
