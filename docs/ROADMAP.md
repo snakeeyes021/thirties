@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-15.
+> Last revised: 2026-10-18.
 
 ---
 
@@ -138,30 +138,125 @@ Done means a generic user can install Thirties fresh and use it daily, with no c
 
 ---
 
-## Next
+## 0.1: The day list (branch `feature/0.1`, agreed 2026-10-17)
+
+Real use of the MVP showed the root problem: the schedule does two jobs, the plan and the record. So every drift became a schedule edit, which brought shuffles, confirmations, nagging, and a day view full of things that never happened. 0.1 separates them.
+
+### Principles
+- **The task backend is the source of truth** (Joplin today). Every list lives there, including the day's list, and the user can edit any of it by hand. Thirties is a wrapper around the user's own notes. It stores only what has no home in them:
+  - the plan (when things are scheduled)
+  - the record (what actually happened, and when)
+  - facts about items ("after shower", "not before 3", "needs daylight")
+  - each list's role and each item's urgency
+  - the link between a Today item and its home list
+  - settings and conversations
+- **Notes stay plain checklists.** Thirties never writes times, ids or markers into them.
+- **The plan changes only when the user asks** (or agrees to a proposal). Nothing is assumed done.
+
+### 1. Lists: a role per note, an urgency per item
+Notes are organized by area of life (Home, Errands/Admin, Medical…), and urgency varies within each one, so there are two axes:
+- **Role (per note, not per notebook):**
+
+  | Role | Example | What Thirties does with it |
+  |---|---|---|
+  | routine | Morning Routine | feeds Today each morning, in order |
+  | today | Today To-Do | the day's actual list |
+  | menu | Self | offers items when there's free time, and expands "pick one item from Home…" into a suggestion |
+  | list | Home, Errands/Admin, Medical, Shopping | items to work through |
+  | project | Wedding To-Do | a one-off with an end |
+  | reference | wishlists, "Do I want?" | never pushed; mentioned only when asked |
+  | ignore | | not read |
+
+- **Urgency (per item):** now, soon, whenever, someday, or a date.
+  - The guess reads the note's own structure: headings (Active / Probation), blank-line groups, nesting (the leaf "Need to call" is the action; its parents are context), and wording ("for THIS winter").
+  - The note's role and area give the default (Medical leans soon, Home leans whenever).
+- **Who guesses:**
+  - The chosen brain's model guesses, with Gemma as the fallback since it's always installed. Python doesn't attempt this judgment.
+  - Roles: one small, constrained choice per note.
+  - Urgency: guessed one note at a time, for new or changed items only.
+  - Guesses are starting values; the user confirms or corrects them.
+  - Each guessing task is also an SLM eval, with Gemini's answer on the same notes as the reference.
+- **Setup:**
+  - Thirties finds every notebook and note, preselects the relevant ones, and proposes a role for each note.
+  - New notes that appear later are asked about once.
+- **Profile → Your lists:** every item grouped by notebook and note, with an urgency choice (or a date) to bulk-edit. Urgency can also be corrected in conversation ("that's not urgent").
+- **Restructuring is offered, never required.** A user with an empty backend gets a starter set (Today, a routine, a couple of lists). A one-time triage conversation for a monolithic list waits until after 0.1.
+
+### 2. The Today note
+- **Morning:** Thirties proposes the day. It includes the routine, asks which of yesterday's unfinished items to keep, and picks by urgency and fit. Once agreed, it writes the list to the Today note.
+- **Linked to home lists:** a Today item copied from Errands stays linked to it, so ticking either one ticks both.
+- **Edits by hand:**
+  - Thirties re-reads the note, and a reworded item counts as a new item.
+  - If a scheduled item disappears from the list, the user is told once.
+- **Next morning:** declined items leave Today. Items with a home list are still on it. Items without one get a proposed home, as one list: "Clip cat nails → Errands/Admin".
+- **Routine notes are unticked each morning** (with permission), so routines start fresh.
+
+### 3. Plan and record
+- **Done items:**
+  - They grey out at the times they actually happened, like traffic behind you on a map.
+  - "Done" with no time given means finished when reported, with the start estimated and marked as a guess.
+- **Unreported items:**
+  - They stay where they were, marked not reported, and the day view shows a quiet "behind: Shower, PT".
+  - Thirties never moves them on its own.
+- **Redraw** (a button, or "replan") is one deterministic action, with undo. Python reflows what's left from now, around fixed items and item facts. The model steps in only when things don't fit, with one proposal ("drop the walk, or move cables to tomorrow?").
+- **Fixed commitments at risk:** the assistant speaks up once. It doesn't silently change the plan.
+- **Facts about items, enforced by Python:**
+  - how fixed an item is: fixed (calendar), anchored (meals, routines), or flexible
+  - what must come first ("outside things after shower")
+  - when it can't start ("not before she leaves")
+  - daylight
+- **Direct manipulation:** drag items, tap them done. This goes through `PlanTools`, like the assistant.
+
+### 4. Messages
+- **Light:** a heads-up before fixed commitments, plus reminders the user asked for.
+- **Medium (default):** one message at the start of each stretch of the day ("This afternoon: X, Y, Z") and one check-in at its end ("What did you get to?").
+  - Python cuts stretches at fixed commitments, work, sunset and sleep, up to about three hours each.
+- **Heavy:** per item, grouped by thirty (the 0.0.1 behaviour).
+- **Always:**
+  - nothing during sleep or calendar events
+  - nothing about items already reported
+  - no check-in shortly after the user has talked to the assistant
+
+### 5. The day view
+- **Default page:**
+  - "Now and next"
+  - the rest of today in a compact list
+  - earlier items folded into "Done today", a summary of what actually happened and when
+- **Second page:** the full 48-thirty timeline.
+- Try it, and change it if it doesn't feel right.
+
+### Order of work
+1. List roles and urgency: the model's guesses, setup, and Profile → Your lists.
+2. The Today note, with links to home lists, the morning proposal and the next-morning cleanup.
+3. Plan and record, with item facts and redraw.
+4. Message levels.
+5. The day view.
+
+Each step adds sim scenarios for what it changes and reruns the 0.0.1 baseline scenarios to check nothing regressed.
+
+---
+
+## After 0.1
 
 1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
-2. **SLM understanding and efficiency** (judge: understanding 3.4, efficiency 3.4 on generated scenarios). First, rerun the generated baseline's SLM scenarios on the fixes made since (`--only-from` the baseline report), then finish the remaining 160:
+2. **SLM understanding and efficiency** (judge: understanding 3.4, efficiency 3.4 on generated scenarios):
    - Decision fatigue: when the user says "you pick" or is low on energy, propose one low-effort plan and apply it on "sure". Tasks need a rough effort estimate for this.
    - Multi-part messages drop a part (50% on the parse benchmark: "work ran until 4:30, and move budget review to 4:30" loses the work change). Add a "did I cover everything in the message?" check in Python: look for nouns from the message that matched no action.
    - "Dinner, cooking and eating, listening to X" becomes three items; it should be one item with X alongside.
    - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
-3. **Messages to the user (check-ins and reminders):**
-   - Keep: one check-in 10 minutes after a planned item ends with no outcome.
-   - User-requested messages at any time, on any day ("remind me next week to water the alligator" → "3 PM on Saturday").
-   - Suppression on request ("no need to keep asking about X"; "I'll do it tomorrow").
-   - Later, once there's a rule for it: contextual messages ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
-4. **Rollover as a batch:** a morning "yesterday's unfinished items" proposal you confirm in one go (the tools exist; this is the flow).
-5. **Statistics in planning:** use real durations from history when proposing how long things take, and warn when a plan exceeds the capacity you've actually shown.
-6. **Conversation summaries** when a conversation ends, so history search works on summaries instead of raw messages.
-7. **Calendar refinements:**
+3. **Contextual messages** ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
+4. **Calendar refinements:**
    - remember "not mine" decisions per recurring series, not per occurrence
-   - (not planned for now: writing events back to Google Calendar; task write-back, Joplin first, is what matters)
-8. **Connector abstraction (Anti-Pattern 1):** `TaskSource`, `CalendarSource` and `SyncTransport` interfaces. The user mentioned "a cloud location with much more storage" as another configurable option, probably a sync or storage transport; waiting on the user to say what it is.
-9. **Weekly patterns:** different routines per weekday (work hours, sleep).
-10. **Housekeeping:**
+   - choose per calendar: mine, show only, or ignore
+   - (not planned: writing events back to Google Calendar)
+5. **Connector abstraction (Anti-Pattern 1):** `TaskSource` and `CalendarSource` interfaces, beside the existing `SyncTransport`.
+6. **Weekly patterns:** different routines per weekday (work hours, sleep).
+7. **Triage for monolithic lists:** a one-time conversation that proposes splitting a list sorted by time horizon into lists by area of life.
+8. **Housekeeping:**
    - `pyproject.toml` dependencies are stale (`astral` is unused; `litert-lm-api` should be optional)
    - `inference.py` hard-codes `~/dev/Thirties` runner paths
    - unused imports
    - the DST fall-back hour edge case: same-zone comparisons use wall time
    - the desktop app's periodic refresh runs on the UI thread
+   - GUI tests in CI (they skip there: no display)
+9. **Later:** a headless Joplin CLI sync peer, Flathub, translations, a native mobile app.
