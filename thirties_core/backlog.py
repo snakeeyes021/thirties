@@ -1,0 +1,45 @@
+"""Assemble the user's backlog from every connected source.
+
+Joplin is the first task source; public media wishlists (Goodreads, Letterboxd,
+Serializd) add read-only "want to read/watch" items. Clients call
+``load_backlog`` instead of talking to each connector.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from thirties_core.config import ThirtiesConfig
+from thirties_core.models import TaskItem
+
+logger = logging.getLogger(__name__)
+
+
+def load_backlog(config: ThirtiesConfig, joplin_engine=None, scheduler=None
+                 ) -> Tuple[List[TaskItem], List[Dict[str, Any]]]:
+    """Return (tasks, joplin notes) from all sources, with deferral history attached."""
+    tasks: List[TaskItem] = []
+    notes: List[Dict[str, Any]] = []
+    if joplin_engine is not None:
+        tasks.extend(joplin_engine.fetch_tasks())
+        notes = joplin_engine.fetch_active_notes()
+    tasks.extend(load_media_tasks(config))
+    if scheduler is not None:
+        scheduler.attach_history_to_tasks(tasks)
+    return tasks, notes
+
+
+def load_media_tasks(config: ThirtiesConfig, opener=None) -> List[TaskItem]:
+    media = getattr(config, "media", None)
+    if not media or not (media.goodreads_user_id or media.letterboxd_username or media.serializd_username):
+        return []
+    try:
+        from thirties_core.media_sources import fetch_all_media, media_items_as_tasks
+        return media_items_as_tasks(fetch_all_media(config, opener=opener))
+    except Exception as e:  # a wishlist outage must never break planning
+        logger.warning("Media wishlists unavailable: %s", e)
+        return []
+
+
+__all__ = ["load_backlog", "load_media_tasks"]
