@@ -109,6 +109,20 @@ class TestHandEdits(TodayTestCase):
         self.assertEqual(self.t.assistant.sync_today(), [])
 
 
+class TestBrains(TodayTestCase):
+
+    def test_gemini_sees_todays_list_and_routines(self):
+        from thirties_core.brains.frontier import FrontierBrain
+        self.t.execute("add_to_today", {"items": ["Call the bank"]})
+        self.api.notes["n_today"]["body"] = "- [x] Call the bank\n- [ ] Clip cat nails\n"
+        self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [ ] PT\n"}
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        notes = self.services.joplin.fetch_active_notes()
+        text = FrontierBrain(self.t, None, tasks=self.services.tasks, active_notes=notes).build_backlog_summary()
+        self.assertIn("Today's list (Today To-Do):\n- [done] Call the bank\n- Clip cat nails\n"
+                      "Routine (Morning Routine):\n- [done] Shower\n- PT", text)
+
+
 class TestMorning(TodayTestCase):
 
     def setUp(self):

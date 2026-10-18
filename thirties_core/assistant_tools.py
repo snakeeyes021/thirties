@@ -858,7 +858,8 @@ class AssistantTools:
             parts.append(added)
         if homeless:
             parts.append("Off today's list, with no other list to go back to: " + ", ".join(homeless)
-                         + ". Propose a list for each (add_task), or let them go.")
+                         + ". Want me to put " + ("it" if len(homeless) == 1 else "them") + " on one of your lists, "
+                         "or let " + ("it" if len(homeless) == 1 else "them") + " go?")
         return "\n".join(parts) or "Today's list stays as it is."
 
     def rollover_pending(self) -> bool:

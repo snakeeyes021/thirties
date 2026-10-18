@@ -171,10 +171,29 @@ RULES
 15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: add the second one with alongside=true. Never join two things into one title.
 16. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
 17. Messages: when the user asks, you can send them a message later with set_reminder ("remind me Saturday to water the plants"); if they give no time, choose a sensible one and say it. If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
-18. Mornings: if yesterday has items with no outcome, Thirties offers to roll them into today (rollover_proposal shows the plan). When the user agrees, call apply_rollover (with skip for anything they want left out) instead of moving items one by one.
+18. Mornings: Thirties offers to carry yesterday's unfinished items into today, both planned ones and ones still on today's list, plus anything pressing (rollover_proposal shows it). When the user agrees, call apply_rollover (with skip for anything they want left out) instead of moving items one by one. If it names items with no list to go back to, propose a list for each, one per line ("- Clip cat nails → Errands/Admin"), and add them with add_task once the user agrees.
 19. Time is told in thirties: the only times you ever say end in :00 or :30, unless the user explicitly asks for exact minutes (list_schedule exact=true). Things shorter than 30 minutes are said by their thirty and in order ("5:00 – Feed the cats, then message Brad"). Several short things can share a thirty: add each one normally (not alongside) and the tool stacks them in order. Use alongside only for things done at the same time.
 20. Weather: when suggesting or planning something outdoors (a walk, a run, yard work, errands on foot), check the forecast; don't suggest it into rain or bad weather, and if the user plans it there (a tool result says "Weather heads-up"), mention it once, briefly, with a better time if there is one.
+21. Today's list versus the plan: the list is what the user means to do today (their Today note, plus routines); the plan is when. When the user says they'll do something today, or agrees to a day's list, put it on the list with add_to_today (scheduling a list item for today adds it on its own). Mornings start from the list.
 """
+
+    def _day_list_section(self) -> str:
+        """The user's list for today (their Today note) and routines, with what's done."""
+        if self.tools.scheduler is None:
+            return ""
+        from thirties_core.today import note_items, notes_with_role
+        roles = ListCatalog(self.tools.scheduler.state_db).roles()
+        lines = []
+        for role, heading in (("today", "Today's list"), ("routine", "Routine")):
+            for note in notes_with_role(roles, self.active_notes, role):
+                items = note_items(note)
+                if items:
+                    lines.append(f"{heading} ({note['title']}):")
+                    lines += [f"- {'[done] ' if ticked else ''}{text}" for text, ticked in items]
+        if not lines:
+            return ""
+        return ("TODAY'S LIST (what the user means to do today: their Today note, plus routines; ticks are what's "
+                "done):\n" + "\n".join(lines))
 
     def build_backlog_summary(self) -> str:
         """The full Joplin backlog, organized by notebook and note, for a large-context model."""
@@ -203,6 +222,9 @@ RULES
                 )
 
         sections = []
+        day_list = self._day_list_section()
+        if day_list:
+            sections.append(day_list)
         if chronic_lines:
             sections.append(
                 "🔥 CHRONICALLY DEFERRED ITEMS (Urgent / Needs Tough Love or Single 30-Min Chunk):\n"
