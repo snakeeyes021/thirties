@@ -90,6 +90,59 @@ class DayViewTests(unittest.TestCase):
         return [(r.title_label.get_text(), isinstance(r, GroupedBlockWidget), len(getattr(r, "blocks", [None])))
                 for r in view._rows]
 
+    def test_the_day_page_shows_where_the_day_stands(self) -> None:
+        from thirties_core.models import SpanStatus
+        done = next(s for s in self.plan.spans if s.id == "research")
+        done.status, done.actual_start, done.actual_end = SpanStatus.DONE, at("13:15"), at("14:20")
+        self.sched.state_db.upsert_span(done)
+        plan, _ = self.sched.build_day_plan(DAY)
+        calls = []
+        view = DayView(plan)
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Redrew the rest of today:", None)
+        groups = view.agenda.groups
+        self.assertEqual(list(groups), ["now", "next", "behind", "done"])
+
+        def titles(group):
+            rows = []
+
+            def walk(w):
+                if isinstance(w, Adw.ActionRow):
+                    rows.append(w)
+                c = w.get_first_child()
+                while c is not None:
+                    walk(c)
+                    c = c.get_next_sibling()
+            walk(group)
+            return [(r.get_title(), r.get_subtitle() or "") for r in rows]
+        self.assertEqual(titles(groups["now"]), [("Free until 8:00 PM", "")])
+        self.assertEqual(titles(groups["behind"]), [("Dinner", "planned 6:00 PM – 7:00 PM"),
+                                                    ("Audiobook", "planned 6:00 PM – 7:00 PM")])
+        self.assertIn(("Movie", "8:00 PM – 9:30 PM"), titles(groups["next"]))
+        self.assertEqual(titles(groups["done"]), [("Research", "1:00 PM – 2:30 PM")])  # when it really happened
+        view.agenda.replan_btn.emit("clicked")
+        self.assertEqual(calls[-1], ("redraw", {}))
+        self.assertTrue(view.move_to("movie", at("21:00")))
+        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM", "push_later": True}))
+
+    def test_items_past_their_time_are_not_assumed_done(self) -> None:
+        set_debug_time(at("21:40"))
+        view = DayView(self.plan)
+        calls = []
+        view.set_actions(lambda name, args: calls.append((name, args)) or "", None)
+        self.assertIn("behind", view.agenda.groups)
+        buttons = []
+        def walk(w):
+            if isinstance(w, Gtk.Button) and (w.get_tooltip_text() or "").startswith("Mark Movie"):
+                buttons.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(view.agenda.groups["behind"])
+        self.assertEqual([b.get_tooltip_text() for b in buttons], ["Mark Movie done", "Mark Movie skipped"])
+        buttons[0].emit("clicked")
+        self.assertEqual(calls, [("log_outcome", {"event": "movie", "status": "done"})])
+
     def test_multi_thirty_items_collapse_into_cards(self) -> None:
         view = DayView(self.plan)
         rows = self.rows(view)

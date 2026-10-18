@@ -70,6 +70,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
+        self.day_view.set_actions(self._run_day_tool, self._on_replanned)
         self.content_toolbar.set_content(self.day_view)
 
         self.conv_manager = None
@@ -287,6 +288,29 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             self.day_view.refresh_plan(self.conv_manager.day_plan)
         self._sync_brain_action()  # "/brain gemma" typed in the chat
         self._push_sync()
+
+    def _run_day_tool(self, name: str, args: dict) -> str:
+        """A change made in the day view (a tap, a drag, Replan) goes through the same tools as the assistant."""
+        if self.conv_manager is None:
+            return ""
+        from thirties_core.plan_tools import NOT_DONE
+        result = self.conv_manager.execute_tool(name, args)
+        if result.startswith(NOT_DONE):
+            self._toast(result.split(":", 1)[1].split(". Ask the user")[0].strip())
+        self.day_view.refresh_plan(self.conv_manager.day_plan)
+        self._push_sync()
+        return result
+
+    def _on_replanned(self, result: str) -> None:
+        from thirties_core.plan_tools import NOT_DONE
+        if result.startswith(NOT_DONE):
+            return
+        missed = next((line.split(": ", 1)[1] for line in result.splitlines()
+                       if line.startswith("Doesn't fit")), "")
+        toast = Adw.Toast(title="Replanned the rest of today" + (f". Didn't fit: {missed.split('.')[0]}" if missed else ""),
+                          timeout=8, button_label="Undo")
+        toast.connect("button-clicked", lambda *_: self._run_day_tool("undo_redraw", {}))
+        self.toast_overlay.add_toast(toast)
 
     def _push_sync(self) -> None:
         if self.config.sync.enabled and self.config.sync.auto_push_on_change:
