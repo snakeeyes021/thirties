@@ -538,8 +538,8 @@ class ChatPanel(Gtk.Box):
         available = "still available" if live else "available"
         greeting = (
             f"Good day! You are planning {day_prefix}.\n"
-            f"You have {counts['daylight_open']}/{counts['daylight_total']} daylight blocks "
-            f"and {counts['dark_open']}/{counts['dark_total']} dark blocks {available}.\n\n"
+            f"You have {counts['daylight_open']}/{counts['daylight_total']} Daylight Thirties "
+            f"and {counts['dark_open']}/{counts['dark_total']} Dark Thirties {available}.\n\n"
         )
         if ambiguous:
             ev = ambiguous[0]
