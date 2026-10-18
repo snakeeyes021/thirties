@@ -1,0 +1,118 @@
+"""Make day scripts for tests/day_sim.py from real conversations, and variations of them.
+
+    # one script per real day, from the app's stored conversations (and, optionally, a phone export with times)
+    python3 -m tests.day_scripts extract --day 2026-10-16 --day 2026-10-17 --export phone_export.txt
+    # variations of a script: same kind of person and backlog, a different day with different mishaps
+    python3 -m tests.day_scripts vary docs/eval_reports/day_scripts/real_2026-10-17.json --n 4
+
+Scripts made from real conversations hold personal details, so they go to
+docs/eval_reports/day_scripts/ (gitignored). Each one is a single agy call.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from datetime import date
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests.sim_eval import make_llm
+from thirties_core.brains.slm.parse import extract_json
+
+OUT_DIR = REPO_ROOT / "docs" / "eval_reports" / "day_scripts"
+EXAMPLE = (REPO_ROOT / "tests" / "day_scripts" / "saturday_errands.json").read_text()
+
+FORMAT = """A day script is a JSON object with exactly these fields (this example is synthetic):
+{example}
+- "life": the course of the day in time order, one beat per line, each starting with a 24-hour time: what the person asks the app for, what they actually do and for how long, what interrupts them, what they find out. Include what they want from the assistant in their own terms (e.g. "Ask to plan the morning routine as its separate items, about 2 thirties together").
+- "constraints": facts the person knows but only says when they matter (e.g. "Nothing outside until after the shower").
+- "truth": what the person really did, with real start and end times (24-hour), for scoring the app's record; "match" is |-separated words that would appear in the item's title; add "done": false for things planned but not done.
+- "work": [start, end] in 24-hour time, or null if no work that day.
+- "events": calendar events that day (24-hour times; "invite": true for unconfirmed invites).
+- "setup": [tool, arguments] calls that set up the day before it starts, e.g. yesterday's unfinished item: ["add_event", {{"title": "Message Brad back", "start": "9:30 PM", "duration": "15 min", "day": "yesterday"}}].
+- "persona": who they are and how they text and react, from how they actually wrote.
+Return ONLY the JSON object, written directly in your reply: don't use tools, run commands, or read or write files."""
+
+EXTRACT_PROMPT = """Below is a real day of someone using a planning assistant app ("Thirties"): the app's stored conversation for {day} (with the tool results it saw), and possibly the person's phone export with message times.
+
+Write a day script that lets a simulator relive this day realistically against a new version of the app. Capture how the day really went, not how the app handled it: what the person wanted, what they did and when, what ran late, what interrupted them, the constraints they revealed (and when they revealed them), and how they reacted to the app. Don't include the app's mistakes as facts of the day.
+
+{format}
+
+The stored conversation:
+{conversation}
+
+The phone export (may include other days; use only {day}):
+{export}"""
+
+VARY_PROMPT = """Here is a day script for simulating a person's day with a planning assistant app:
+{script}
+
+Write {n} different variations of it, as a JSON object {{"scripts": [...]}}. Each one is the same kind of person (same persona and the same lists of things to do), but a different day: a different date within two weeks of the original (keep weekday versus weekend consistent with "work"), a different wake time, different things to get done from the same kinds of lists, different mishaps (something running long, an interruption, a change of mind, a forgotten constraint), and a different mood. Keep each script internally consistent: "truth" must match "life". Give each a new "id" ending in _v1, _v2 and so on, and "source": "variation of {sid}".
+
+{format}"""
+
+
+def stored_conversation(db_path: Path, day: str) -> str:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    lines = []
+    for (messages,) in conn.execute("SELECT messages FROM conversations WHERE plan_date = ? ORDER BY created_at", (day,)):
+        for m in json.loads(messages):
+            content = str(m.get("content") or "").strip()
+            calls = m.get("tool_calls") or []
+            if m["role"] == "tool":
+                lines.append(f"(tool result: {content[:400]})")
+            elif content or calls:
+                call_text = "".join(f"\n  CALL {c.get('name')} {json.dumps(c.get('arguments', {}))}" for c in calls)
+                lines.append(f"{m['role'].capitalize()}: {content}{call_text}")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    ex = sub.add_parser("extract")
+    ex.add_argument("--day", action="append", required=True)
+    ex.add_argument("--db", default=str(Path.home() / ".local/share/thirties/state.sqlite"))
+    ex.add_argument("--export", default="")
+    va = sub.add_parser("vary")
+    va.add_argument("script")
+    va.add_argument("--n", type=int, default=4)
+    ap.add_argument("--model", default="gemini-3.8-flash")
+    args = ap.parse_args()
+    llm = make_llm(args.model, timeout=900)  # long prompts, long answers
+    fmt = FORMAT.format(example=EXAMPLE)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    made = []
+    if args.cmd == "extract":
+        export = Path(args.export).read_text() if args.export else "(none)"
+        for day in args.day:
+            date.fromisoformat(day)
+            script = extract_json(llm(EXTRACT_PROMPT.format(day=day, format=fmt, export=export,
+                                                            conversation=stored_conversation(Path(args.db), day))))
+            if not script:
+                print(f"{day}: no script came back")
+                continue
+            script.update({"id": f"real_{day}", "date": script.get("date") or day,
+                           "source": f"the stored conversation of {day}"})
+            made.append(script)
+    else:
+        original = json.loads(Path(args.script).read_text())
+        out = extract_json(llm(VARY_PROMPT.format(script=json.dumps(original, indent=2), n=args.n,
+                                                  sid=original["id"], format=fmt))) or {}
+        made = [s for s in out.get("scripts", []) if isinstance(s, dict) and s.get("id")]
+    for script in made:
+        path = OUT_DIR / f"{script['id']}.json"
+        path.write_text(json.dumps(script, indent=2, ensure_ascii=False))
+        print(f"wrote {path.relative_to(REPO_ROOT)}: {len(script.get('life', []))} beats, "
+              f"{len(script.get('truth', []))} truth items")
+
+
+if __name__ == "__main__":
+    main()

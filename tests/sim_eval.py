@@ -463,10 +463,10 @@ def raise_if_agy_failed(text: str) -> None:
         raise (QuotaExhausted if QUOTA_RE.search(text) else AgyError)(text[:400])
 
 
-def make_llm(model: str) -> Callable[[str], str]:
+def make_llm(model: str, timeout: int = 180) -> Callable[[str], str]:
     cfg = ThirtiesConfig()
     cfg.inference.gemini_model = model
-    cfg.inference.timeout_seconds = 180
+    cfg.inference.timeout_seconds = timeout
     engine = AntigravityInferenceEngine(cfg)
 
     def ask(prompt: str) -> str:
