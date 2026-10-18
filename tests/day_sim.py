@@ -574,12 +574,23 @@ def main() -> None:
     ap.add_argument("--sim-model", default="gemini-3.8-flash-low")
     ap.add_argument("--frontier-model", default="gemini-3.8-flash-low")
     ap.add_argument("--label", default="")
+    ap.add_argument("--order-seed", type=int, default=None, help="run days in a fixed shuffled order (milestone runs)")
+    ap.add_argument("--resume", default="", help="skip days already in reports with this label")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="      [%(name)s] %(message)s")
 
     brains = ["slm", "frontier"] if args.brain == "both" else [args.brain]
     scripts = find_scripts([Path(p) for p in args.scripts], args.only)
     jobs = [(s, b) for s in scripts for b in brains]
+    if args.order_seed is not None:  # a fixed shuffled order: any first N days are a fair sample of all of them
+        import hashlib
+        jobs.sort(key=lambda j: hashlib.sha256(f"{args.order_seed}:{j[0].id}:{j[1]}".encode()).hexdigest())
+    if args.resume:  # skip days already run under this label (a run that spans windows or weeks)
+        done = set()
+        for report in REPORTS_DIR.glob(f"day_*_{args.resume}.json"):
+            done |= {(r["script"], r["brain"]) for r in json.loads(report.read_text()) if not r.get("error")}
+        jobs = [j for j in jobs if (j[0].id, j[1]) not in done]
+        print(f"resuming {args.resume}: {len(done)} days done, {len(jobs)} to go", flush=True)
     if args.shard:
         k, n = (int(x) for x in args.shard.split("/"))
         results, quota = run_jobs(args, jobs[k::n])
