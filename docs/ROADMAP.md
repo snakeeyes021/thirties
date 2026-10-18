@@ -225,14 +225,18 @@ Notes are organized by area of life (Home, Errands/Admin, Medical…), and urgen
 - **Second page:** the full 48-thirty timeline.
 - Try it, and change it if it doesn't feel right.
 
-### Order of work
-1. List roles and urgency: the model's guesses, setup, and Profile → Your lists.
-2. The Today note, with links to home lists, the morning proposal and the next-morning cleanup.
-3. Plan and record, with item facts and redraw.
-4. Message levels.
-5. The day view.
+### Order of work (first versions of 0–5 landed 2026-10-18)
+0. **A day-long sim** (`tests/day_sim.py`). The short sim froze the clock with two to four crisp goals, about 3/10 for realism against a real day. The day sim lives a whole day from a script: the clock runs, the real background service's messages reach the simulated user, hidden constraints come out when the plan breaks them, and a ground truth of what really happened scores the record. Scripts come from real conversations (`tests/day_scripts.py`, kept out of git) and variations of them. Baseline it on 0.0.1 (branch `eval/0.0.1`: v0.0.1 plus the agy fix and the harness), then on 0.1.
+1. **List roles and urgency.** `lists.py` stores them (synced); `brains/list_sorter.py` has the chosen model guess (Gemini a note per call, Gemma one choice per call); the background service guesses what's new every half hour; Profile → Lists and a Your Lists setup step for the user's choices; both brains use them; `set_urgency` in conversation.
+2. **The Today note** (`today.py`). `add_to_today`, links to home lists (ticking either ticks both), scheduling a list item for today adds it. Mornings: routines unticked (a switch), ticked items cleared from Today, and the rollover covers what's still on Today plus pressing items. Hand edits are caught every two minutes. Routines stay in their own notes rather than being copied into Today each day.
+3. **Plan and record.** `redraw` and `undo_redraw` (Python lays out the rest of today, around fixed things and `set_item_facts` facts; what doesn't fit comes off with a question); "not reported" items are never assumed done. Gemini's rules: record drift, don't reshuffle.
+4. **Message levels** (off, light, medium by default, heavy), stretches of the day, quiet during sleep and calendar events and while the user is talking.
+5. **The day view.** A Day page (Now, Next, Not reported with Done/Skipped, Done today at real times, Replan with Undo) and the Timeline page with drag to move.
 
-Each step adds sim scenarios for what it changes and reruns the 0.0.1 baseline scenarios to check nothing regressed.
+Still to do in 0.1:
+- Run the day sim baselines (0.0.1, then 0.1) and fix what they show.
+- The SLM brain can redraw ("replan", "just figure it out") and carries the morning flow, but it has no actions yet for `add_to_today`, `set_urgency` or `set_item_facts`; add them once the day sim shows how often they're needed.
+- Try the day view and the lists pages for real, and adjust.
 
 ---
 
