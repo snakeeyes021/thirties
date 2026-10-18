@@ -47,6 +47,12 @@ class TestCatalog(unittest.TestCase):
         self.assertTrue(out["t_banjo"].someday)  # someday items are never pushed, by any brain
         self.assertEqual((out["t_shower"].list_role, out["t_shower"].urgency), ("routine", "now"))
 
+    def test_the_users_urgency_beats_a_someday_heading(self):
+        gutter = item("t_gutter", "Fix the gutter")
+        gutter.someday = True  # it sits under a Someday heading
+        self.c.set_urgency("t_gutter", "now", source="user")
+        self.assertFalse(self.c.apply([gutter])[0].someday)
+
     def test_what_still_needs_a_guess(self):
         self.c.set_role("n_errands", "list", "Errands")
         self.c.set_role("n_routine", "routine", "Morning routine")

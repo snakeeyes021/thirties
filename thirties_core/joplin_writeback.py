@@ -148,18 +148,6 @@ def remove_item(body: str, title: str) -> Optional[str]:
     return None
 
 
-def uncheck(body: str, title: str) -> Optional[str]:
-    """Untick one item; None if it's gone."""
-    lines = body.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        m = DONE_CHECKBOX_REGEX.match(line.rstrip("\r\n"))
-        if m and m.group(2).strip() == title.strip():
-            ending = line[len(line.rstrip("\r\n")):]
-            lines[i] = f"{m.group(1)}- [ ] {m.group(2).strip()}{ending}"
-            return "".join(lines)
-    return body if any(_open_item(l.rstrip("\r\n"), title) for l in lines) else None
-
-
 def untick_all(body: str) -> str:
     """Every item open again (a routine note, each morning)."""
     return "".join(re.sub(r"^([ \t]*)-\s*\[[xX]\]", r"\1- [ ]", line) for line in body.splitlines(keepends=True))
@@ -336,8 +324,6 @@ class JoplinWriter:
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
         if kind == "remove":
             return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"]))
-        if kind == "uncheck":
-            return self._edit_body(op["note_id"], lambda b: uncheck(b, op["title"]))
         if kind == "untick_all":
             return self._edit_body(op["note_id"], untick_all)
         if kind == "clear_ticked":

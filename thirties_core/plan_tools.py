@@ -805,7 +805,9 @@ class PlanTools:
         movable = sorted((s for s in plan.active_spans() if self._movable(s) and s.status == SpanStatus.PLANNED
                           and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not facts[s.id].anchored
                           and (s.start_dt >= start_from or s.end_dt <= now)), key=lambda s: s.start_dt)
+        movable = self._in_fact_order(movable, facts)
         ids = {s.id for s in movable}
+        original = {s.id: (s.start_dt, s.end_dt) for s in movable}
         blockers = [s for s in plan.active_spans() if s.id not in ids and not s.tentative and s.end_dt > start_from
                     and s.status == SpanStatus.PLANNED]
         ends: Dict[str, datetime] = {s.id: s.end_dt for s in plan.spans if s.id not in ids}
@@ -815,6 +817,14 @@ class PlanTools:
         for span in movable:
             length = span.end_dt - span.start_dt
             f = facts[span.id]
+            partner = next((p for p in movable if p.id in placed and p.id != span.id and length >= timedelta(minutes=30)
+                            and original[p.id][0] < span.end_dt and span.start_dt < original[p.id][1]
+                            and original[p.id][1] - original[p.id][0] >= timedelta(minutes=30)), None)
+            if partner is not None:  # it happens alongside something (an audiobook during dinner): it moves with it
+                t = placed[partner.id][0] + (span.start_dt - original[partner.id][0])
+                placed[span.id] = (t, t + length)
+                ends[span.id] = t + length
+                continue
             earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
                            + ([f.not_before] if f.not_before else [])
                            + [ends[a] for a in f.after if a in ends])
@@ -861,6 +871,24 @@ class PlanTools:
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
         return "\n".join(out)
+
+    @staticmethod
+    def _in_fact_order(spans: List[EventSpan], facts) -> List[EventSpan]:
+        """Planned order, except that an item comes after whatever it has to come after."""
+        ids = {s.id for s in spans}
+        out, done = [], set()
+
+        def visit(span, seen=()):
+            if span.id in done or span.id in seen:
+                return
+            for before in facts[span.id].after:
+                if before in ids:
+                    visit(next(s for s in spans if s.id == before), seen + (span.id,))
+            done.add(span.id)
+            out.append(span)
+        for span in spans:
+            visit(span)
+        return out
 
     def undo_redraw(self, **_: Any) -> str:
         import json

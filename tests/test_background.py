@@ -156,6 +156,17 @@ class TestMessageLevels(unittest.TestCase):
         self.run_day("14:45", "20:30")
         self.assertEqual([k for k, _ in self.sent], ["heads_up"])
 
+    def test_the_old_start_message_switch_doesnt_silence_everything(self):
+        self.sched.config.telegram.notify_block_transitions = False  # someone who'd turned start messages off
+        self.run_day("14:45", "15:00")
+        self.assertEqual([k for k, _ in self.sent], ["heads_up"])
+
+    def test_the_last_stretch_is_asked_about_before_bed(self):
+        self.sched.state_db.upsert_span(EventSpan("rd", "Reading", at("21:00"), at("22:00"), SpanCategory.ACTIVITY))
+        self.run_day("20:30", "23:30")
+        checkins = [b for k, b in self.sent if k == "checkin"]
+        self.assertTrue(any("Reading" in b for b in checkins), self.sent)
+
     def test_off_and_no_notify(self):
         self.sched.config.assistant.message_level = "off"
         self.run_day("14:45", "20:30")

@@ -81,7 +81,9 @@ class DialogState:
 
 
 REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
-                       r"( else)? (back|later)|(just )?figure it out|undo the (re-?plan|redraw))\b", re.I)
+                       r"( else)? (back|later)|just figure it out|undo the (re-?plan|redraw))\b", re.I)
+NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\w.!?]+\w+){0,3}[^\w.!?]+"
+                    r"(re-?plan|redraw|re-?do|push|just figure)", re.I)  # within one sentence
 
 
 class SlmBrain:
@@ -186,7 +188,7 @@ class SlmBrain:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
         self._message = user_text
-        if REDRAW_RE.search(user_text):  # a new plan for the rest of today: Python does it, no parse needed
+        if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text):  # a new plan: Python does it, no parse
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
             ok, reply = self._run("undo_redraw" if undo else "redraw", {})
             self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),

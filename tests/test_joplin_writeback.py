@@ -7,7 +7,7 @@ from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.joplin_writeback import (JoplinWriter, append_task, check_off, clear_ticked, insert_subtasks,
-                                           remove_item, uncheck, untick_all)
+                                           remove_item, untick_all)
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -49,7 +49,6 @@ class TestBodyEdits(unittest.TestCase):
         self.assertIsNone(remove_item(day, "Nap"))
         self.assertNotIn("[x]", untick_all(day))
         self.assertEqual(clear_ticked(day), "- [ ] Shower\n    - [ ] Brush teeth\n- [ ] Lunch\n")
-        self.assertIn("- [ ] PT", uncheck(day, "PT"))
 
 
 class TestWriter(unittest.TestCase):

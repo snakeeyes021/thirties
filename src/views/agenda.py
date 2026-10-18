@@ -132,10 +132,14 @@ class AgendaPage(Gtk.ScrolledWindow):
                             valign=Gtk.Align.CENTER, tooltip_text=f"Mark {span.title} {'done' if done else 'skipped'}")
         button.add_css_class("flat")
         button.add_css_class("circular")
-        args = {"event": span.id, "status": status}
-        if finished_now is not None:
-            args["finished"] = format_clock(finished_now)
-        button.connect("clicked", lambda _b: self.run_tool and self.run_tool("log_outcome", args))
+        def clicked(_b):
+            args = {"event": span.id, "status": status}
+            if finished_now is not None:  # it's happening now: it finished at the click
+                from thirties_core.astronomy import get_current_time
+                args["finished"] = format_clock(get_current_time(span.start_dt.tzinfo))
+            if self.run_tool:
+                self.run_tool("log_outcome", args)
+        button.connect("clicked", clicked)
         return button
 
     def _on_replan(self, _btn) -> None:

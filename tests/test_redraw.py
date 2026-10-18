@@ -57,6 +57,20 @@ class TestRedraw(unittest.TestCase):
         self.assertEqual(times["Feed cats"][0], "6:00 PM")
         self.assertEqual(times["Message Brad"][0], "6:05 PM")  # shares the 6:00 thirty, in order
 
+    def test_after_holds_even_when_the_other_was_planned_later(self):
+        self.t.execute("add_event", {"title": "Bike", "start": "9:00 PM", "duration": "30 min"})
+        self.t.execute("add_event", {"title": "Helmet", "start": "9:30 PM", "duration": "30 min"})
+        self.t.execute("set_item_facts", {"event": "bike", "after": "Helmet"})
+        self.t.execute("redraw", {})
+        times = {s.title: s.start_dt for s in self.t.day_plan.spans}
+        self.assertGreater(times["Bike"], times["Helmet"])
+
+    def test_things_happening_alongside_move_together(self):
+        self.t.execute("add_event", {"title": "Audiobook", "start": "4:00 PM", "duration": "30 min", "alongside": True})
+        self.t.execute("redraw", {})
+        times = self.times()
+        self.assertEqual(times["Audiobook"], times["Shower"])
+
     def test_facts_need_real_items(self):
         self.assertTrue(self.t.execute("set_item_facts", {"event": "walk", "after": "Walk"}).startswith(NOT_DONE))
         self.assertTrue(self.t.execute("set_item_facts", {"event": "walk", "after": "Nap"}).startswith(NOT_DONE))
@@ -76,6 +90,9 @@ class TestSlmRedraw(unittest.TestCase):
         reply = brain.respond("ugh, still not showered. my god, just figure it out")
         self.assertTrue(reply.startswith("Redrew the rest of today:\n- 5:30 PM – Shower"), reply)
         self.assertTrue(brain.respond("undo the replan").startswith("Put back as it was"))
+        from thirties_core.brains.slm.brain import NOT_RE, REDRAW_RE
+        for text in ("please don't replan, I'm fine", "no need to push everything back", "I can't figure it out"):
+            self.assertFalse(REDRAW_RE.search(text) and not NOT_RE.search(text), text)
 
 
 if __name__ == "__main__":

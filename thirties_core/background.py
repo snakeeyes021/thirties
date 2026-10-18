@@ -169,8 +169,6 @@ class BackgroundService:
     # --- how much to say ---
 
     def level(self) -> str:
-        if not self.config.telegram.notify_block_transitions:  # --no-notify
-            return "off"
         level = getattr(self.config.assistant, "message_level", "medium")
         return level if level in LEVELS else "medium"
 
@@ -218,6 +216,8 @@ class BackgroundService:
         if self.level() != "medium" or self._quiet(now):
             return
         plan = self.manager().day_plan
+        quiet_spans = [s for s in plan.active_spans() if not s.tentative
+                       and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))]
         started, asked = self._remembered("stretch_started"), self._remembered("stretch_asked")
         grace = timedelta(minutes=self.config.assistant.checkin_after_minutes)
         from thirties_core.memory import CheckinMutes
@@ -232,8 +232,11 @@ class BackgroundService:
                 self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + ".", "start",
                           to_conversation=False, now=now)
             open_items = [s for s in items if not mutes.is_muted(s.id, now)]
-            if (b + grace <= now < b + timedelta(hours=2) and key not in asked and open_items
-                    and self.config.assistant.checkins and not self._talking(now)):
+            ask_at = b + grace
+            if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
+                ask_at = b - timedelta(minutes=15)  # it ends at bedtime (or a long event): ask just before
+            if (ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items
+                    and not self._talking(now)):
                 asked[key] = now.date().isoformat()
                 self._remember("stretch_asked", asked, now)
                 titles = [s.title for s in open_items]
@@ -244,7 +247,7 @@ class BackgroundService:
         """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
         have no outcome: never twice about an item, never about one already reported or muted."""
         cfg = self.config.assistant
-        if not cfg.checkins or self.level() != "heavy" or self._quiet(now) or self._talking(now):
+        if self.level() != "heavy" or self._quiet(now) or self._talking(now):
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
@@ -344,6 +347,8 @@ class BackgroundService:
             return
         self._last_today = time.time()
         assistant = self.manager().tools.assistant
+        if assistant is not None and assistant.morning_pending() and now.hour < 12:
+            assistant.start_the_day()  # Joplin was closed at wake-up; it may be open now
         for message in assistant.sync_today() if assistant is not None else []:
             self.send("📝 " + message, "today", now=now)
 
@@ -385,7 +390,8 @@ class BackgroundService:
                 sorter = list_sorter_for(self.config, self.scheduler.state_db, self.inference_engine)
                 if sorter is None:
                     return
-                counts = sort_lists(ListCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today())
+                counts = sort_lists(ListCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today(),
+                                    max_notes=10)  # a few notes each half hour, not the whole backlog at once
                 if any(counts.values()):
                     logger.info("Sorted lists: %d note roles and %d item urgencies guessed.",
                                 counts["roles"], counts["items"])

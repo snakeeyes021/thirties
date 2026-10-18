@@ -101,11 +101,11 @@ class ListsPage(Gtk.Stack):
         row = Adw.ExpanderRow(title=note["title"])
         row.note_id = note["id"]
         self._describe(row, role_row, len(items))
-        names = list(ROLES)
-        choice = Adw.ComboRow(title="What it's for", model=Gtk.StringList.new([ROLE_NAMES[r] for r in names]))
-        choice.set_subtitle(ROLES[role] if role else "Not sorted yet")
-        if role:
-            choice.set_selected(names.index(role))
+        names = [""] + list(ROLES)  # "" is "not sorted yet": guessed again later
+        choice = Adw.ComboRow(title="What it's for",
+                              model=Gtk.StringList.new(["Not sorted yet"] + [ROLE_NAMES[r] for r in ROLES]))
+        choice.set_subtitle(ROLES[role] if role else "Thirties will guess")
+        choice.set_selected(names.index(role) if role else 0)
         choice.connect("notify::selected", self._on_role, row, names, note)
         row.add_row(choice)
         row.items, row.urgencies, row.item_rows = items, urgencies, []
@@ -122,11 +122,18 @@ class ListsPage(Gtk.Stack):
 
     def _on_role(self, combo: Adw.ComboRow, _pspec, row: Adw.ExpanderRow, names: List[str], note) -> None:
         role = names[combo.get_selected()]
-        if role == self.catalog.role(note["id"]) and self.catalog.roles()[note["id"]]["source"] == "user":
-            return
-        self.catalog.set_role(note["id"], role, note["title"], source="user")
-        combo.set_subtitle(ROLES[role])
-        self._describe(row, self.catalog.roles()[note["id"]], len(row.items))
+        current = self.catalog.roles().get(note["id"])
+        if not role:
+            if current:
+                self.catalog.clear_role(note["id"])
+            combo.set_subtitle("Thirties will guess")
+            self._describe(row, None, len(row.items))
+        else:
+            if current and current["role"] == role and current["source"] == "user":
+                return
+            self.catalog.set_role(note["id"], role, note["title"], source="user")
+            combo.set_subtitle(ROLES[role])
+            self._describe(row, self.catalog.roles()[note["id"]], len(row.items))
         self._fill_items(row, force=True)
         self._changed()
 

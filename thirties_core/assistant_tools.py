@@ -368,6 +368,16 @@ class AssistantTools:
         found = notes_with_role(ListCatalog(self._db).roles(), self._joplin_notes(), "today")
         return found[0] if found else None
 
+    def _joplin_up(self) -> bool:
+        try:
+            return bool(self.s.joplin.api_client.ping())
+        except Exception:
+            return False
+
+    def morning_pending(self) -> bool:
+        """The morning reset couldn't run yet (Joplin was closed at wake-up)."""
+        return bool(self._db) and self._db.get_sync_meta(f"day_started:{self._today().isoformat()}") == "pending"
+
     def _tick_twin(self, task: TaskItem, writer) -> None:
         """A done item ticks its twin: the home item of a Today item, or the Today item of a home item."""
         from thirties_core.joplin_writeback import complete_op
@@ -399,6 +409,8 @@ class AssistantTools:
         writer = self._writer()
         if today is None or writer is None or self._db is None or not writer.allowed:
             return []
+        if not self._joplin_up():
+            return []  # nothing to deliver to; and queuing the same tick every two minutes would pile up
         notes = {n["id"]: n for n in self._joplin_notes()}
         on_today = {text.lower(): ticked for text, ticked in note_items(today)}
         links = TodayLinks(self._db)
@@ -446,7 +458,8 @@ class AssistantTools:
         added, already, queued = [], [], False
         for name in items or []:
             task = self._find_task(str(name))
-            if task is not None and task.parent_note_id != note["id"] and _stem_words(str(name)) - _stem_words(task.title):
+            if (task is not None and task.id != str(name).strip() and task.parent_note_id != note["id"]
+                    and _stem_words(str(name)) - _stem_words(task.title)):
                 task = None  # only similar to a list item: it's something new
             title = task.title if task is not None else str(name).strip()
             if title.lower() in on_today:
@@ -763,6 +776,14 @@ class AssistantTools:
         writer = self._writer()
         if writer is None or self._db is None or not writer.allowed:
             return ""
+        key = f"day_started:{self._today().isoformat()}"
+        if self._db.get_sync_meta(key) == "done":
+            return ""
+        if not self._joplin_up():
+            # Never queued: delivered later it would wipe ticks made since. Tried again while Joplin is closed.
+            self._db.set_sync_meta(key, "pending")
+            return ""
+        self._db.set_sync_meta(key, "done")
         roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
         done = []
         if getattr(self.pt.scheduler.config.joplin, "reset_routines", True):
@@ -816,10 +837,10 @@ class AssistantTools:
         data = json.loads(raw)
         if data.get("state") == "applied":
             return "Yesterday's items were already rolled over."
-        skip_words = {_stem(w) for w in _words(" ".join(skip) if isinstance(skip, list) else str(skip or ""))}
+        skip_words = _stem_words(" ".join(skip) if isinstance(skip, list) else str(skip or ""))
 
         def skipped(title: str) -> bool:
-            return bool(skip_words and skip_words & {_stem(w) for w in _words(title)})
+            return bool(skip_words & _stem_words(title))
         from datetime import datetime as _dt
         yesterday = (self._today() - timedelta(days=1)).isoformat()
         moved, back = [], []
@@ -847,7 +868,10 @@ class AssistantTools:
             links.unlink(title)
         tasks = {t.id: t for t in self.s.tasks}
         add = [tasks[t].title for t in carry["add"] if t in tasks and not skipped(tasks[t].title)]
-        added = self.add_to_today(add) if add else ""
+        try:
+            added = self.add_to_today(add) if add else ""
+        except ToolError as e:  # the plan part is done already: say why the list part isn't
+            added = f"(Couldn't put {', '.join(add)} on today's list: {e})"
         self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
         parts = []
         if moved:

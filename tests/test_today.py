@@ -64,6 +64,10 @@ class TestAddingToToday(TodayTestCase):
                                            "task_id": "t_stamps", "day": "tomorrow"})
         self.assertNotIn("today's list", out)  # tomorrow's things aren't on today's list
 
+    def test_by_task_id_too(self):
+        self.assertEqual(self.t.execute("add_to_today", {"items": ["t_bank"]}), "Added to today's list: Call the bank.")
+        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], "t_bank")
+
     def test_without_a_today_note(self):
         ListCatalog(self.sched.state_db).set_role("n_today", "list", "Today To-Do")
         self.assertTrue(self.t.execute("add_to_today", {"items": ["x"]}).startswith(NOT_DONE))
@@ -143,6 +147,24 @@ class TestMorning(TodayTestCase):
         self.api.notes["n_routine"]["body"] = "- [x] Shower\n"
         self.t.assistant.start_the_day()
         self.assertEqual(self.body("n_routine"), "- [x] Shower\n")  # not allowed: left alone
+
+    def test_the_morning_reset_waits_for_joplin_instead_of_queuing(self):
+        self.api.up = False
+        self.t.assistant.start_the_day()
+        self.assertTrue(self.t.assistant.morning_pending())
+        self.assertEqual(self.sched.state_db.outbox_pending(), [])  # never queued: it would undo later ticks
+        self.api.up = True
+        self.t.assistant.start_the_day()
+        self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] PT\n")
+        self.assertFalse(self.t.assistant.morning_pending())
+
+    def test_without_write_back_the_rollover_still_applies(self):
+        self.t.assistant.start_the_day()
+        self.t.execute("rollover_proposal", {})
+        self.sched.config.joplin.write_back = False
+        out = self.t.execute("apply_rollover", {})
+        self.assertIn("Couldn't put Buy stamps on today's list", out)
+        self.assertEqual(self.t.execute("apply_rollover", {}), "Yesterday's items were already rolled over.")
 
     def test_the_morning_proposal_keeps_drops_and_adds(self):
         self.t.assistant.start_the_day()

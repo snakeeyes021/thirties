@@ -443,7 +443,7 @@ class ThirtiesTelegramBridge:
         tasks_count = len(services.tasks) if services else 0
         notes_count = len(getattr(self, "active_notes", []) or [])
         sync_enabled = "Enabled" if self.config.sync.enabled else "Disabled"
-        notify_enabled = "Enabled" if self.config.telegram.notify_block_transitions else "Disabled"
+        notify_enabled = getattr(self.config.assistant, "message_level", "medium").capitalize()
 
         msg = (
             "⚙️ *Thirties System Status*\n\n"
@@ -585,7 +585,7 @@ def main() -> None:
     if args.token:
         cfg.telegram.bot_token = args.token
     if args.no_notify:
-        cfg.telegram.notify_block_transitions = False
+        cfg.assistant.message_level = "off"
     if args.check:
         sys.exit(0 if check_setup(cfg) else 1)
 
