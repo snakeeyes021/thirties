@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
-from thirties_core.clock import format_clock
+from thirties_core.clock import format_clock, thirty_of
 from thirties_core.conversation import ConversationManager
 from thirties_core.models import SpanCategory, SpanStatus
 
@@ -57,7 +57,6 @@ class BackgroundService:
         self._day: Optional[date] = None
         self._manager: Optional[ConversationManager] = None
         self._lock = threading.RLock()
-        self._last_buzz_span: Optional[str] = None
         self._last_outbox = 0.0
         self._last_sync = 0.0
         self._threads: List[threading.Thread] = []
@@ -117,11 +116,21 @@ class BackgroundService:
 
     # --- duties ---
 
-    def _asked(self) -> Dict[str, str]:
-        raw = self.scheduler.state_db.get_sync_meta("checkins_asked")
+    def _remembered(self, key: str) -> Dict[str, str]:
+        raw = self.scheduler.state_db.get_sync_meta(key)
         return json.loads(raw) if raw else {}
 
+    def _remember(self, key: str, done: Dict[str, str], now: datetime) -> None:
+        cutoff = (now.date() - timedelta(days=3)).isoformat()
+        self.scheduler.state_db.set_sync_meta(key, json.dumps({k: v for k, v in done.items() if v >= cutoff}))
+
+    @staticmethod
+    def _plannable(span) -> bool:
+        return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+
     def check_ins(self, now: datetime) -> None:
+        """Once a thirty is over (plus the grace period), ask in one message about the items in it that
+        have no outcome: never twice about an item, never about one already reported or muted."""
         cfg = self.config.assistant
         if not cfg.checkins:
             return
@@ -130,25 +139,29 @@ class BackgroundService:
         manager = self.manager()
         manager.refresh()
         plan = manager.day_plan
-        asked = self._asked()
+        asked = self._remembered("checkins_asked")
         grace = timedelta(minutes=cfg.checkin_after_minutes)
+
+        def thirty_end(span):  # an item is over when the thirty it ends in is over
+            end = thirty_of(span.end_dt - timedelta(seconds=1)) + timedelta(minutes=30)
+            return max(end, span.end_dt)
         due = [s for s in plan.active_spans()
-               if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.status == SpanStatus.PLANNED
-               and s.id not in asked and s.end_dt + grace <= now < s.end_dt + timedelta(hours=2)
-               and not mutes.is_muted(s.id, now)]
+               if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
+               and thirty_end(s) + grace <= now < thirty_end(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
         if not due:
             return
-        span = due[-1]
         for s in due:
             asked[s.id] = now.date().isoformat()
-        cutoff = (now.date() - timedelta(days=3)).isoformat()
-        self.scheduler.state_db.set_sync_meta("checkins_asked",
-                                              json.dumps({k: v for k, v in asked.items() if v >= cutoff}))
-        following = next((s for s in plan.active_spans()
-                          if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and s.covers(now)), None)
-        question = f"👋 Just checking in: did you get to {span.title}"
-        question += f", or are you still on it? (Next up: {following.title}.)" if following else "?"
-        self.send(question, "checkin", telegram_text=question.replace(span.title, f"*{span.title}*", 1), now=now)
+        self._remember("checkins_asked", asked, now)
+        titles = [s.title for s in sorted(due, key=lambda s: s.start_dt)]
+        if len(titles) == 1:
+            question = f"👋 Just checking in: did you get to {titles[0]}, or are you still on it?"
+            bold = question.replace(titles[0], f"*{titles[0]}*", 1)
+        else:
+            listed = ", ".join(titles[:-1]) + f" and {titles[-1]}"
+            question = f"👋 How did it go? Did you get to {listed}?"
+            bold = question
+        self.send(question, "checkin", telegram_text=bold, now=now)
 
     def reminders(self, now: datetime) -> None:
         from thirties_core.memory import ReminderStore
@@ -163,22 +176,32 @@ class BackgroundService:
             self.send(text, "reminder", now=now)
 
     def starts(self, now: datetime) -> None:
-        """Say when a planned item (or bedtime) starts."""
+        """At the start of a thirty, one message for what's planned to start in it; each item is announced
+        at most once (moving it doesn't announce it again), and times are told in thirties."""
         if not self.config.telegram.notify_block_transitions:
             return
         plan = self.manager().day_plan
+        block = thirty_of(now)
+        if now - block > timedelta(minutes=5):
+            return  # only right at the start of a thirty
+        announced = self._remembered("starts_announced")
         starting = [s for s in plan.active_spans()
-                    if s.start_dt <= now < s.start_dt + timedelta(minutes=2) and not s.tentative
+                    if thirty_of(s.start_dt) == block and s.id not in announced and not s.tentative
+                    and s.status == SpanStatus.PLANNED
                     and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR, SpanCategory.SLEEP)]
-        for span in starting:
-            if span.id == self._last_buzz_span:
-                continue
-            self._last_buzz_span = span.id
-            if span.category == SpanCategory.SLEEP:
-                text = f"🌙 Bedtime ({format_clock(span.start_dt)}). Wind down and rest well!"
-            else:
-                text = f"🔔 {span.title} starts now ({format_clock(span.start_dt)} – {format_clock(span.end_dt)})"
-            self.send(text, "start", to_conversation=False, now=now)
+        if not starting:
+            return
+        for s in starting:
+            announced[s.id] = now.date().isoformat()
+        self._remember("starts_announced", announced, now)
+        sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
+        rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
+        if rest:
+            self.send(f"🔔 {format_clock(block)}: " + ", ".join(s.title for s in rest), "start",
+                      to_conversation=False, now=now)
+        if sleep:
+            self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start",
+                      to_conversation=False, now=now)
 
     def rollover(self, now: datetime) -> None:
         """Once a day, after waking: offer to roll yesterday's unfinished items into today."""

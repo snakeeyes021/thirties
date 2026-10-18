@@ -31,8 +31,8 @@ class TestBackground(unittest.TestCase):
     def test_check_in_once_after_an_item_ends_on_desktop_and_phone(self):
         self.svc.check_ins(at("18:15"))
         self.svc.check_ins(at("18:20"))
-        self.assertEqual(self.desktop, [("checkin", "👋 Just checking in: did you get to Taxes?")])
-        self.svc.bridge.broadcast.assert_called_once_with("👋 Just checking in: did you get to *Taxes*?")
+        self.assertEqual(self.desktop, [("checkin", "👋 Just checking in: did you get to Taxes, or are you still on it?")])
+        self.svc.bridge.broadcast.assert_called_once_with("👋 Just checking in: did you get to *Taxes*, or are you still on it?")
         self.assertIn("did you get to Taxes", self.svc.manager().history()[-1]["content"])
         fresh = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=self.svc.joplin_engine,
                                   inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
@@ -52,10 +52,35 @@ class TestBackground(unittest.TestCase):
         self.svc.reminders(at("15:01"))
         self.assertEqual(self.desktop, [("reminder", "⏰ Reminder: Water the alligator")])
 
-    def test_start_nudge(self):
+    def test_start_nudge_once_per_thirty_without_minute_times(self):
+        for title, minute in (("Feed kitties", 0), ("Caffeinate", 5), ("Water bottle", 10)):
+            start = at("11:00") + timedelta(minutes=minute)
+            self.sched.state_db.upsert_span(EventSpan(f"m{minute}", title, start, start + timedelta(minutes=5),
+                                                      SpanCategory.ACTIVITY))
+        for minute in (0, 1, 5, 10):  # ticks through the thirty
+            self.svc.starts(at("11:00") + timedelta(minutes=minute))
+        self.assertEqual(self.desktop, [("start", "🔔 11:00: Feed kitties, Caffeinate, Water bottle")])
         self.svc.starts(at("17:00") + timedelta(seconds=20))
-        self.svc.starts(at("17:01"))
-        self.assertEqual(self.desktop, [("start", "🔔 Taxes starts now (5:00 – 6:00)")])
+        self.assertEqual(self.desktop[-1], ("start", "🔔 5:00: Taxes"))
+
+    def test_moved_item_is_not_announced_again(self):
+        self.svc.starts(at("17:00"))
+        span = self.sched.state_db.get_spans_between(at("17:00"), at("18:00"))[0]
+        span.start_dt, span.end_dt = at("17:30"), at("18:30")
+        self.sched.state_db.upsert_span(span)
+        self.svc._manager = None
+        self.svc.starts(at("17:30"))
+        self.assertEqual(len(self.desktop), 1)
+
+    def test_check_ins_batch_the_items_of_a_thirty(self):
+        for title, minute in (("Feed kitties", 0), ("Caffeinate", 5)):
+            start = at("11:00") + timedelta(minutes=minute)
+            self.sched.state_db.upsert_span(EventSpan(f"c{minute}", title, start, start + timedelta(minutes=5),
+                                                      SpanCategory.ACTIVITY))
+        self.svc.check_ins(at("11:20"))  # the thirty isn't over yet
+        self.svc.check_ins(at("11:41"))
+        self.svc.check_ins(at("11:50"))
+        self.assertEqual(self.desktop, [("checkin", "👋 How did it go? Did you get to Feed kitties and Caffeinate?")])
 
 
 class TestReminderTools(unittest.TestCase):
