@@ -80,6 +80,10 @@ class DialogState:
                    dict(data.get("awaiting_time", {})))
 
 
+REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
+                       r"( else)? (back|later)|(just )?figure it out|undo the (re-?plan|redraw))\b", re.I)
+
+
 class SlmBrain:
     """Pipeline brain for a small on-device model."""
 
@@ -182,6 +186,12 @@ class SlmBrain:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
         self._message = user_text
+        if REDRAW_RE.search(user_text):  # a new plan for the rest of today: Python does it, no parse needed
+            undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
+            ok, reply = self._run("undo_redraw" if undo else "redraw", {})
+            self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
+                                  "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
+            return reply
         try:
             actions = self._parse(user_text)
         except SlmUnavailable as e:
