@@ -180,6 +180,17 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
   - **A trade-off to fix:** fewer check-ins means fewer reports, so the record can suffer (the Saturday recorded 2 of 7 done items instead of 5). Quiet messaging needs another way to collect what happened, such as one short wrap-up at the end of the day.
   - **The SLM** is still at 2–3/10: its problems are understanding, not messaging.
 
+**Milestone run of 0.1, first 47 days (2026-10-18)**, commit 9ec6ea5, simulator and judge on flash-low through the plain agy agent: 24 scripts (20 made-up people with their own lists, the user's three real days, the synthetic Saturday) on both brains, in the fixed order (seed 1). The 47 days used about 4% of the weekly Gemini quota.
+
+| Brain | Whose days | Days | Requests met | User's rating | Messages per waking hour | Done items recorded | Judge (accuracy / understanding / plan respect / message load / record keeping) |
+|---|---|---|---|---|---|---|---|
+| Frontier | other people | 20 | 0.93 | 6.8/10 | 0.27 | 63% | 3.7 / 4.1 / 4.2 / 4.5 / 3.5 |
+| Frontier | the user | 2 | 0.90 | 4.5/10 | 0.27 | 53% | 3.5 / 4.0 / 3.5 / 4.0 / 3.0 |
+| SLM | other people | 20 | 0.53 | 3.9/10 | 0.30 | 67% | 2.0 / 2.1 / 2.0 / 3.3 / 2.0 |
+| SLM | the user | 3 | 0.27 | 2.3/10 | 0.23 | 22% | 1.0 / 1.0 / 1.0 / 3.0 / 1.0 |
+
+  No minute times were shown on any day. It found one design error: rounding every time to a thirty turned a support worker's stated 10:45 break into 11:00. Times the user says, and calendar times, now keep their minutes.
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments
