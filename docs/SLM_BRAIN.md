@@ -133,6 +133,30 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   Weakest SLM goal kinds: free time (0.71), work ran late (0.74), move (0.75), fill a window (0.76), shift (0.78), outcome done (0.78). The 13 hand-written scenarios had hidden this: they score 0.97. Fixes for most of the failures it found landed after this baseline and need a rerun on the same scenarios (`--only-from` the baseline report).
 
+**Baseline for 0.0.1 (2026-10-18)**, run on branch `eval/0.0.1` (v0.0.1 plus the agy no-tools fix and the day sim), simulator and judge on flash-low:
+
+- **Short sim**, 16 hand-written + 37 generated scenarios on both brains (53 each; the standard is now 16 + 34):
+
+| Brain | Goals met | All checks passed | Judge (accuracy / understanding / clarity / efficiency / tone) | Time per reply |
+|---|---|---|---|---|
+| Frontier | 0.99 | 45/53 | 4.8 / 4.8 / 4.4 / 4.7 / 4.9 | 6.5 s |
+| SLM | 0.89 | 43/52 | 3.8 / 3.8 / 3.4 / 3.7 / 4.2 | 1.4 s |
+
+  Weakest SLM goal kinds: profile (0.70), move (0.74), insert_slide (0.74), outcome_skip (0.78), fill (0.79). The short sim still says both brains are mostly fine.
+
+- **Day sim**, three whole days (a synthetic Saturday and the user's real 10-16 and 10-17), the clock running and the app's own messages arriving. It tells a different story:
+
+| Brain | Day | Requests met | User's rating | Messages per waking hour | Done items recorded | Time error | Judge (accuracy / understanding / plan respect / message load / record keeping) |
+|---|---|---|---|---|---|---|---|
+| Frontier | Saturday | 1.00 | 6/10 | 0.95 | 6/7 | 42 min | 4 / 5 / 5 / 2 / 3 |
+| Frontier | 10-16 | 0.90 | 4/10 | 0.67 | 3/5 | 30 min | 3 / 3 / 4 / 2 / 3 |
+| Frontier | 10-17 | 0.84 | 4/10 | 1.86 | 8/12 | 27 min | 3 / 3 / 3 / 2 / 3 |
+| SLM | Saturday | 0.64 | 4/10 | 1.1 | 3/7 | 73 min | 2 / 2 / 3 / 1 / 2 |
+| SLM | 10-16 | 0.53 | 3/10 | 0.73 | 0/5 | – | 1 / 1 / 1 / 2 / 1 |
+| SLM | 10-17 | 0.22 | 2/10 | 1.3 | 3/12 | 301 min | 1 / 1 / 1 / 1 / 1 |
+
+  Message load scores 1–2 on every day: the 0.0.1 check-ins and start messages are what the simulated user minds most, on both brains. The SLM's worst moments: answering "what's left today" with raw backlog lines, "what does tomorrow look like" with today, not dropping a declined invite, marking an item done in Joplin that the user said wasn't, and an evening time recorded as 7 AM. A day costs about 37 agy calls with the SLM and 63 with the Frontier brain.
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments
