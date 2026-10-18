@@ -248,19 +248,20 @@ Still to do in 0.1:
    - Multi-part messages drop a part (50% on the parse benchmark: "work ran until 4:30, and move budget review to 4:30" loses the work change). Add a "did I cover everything in the message?" check in Python: look for nouns from the message that matched no action.
    - "Dinner, cooking and eating, listening to X" becomes three items; it should be one item with X alongside.
    - Speed: try E2B for parsing, shorter keys in the output, and a lighter context.
-3. **Contextual messages** ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
-4. **Calendar refinements:**
+3. **Spike: which on-device model.** Compare Gemma 4 E4B with other small models that fit the same devices: Phi-4 Mini (3.8B) and Qwen (3–4B, and 7–9B where memory allows), on the same tasks: the parse benchmark (`tests/slm_parse_eval.py`), list sorting against Gemini's answers, and the day sim. Measure accuracy, latency and memory, and check the licence. First, put the brain behind a model-neutral runtime: `json_call`, `text_call` and the parser session are all it uses. Then check which models LiteRT-LM can run; llama.cpp (GGUF, Vulkan, JSON-schema grammars) is the fallback. Keep Gemma's own strengths in view: it was built for on-device use, it takes audio (for voice later), and it already runs on the GPU in the Flatpak.
+4. **Contextual messages** ("have you started X?", "are you on your way?") only for items that matter, chosen by the app. Don't build this until the rule is clear.
+5. **Calendar refinements:**
    - remember "not mine" decisions per recurring series, not per occurrence
    - choose per calendar: mine, show only, or ignore
    - (not planned: writing events back to Google Calendar)
-5. **Connector abstraction (Anti-Pattern 1):** `TaskSource` and `CalendarSource` interfaces, beside the existing `SyncTransport`.
-6. **Weekly patterns:** different routines per weekday (work hours, sleep).
-7. **Triage for monolithic lists:** a one-time conversation that proposes splitting a list sorted by time horizon into lists by area of life.
-8. **Housekeeping:**
+6. **Connector abstraction (Anti-Pattern 1):** `TaskSource` and `CalendarSource` interfaces, beside the existing `SyncTransport`.
+7. **Weekly patterns:** different routines per weekday (work hours, sleep).
+8. **Triage for monolithic lists:** a one-time conversation that proposes splitting a list sorted by time horizon into lists by area of life.
+9. **Housekeeping:**
    - `pyproject.toml` dependencies are stale (`astral` is unused; `litert-lm-api` should be optional)
    - `inference.py` hard-codes `~/dev/Thirties` runner paths
    - unused imports
    - the DST fall-back hour edge case: same-zone comparisons use wall time
    - the desktop app's periodic refresh runs on the UI thread
    - GUI tests in CI (they skip there: no display)
-9. **Later:** a headless Joplin CLI sync peer, Flathub, translations, a native mobile app.
+10. **Later:** a headless Joplin CLI sync peer, Flathub, translations, a native mobile app.
