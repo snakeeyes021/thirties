@@ -133,7 +133,7 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   Weakest SLM goal kinds: free time (0.71), work ran late (0.74), move (0.75), fill a window (0.76), shift (0.78), outcome done (0.78). The 13 hand-written scenarios had hidden this: they score 0.97. Fixes for most of the failures it found landed after this baseline and need a rerun on the same scenarios (`--only-from` the baseline report).
 
-**Baseline for 0.0.1 (2026-10-18)**, run on branch `eval/0.0.1` (v0.0.1 plus the agy no-tools fix and the day sim), simulator and judge on flash-low:
+**Baseline for 0.0.1 (2026-10-18)**, run on branch `eval/0.0.1` (v0.0.1 plus the agy no-tools fix and the day sim), simulator and judge on flash-low. **Caveat:** these runs had a harness bug (fixed in 68d14b3): the simulator's prompt went through the Frontier chat wrapper, and in about 40% of short-sim conversations the simulated user answered as the assistant or thought out loud. The numbers understate both brains; clean reruns of 0.0.1 and 0.1 replace them.
 
 - **Short sim**, 16 hand-written + 37 generated scenarios on both brains (53 each; the standard is now 16 + 34):
 
