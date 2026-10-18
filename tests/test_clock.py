@@ -92,5 +92,17 @@ class TestClock(unittest.TestCase):
                          ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting"])
 
 
+
+class TestToThirties(unittest.TestCase):
+
+    def test_only_00_and_30_are_said(self):
+        from thirties_core.clock import to_thirties
+        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"), "Sunset at 6:30, then dinner 7:00 PM – 8:00 PM")
+        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:30 PM")
+        self.assertEqual(to_thirties("at 12:50 PM"), "at 1:00 PM")
+        self.assertEqual(to_thirties("at 11:50 PM"), "at 12:00 AM")
+        self.assertEqual(to_thirties("score 3:2, ratio 10:45:12"), "score 3:2, ratio 10:45:12")
+
+
 if __name__ == "__main__":
     unittest.main()

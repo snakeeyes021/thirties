@@ -159,6 +159,11 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
         self.assertNotIn("CALL", out)
 
+    def test_minutes_are_said_as_thirties_unless_asked(self) -> None:
+        self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
+        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:30 tonight.")
+        self.assertEqual(self.manager.send_user_message("what's the exact time of sunset?"), "Sunset is at 6:28 tonight.")
+
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
             self.engine.set_next_response(reply("CALL list_schedule"))

@@ -153,7 +153,7 @@ How the day really went (hidden from the assistant):
 The user's hidden constraints:
 {constraints}
 
-The conversation, with times. "App" lines are the app's own notifications.
+The conversation, with times. "App" lines are the app's own notifications; "(app did)" lines are what the app actually did (its tool calls and their results), which the user didn't see: use them to check what the assistant claims.
 {transcript}
 
 The final record (what the assistant's schedule says, with outcomes; ground truth for anything the assistant claimed):
@@ -201,8 +201,10 @@ class DayRun:
     error: str = ""
 
     def transcript_text(self, for_user: bool = False) -> str:
-        names = {"user": "You" if for_user else "User", "assistant": "Assistant", "app": "App"}
-        return "\n".join(f"[{t}] {names[w]}: {x}" for t, w, x in self.log) or "(nothing yet)"
+        """The conversation; for the judge, with what the app actually did (its tool calls) in brackets."""
+        names = {"user": "You" if for_user else "User", "assistant": "Assistant", "app": "App", "tool": "(app did)"}
+        return "\n".join(f"[{t}] {names[w]}: {x}" for t, w, x in self.log
+                         if not (for_user and w == "tool")) or "(nothing yet)"
 
     def plan(self, offset: int = 0):
         return self.scheduler.build_day_plan(self.script.day + timedelta(days=offset))[0]
@@ -268,6 +270,19 @@ def advance(run: DayRun, now: datetime, until: datetime) -> datetime:
     return until
 
 
+def tool_lines(messages) -> List[str]:
+    """What the app did in a turn: tool calls and their results (Gemini), or the actions run (SLM)."""
+    out = []
+    for m in messages:
+        for call in m.get("tool_calls") or []:
+            out.append(f"{call.get('name')} {json.dumps(call.get('arguments', {}), ensure_ascii=False)[:200]}")
+        if m.get("role") == "tool":
+            out.append(f"→ {str(m.get('content', ''))[:200]}")
+        for action in m.get("slm_actions") or []:
+            out.append(json.dumps(action, ensure_ascii=False)[:200])
+    return out
+
+
 def live_day(run: DayRun, sim, max_moves: int = MAX_MOVES) -> None:
     script = run.script
     now = at(script.day, script.wake)
@@ -297,7 +312,9 @@ def live_day(run: DayRun, sim, max_moves: int = MAX_MOVES) -> None:
         if text:
             run.log.append((_hhmm(now), "user", text))
             start = time_mod.time()
+            before = len(run.manager.brain.messages)
             reply = run.manager.send_user_message(text)
+            run.log += [(_hhmm(now), "tool", t) for t in tool_lines(run.manager.brain.messages[before:])]
             if run.brain == "frontier":
                 raise_if_agy_failed(reply)
             run.latencies.append(round(time_mod.time() - start, 1))
@@ -334,6 +351,8 @@ def measure(run: DayRun) -> Dict[str, Any]:
     leaks, internal = [], []
     asked_exact = False
     for t, who, text in run.log:
+        if who == "tool":
+            continue
         if who == "user":
             asked_exact = bool(EXACT_ASKED_RE.search(text))
             continue

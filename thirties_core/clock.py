@@ -170,6 +170,28 @@ _DAY_HINT_RE = re.compile(r"\b(?:tomorrow|yesterday|tonight|today|mon|tue|wed|th
                           r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d", re.IGNORECASE)
 
 
+EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minute|minutes? past)\b", re.I)
+_CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
+
+
+def to_thirties(text: str) -> str:
+    """Only :00 and :30 are ever said: any other clock time is rounded to the nearest thirty ("sunset at 6:28"
+    is said "6:30"). For replies when the user hasn't asked for exact minutes."""
+    def fix(m: re.Match) -> str:
+        h, mm, suffix = int(m.group(1)), int(m.group(2)), m.group(3) or ""
+        if mm in (0, 30):
+            return m.group(0)
+        total = h * 60 + int(round(mm / 30.0)) * 30
+        nh, nm = (total // 60), total % 60
+        if nh == 13:
+            nh = 1
+        if nh == 12 and h == 11 and suffix:  # 11:50 AM → 12:00 PM, 11:50 PM → 12:00 AM
+            swap = {"AM": "PM", "PM": "AM", "am": "pm", "pm": "am", "a.m.": "p.m.", "p.m.": "a.m."}
+            suffix = re.sub(r"AM|PM|am|pm|a\.m\.|p\.m\.", lambda x: swap[x.group(0)], suffix)
+        return f"{nh}:{nm:02d}{suffix}"
+    return _CLOCK_MINUTES_RE.sub(fix, text)
+
+
 def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:
     """Say AM/PM only where it could be mistaken.
 

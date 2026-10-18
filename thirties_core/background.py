@@ -130,11 +130,11 @@ class BackgroundService:
     def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
              to_conversation: bool = True, now: Optional[datetime] = None) -> None:
         """Send a message to the desktop and, if a phone is paired here, to Telegram."""
-        from thirties_core.clock import trim_meridiems
+        from thirties_core.clock import to_thirties, trim_meridiems
         try:
             now = now or self.now()
-            text = trim_meridiems(text, now)
-            telegram_text = trim_meridiems(telegram_text, now) if telegram_text else None
+            text = trim_meridiems(to_thirties(text), now)
+            telegram_text = trim_meridiems(to_thirties(telegram_text), now) if telegram_text else None
         except Exception:
             pass
         if to_conversation:
@@ -186,6 +186,13 @@ class BackgroundService:
         except ValueError:
             return False
 
+    def _talked_since(self, since: datetime) -> bool:
+        raw = self.scheduler.state_db.get_sync_meta("last_user_message_at")
+        try:
+            return bool(raw) and datetime.fromisoformat(raw) >= since
+        except ValueError:
+            return False
+
     def _unreported(self, span) -> bool:
         return self._plannable(span) and span.status == SpanStatus.PLANNED and not span.tentative
 
@@ -226,7 +233,7 @@ class BackgroundService:
             key = a.isoformat()
             items = sorted((s for s in plan.active_spans() if self._unreported(s) and a <= s.start_dt < b),
                            key=lambda s: s.start_dt)
-            if a <= now < a + timedelta(minutes=5) and key not in started and items:
+            if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
                 self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + ".", "start",
@@ -235,6 +242,10 @@ class BackgroundService:
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
                 ask_at = b - timedelta(minutes=15)  # it ends at bedtime (or a long event): ask just before
+            if ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items and self._talked_since(a):
+                asked[key] = now.date().isoformat()  # they've been talking to the assistant: it knows; don't ask
+                self._remember("stretch_asked", asked, now)
+                continue
             if (ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items
                     and not self._talking(now)):
                 asked[key] = now.date().isoformat()

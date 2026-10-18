@@ -167,6 +167,11 @@ class TestMessageLevels(unittest.TestCase):
         checkins = [b for k, b in self.sent if k == "checkin"]
         self.assertTrue(any("Reading" in b for b in checkins), self.sent)
 
+    def test_no_stretch_check_in_after_talking_with_the_assistant(self):
+        self.sched.state_db.set_sync_meta("last_user_message_at", at("17:15").isoformat())  # mid-stretch
+        self.run_day("15:55", "20:30")
+        self.assertEqual([k for k, _ in self.sent if k == "checkin"], [])
+
     def test_off_and_no_notify(self):
         self.sched.config.assistant.message_level = "off"
         self.run_day("14:45", "20:30")
