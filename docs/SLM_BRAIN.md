@@ -163,6 +163,22 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   Message load scores 1–2 on every day: the 0.0.1 check-ins and start messages are what the simulated user minds most, on both brains. The SLM's worst moments: answering "what's left today" with raw backlog lines, "what does tomorrow look like" with today, not dropping a declined invite, marking an item done in Joplin that the user said wasn't, and an evening time recorded as 7 AM. A day costs about 37 agy calls with the SLM and 63 with the Frontier brain.
 
+**Clean comparison, 0.0.1 against 0.1 (2026-10-18)**, with the simulator fixed: the same three days on each version and brain, one run each (so any single cell is noisy; look for differences that hold across all six pairs). 0.1 is `68d14b3` with Gemma's sorted lists.
+
+| Brain | Day | Requests met | User's rating | Messages per waking hour | Message load (judge) | Done items recorded |
+|---|---|---|---|---|---|---|
+| Frontier | Saturday | 1.00 → 0.83 | 4 → 6 | 0.88 → 0.15 | 2 → 5 | 5/7 → 2/7 |
+| Frontier | 10-16 | 0.92 → 0.95 | 6 → 6 | 0.73 → 0.18 | 2 → 5 | 3/5 → 4/5 |
+| Frontier | 10-17 | 0.84 → 0.76 | 3 → 3 | 1.46 → 0.24 | 2 → 4 | 7/12 → 8/12 |
+| SLM | Saturday | 0.61 → 0.58 | 4 → 3 | 0.88 → 0.37 | 2 → 3 | 5/7 → 2/7 |
+| SLM | 10-16 | 0.44 → 0.50 | 2 → 2 | 0.91 → 0.24 | 1 → 4 | 2/5 → 1/5 |
+| SLM | 10-17 | 0.29 → 0.34 | 2 → 2 | 1.14 → 0.16 | 2 → 3 | 1/12 → 3/12 |
+
+  - **Holds everywhere:** the app's own messages fell four- to sixfold, and the judge's message-load score rose on every pair (2 → 4–5 for the Frontier brain). No minute times were shown.
+  - **Mixed:** requests met and the user's rating moved within noise, except the Frontier Saturday (rating 4 → 6).
+  - **A trade-off to fix:** fewer check-ins means fewer reports, so the record can suffer (the Saturday recorded 2 of 7 done items instead of 5). Quiet messaging needs another way to collect what happened, such as one short wrap-up at the end of the day.
+  - **The SLM** is still at 2–3/10: its problems are understanding, not messaging.
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments
