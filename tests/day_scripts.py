@@ -17,7 +17,7 @@ import sqlite3
 import sys
 from datetime import date
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -78,12 +78,12 @@ def stored_conversation(db_path: Path, day: str) -> str:
 PEOPLE_DIR = REPO_ROOT / "tests" / "day_scripts" / "people"
 
 
-def import_scripts(files: List[str], to: Path) -> None:
+def import_scripts(files: List[str], to: Optional[Path] = None) -> None:
     """Every script in the files (JSON objects or arrays, fenced or not), checked, one file each."""
     import re as _re
     from tests.day_sim import validate
-    to.mkdir(parents=True, exist_ok=True)
     good = bad = 0
+    counts: dict = {}
     for f in files:
         text = Path(f).read_text()
         blocks = _re.findall(r"```(?:json)?\s*(.*?)```", text, _re.S) or [text]
@@ -100,9 +100,14 @@ def import_scripts(files: List[str], to: Path) -> None:
                     print(f"{f}: {script.get('id', '?')}: " + "; ".join(problems[:6]))
                     bad += 1
                     continue
-                (to / f"{script['id']}.json").write_text(json.dumps(script, indent=2, ensure_ascii=False))
+                where = to or (PEOPLE_DIR if script.get("notes") else OUT_DIR)  # made-up people are committed;
+                where.mkdir(parents=True, exist_ok=True)                        # the user's own days stay private
+                (where / f"{script['id']}.json").write_text(json.dumps(script, indent=2, ensure_ascii=False))
+                counts[where] = counts.get(where, 0) + 1
                 good += 1
-    print(f"{good} scripts filed in {to.relative_to(REPO_ROOT)}, {bad} with problems")
+    for where, n in counts.items():
+        print(f"{n} scripts filed in {where.relative_to(REPO_ROOT)}")
+    print(f"{good} scripts filed, {bad} with problems")
 
 
 def sort_real_lists(brain: str, model: str) -> None:
@@ -156,7 +161,8 @@ def main() -> None:
     im = sub.add_parser("import", help="check and file scripts written elsewhere (e.g. the Gemini web app)")
     im.add_argument("files", nargs="+")
     im.add_argument("--people", action="store_true",
-                    help="made-up people with their own lists: into tests/day_scripts/people (committed)")
+                    help="all into tests/day_scripts/people (default: scripts with their own lists go there, the "
+                         "user's own days to docs/eval_reports/day_scripts)")
     so = sub.add_parser("lists", help="sort the real lists once (roles and urgency) for the day sim's --lists-from")
     so.add_argument("--brain", choices=["slm", "frontier"], default="slm")
     ap.add_argument("--model", default="gemini-3.8-flash")
@@ -165,7 +171,7 @@ def main() -> None:
         sort_real_lists(args.brain, args.model)
         return
     if args.cmd == "import":
-        import_scripts(args.files, PEOPLE_DIR if args.people else OUT_DIR)
+        import_scripts(args.files, PEOPLE_DIR if args.people else None)
         return
     llm = make_llm(args.model, timeout=900)  # long prompts, long answers
     fmt = FORMAT.format(example=EXAMPLE)
