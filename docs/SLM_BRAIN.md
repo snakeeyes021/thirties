@@ -189,7 +189,7 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 | SLM | other people | 20 | 0.53 | 3.9/10 | 0.30 | 67% | 2.0 / 2.1 / 2.0 / 3.3 / 2.0 |
 | SLM | the user | 3 | 0.27 | 2.3/10 | 0.23 | 22% | 1.0 / 1.0 / 1.0 / 3.0 / 1.0 |
 
-  No minute times were shown on any day. It found one design error: rounding every time to a thirty turned a support worker's stated 10:45 break into 11:00. Times the user says, and calendar times, now keep their minutes.
+  No minute times were shown on any day. It found one design error: rounding to the nearest thirty turned a support worker's 10:45 break into 11:00, the wrong thirty. A time is now told by the thirty it's in (the 10:30 thirty), its exact minute only when asked for.
 
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
