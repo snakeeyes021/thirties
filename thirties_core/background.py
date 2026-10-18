@@ -254,6 +254,26 @@ class BackgroundService:
                 listed = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
                 self.send(f"👋 Since {format_clock(a)}: did you get to {listed}?", "checkin", now=now)
 
+    def wrap_up(self, now: datetime) -> None:
+        """Medium: once a day, 45 minutes before bed, one question about whatever from today still isn't reported,
+        so the record stays good without asking all day."""
+        if self.level() != "medium" or self._quiet(now) or self._talking(now):
+            return
+        plan = self.manager().day_plan
+        bed = min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start),
+                  default=None)
+        key = f"wrap_up:{plan.target_date.isoformat()}"
+        if bed is None or not (bed - timedelta(minutes=45) <= now < bed) or self.scheduler.state_db.get_sync_meta(key):
+            return
+        from thirties_core.memory import CheckinMutes
+        mutes = CheckinMutes(self.scheduler.state_db)
+        open_items = [s.title for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
+                      if self._unreported(s) and s.end_dt <= now and not mutes.is_muted(s.id, now)]
+        self.scheduler.state_db.set_sync_meta(key, "1")
+        if open_items:
+            listed = open_items[0] if len(open_items) == 1 else ", ".join(open_items[:-1]) + f" and {open_items[-1]}"
+            self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now)
+
     def check_ins(self, now: datetime) -> None:
         """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
         have no outcome: never twice about an item, never about one already reported or muted."""
@@ -416,8 +436,8 @@ class BackgroundService:
 
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
-        for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.check_ins, self.starts,
-                     self.today_sync):
+        for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
+                     self.starts, self.today_sync):
             try:
                 duty(now)
             except Exception as e:

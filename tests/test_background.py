@@ -126,7 +126,7 @@ class TestMessageLevels(unittest.TestCase):
         t = at(start)
         while t <= at(end):
             set_debug_time(t)
-            for duty in (self.svc.heads_up, self.svc.stretches, self.svc.check_ins, self.svc.starts):
+            for duty in (self.svc.heads_up, self.svc.stretches, self.svc.wrap_up, self.svc.check_ins, self.svc.starts):
                 duty(t)
             t += timedelta(minutes=5)
 
@@ -171,6 +171,11 @@ class TestMessageLevels(unittest.TestCase):
         self.sched.state_db.set_sync_meta("last_user_message_at", at("17:15").isoformat())  # mid-stretch
         self.run_day("15:55", "20:30")
         self.assertEqual([k for k, _ in self.sent if k == "checkin"], [])
+
+    def test_one_wrap_up_before_bed_for_what_isnt_reported(self):
+        self.run_day("21:30", "23:30")
+        wrap = [b for k, b in self.sent if b.startswith("🌙 Before bed")]
+        self.assertEqual(wrap, ["🌙 Before bed: did Lunch, Shower and Food happen? Just say which (or none)."])
 
     def test_off_and_no_notify(self):
         self.sched.config.assistant.message_level = "off"

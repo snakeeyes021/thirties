@@ -182,6 +182,19 @@ class TestMorning(TodayTestCase):
         self.assertIn("Couldn't put Buy stamps on today's list", out)
         self.assertEqual(self.t.execute("apply_rollover", {}), "Yesterday's items were already rolled over.")
 
+    def test_daily_things_and_project_time_dont_carry_over(self):
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        y = DAY - timedelta(days=1)
+        for title, start in (("Shower", "9:00 PM"), ("Thirties dev", "8:00 PM"), ("Return the library books", "7:00 PM")):
+            self.t.execute("add_event", {"title": title, "start": start, "duration": "30 min", "day": y.isoformat()})
+        self.api.notes["n_dev"] = {"id": "n_dev", "body": "- [ ] Fix the sync bug\n"}
+        TITLES["n_dev"] = "Thirties"
+        ListCatalog(self.sched.state_db).set_role("n_dev", "backlog", "Thirties")
+        self.api.notes["n_routine"]["body"] = "- [ ] Shower\n- [ ] PT\n"
+        titles = [p["title"] for p in self.t.assistant.rollover_plan()]
+        self.assertEqual(titles, ["Return the library books"])
+
     def test_the_morning_proposal_keeps_drops_and_adds(self):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})

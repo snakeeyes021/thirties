@@ -723,7 +723,7 @@ class AssistantTools:
             return []
         yesterday = self.pt.plan_for(today - timedelta(days=1))
         now = self.pt._now()
-        pending = unreviewed_spans(yesterday.spans, now, yesterday.day_start)
+        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s)]
         floor = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
         windows = [(max(a, floor), b) for a, b in self.pt.open_windows() if b > floor]
         plan = []
@@ -741,6 +741,25 @@ class AssistantTools:
             plan.append({"span_id": s.id, "title": s.title, "minutes": int(need.total_seconds() // 60),
                          "start": start.isoformat() if start else None})
         return plan
+
+    def _carries_over(self, span: EventSpan) -> bool:
+        """Daily things (items of a routine note) and time on a project ("Redfox dev", a backlog's time) happen
+        again anyway: they don't carry over to the next day as unfinished."""
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import note_items, notes_with_role
+        title = span.title.strip().lower()
+        task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
+        if task is not None and task.list_role in ("routine", "backlog"):
+            return False
+        if self._db is None:
+            return True
+        roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
+        routine = {text.lower() for n in notes_with_role(roles, notes, "routine") for text, _ in note_items(n)}
+        projects = {n["title"].strip().lower() for n in notes_with_role(roles, notes, "backlog")}
+        if title in routine:
+            return False
+        project = re.sub(r"\s+(dev|work|time|session|block)$", "", title)
+        return not (project != title and project in projects)
 
     def _rollover_key(self) -> str:
         return f"rollover:{self._today().isoformat()}"
