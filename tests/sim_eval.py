@@ -434,13 +434,14 @@ QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many r
 # --- staying within a share of the agy quota (see docs/SLM_BRAIN.md, "Eval budget") ---
 
 QUOTA_WINDOW_SECONDS = 5 * 3600   # agy's quota window
-MEASURED_CAPACITY = 1650          # calls that used up a window on 2026-10-15 (sim/judge on medium then)
+MEASURED_CAPACITY = 2000          # calls per window on flash-low: 1,113 calls showed as 55% used (2026-10-18)
 CALLS_PER_CONVERSATION = {"slm": 6, "frontier": 9}  # simulator turns + judge (+ Frontier replies), measured
 
 
 def quota_capacity() -> int:
-    """Calls per window: the count before the last quota stop in the ledger, else the measured figure."""
-    rows = agy_ledger(7 * 86400)
+    """Calls per window: the count before a quota stop in the last day, else the measured figure (older stops
+    were measured with a different mix of models)."""
+    rows = agy_ledger(86400)
     stops = [t for t, _, outcome in rows if outcome == "quota"]
     if not stops:
         return MEASURED_CAPACITY
