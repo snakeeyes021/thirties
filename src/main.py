@@ -26,6 +26,7 @@ class ThirtiesApplication(Adw.Application):
         super().__init__(application_id='tech.redfoxlabs.Thirties',
                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
                          resource_base_path='/tech/redfoxlabs/Thirties')
+        self.version = ""  # set by main() from the build
         self.add_main_option("background", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
                              _("Start in the background, without a window"), None)
         self.core = None
@@ -130,7 +131,7 @@ class ThirtiesApplication(Adw.Application):
         about = Adw.AboutDialog(application_name='Thirties',
                                 application_icon='tech.redfoxlabs.Thirties',
                                 developer_name='Matthew Samson',
-                                version='0.1.0',
+                                version=self.version,
                                 translator_credits=_('translator-credits'),
                                 developers=['Matthew Samson'],
                                 copyright='© 2026 Matthew Samson')
@@ -152,4 +153,5 @@ def main(version):
     """The application's entry point."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     app = ThirtiesApplication()
+    app.version = version
     return app.run(sys.argv)

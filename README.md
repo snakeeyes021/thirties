@@ -28,7 +28,8 @@ With your permission it keeps running in the background after you close it, for
 reminders, check-ins and your phone; Ctrl+Q quits it completely.
 
 The desktop app is a Flatpak built with meson (GNOME Builder, or `flatpak-builder`
-with `tech.redfoxlabs.Thirties.json`).
+with `tech.redfoxlabs.Thirties.json`). Each release on GitHub has a bundle to install
+with `flatpak install --user tech.redfoxlabs.Thirties.flatpak`; it's an early alpha.
 
 For development:
 

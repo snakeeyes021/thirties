@@ -114,7 +114,7 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
 
 ---
 
-## MVP (agreed 2026-10-16; items 1–12 done 2026-10-16, item 13 waits for the go-ahead)
+## MVP: released as 0.0.1, an alpha (agreed 2026-10-16; done 2026-10-17)
 
 Done means a generic user can install Thirties fresh and use it daily, with no config files, dev tools or hand-run setup. Work happens on `restructure/one-core-two-brains`, in roughly this order:
 
@@ -130,7 +130,9 @@ Done means a generic user can install Thirties fresh and use it daily, with no c
 10. **Rollover as a batch:** yesterday's unfinished items proposed together, confirmed in one go.
 11. **Statistics in planning:** real durations in proposals; a warning when a plan exceeds the capacity you've actually shown.
 12. **Conversation summaries** for history search.
-13. **The release build, last:** a Flatpak manifest and GitHub Actions workflow like Pianola's. Then a human PR and merge to `main`, then a fresh eval baseline (both brains, sim/judge on flash-low, within the 66% budget).
+13. **The release build, last:** a Flatpak manifest and GitHub Actions workflow like Pianola's (`.github/workflows/flatpak.yml`: tests, a `.flatpak` bundle on every push, an OCI image on GHCR from `main` and tags, and a GitHub Release from a `v*` tag, marked pre-release while the version is 0.x). Then a human PR and merge to `main`, then a fresh eval baseline (both brains, sim/judge on flash-low, within the 66% budget).
+
+**Not yet tried by hand** (anything broken here is tech debt for the branch current when it's found): background permission and autostart, Detect location, pairing a phone by code, starting Joplin when needed, folder sync, and notifications from the installed app.
 
 **Deferred until after the MVP:** contextual check-ins ("have you started?"), a headless Joplin CLI sync peer, calendar refinements (no calendar write-back), per-weekday routines, the connector abstraction beyond the storage transport, further SLM research (E2B only if E4B doesn't fit a device), Flathub, translations, a native mobile app, and housekeeping.
 

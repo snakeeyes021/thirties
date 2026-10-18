@@ -5,66 +5,52 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>Thirties</name>
-  <summary>Keep the summary shorter, between 10 and 35 characters</summary>
+  <summary>Plan your day with an assistant</summary>
   <description>
-    <p>No description</p>
+    <p>
+      Thirties is a personal assistant for your time. It gathers your tasks and calendar into one place, lays the day out as 48 half-hour “thirties” anchored to sunrise and sunset, and lets you plan, re-plan and review the day in plain conversation, on your desktop or from your phone.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>A day canvas of thirties, with daylight and dark from your location</li>
+      <li>Planning by conversation: “put the walk at 4:00”, “it went until 4:30”</li>
+      <li>Your Joplin lists and GNOME calendars in one plan; it can tick off and add Joplin items for you</li>
+      <li>Reminders and check-ins, on the desktop and by Telegram</li>
+      <li>Rolling unfinished items into the next day, and learning how long things really take</li>
+      <li>An assistant that runs on your computer (Gemma), or Gemini</li>
+      <li>Sync between computers through a folder you choose</li>
+    </ul>
+    <p>This is an early alpha.</p>
   </description>
 
-  <developer id="tld.vendor">
-    <name>Developer name</name>
+  <developer id="tech.redfoxlabs">
+    <name>Matthew Samson (Red Fox Labs)</name>
   </developer>
 
-  <!-- Required: Should be a link to the upstream homepage for the component -->
-  <url type="homepage">https://example.org/</url>
-  <!-- Recommended: It is highly recommended for open-source projects to display the source code repository -->
-  <url type="vcs-browser">https://example.org/repository</url>
-  <!-- Should point to the software's bug tracking system, for users to report new bugs -->
-  <url type="bugtracker">https://example.org/issues</url>
-  <!-- Should link a FAQ page for this software, to answer some of the most-asked questions in detail -->
-  <!-- URLs of this type should point to a webpage where users can submit or modify translations of the upstream project -->
-  <url type="translate">https://example.org/translate</url>
-  <url type="faq">https://example.org/faq</url>
-  <!-- Should provide a web link to an online user's reference, a software manual or help page -->
-  <url type="help">https://example.org/help</url>
-  <!-- URLs of this type should point to a webpage showing information on how to donate to the described software project -->
-  <url type="donation">https://example.org/donate</url>
-  <!-- This could for example be an HTTPS URL to an online form or a page describing how to contact the developer -->
-  <url type="contact">https://example.org/contact</url>
-  <!-- URLs of this type should point to a webpage showing information on how to contribute to the described software project -->
-  <url type="contribute">https://example.org/contribute</url>
+  <url type="homepage">https://github.com/snakeeyes021/thirties</url>
+  <url type="vcs-browser">https://github.com/snakeeyes021/thirties</url>
+  <url type="bugtracker">https://github.com/snakeeyes021/thirties/issues</url>
 
   <translation type="gettext">thirties</translation>
-  <!-- All graphical applications having a desktop file must have this tag in the MetaInfo.
-     If this is present, appstreamcli compose will pull icons, keywords and categories from the desktop file. -->
   <launchable type="desktop-id">tech.redfoxlabs.Thirties.desktop</launchable>
-  <!-- Use the OARS website (https://hughsie.github.io/oars/generate.html) to generate these and make sure to use oars-1.1 -->
   <content_rating type="oars-1.1" />
 
-  <!-- Applications should set a brand color in both light and dark variants like so -->
   <branding>
-    <color type="primary" scheme_preference="light">#ff00ff</color>
-    <color type="primary" scheme_preference="dark">#993d3d</color>
+    <color type="primary" scheme_preference="light">#e9d4bb</color>
+    <color type="primary" scheme_preference="dark">#7a5434</color>
   </branding>
 
-  <screenshots>
-    <screenshot type="default">
-      <image>https://example.org/example1.png</image>
-      <caption>A caption</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://example.org/example2.png</image>
-      <caption>A caption</caption>
-    </screenshot>
-  </screenshots>
-
   <releases>
-    <release version="1.0.1" date="2024-01-18">
-      <url type="details">https://example.org/changelog.html#version_1.0.1</url>
-      <description translate="no">
-        <p>Release description</p>
+    <release version="0.0.1" date="2026-10-17" type="development">
+      <description>
+        <p>First alpha of Thirties:</p>
         <ul>
-          <li>List of changes</li>
-          <li>List of changes</li>
+          <li>Setup assistant: location, usual week, assistant, Joplin, sync and phone</li>
+          <li>Day planning by conversation, told in thirties</li>
+          <li>Joplin lists and GNOME calendars, with write-back to Joplin</li>
+          <li>Reminders, check-ins and start messages, on the desktop and by Telegram</li>
+          <li>Morning rollover of unfinished items, and statistics from what actually happened</li>
+          <li>Runs in the background, with autostart</li>
         </ul>
       </description>
     </release>
