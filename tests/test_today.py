@@ -89,6 +89,26 @@ class TestTickingTwins(TodayTestCase):
         self.assertEqual(self.body("n_today"), "- [x] Call the bank\n")
 
 
+class TestHandEdits(TodayTestCase):
+
+    def test_ticked_by_hand_on_either_side(self):
+        self.t.execute("add_to_today", {"items": ["Call the bank", "Buy stamps"]})
+        self.api.notes["n_today"]["body"] = "- [x] Call the bank\n- [ ] Buy stamps\n"
+        self.api.notes["n_errands"]["body"] = "- [ ] Call the bank\n- [x] Buy stamps\n"
+        self.assertEqual(self.t.assistant.sync_today(), [])
+        self.assertEqual(self.body("n_errands"), "- [x] Call the bank\n- [x] Buy stamps\n")
+        self.assertEqual(self.body("n_today"), "- [x] Call the bank\n- [x] Buy stamps\n")
+
+    def test_a_scheduled_item_taken_off_today_is_mentioned_once(self):
+        self.t.execute("add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
+                                     "task_id": "t_bank"})
+        self.api.notes["n_today"]["body"] = ""
+        self.assertEqual(self.t.assistant.sync_today(),
+                         ["You took Call the bank off today's list; it's still planned at 3:00 PM. "
+                          "Should I take it off the plan too?"])
+        self.assertEqual(self.t.assistant.sync_today(), [])
+
+
 class TestMorning(TodayTestCase):
 
     def setUp(self):

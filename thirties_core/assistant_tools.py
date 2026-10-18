@@ -389,6 +389,46 @@ class AssistantTools:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
             self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
 
+    def sync_today(self) -> List[str]:
+        """Catch up with edits made by hand: an item ticked on the Today note ticks its home item, and the other way
+        round; a scheduled item taken off the Today note is mentioned once. Returns messages for the user."""
+        import json
+        from thirties_core.joplin_writeback import complete_op
+        from thirties_core.today import TodayLinks, note_items
+        today = self._today_note()
+        writer = self._writer()
+        if today is None or writer is None or self._db is None or not writer.allowed:
+            return []
+        notes = {n["id"]: n for n in self._joplin_notes()}
+        on_today = {text.lower(): ticked for text, ticked in note_items(today)}
+        links = TodayLinks(self._db)
+        for link in links.all():
+            home_items = {text.lower(): (text, ticked) for text, ticked in note_items(notes.get(link["home_note_id"]))}
+            home = home_items.get(link["home_title"].lower())
+            mine = on_today.get(link["today_title"])
+            if home is None or mine is None:
+                continue
+            if mine and not home[1]:
+                writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": link["home_note_id"],
+                               "title": home[0]})
+            elif home[1] and not mine:
+                exact = next(t for t, _ in note_items(today) if t.lower() == link["today_title"])
+                writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
+        messages = []
+        key = f"today_removed_told:{self._today().isoformat()}"
+        told = set(json.loads(self._db.get_sync_meta(key) or "[]"))
+        plan = self.pt.plan_for(self._today())
+        for span in plan.spans:
+            linked = links.today_title_of(span.task_id) if span.task_id else None
+            if (linked and linked not in on_today and span.status.value == "planned" and span.id not in told
+                    and span.end_dt > self.pt._now()):
+                messages.append(f"You took {span.title} off today's list; it's still planned at "
+                                f"{format_clock(thirty_of(span.start_dt))}. Should I take it off the plan too?")
+                told.add(span.id)
+        if messages:
+            self._db.set_sync_meta(key, json.dumps(sorted(told)))
+        return messages
+
     def add_to_today(self, items: Any, **_: Any) -> str:
         from thirties_core.today import TodayLinks, note_items
         note = self._today_note()

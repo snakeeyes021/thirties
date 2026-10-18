@@ -41,6 +41,7 @@ class BackgroundService:
     OUTBOX_EVERY = 60
     SYNC_EVERY = 300
     LISTS_EVERY = 1800
+    TODAY_EVERY = 120
 
     def __init__(self, config, desktop_notify: Optional[DesktopNotify] = None, *, scheduler=None, joplin_engine=None,
                  inference_engine=None, sync_engine=None) -> None:
@@ -62,6 +63,7 @@ class BackgroundService:
         self._last_outbox = 0.0
         self._last_sync = 0.0
         self._last_lists = 0.0
+        self._last_today = 0.0
         self._sorting = False
         self.sort_lists_enabled = not os.environ.get("THIRTIES_OFFLINE")  # off in tests and evals
         self._threads: List[threading.Thread] = []
@@ -231,6 +233,15 @@ class BackgroundService:
             return
         self.send("☀️ Good morning! " + text, "rollover", now=now)
 
+    def today_sync(self, now: datetime) -> None:
+        """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
+        if time.time() - self._last_today < self.TODAY_EVERY:
+            return
+        self._last_today = time.time()
+        assistant = self.manager().tools.assistant
+        for message in assistant.sync_today() if assistant is not None else []:
+            self.send("📝 " + message, "today", now=now)
+
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
             return
@@ -283,7 +294,7 @@ class BackgroundService:
 
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
-        for duty in (self.rollover, self.check_ins, self.reminders, self.starts):
+        for duty in (self.rollover, self.check_ins, self.reminders, self.starts, self.today_sync):
             try:
                 duty(now)
             except Exception as e:
