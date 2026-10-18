@@ -122,7 +122,7 @@
     </section>
     <section>
       <item>
-        <attribute name="label" translatable="yes">Profile &amp; _Memory</attribute>
+        <attribute name="label" translatable="yes">_Profile, Memory &amp; Lists</attribute>
         <attribute name="action">win.profile-memory</attribute>
       </item>
     </section>

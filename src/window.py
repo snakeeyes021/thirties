@@ -307,10 +307,14 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     def _show_profile_dialog(self) -> None:
         services = self.conv_manager.tools.services if self.conv_manager else None
+        from thirties_core.lists import ListCatalog
+        engine = self.joplin_engine
         dialog = ProfileMemoryDialog(
             profile=services.profile if services else None,
             memory=services.memory if services else None,
             on_changed=self._push_sync,
+            lists=ListCatalog(self.scheduler.state_db) if self.scheduler else None,
+            load_lists=lambda: (engine.fetch_active_notes(), engine.fetch_tasks()) if engine else ([], []),
         )
         dialog.present(self)
 

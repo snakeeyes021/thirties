@@ -95,6 +95,11 @@ class ListCatalog:
             """, (note_id, title, role, source, utc_now_iso()))
         return True
 
+    def clear_role(self, note_id: str) -> None:
+        """Forget a note's role, so it's guessed again."""
+        with self.db._get_connection() as conn:
+            conn.execute("DELETE FROM list_roles WHERE note_id = ?", (note_id,))
+
     # --- urgency ---
 
     def urgencies(self) -> Dict[str, Dict[str, str]]:
@@ -176,15 +181,17 @@ class ListCatalog:
 
 
 def sort_lists(catalog: ListCatalog, notes: List[Dict[str, Any]], tasks: List[TaskItem], sorter, today: date,
-               max_notes: Optional[int] = None) -> Dict[str, int]:
-    """Guess what's missing: the role of each new note, then the urgency of each new item in sorted lists
-    (a whole note at a time). A note the model couldn't answer for is tried again next time."""
+               max_notes: Optional[int] = None, with_items: bool = True) -> Dict[str, int]:
+    """Guess what's missing: the role of each new note, then (with ``with_items``) the urgency of each new item
+    in sorted lists, a whole note at a time. A note the model couldn't answer for is tried again next time."""
     counts = {"roles": 0, "items": 0}
     for note in catalog.notes_without_role(notes)[:max_notes]:
         role = sorter.role(note)
         if role is not None:
             catalog.set_role(note["id"], role, note.get("title", ""), source="guess")
             counts["roles"] += 1
+    if not with_items:
+        return counts
     by_id, roles = {n["id"]: n for n in notes}, catalog.roles()
     for note_id, items in list(catalog.items_without_urgency(tasks).items())[:max_notes]:
         if note_id not in by_id:
