@@ -12,6 +12,7 @@ starts with ``NOT_DONE`` means nothing was changed, and says why.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -147,6 +148,9 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
+_JOINER = re.compile(r"\s+(?:/|&|\+|and|with)\s+|\s*/\s*", re.IGNORECASE)
+
+
 def _merge_intervals(intervals: List[Tuple[datetime, datetime]]) -> List[Tuple[datetime, datetime]]:
     merged: List[Tuple[datetime, datetime]] = []
     for start, end in sorted(intervals):
@@ -247,6 +251,24 @@ class PlanTools:
             return self.open_windows()
         finally:
             self.day_plan = saved
+
+    def _separate_things(self, title: str, ignore: Optional[str] = None) -> None:
+        """One item per thing: a title joining two things the user already has ("Thirties dev / Message Brad")
+        is refused, so each keeps its own outcome, check-in and statistics."""
+        parts = [p.strip().lower() for p in _JOINER.split(title) if p.strip()]
+        if len(parts) < 2:
+            return
+        known = {s.title.lower() for s in self.day_plan.spans if s.id != ignore and not s.is_envelope}
+        if self.services is not None:
+            known |= {t.title.lower() for t in self.services.tasks}
+
+        def is_known(part: str) -> bool:
+            return len(part) > 2 and any(part == k or (len(part) > 5 and k.startswith(part)) for k in known)
+
+        matched = [p for p in parts if is_known(p)]
+        if len(matched) >= 2:
+            raise ToolError(f"'{title}' is {len(parts)} separate things. Give each its own item (the second "
+                            f"with alongside=true if they happen at the same time).")
 
     def _start(self, text: Any) -> datetime:
         return resolve_clock(str(text), self.day_plan.day_start)
@@ -441,6 +463,7 @@ class PlanTools:
             raise ToolError("Calendar events come from the user's calendar and can't be added here.")
         if task_id and cat == SpanCategory.ACTIVITY:
             cat = SpanCategory.TASK
+        self._separate_things(str(title))
         start_dt = self._start(start)
         if end not in (None, ""):
             end_dt = self._end(end, start_dt)
@@ -489,6 +512,8 @@ class PlanTools:
         span = self._find_span(event)
         if span.source == "calendar":
             raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
+        if title:
+            self._separate_things(str(title))
         if to_day not in (None, ""):
             return self._move_to_day(span, to_day, start, end, duration, title)
         before = self.describe(span)

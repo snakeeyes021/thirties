@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 # --- note body edits (pure) ---
 
-def _open_item(line: str, title: str) -> Optional[re.Match]:
-    m = CHECKBOX_REGEX.match(line)
+def _open_item(line: str, title: str, ticked_too: bool = False) -> Optional[re.Match]:
+    m = CHECKBOX_REGEX.match(line) or (DONE_CHECKBOX_REGEX.match(line) if ticked_too else None)
     return m if m and m.group(2).strip() == title.strip() else None
 
 
@@ -63,10 +63,12 @@ def _indent_unit(lines: List[str]) -> str:
     return " " * min(widths) if widths else "    "
 
 
-def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], occurrence: int = 0) -> Optional[str]:
+def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], occurrence: int = 0,
+                    ticked_too: bool = False) -> Optional[str]:
     """Add steps as open items nested under a checklist item, after any children it already has.
 
     With ``parent_title`` None (a to-do note broken down), the steps go at the end of the note.
+    ``ticked_too`` lets the parent be a ticked item (a routine note's items stay ticked between days).
     Returns None if the parent item is gone.
     """
     steps = [s.strip() for s in steps if s.strip()]
@@ -76,7 +78,7 @@ def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], oc
     unit = _indent_unit(lines)
     seen = 0
     for i, line in enumerate(lines):
-        m = _open_item(line, parent_title)
+        m = _open_item(line, parent_title, ticked_too)
         if not m:
             continue
         if seen < occurrence:
@@ -281,7 +283,8 @@ class JoplinWriter:
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
         if kind == "break_down":
             return self._edit_body(op["note_id"], lambda b: insert_subtasks(b, op.get("parent_title"), op["steps"],
-                                                                              op.get("occurrence", 0)))
+                                                                              op.get("occurrence", 0),
+                                                                              op.get("ticked_too", False)))
         return False, f"gone: unknown operation {kind!r}"
 
 

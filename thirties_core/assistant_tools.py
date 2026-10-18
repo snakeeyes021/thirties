@@ -142,9 +142,11 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "break_down_task",
-        "description": "Break a backlog task into smaller steps, written into Joplin as subtasks under it. Propose "
+        "description": "Break a task into smaller steps, written into Joplin as subtasks under it. Works on any "
+                       "checklist item in the user's lists, including routine notes and ticked items. Propose "
                        "the steps first; call this only after the user agrees.",
-        "parameters": {"task": "The task (title or task_id).", "steps": "The steps, as a list of short actions."},
+        "parameters": {"task": "The task (title or task_id).", "steps": "The steps, as a list of short actions.",
+                       "list": "The note it's in, if the same item is in more than one (e.g. 'Morning routine')."},
         "required": ["task", "steps"],
     },
     {
@@ -334,10 +336,41 @@ class AssistantTools:
 
     # --- changing the backlog in Joplin (only when the user asked or agreed) ---
 
+    def _joplin_notes(self) -> List[Dict[str, Any]]:
+        """The Joplin notes Thirties reads, with their bodies (empty if Joplin isn't connected)."""
+        try:
+            notes = self.s.joplin.fetch_active_notes() if self.s.joplin is not None else []
+        except Exception:
+            return []
+        return notes if isinstance(notes, list) else []
+
     def _notes(self) -> Dict[str, str]:
-        notes = {t.parent_note_id: t.parent_note_title for t in self.s.tasks if t.parent_note_id and t.parent_note_title}
+        notes = {n["id"]: n["title"] for n in self._joplin_notes()}  # routine notes too, all ticked or not
+        notes.update({t.parent_note_id: t.parent_note_title for t in self.s.tasks if t.parent_note_id and t.parent_note_title})
         notes.update({t.id: t.title for t in self.s.tasks if not t.is_checkbox_item and not t.id.startswith("media:")})
         return notes
+
+    def _note_item(self, ref: str, list_name: str = "") -> Optional[TaskItem]:
+        """A checklist line, open or ticked, in any note: routine notes keep their items ticked between days,
+        so those aren't backlog tasks, but the user can still have them changed."""
+        from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX
+        want = ref.strip().lower()
+        in_list = {_stem(w) for w in _words(list_name)}
+        hits = []
+        for note in self._joplin_notes():
+            if in_list and not in_list & {_stem(w) for w in _words(note["title"])}:
+                continue
+            for line in (note.get("body") or "").splitlines():
+                m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
+                if m and m.group(2).strip().lower() == want:
+                    hits.append(TaskItem(id=_checkbox_id(note["id"], m.group(2).strip()), title=m.group(2).strip(),
+                                         source_notebook=note.get("source_notebook", ""), is_checkbox_item=True,
+                                         parent_note_title=note["title"], parent_note_id=note["id"]))
+                    break
+        if len(hits) > 1:
+            raise ToolError(f"'{ref}' is in more than one list ({', '.join(h.parent_note_title for h in hits)}). "
+                            "Which one? Give it as list.")
+        return hits[0] if hits else None
 
     def add_task(self, title: str, list: str = "", section: str = "", **_: Any) -> str:
         notes = self._notes()
@@ -364,10 +397,15 @@ class AssistantTools:
         return (f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)" if status == "queued" else "")
                 + f". To schedule it, use task_id={new_id}.")
 
-    def break_down_task(self, task: str, steps: Any, **_: Any) -> str:
-        found = self._find_task(str(task))
+    def break_down_task(self, task: str, steps: Any, list: str = "", **_: Any) -> str:
+        found, ticked_too = self._find_task(str(task)), False
+        if found is not None and list and not {_stem(w) for w in _words(list)} & \
+                {_stem(w) for w in _words(found.parent_note_title or found.title)}:
+            found = None
         if found is None:
-            raise ToolError(f"There is no backlog task matching '{task}'.")
+            found, ticked_too = self._note_item(str(task), list), True
+        if found is None:
+            raise ToolError(f"There is no item matching '{task}' in the user's lists.")
         if isinstance(steps, str):
             steps = [s for s in re.split(r"\s*(?:;|\n|\|)\s*", steps) if s.strip()]
         steps = [str(s).strip() for s in steps if str(s).strip()]
@@ -378,7 +416,7 @@ class AssistantTools:
             raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
                             "Connect it in Preferences → Tasks.")
         from thirties_core.joplin_writeback import break_down_op
-        status, msg = writer.submit(break_down_op(found, steps))
+        status, msg = writer.submit(dict(break_down_op(found, steps), ticked_too=ticked_too))
         if status in ("not_allowed", "failed"):
             raise ToolError(msg)
         note_id = found.parent_note_id if found.is_checkbox_item else found.id

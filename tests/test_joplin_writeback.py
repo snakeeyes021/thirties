@@ -113,6 +113,29 @@ class TestTools(unittest.TestCase):
         new = [t for t in self.services.tasks if t.parent_task_id == "t_bank"]
         self.assertEqual([t.title for t in new], ["Look up hours", "Make the call"])
 
+    def test_routine_items_can_be_broken_down_even_when_ticked(self):
+        routine = "# Morning\n- [x] Feed kitties\n- [x] Shower\n- [ ] PT\n"
+        self.api.notes["r1"] = {"id": "r1", "body": routine}
+        self.services.joplin.fetch_active_notes.return_value = [
+            {"id": "n1", "title": "Errands", "body": BODY, "source_notebook": "Tasks"},
+            {"id": "r1", "title": "Morning routine", "body": routine, "source_notebook": "Routines"}]
+        out = self.t.execute("break_down_task", {"task": "shower", "steps": ["Shower", "Brush teeth"]})
+        self.assertIn("Broke 'Shower' into 2 steps", out)
+        self.assertEqual(self.api.notes["r1"]["body"],
+                         "# Morning\n- [x] Feed kitties\n- [x] Shower\n    - [ ] Shower\n    - [ ] Brush teeth\n- [ ] PT\n")
+        out = self.t.execute("add_task", {"title": "Stretch", "list": "morning routine"})
+        self.assertTrue(out.startswith("Added 'Stretch' to Morning routine"), out)
+
+    def test_an_item_in_two_lists_needs_the_list_named(self):
+        self.services.joplin.fetch_active_notes.return_value = [
+            {"id": "n1", "title": "Errands", "body": "- [x] Shower\n"},
+            {"id": "r1", "title": "Morning routine", "body": "- [x] Shower\n"}]
+        self.api.notes["r1"] = {"id": "r1", "body": "- [x] Shower\n"}
+        self.assertIn("more than one list", self.t.execute("break_down_task", {"task": "Shower", "steps": ["a", "b"]}))
+        out = self.t.execute("break_down_task", {"task": "Shower", "steps": ["a", "b"], "list": "routine"})
+        self.assertIn("Broke 'Shower'", out)
+        self.assertIn("    - [ ] a", self.api.notes["r1"]["body"])
+
     def test_add_task_needs_a_clear_list(self):
         self.assertTrue(self.t.execute("add_task", {"title": "Buy stamps", "list": ""}).startswith(NOT_DONE))
         out = self.t.execute("add_task", {"title": "Buy stamps", "list": "errands"})

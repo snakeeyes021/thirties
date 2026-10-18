@@ -142,6 +142,18 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertNotRegex(t.list_schedule(), r":(?!00|30)\d\d")
         self.assertRegex(t.list_schedule(exact=True), r"5:15 PM")  # exact minutes only when asked
 
+    def test_two_things_stay_two_items(self) -> None:
+        t = tools_for()
+        t.execute("add_event", {"title": "Thirties dev", "start": "5:00 PM", "duration": "1 hour"})
+        t.execute("add_event", {"title": "Message Brad back", "start": "7:00 PM", "duration": "15 min"})
+        out = t.execute("add_event", {"title": "Thirties dev / Message Brad", "start": "5:00 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertIn("alongside=true", out)
+        out = t.execute("update_event", {"event": "thirties dev", "title": "Thirties dev & Message Brad back"})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        out = t.execute("add_event", {"title": "Rice and beans", "start": "8:00 PM", "duration": "30 min"})
+        self.assertFalse(out.startswith(NOT_DONE), out)  # one thing that happens to say "and"
+
     def test_sleep_tonight_crosses_midnight(self) -> None:
         t = tools_for()
         t.execute("update_event", {"event": "Sleep", "start": "10:30 PM", "end": "6:30 AM"})
