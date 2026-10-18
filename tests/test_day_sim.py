@@ -42,6 +42,7 @@ class TestDaySim(unittest.TestCase):
 
     def test_the_clock_runs_and_the_apps_messages_interrupt_the_wait(self):
         run = start_day(SCRIPT, "frontier", [], [], MockInferenceEngine())
+        run.scheduler.config.assistant.message_level = "heavy"  # a message per item, to test the mechanics
         sim = scripted([
             {"wait_minutes": 0, "message": "morning!"},
             {"wait_minutes": 180, "message": "back from my walk"},  # interrupted at 10:00 by the start message

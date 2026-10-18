@@ -27,13 +27,44 @@ from typing import Any, Callable, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
-from thirties_core.clock import format_clock, thirty_of
+from thirties_core.clock import format_clock, thirty_ceil, thirty_of
 from thirties_core.conversation import ConversationManager
 from thirties_core.models import SpanCategory, SpanStatus
 
 logger = logging.getLogger(__name__)
 
 DesktopNotify = Callable[[str, str, str], None]  # (title, body, kind) -> None
+
+
+LEVELS = ("off", "light", "medium", "heavy")
+STRETCH_MAX = timedelta(hours=3)
+QUIET_AFTER_TALK = timedelta(minutes=30)
+
+
+def day_stretches(plan) -> List[tuple]:
+    """The day cut into natural stretches for messages: from waking to sleep, cut at fixed commitments (calendar
+    events, work), at sunset and at sleep; stretches over three hours are split evenly at thirties."""
+    fixed = [s for s in plan.active_spans() if not s.tentative and
+             (s.category in (SpanCategory.CALENDAR, SpanCategory.WORK) or s.is_firm)]
+    sleeps = sorted((s for s in plan.spans if s.category == SpanCategory.SLEEP), key=lambda s: s.start_dt)
+    wake = max([s.end_dt for s in sleeps if s.end_dt <= plan.day_start + timedelta(hours=12)] + [plan.day_start])
+    bed = min([s.start_dt for s in sleeps if s.start_dt > wake] + [plan.day_end])
+    def nearest_thirty(t):  # only :00 and :30 are ever said
+        return thirty_of(t + timedelta(minutes=15))
+    cuts = sorted({nearest_thirty(t) for t in {wake, bed, plan.sunset} | {t for s in fixed for t in (s.start_dt, s.end_dt)}})
+    cuts = [t for t in cuts if nearest_thirty(wake) <= t <= nearest_thirty(bed)]
+    out = []
+    for a, b in zip(cuts, cuts[1:]):
+        if any(f.start_dt <= a and b <= f.end_dt for f in fixed) or b - a < timedelta(minutes=30):
+            continue
+        parts = -(-(b - a) // STRETCH_MAX)  # ceiling division
+        step = thirty_ceil(a + (b - a) / parts) - a if parts > 1 else b - a
+        t = a
+        while t < b:
+            end = b if b - t < step + timedelta(minutes=30) else t + step
+            out.append((t, end))
+            t = end
+    return out
 
 
 class BackgroundService:
@@ -135,11 +166,85 @@ class BackgroundService:
     def _plannable(span) -> bool:
         return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
 
+    # --- how much to say ---
+
+    def level(self) -> str:
+        if not self.config.telegram.notify_block_transitions:  # --no-notify
+            return "off"
+        level = getattr(self.config.assistant, "message_level", "medium")
+        return level if level in LEVELS else "medium"
+
+    def _quiet(self, now: datetime) -> bool:
+        """Asleep, or in a calendar event: no messages (except reminders the user asked for)."""
+        plan = self.manager().day_plan
+        return any(s.start_dt <= now < s.end_dt for s in plan.active_spans() if not s.tentative
+                   and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm)))
+
+    def _talking(self, now: datetime) -> bool:
+        """The user wrote to the assistant in the last half hour: it already knows how things are going."""
+        raw = self.scheduler.state_db.get_sync_meta("last_user_message_at")
+        try:
+            return bool(raw) and now - datetime.fromisoformat(raw) < QUIET_AFTER_TALK
+        except ValueError:
+            return False
+
+    def _unreported(self, span) -> bool:
+        return self._plannable(span) and span.status == SpanStatus.PLANNED and not span.tentative
+
+    def heads_up(self, now: datetime) -> None:
+        """Light and up: fifteen minutes before a calendar event, a heads-up, naming anything planned before it
+        that isn't reported yet."""
+        if self.level() == "off":
+            return
+        plan = self.manager().day_plan
+        told = self._remembered("heads_up")
+        soon = [s for s in plan.active_spans() if s.category == SpanCategory.CALENDAR and not s.tentative
+                and s.id not in told and now < s.start_dt <= now + timedelta(minutes=15)]
+        for event in soon:
+            told[event.id] = now.date().isoformat()
+            behind = [s.title for s in plan.active_spans() if self._unreported(s)
+                      and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
+            text = f"⏰ {event.title} at {format_clock(event.start_dt)}."
+            if behind:
+                text += " (" + (", ".join(behind[:-1]) + " and " + behind[-1] if len(behind) > 1 else behind[0]) + \
+                        (" aren't" if len(behind) > 1 else " isn't") + " reported yet.)"
+            self.send(text, "heads_up", now=now)
+        if soon:
+            self._remember("heads_up", told, now)
+
+    def stretches(self, now: datetime) -> None:
+        """Medium: at the start of each stretch of the day, what's planned in it; once it's over (plus the grace
+        period), one question about whatever in it isn't reported."""
+        if self.level() != "medium" or self._quiet(now):
+            return
+        plan = self.manager().day_plan
+        started, asked = self._remembered("stretch_started"), self._remembered("stretch_asked")
+        grace = timedelta(minutes=self.config.assistant.checkin_after_minutes)
+        from thirties_core.memory import CheckinMutes
+        mutes = CheckinMutes(self.scheduler.state_db)
+        for a, b in day_stretches(plan):
+            key = a.isoformat()
+            items = sorted((s for s in plan.active_spans() if self._unreported(s) and a <= s.start_dt < b),
+                           key=lambda s: s.start_dt)
+            if a <= now < a + timedelta(minutes=5) and key not in started and items:
+                started[key] = now.date().isoformat()
+                self._remember("stretch_started", started, now)
+                self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + ".", "start",
+                          to_conversation=False, now=now)
+            open_items = [s for s in items if not mutes.is_muted(s.id, now)]
+            if (b + grace <= now < b + timedelta(hours=2) and key not in asked and open_items
+                    and self.config.assistant.checkins and not self._talking(now)):
+                asked[key] = now.date().isoformat()
+                self._remember("stretch_asked", asked, now)
+                titles = [s.title for s in open_items]
+                listed = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
+                self.send(f"👋 Since {format_clock(a)}: did you get to {listed}?", "checkin", now=now)
+
     def check_ins(self, now: datetime) -> None:
-        """Once a thirty is over (plus the grace period), ask in one message about the items in it that
+        """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
         have no outcome: never twice about an item, never about one already reported or muted."""
         cfg = self.config.assistant
-        if not cfg.checkins:
+        if not cfg.checkins or self.level() != "heavy" or self._quiet(now) or self._talking(now):
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
@@ -183,9 +288,9 @@ class BackgroundService:
             self.send(text, "reminder", now=now)
 
     def starts(self, now: datetime) -> None:
-        """At the start of a thirty, one message for what's planned to start in it; each item is announced
-        at most once (moving it doesn't announce it again), and times are told in thirties."""
-        if not self.config.telegram.notify_block_transitions:
+        """Heavy: at the start of a thirty, one message for what's planned to start in it; each item is
+        announced at most once (moving it doesn't announce it again), and times are told in thirties."""
+        if self.level() != "heavy" or self._quiet(now):
             return
         plan = self.manager().day_plan
         block = thirty_of(now)
@@ -294,7 +399,8 @@ class BackgroundService:
 
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
-        for duty in (self.rollover, self.check_ins, self.reminders, self.starts, self.today_sync):
+        for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.check_ins, self.starts,
+                     self.today_sync):
             try:
                 duty(now)
             except Exception as e:

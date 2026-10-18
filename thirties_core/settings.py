@@ -50,6 +50,7 @@ _ALL = [
     Setting("joplin.reset_routines", "shared"),
     Setting("assistant.checkins", "shared"),
     Setting("assistant.checkin_after_minutes", "shared"),
+    Setting("assistant.message_level", "shared"),
     Setting("telegram.notify_block_transitions", "shared"),
     # about this machine
     Setting("assistant.brain", "device"),

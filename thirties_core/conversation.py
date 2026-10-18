@@ -222,6 +222,9 @@ class ConversationManager:
 
     def send_user_message(self, user_text: str) -> str:
         """Handle one user turn: developer slash commands here, everything else via the brain."""
+        if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
+            self.scheduler.state_db.set_sync_meta("last_user_message_at",
+                                                  get_current_time(self.day_plan.day_start.tzinfo).isoformat())
         # Developer / Runtime Simulation Slash Commands
         clean_text = user_text.strip()
         if clean_text.startswith("/"):

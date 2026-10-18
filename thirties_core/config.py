@@ -74,6 +74,9 @@ class AssistantConfig:
     slm_voice: bool = True    # SLM: rewrite template replies naturally (facts are verified, else the template is used)
     checkins: bool = True     # ask "did you get to X?" after planned items end (Telegram)
     checkin_after_minutes: int = 10
+    # How often Thirties messages on its own: "off" (only reminders asked for), "light" (a heads-up before
+    # calendar events), "medium" (plus the start and end of each stretch of the day), "heavy" (every item).
+    message_level: str = "medium"
 
 
 @dataclass

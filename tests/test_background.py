@@ -4,9 +4,9 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, event, make_scheduler
 from thirties_core.astronomy import set_debug_time
-from thirties_core.background import BackgroundService
+from thirties_core.background import BackgroundService, day_stretches
 from thirties_core.inference import MockInferenceEngine
 from thirties_core.memory import CheckinMutes, ReminderStore
 from thirties_core.models import EventSpan, SpanCategory
@@ -18,6 +18,7 @@ class TestBackground(unittest.TestCase):
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
+        self.sched.config.assistant.message_level = "heavy"  # every item; the levels have their own tests
         joplin = MagicMock()
         joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
         self.desktop = []
@@ -101,6 +102,76 @@ class TestReminderTools(unittest.TestCase):
         self.assertIn("Cancelled the reminder: Call mom", self.m.execute_tool("cancel_reminder", {"reminder": "mom"}))
         self.assertIn("10:30 AM", self.m.execute_tool("set_reminder", {"text": "Stretch", "time": "in 30 minutes"}))
         self.assertIn("No more check-ins until", self.m.execute_tool("mute_checkins", {}))
+
+
+class TestMessageLevels(unittest.TestCase):
+    """How often Thirties speaks up: light, medium (the default), heavy; never while asleep or in an event."""
+
+    def setUp(self):
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        self.sched = make_scheduler([event("dentist", "15:00", "16:00", "Dentist")])
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        self.sent = []
+        self.svc = BackgroundService(self.sched.config, lambda t, b, k: self.sent.append((k, b)),
+                                     scheduler=self.sched, joplin_engine=joplin,
+                                     inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        self.svc.today = lambda: DAY
+        self.sched.state_db.upsert_span(EventSpan("sh", "Shower", at("16:30"), at("17:00"), SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("fd", "Food", at("17:00"), at("18:00"), SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("lu", "Lunch", at("14:00"), at("14:30"), SpanCategory.ACTIVITY))
+
+    def run_day(self, start, end):
+        t = at(start)
+        while t <= at(end):
+            set_debug_time(t)
+            for duty in (self.svc.heads_up, self.svc.stretches, self.svc.check_ins, self.svc.starts):
+                duty(t)
+            t += timedelta(minutes=5)
+
+    def test_stretches_cut_at_fixed_things_sunset_and_sleep(self):
+        plan = self.svc.manager().day_plan
+        cuts = [(a.strftime("%H:%M"), b.strftime("%H:%M")) for a, b in day_stretches(plan)]
+        self.assertIn(("16:00", "18:30"), cuts)  # after work (until 4) and the dentist, until sunset (6:31: nearest thirty)
+        self.assertTrue(all(b > a for a, b in day_stretches(plan)))
+        self.assertTrue(all(b - a <= timedelta(hours=3) for a, b in day_stretches(plan)))
+        self.assertFalse(any(a < at("16:00") and b > at("15:00") for a, b in day_stretches(plan)))  # not in the event
+
+    def test_medium_is_a_few_messages_a_day(self):
+        self.run_day("14:45", "20:30")
+        kinds = [k for k, _ in self.sent]
+        self.assertEqual(kinds.count("heads_up"), 1)
+        self.assertIn(("heads_up", "⏰ Dentist at 3:00. (Lunch isn't reported yet.)"), self.sent)
+        self.assertNotRegex(" ".join(b for _, b in self.sent), r":(?!00|30)\d\d")  # only :00 and :30
+        starts = [b for k, b in self.sent if k == "start"]
+        self.assertTrue(starts[0].startswith("🗓 Until ") and "Shower, then Food" in starts[0], starts)
+        checkins = [b for k, b in self.sent if k == "checkin"]
+        self.assertEqual(len(checkins), 1)
+        self.assertIn("did you get to Shower and Food?", checkins[0])
+        self.assertLessEqual(len(self.sent), 4)
+
+    def test_light_is_only_the_heads_up(self):
+        self.sched.config.assistant.message_level = "light"
+        self.run_day("14:45", "20:30")
+        self.assertEqual([k for k, _ in self.sent], ["heads_up"])
+
+    def test_off_and_no_notify(self):
+        self.sched.config.assistant.message_level = "off"
+        self.run_day("14:45", "20:30")
+        self.assertEqual(self.sent, [])
+
+    def test_no_check_in_while_the_user_is_talking_or_in_an_event(self):
+        self.sched.config.assistant.message_level = "heavy"
+        self.sched.state_db.set_sync_meta("last_user_message_at", at("17:30").isoformat())
+        self.svc.check_ins(at("17:45"))  # Shower's thirty ended at 5:00: but the user just wrote
+        self.assertEqual(self.sent, [])
+        self.svc.check_ins(at("18:20"))
+        self.assertTrue(self.sent and self.sent[0][0] == "checkin")
+        self.sched.state_db.upsert_span(EventSpan("x", "Errand", at("15:00"), at("15:20"), SpanCategory.ACTIVITY))
+        before = len(self.sent)
+        self.svc.starts(at("15:00"))  # during the dentist: quiet
+        self.assertEqual(len(self.sent), before)
 
 
 if __name__ == "__main__":
