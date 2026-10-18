@@ -173,11 +173,11 @@ class TestTurnLoop(ConversationTestCase):
 
     def test_minutes_are_said_as_thirties_unless_asked(self) -> None:
         self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
-        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:30 tonight.")
+        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:00 tonight.")
         self.assertEqual(self.manager.send_user_message("what's the exact time of sunset?"), "Sunset is at 6:28 tonight.")
-        self.engine.responses = [reply("Enjoy your break at 10:45, back at 11:00.")]
-        self.assertEqual(self.manager.send_user_message("my break is 10:45 to 11, strictly"),
-                         "Enjoy your break at 10:45, back at 11:00.")  # a time the user said stays as said
+        self.engine.responses = [reply("Your break is in the 10:45 thirty.")]
+        self.assertEqual(self.manager.send_user_message("when's my break?"),
+                         "Your break is in the 10:30 thirty.")  # the thirty it's in, never the next one
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):

@@ -127,22 +127,32 @@ def thirty_ceil(dt: datetime) -> datetime:
 
 
 def group_short_items(items: Sequence[Tuple[datetime, datetime, str, str]]) -> List[Tuple[datetime, datetime, str, str]]:
-    """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one
-    row at the thirty's start ("5:00 – Feed cats, Message Brad"), ending when the thirty ends."""
+    """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one row at the
+    thirty's start, ending when the thirty ends. In the row's title, things one after another are on their own
+    lines ("Thing 1\nBreak") and things at the same time are joined with + ("Personal call + Break")."""
     out: List[Tuple[datetime, datetime, str, str]] = []
-    grouped: List[bool] = []  # parallel to out: is this row a thirty of short items?
+    rows: List[Optional[List[Tuple[datetime, datetime, str]]]] = []  # parallel to out: the short items of a thirty
     for start, end, title, note in items:
         if end - start < SHORT and thirty_of(start) == thirty_of(end - timedelta(seconds=1)):
             block = thirty_of(start)
             label = f"{title} ({note})" if note else title
-            if out and grouped[-1] and out[-1][0] == block:
-                out[-1] = (block, block + SHORT, f"{out[-1][2]}, {label}", "")
+            if out and rows[-1] is not None and out[-1][0] == block:
+                rows[-1].append((start, end, label))
                 continue
             out.append((block, block + SHORT, label, ""))
-            grouped.append(True)
+            rows.append([(start, end, label)])
         else:
             out.append((start, end, title, note))
-            grouped.append(False)
+            rows.append(None)
+    for i, row in enumerate(rows):
+        if row and len(row) > 1:
+            lines: List[List[Tuple[datetime, datetime, str]]] = []
+            for item in sorted(row, key=lambda r: r[0]):
+                if lines and item[0] < max(e for _, e, _ in lines[-1]):  # overlaps what's on this line
+                    lines[-1].append(item)
+                else:
+                    lines.append([item])
+            out[i] = (out[i][0], out[i][1], "\n".join(" + ".join(t for _, _, t in line) for line in lines), "")
     return out
 
 
@@ -161,7 +171,12 @@ def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered:
         if next_start is not None and next_start != end:
             extras.append(f"until {format_clock(end)}")
         prefix = f"{i + 1}. " if numbered else "- "
-        lines.append(f"{prefix}{format_clock(start)} – {title}" + (f" ({', '.join(extras)})" if extras else ""))
+        tail = f" ({', '.join(extras)})" if extras else ""
+        if "\n" in title:  # several things one after another in this thirty: the thirty, then each on its own line
+            lines.append(f"{prefix}{format_clock(start)} –{tail}")
+            lines += [f"  {line}" for line in title.split("\n")]
+        else:
+            lines.append(f"{prefix}{format_clock(start)} – {title}{tail}")
     return lines
 
 
@@ -174,34 +189,13 @@ EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minu
 _CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
 
 
-def to_thirties(text: str, keep: Optional[Set[str]] = None) -> str:
-    """Only :00 and :30 are ever said: any other clock time is rounded to the nearest thirty ("sunset at 6:28"
-    is said "6:30"). For replies when the user hasn't asked for exact minutes. Times in ``keep`` ("10:45", the
-    ones the user said themselves: a break at 10:45 is a break at 10:45) stay as they are."""
+def to_thirties(text: str) -> str:
+    """Only :00 and :30 are ever said: any other clock time becomes the thirty it falls in (a break at 10:45
+    is in the 10:30 thirty, never "11:00"). For replies when the user hasn't asked for exact minutes."""
     def fix(m: re.Match) -> str:
         h, mm, suffix = int(m.group(1)), int(m.group(2)), m.group(3) or ""
-        if mm in (0, 30) or f"{h}:{mm:02d}" in (keep or set()):
-            return m.group(0)
-        total = h * 60 + int(round(mm / 30.0)) * 30
-        nh, nm = (total // 60), total % 60
-        if nh == 13:
-            nh = 1
-        if nh == 12 and h == 11 and suffix:  # 11:50 AM → 12:00 PM, 11:50 PM → 12:00 AM
-            swap = {"AM": "PM", "PM": "AM", "am": "pm", "pm": "am", "a.m.": "p.m.", "p.m.": "a.m."}
-            suffix = re.sub(r"AM|PM|am|pm|a\.m\.|p\.m\.", lambda x: swap[x.group(0)], suffix)
-        return f"{nh}:{nm:02d}{suffix}"
+        return m.group(0) if mm in (0, 30) else f"{h}:{0 if mm < 30 else 30:02d}{suffix}"
     return _CLOCK_MINUTES_RE.sub(fix, text)
-
-
-def times_said(texts: Iterable[str]) -> Set[str]:
-    """Clock times ("10:45") someone wrote, without AM/PM."""
-    return {f"{int(m.group(1))}:{m.group(2)}" for t in texts for m in _CLOCK_MINUTES_RE.finditer(t or "")}
-
-
-def calendar_times(plan) -> Set[str]:
-    """The start and end times of a day's calendar events ("10:45"): facts from the calendar, said as they are."""
-    return {f"{t.hour % 12 or 12}:{t.minute:02d}" for s in plan.spans if s.source == "calendar"
-            for t in (s.start_dt, s.end_dt)}
 
 
 def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:

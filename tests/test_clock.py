@@ -72,7 +72,9 @@ class TestClock(unittest.TestCase):
     def test_short_items_are_listed_by_their_thirty(self) -> None:
         items = [(at("17:00"), at("17:15"), "Message Brad", ""), (at("17:15"), at("17:30"), "Feed cats", ""),
                  (at("17:30"), at("18:30"), "Dinner", "")]
-        self.assertEqual(agenda_lines(items), ["- 5:00 PM – Message Brad, Feed cats", "- 5:30 PM – Dinner"])
+        self.assertEqual(agenda_lines(items), ["- 5:00 PM –", "  Message Brad", "  Feed cats", "- 5:30 PM – Dinner"])
+        together = [(at("10:35"), at("10:50"), "Personal call", ""), (at("10:45"), at("11:00"), "Break", "")]
+        self.assertEqual(agenda_lines(together), ["- 10:30 AM – Personal call + Break"])
 
     def test_agenda_lines_show_end_times_only_where_not_implied(self) -> None:
         items = [(at("16:00"), at("17:00"), "Feed cat", ""),
@@ -97,12 +99,9 @@ class TestToThirties(unittest.TestCase):
 
     def test_only_00_and_30_are_said(self):
         from thirties_core.clock import to_thirties
-        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"), "Sunset at 6:30, then dinner 7:00 PM – 8:00 PM")
-        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:30 PM")
-        self.assertEqual(to_thirties("at 12:50 PM"), "at 1:00 PM")
-        self.assertEqual(to_thirties("at 11:50 PM"), "at 12:00 AM")
+        # a time becomes the thirty it falls in: a break at 10:45 is in the 10:30 thirty, never "11:00"
+        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"), "Sunset at 6:00, then dinner 7:00 PM – 8:00 PM")
+        self.assertEqual(to_thirties("break at 10:45, back by 11:00"), "break at 10:30, back by 11:00")
+        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:00 PM")
+        self.assertEqual(to_thirties("at 11:50 PM"), "at 11:30 PM")
         self.assertEqual(to_thirties("score 3:2, ratio 10:45:12"), "score 3:2, ratio 10:45:12")
-
-
-if __name__ == "__main__":
-    unittest.main()
