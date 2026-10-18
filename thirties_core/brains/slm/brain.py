@@ -86,6 +86,7 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
                     r"(re-?plan|redraw|re-?do|push|just figure)", re.I)  # within one sentence
 
 
+MAX_MESSAGE_CHARS = 2000
 DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
@@ -191,6 +192,7 @@ class SlmBrain:
         if len(self.messages) > 1 and not self.state.last_ids and not self.state.proposal:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
+        user_text = user_text[:MAX_MESSAGE_CHARS]  # a huge paste can't fit Gemma's context: read the start of it
         self._message = user_text
         if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text):  # a new plan: Python does it, no parse
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))

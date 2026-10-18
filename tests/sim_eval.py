@@ -471,7 +471,9 @@ def make_llm(model: str, timeout: int = 180) -> Callable[[str], str]:
 
     def ask(prompt: str) -> str:
         for attempt in range(3):  # agy occasionally returns nothing or an error; try again
-            out = engine.chat([{"role": "user", "content": prompt}]).get("content", "")
+            # As written: wrapped as a chat turn ("write the assistant's next message"), the simulated user
+            # sometimes answered as the assistant, or thought out loud about the two instructions.
+            out = engine.complete(prompt)
             if out.strip() and not out.startswith(AGY_ERROR_PREFIXES):
                 return out
             if QUOTA_RE.search(out):

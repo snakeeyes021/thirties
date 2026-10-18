@@ -200,6 +200,16 @@ class TestTransports(unittest.TestCase):
         self.assertTrue(first.startswith("(You are answering as a text model: you have no tools here"))
         self.assertTrue(second.endswith("Answer now, in text only.)"))
 
+    def test_antigravity_complete_sends_the_prompt_as_written(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        answer = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": "hey"}}), stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", return_value=answer) as run:
+            self.assertEqual(engine.complete("You are role-playing a user. Your next message:"), "hey")
+        sent = json.loads(run.call_args.kwargs["input"])["message"]["content"]
+        self.assertTrue(sent.endswith("You are role-playing a user. Your next message:"))
+        self.assertNotIn("Write the assistant's next message", sent)
+
     def test_antigravity_timeout(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())
         with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \

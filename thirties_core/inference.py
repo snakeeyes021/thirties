@@ -238,6 +238,30 @@ class AntigravityInferenceEngine:
                     f"{closing}\n\nAssistant:")
         return f"{AGY_NO_TOOLS}\n\n{dialogue}\n\n{closing}\n\nAssistant:"
 
+    def complete(self, prompt: str) -> str:
+        """One prompt, sent as written (no conversation framing): for evals' simulated users and judges.
+        Returns the reply text, or an error sentence starting like the chat errors do."""
+        agy_bin = find_agy_binary(self.custom_agy_path)
+        if not agy_bin:
+            raise RuntimeError("Antigravity CLI (agy) binary not found.")
+        cmd = [agy_bin, "--sandbox", "--input-format", "stream-json", "--output-format", "stream-json",
+               "--model", self.model, "--disable-slash-commands"]
+        workspace = agy_workspace_dir()
+        prompt = f"{AGY_NO_TOOLS}\n\n{prompt}"
+        try:
+            res = self._run(cmd, prompt, workspace)
+            result = _stream_result(res.stdout)
+            if (res.returncode == 0 and result is not None and not str(result.get("response", "")).strip()
+                    and "denied" in (res.stderr or "")):
+                res = self._run(cmd, prompt + AGY_TOOL_RETRY, workspace)
+                result = _stream_result(res.stdout)
+        except subprocess.TimeoutExpired:
+            record_agy_call(self.model, "timeout")
+            return "The Antigravity assistant timed out waiting for a response."
+        if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
+            return str(result.get("response", ""))
+        return f"Error contacting model via Antigravity CLI: {res.stderr or res.stdout[-1000:]}"
+
     def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
         stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
         res = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True, timeout=self.timeout, cwd=workspace)
