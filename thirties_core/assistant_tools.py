@@ -193,6 +193,16 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "set_urgency",
+        "description": "Record how pressing an item on the user's lists is, when they say so (\"that's not "
+                       "urgent\", \"the thermals are for this winter\", \"the ENT call has to happen this week\"). "
+                       "It sticks: guesses never override it.",
+        "parameters": {"task": "The task (title or task_id).",
+                       "urgency": "'now' (today or tomorrow), 'soon' (a week or two), 'whenever' or 'someday'.",
+                       "due": "A date it must be done by, if they gave one, e.g. 'Friday' or 'Nov 3'."},
+        "required": ["task"],
+    },
+    {
         "name": "get_weather",
         "description": "The forecast for a day (default: the rest of today), as plain facts. Read-only.",
         "parameters": {},
@@ -908,6 +918,23 @@ class AssistantTools:
             return f"I won't ask about {span.title} again."
         return f"No more check-ins until {format_clock(end)}" + (" tomorrow." if end.date() > now.date() else ".")
 
+    def set_urgency(self, task: str, urgency: str = "", due: Any = None, **_: Any) -> str:
+        from thirties_core.lists import URGENCIES, ListCatalog, urgency_label
+        found = self._find_task(str(task))
+        if found is None:
+            raise ToolError(f"There is no item matching '{task}' in the user's lists.")
+        if self._db is None:
+            raise ToolError("Urgency can't be saved here.")
+        due_day = parse_day(str(due), self._today()) if due not in (None, "") else None
+        urgency = str(urgency or "").strip().lower() or ("now" if due_day and (due_day - self._today()).days <= 1
+                                                          else "soon" if due_day else "")
+        if urgency not in URGENCIES:
+            raise ToolError("urgency must be 'now', 'soon', 'whenever' or 'someday'.")
+        ListCatalog(self._db).set_urgency(found.id, urgency, due_day, note_id=found.parent_note_id or found.id,
+                                          title=found.title, source="user")
+        found.urgency, found.due, found.someday = urgency, due_day.isoformat() if due_day else "", urgency == "someday"
+        return f"Noted: '{found.title}' is {urgency_label(found)}."
+
     def handlers(self) -> Dict[str, Any]:
         return {
             "log_outcome": self.log_outcome,
@@ -930,6 +957,7 @@ class AssistantTools:
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,
             "mute_checkins": self.mute_checkins,
+            "set_urgency": self.set_urgency,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }

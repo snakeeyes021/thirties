@@ -201,6 +201,9 @@ class TaskItem:
     section: str = ""                     # nearest heading above the item inside its note
     parent_task_id: Optional[str] = None  # the checklist item this one is indented under
     someday: bool = False                 # listed under a "someday/maybe" heading: visible, never pushed
+    list_role: str = ""                   # what its note is for (lists.ROLES), once known
+    urgency: str = ""                     # now / soon / whenever / someday (lists.URGENCIES), once known
+    due: str = ""                         # ISO date it's due by, if the user gave one
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
