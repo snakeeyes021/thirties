@@ -64,7 +64,7 @@ SCRIPT_DIRS = [REPO_ROOT / "tests" / "day_scripts", REPO_ROOT / "docs" / "eval_r
 STEP = timedelta(minutes=5)
 MAX_MOVES = 160         # simulator decisions per day (waits included)
 MAX_MESSAGES = 80       # user messages per day
-CALLS_PER_DAY = {"slm": 60, "frontier": 260}  # agy calls: simulator moves + judge + rating (+ Frontier replies); slm measured ~37
+CALLS_PER_DAY = {"slm": 60, "frontier": 100}  # agy calls: simulator moves + judge + rating (+ Frontier replies); measured ~37 and ~63
 logger = logging.getLogger("day_sim")
 
 

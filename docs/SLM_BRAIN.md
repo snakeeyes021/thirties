@@ -95,7 +95,7 @@ Evals use **at most 66% of agy's quota per 5-hour window**, leaving the rest for
 
 - **How it's enforced:** every agy call, from the app, the Telegram bridge or an eval, is logged to `~/.local/share/thirties/agy_calls.log` (agy can't report usage itself). Before each conversation, `sim_eval` counts the calls in the last 5 hours and stops cleanly at the budget, reporting how many conversations finished.
 - **Capacity:** about 2,000 calls per window with the sim user and judge on flash-low (1,113 calls showed as 55% used in agy on 2026-10-18); 1,650 on 2026-10-15, when they ran on medium thinking.
-- **Standard run:** 100 conversations, the same set every time: the 13 hand-written scenarios plus the first 37 generated (seed 1), on both brains (`--generated 37 --with-handwritten --seed 1 --brain both`). They now default to `gemini-3.8-flash-low`, which probably costs less per call. Each time a quota stop shows up in the ledger, the capacity estimate recalibrates from it.
+- **Standard run:** 100 conversations, the same set every time: the 16 hand-written scenarios plus the first 34 generated (seed 1), on both brains (`--generated 34 --with-handwritten --seed 1 --brain both`); about 800 agy calls. They now default to `gemini-3.8-flash-low`, which probably costs less per call. Each time a quota stop shows up in the ledger, the capacity estimate recalibrates from it.
 - **What fits in one window** (66% ≈ 1,090 calls; an SLM conversation costs about 6 calls, a Frontier one about 9):
 
 | Run | Conversations per window |
