@@ -178,6 +178,16 @@ class TestPersistence(ConversationTestCase):
         self.assertEqual(again.history(), [{"role": "user", "content": "plan my evening"},
                                            {"role": "assistant", "content": "Sure thing."}])
 
+    def test_an_opening_greeting_is_kept_and_seen_by_the_model(self) -> None:
+        sched = make_scheduler()
+        engine = MockInferenceEngine([reply("Got it, you're going.")])
+        first = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        first.add_assistant_message("You have an unconfirmed event: 'Dinner'. Are you attending?")
+        first.send_user_message("yes")
+        self.assertIn("Are you attending?", str(engine.call_history[0]))
+        again = ConversationManager(sched.build_day_plan(DAY)[0], [], [], sched, inference_engine=engine, active_notes=[])
+        self.assertEqual([m["role"] for m in again.history()], ["assistant", "user", "assistant"])
+
     def test_refresh_follows_new_conversations_but_keeps_a_chosen_old_one(self) -> None:
         sched = make_scheduler()
         engine = MockInferenceEngine()

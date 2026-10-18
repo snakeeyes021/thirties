@@ -357,6 +357,8 @@ class GeminiInferenceEngine:
                 contents[-1]["parts"].append({"text": text})
             else:
                 contents.append({"role": gemini_role, "parts": [{"text": text}]})
+        if contents and contents[0]["role"] == "model":  # the app's greeting (or a check-in) opened the conversation
+            contents.insert(0, {"role": "user", "parts": [{"text": "(Conversation opened.)"}]})
 
         generation_config: Dict[str, Any] = {"temperature": self.temperature}
         if self.thinking_level:

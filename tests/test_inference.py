@@ -92,6 +92,17 @@ class TestTransports(unittest.TestCase):
         texts = [p["text"] for p in payload["contents"][0]["parts"]]
         self.assertTrue(any("[Result of list_schedule]" in t for t in texts))
 
+    def test_gemini_api_conversation_may_open_with_the_assistant(self) -> None:
+        cfg = ThirtiesConfig()
+        cfg.inference.gemini_api_key = "fake"
+        engine = GeminiInferenceEngine(cfg)
+        messages = [{"role": "system", "content": "sys"},
+                    {"role": "assistant", "content": "Are you attending?"}, {"role": "user", "content": "yes"}]
+        with patch("urllib.request.urlopen", return_value=_api_response("Noted.")) as urlopen:
+            engine.chat(messages)
+        payload = json.loads(urlopen.call_args[0][0].data)
+        self.assertEqual([c["role"] for c in payload["contents"]], ["user", "model", "user"])
+
     def test_gemini_api_retries_rate_limits(self) -> None:
         cfg = ThirtiesConfig()
         cfg.inference.gemini_api_key = "fake"

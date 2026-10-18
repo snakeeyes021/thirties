@@ -161,8 +161,8 @@ class ChatPanel(Gtk.Box):
     """Conversation with the planning assistant about the day being shown.
 
     The transcript always comes from the stored conversation (``history()``), so
-    it matches what the Telegram bridge sees. A greeting is shown only while the
-    conversation is empty; it is not stored.
+    it matches what the Telegram bridge sees. A greeting is shown while the
+    conversation is empty, and stored as its first message once the user replies.
     """
 
     def __init__(
@@ -182,6 +182,7 @@ class ChatPanel(Gtk.Box):
         self.set_vexpand(True)
         self.chat_history: list[tuple[str, str]] = []
         self._rendered: list[dict] | None = None
+        self._shown_greeting: str | None = None
         # The manager whose turn is in flight (None when idle).
         self._busy_manager: ConversationManager | None = None
         # Conversations the user explicitly switched to, per day; refresh() would
@@ -562,8 +563,10 @@ class ChatPanel(Gtk.Box):
         while child := self.messages_box.get_first_child():
             self.messages_box.remove(child)
 
+        self._shown_greeting = None
         if not history:
-            self._append_bubble("assistant", self._greeting(), offer_actions=True, record=False)
+            self._shown_greeting = self._greeting()
+            self._append_bubble("assistant", self._shown_greeting, offer_actions=True, record=False)
         for i, msg in enumerate(history):
             self._append_bubble(msg["role"], msg["content"], offer_actions=(i == len(history) - 1))
         if self._busy_manager is manager:
@@ -622,6 +625,9 @@ class ChatPanel(Gtk.Box):
         manager = self.conversation_manager
         if manager is None or self.is_busy:
             return
+        if self._shown_greeting and not manager.history():
+            manager.add_assistant_message(self._shown_greeting)  # what the user is answering stays, for both
+        self._shown_greeting = None
         self._busy_manager = manager
         self._update_input_sensitivity()
         self._update_header()

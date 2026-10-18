@@ -155,18 +155,19 @@ class ChatPanelTests(unittest.TestCase):
     def bubbles(self, panel):
         return [c.text for c in list(_children(panel.messages_box)) if hasattr(c, "text")]
 
-    def test_greeting_only_when_empty_and_turns_persist(self) -> None:
+    def test_greeting_is_kept_once_the_user_replies(self) -> None:
         panel = ChatPanel(self.manager())
         self.assertEqual(len(self.bubbles(panel)), 1)
-        self.assertEqual(panel.chat_history, [])  # the greeting is not part of the transcript
+        greeting = self.bubbles(panel)[0]
+        self.assertEqual(panel.conversation_manager.history(), [])  # not stored until the user replies
 
         panel.send_user_text("Plan my evening")
         self.assertTrue(_iterate_until(lambda: not panel.is_busy))
-        self.assertEqual([r for r, _ in panel.chat_history], ["user", "assistant"])
+        self.assertEqual([r for r, _ in panel.chat_history], ["assistant", "user", "assistant"])
 
-        # Reopening the day shows the stored conversation instead of a greeting
+        # Reopening the day shows the stored conversation, greeting included
         panel.set_conversation_manager(self.manager())
-        self.assertEqual(self.bubbles(panel)[0], "Plan my evening")
+        self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
 
     def test_new_conversation_and_switching_survive_refresh(self) -> None:
         manager = self.manager()
