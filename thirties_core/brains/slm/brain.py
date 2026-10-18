@@ -86,6 +86,7 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
                     r"(re-?plan|redraw|re-?do|push|just figure)", re.I)  # within one sentence
 
 
+DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
 
@@ -1148,12 +1149,26 @@ class SlmBrain:
         return "Swapped:\n" + "\n".join(agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in (a_, b_)])), True
 
     def _do_remove(self, a: Action) -> Tuple[str, bool]:
-        span, problem = self._resolve_one(a)
+        ref = a.get("target") or a.get("title") or ""
+        found = self._span_candidates(ref) if ref and ref.lower() not in PRONOUNS else []
+        if len(found) > 1 and all(s.source == "calendar" for s in found) and len({s.title.lower() for s in found}) == 1:
+            span, problem = found[0], ""  # two invites with one name ("decline both SB Shows"): all of them
+        else:
+            span, problem = self._resolve_one(a)
         if span is None:
             return problem, False
-        if span.tentative:
-            ok, out = self._run("resolve_calendar_event", {"event": span.id, "attend": False})
-            return (f"Declined {span.title}." if ok else out), ok
+        if span.source == "calendar":  # not going: decline it (and its namesakes: "decline both SB Shows")
+            same = [s for s in self.tools.day_plan.spans_in_view()
+                    if s.source == "calendar" and s.title.lower() == span.title.lower()]
+            declined = []
+            for s in same:
+                ok, out = self._run("resolve_calendar_event", {"event": s.id, "attend": False})
+                if ok:
+                    declined.append(format_clock(s.start_dt))
+            if not declined:
+                return out, False
+            return f"Declined {span.title}" + (f" ({' and '.join(declined)})" if len(declined) > 1 else "") + \
+                ": that time is free.", True
         args = {"event": span.id, **({"day": a.get("day")} if a.get("day") else {})}
         ok, out = self._run("remove_event", args)
         if not ok:
@@ -1216,6 +1231,8 @@ class SlmBrain:
         target = {_stem(w) for w in _words(a.get("target") or "")}
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         named = [s for s in invites if target & {_stem(w) for w in _words(s.title)}]
+        if not named and not self.state.proposal and self._rollover_pending():
+            invites = []  # a plain "yes" answers the morning offer, not an invite nobody mentioned
         if named or (invites and not self.state.proposal):
             invite = (named or invites)[0]
             ok, out = self._run("resolve_calendar_event", {"event": invite.id, "attend": True})
@@ -1562,6 +1579,9 @@ class SlmBrain:
     def _do_question(self, a: Action) -> Tuple[str, bool]:
         topic = (a.get("topic") or "").lower()
         day = a.get("day")
+        named_day = DAY_WORD_RE.search(getattr(self, "_message", "") or "")
+        if not day and named_day:  # "what does tomorrow look like?": the parse sometimes drops the day
+            day = named_day.group(1).lower()
         if self._WEATHER_RE.search(topic) or self._WEATHER_RE.search(getattr(self, "_message", "")):
             ok, out = self._run("get_weather", {})
             return out, False

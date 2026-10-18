@@ -597,5 +597,51 @@ class TestMessages(SlmTestCase):
         self.assertIn("Rolled into today:\n- 7:00 PM – Taxes", out)
 
 
+class TestFromTheDaySim(unittest.TestCase):
+    """Failures the day sim found on 0.0.1."""
+
+    def setUp(self):
+        set_debug_time(at("10:40"))
+        self.addCleanup(set_debug_time, None)
+        self.rt = FakeRuntime()
+        self.sched = make_scheduler([event("show1", "15:00", "17:00", "SB Show", invite=True),
+                                     event("show2", "19:30", "21:30", "SB Show", invite=True)])
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.m = ConversationManager(plan, list(TASKS), pending, self.sched, active_notes=[],
+                                     brain=None, inference_engine=None)
+        self.brain = SlmBrain(self.m.tools, tasks=list(TASKS), runtime=self.rt)
+        self.m.brain = self.brain
+        self.m._load(None)
+
+    def say(self, text, *parse):
+        self.rt.parse_replies.append(actions(*parse))
+        self.m.send_user_message(text)
+        return self.m.last_raw_reply
+
+    def shows(self):
+        return [s for s in self.m.day_plan.spans if s.title == "SB Show"]
+
+    def test_yes_answers_the_morning_offer_not_an_invite(self):
+        y = DAY - timedelta(days=1)
+        from tests.fixtures import TZ
+        from datetime import datetime, time as _t
+        from thirties_core.models import EventSpan, SpanCategory
+        self.sched.state_db.upsert_span(EventSpan("br", "Message Brad back", datetime.combine(y, _t(21, 30), TZ),
+                                                  datetime.combine(y, _t(21, 45), TZ), SpanCategory.ACTIVITY))
+        self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
+        out = self.say("yeah put that on today", {"type": "confirm"})
+        self.assertIn("Rolled into today", out)
+        self.assertTrue(all(s.tentative for s in self.shows()))  # the invites are still unanswered
+
+    def test_declining_both_invites_by_name(self):
+        out = self.say("decline both SB Show invites, not going", {"type": "remove", "target": "SB Show"})
+        self.assertTrue(out.startswith("Declined SB Show (3:00 PM and 7:30 PM): that time is free."), out)
+        self.assertEqual(self.shows(), [])
+
+    def test_tomorrow_when_the_parse_drops_the_day(self):
+        out = self.say("what does tomorrow look like?", {"type": "question", "topic": "schedule"})
+        self.assertNotIn("Here's today", out)
+
+
 if __name__ == "__main__":
     unittest.main()

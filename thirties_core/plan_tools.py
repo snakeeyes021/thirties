@@ -677,7 +677,8 @@ class PlanTools:
         if span.source == "calendar":
             if span.tentative:
                 raise ToolError(f"{span.title} is an unconfirmed invite; use resolve_calendar_event with attend=false.")
-            raise ToolError(f"{span.title} comes from the user's calendar; remove it there.")
+            raise ToolError(f"{span.title} comes from the user's calendar. If they aren't going, decline it with "
+                            f"resolve_calendar_event (attend=false); to delete it, they remove it from their calendar.")
         self._drop(span)
         self._save_plan_after_change()
         return f"Removed {self.describe(span)}."
