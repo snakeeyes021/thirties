@@ -87,13 +87,21 @@ def import_scripts(files: List[str], to: Optional[Path] = None) -> None:
     for f in files:
         text = Path(f).read_text()
         blocks = _re.findall(r"```(?:json)?\s*(.*?)```", text, _re.S) or [text]
-        for block in blocks:
-            try:
-                data = json.loads(block)
-            except ValueError as e:
-                print(f"{f}: a block isn't valid JSON ({e}); fix it and import again")
-                bad += 1
-                continue
+        values = []
+        for block in blocks:  # one or more JSON arrays or objects, fenced or pasted back to back
+            decoder, i = json.JSONDecoder(), 0
+            while True:
+                starts = [j for j in (block.find("[", i), block.find("{", i)) if j >= 0]
+                if not starts:
+                    break
+                try:
+                    value, i = decoder.raw_decode(block, min(starts))
+                    values.append(value)
+                except ValueError as e:
+                    print(f"{f}: JSON that can't be read near character {min(starts)} ({e}); skipped the rest")
+                    bad += 1
+                    break
+        for data in values:
             for script in data if isinstance(data, list) else [data]:
                 problems = validate(script)
                 if problems:

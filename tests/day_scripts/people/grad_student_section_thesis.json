@@ -1,0 +1,143 @@
+{
+  "id": "grad_student_section_thesis",
+  "date": "2026-10-14",
+  "source": "made up: grad student teaching a 2 PM discussion section with a thesis chapter due Friday",
+  "wake": "08:00",
+  "bed": "00:30",
+  "work": [
+    "09:00",
+    "18:00"
+  ],
+  "persona": "Devon, a PhD candidate in history with a discussion section to teach at 14:00 and Chapter 3 of their dissertation due to their advisor on Friday. Texts articulately but tends to procrastinate on dissertation writing by over-prepping for teaching or doing small campus errands. Honest when calling out their own avoidance.",
+  "situation": "Wednesday morning waking at 08:00. Teaching HIST 102 discussion section 14:00–15:00 and holding office hours 15:00–16:00, with dissertation writing and reading quiz grading needed around it.",
+  "life": [
+    "08:10 Wake up and text the app: need to get to campus by 09:30, spend the morning on Chapter 3 section 2, prep slides/questions for the 14:00 section, eat lunch, teach 14:00–15:00, hold office hours 15:00–16:00, and grade 18 short reading quizzes before evening.",
+    "08:15 Eat oatmeal, shower, pack bag, and walk to the history department office, arriving at 09:30.",
+    "09:32 Tell the app morning routine and walk to campus are done. Start Chapter 3 writing block.",
+    "10:15 Get sidetracked digging through a JSTOR rabbit hole for a footnote; realize at 11:15 you've only written 150 words and haven't prepped discussion questions for the 14:00 section yet.",
+    "11:18 Text the app that writing is going slowly and ask to switch to section prep now (11:30–12:30), grab lunch at 12:30, and move the second Chapter 3 writing block to 16:30 after office hours.",
+    "11:25 Prep discussion questions and print primary source handouts in the department lounge until 12:35.",
+    "12:35 Grab a falafel wrap from the food truck with a cohort friend; chat runs until 13:30.",
+    "13:32 Report section prep and lunch done. Remind the app you need 30 minutes before teaching to review student forum posts and walk across the quad to the classroom.",
+    "13:35 Skim student forum posts and walk to Hall of Languages.",
+    "14:00 Teach HIST 102 discussion section until 15:00.",
+    "15:00 Hold office hours in the department basement; three students show up asking about midterm essay prompts, keeping you until 16:15.",
+    "16:18 Text the app: teaching and office hours done (ran 15 mins late). Need to return two overdue interlibrary loan books to the main library before the ILL desk closes at 17:00!",
+    "16:20 Walk to the library, drop off ILL books, and grab an iced espresso, finishing at 16:50.",
+    "16:55 Report ILL books returned. Ask how to fit both grading the 18 quizzes and 90 minutes of Chapter 3 writing before heading home for dinner around 20:00.",
+    "17:00 Sit in the quiet carrel and write Chapter 3 section 2 until 18:40 (finally hit a groove and get 750 words down).",
+    "18:42 Report Chapter 3 block went great! Start grading the 18 reading quizzes on Canvas.",
+    "19:45 Finish grading quizzes and entering scores. Tell the app grading is done and you're walking home.",
+    "20:15 Make pasta and eat dinner while watching a YouTube video until 21:00.",
+    "21:05 Report dinner done. Ask the app what tomorrow looks like and tell it to leave the rest of tonight free to read for pleasure."
+  ],
+  "constraints": [
+    "Needs 30 minutes immediately before the 14:00 discussion section to skim student forum posts and walk across the quad.",
+    "Interlibrary Loan (ILL) desk at the main library closes at 17:00 sharp.",
+    "Writes dissertation chapters best in at least 90-minute uninterrupted stretches."
+  ],
+  "truth": [
+    {
+      "item": "Morning routine & walk to campus",
+      "match": "morning|breakfast|shower|walk",
+      "start": "08:15",
+      "end": "09:30"
+    },
+    {
+      "item": "Chapter 3 writing (morning)",
+      "match": "chapter 3|thesis|dissertation|writ",
+      "start": "09:35",
+      "end": "11:15"
+    },
+    {
+      "item": "Prep HIST 102 discussion section",
+      "match": "prep|section|handout|hist",
+      "start": "11:25",
+      "end": "12:35"
+    },
+    {
+      "item": "Lunch",
+      "match": "lunch|falafel",
+      "start": "12:35",
+      "end": "13:30"
+    },
+    {
+      "item": "Skim forum posts & walk to classroom",
+      "match": "forum|skim|review|walk",
+      "start": "13:35",
+      "end": "14:00"
+    },
+    {
+      "item": "Teach HIST 102 section",
+      "match": "teach|hist 102|section",
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "item": "Office hours",
+      "match": "office hours",
+      "start": "15:00",
+      "end": "16:15"
+    },
+    {
+      "item": "Return ILL books to library",
+      "match": "ill|library|book|return",
+      "start": "16:20",
+      "end": "16:50"
+    },
+    {
+      "item": "Chapter 3 writing (afternoon)",
+      "match": "chapter 3|thesis|dissertation|writ",
+      "start": "17:00",
+      "end": "18:40"
+    },
+    {
+      "item": "Grade reading quizzes",
+      "match": "grade|quiz",
+      "start": "18:42",
+      "end": "19:45"
+    },
+    {
+      "item": "Walk home & dinner",
+      "match": "dinner|pasta|eat",
+      "start": "19:45",
+      "end": "21:00"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Teach HIST 102 Section 4",
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "summary": "HIST 102 Office Hours",
+      "start": "15:00",
+      "end": "16:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Near-term goals": "- Send Chapter 3 draft to advisor by Friday 5 PM"
+  },
+  "notes": [
+    {
+      "notebook": "Academic",
+      "title": "Dissertation Ch 3 Backlog",
+      "role": "backlog",
+      "body": "- [ ] Draft Section 2: municipal archive case studies (~800 words)\n- [ ] Check footnote citations on 1923 strike\n- [ ] Integrate advisor comments on intro\n- [ ] Format bibliography entries"
+    },
+    {
+      "notebook": "Academic",
+      "title": "Teaching & Dept",
+      "role": "list",
+      "body": "- [ ] Print primary source handouts for Wed section\n- [ ] Skim Canvas forum posts before section\n- [ ] Grade Week 6 reading quizzes (18 students)\n- [ ] Return 2 overdue ILL books to main library\n- [ ] Email Prof. Alvarez about conference panel"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Life & Errands",
+      "role": "list",
+      "body": "- [ ] Buy pasta sauce and spinach\n- [ ] Call mom back\n- [ ] Clean coffee press\n- [x] Pay student health fee"
+    }
+  ]
+}

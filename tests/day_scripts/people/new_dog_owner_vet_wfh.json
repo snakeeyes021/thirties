@@ -1,0 +1,144 @@
+{
+  "id": "new_dog_owner_vet_wfh",
+  "date": "2026-10-21",
+  "source": "made up: new dog owner working from home while juggling puppy walks, training, and a vet booster visit",
+  "wake": "06:30",
+  "bed": "22:30",
+  "work": [
+    "09:00",
+    "17:30"
+  ],
+  "persona": "Maya, a UX researcher working remotely who adopted a 4-month-old rescue puppy (Biscuit) ten days ago. Texts affectionately but with mild sleep-deprived chaos, constantly planning her day around Biscuit's crate-nap windows and potty breaks.",
+  "situation": "Wednesday morning at 06:30 when Biscuit starts whining in his crate. Has a 11:00 team sync, a 14:00 vet appointment for Biscuit's leptospirosis booster, UX interview synthesis notes to finish, and puppy training sessions.",
+  "life": [
+    "06:32 Wake up to Biscuit whining and text the app while clipping on his leash: up with the puppy! Help me plan today: morning puppy walk + feeding + 15-min clicker training now, my shower and breakfast once he goes in his crate at 07:45, work 09:00–17:30 (with a mid-morning potty break at 10:30, lunch walk at 12:15, and the 14:00–15:15 vet appointment), then an evening decompression sniff walk at 17:30.",
+    "06:35 Remind the app that I can only shower or do deep UX synthesis writing when Biscuit is asleep in his crate, and he can't hold his bladder longer than 3 hours.",
+    "06:35 Take Biscuit out for a 30-minute morning walk, feed him his kibble in a puzzle bowl, and practice 'sit' and 'leave it' clicker training until 07:45.",
+    "07:48 Report puppy walk, feeding, and clicker training done! Settling Biscuit in his crate with a frozen Kong so I can finally shower and make coffee/breakfast.",
+    "07:50 Shower, make coffee and avocado toast, and get dressed until 08:50.",
+    "08:52 Report shower and breakfast done. Logging in early to tag UX user interview transcripts while Biscuit is still sleeping.",
+    "08:55 Tag and synthesize UX interview videos in Dovetail until 10:25.",
+    "10:25 Biscuit wakes up barking; take him outside for a quick 15-minute potty break around the courtyard, then discovers he chewed the corner of the bathmat earlier—spend 10 minutes trimming loose threads and putting the rug up high.",
+    "10:52 Text the app: 10:30 potty break done (also had to rescue the bathmat from puppy teeth). Joining my 11:00 UX team sync now.",
+    "11:00 Attend UX Team Sync until 11:45, then finish summarizing the usability findings slide deck until 12:15.",
+    "12:18 Report usability deck draft done! Taking Biscuit out for his midday walk and grabbing a salad for lunch.",
+    "12:20 Walk Biscuit for 30 minutes, then eat a chopped salad at the counter while he chews a bully stick until 13:20.",
+    "13:22 Report midday walk and lunch done. Answering Slack threads for 20 minutes before loading Biscuit into the car at 13:40 for his 14:00 vet visit.",
+    "13:40 Drive Biscuit to Oakwood Vet Clinic; vet gives him his booster shot and trims his nails, getting back home at 15:15.",
+    "15:18 Text the app: back from the vet! Booster shot made Biscuit super sleepy so he went straight into his crate for a long nap. Going to lock in on finishing the Q4 research roadmap doc until 17:15, and also order a larger crate divider on Chewy.",
+    "15:20 Finish writing the Q4 research roadmap doc and order the crate divider on Chewy until 17:20.",
+    "17:22 Report research roadmap finished and Chewy order placed! Workday is done.",
+    "17:30 Take Biscuit to the quiet grassy park down the street for a slow 40-minute sniff walk until 18:10.",
+    "18:15 Feed Biscuit his dinner, then heat up lentil curry and naan for yourself until 19:15.",
+    "19:20 Report puppy walk and dinners done. Do 10 minutes of gentle crate-game training at 19:30, take Biscuit out for a final 22:00 potty trip, and crash at 22:30."
+  ],
+  "constraints": [
+    "Puppy (Biscuit) needs a potty break or walk at least every 2.5 to 3 hours during the day.",
+    "Deep-focus UX synthesis work and showering can only happen when Biscuit is crated and napping.",
+    "Needs 20 minutes before and after the 14:00 vet appointment to load the puppy into the car seat harness and drive."
+  ],
+  "truth": [
+    {
+      "item": "Morning puppy walk, feeding & clicker training",
+      "match": "morning.*walk|feed.*puppy|clicker|train",
+      "start": "06:35",
+      "end": "07:45"
+    },
+    {
+      "item": "Shower, coffee & breakfast",
+      "match": "shower|coffee|breakfast",
+      "start": "07:50",
+      "end": "08:50"
+    },
+    {
+      "item": "Tag UX interview transcripts",
+      "match": "ux|interview|synthesis|dovetail",
+      "start": "08:55",
+      "end": "10:25"
+    },
+    {
+      "item": "Mid-morning potty break",
+      "match": "potty|break",
+      "start": "10:25",
+      "end": "10:50"
+    },
+    {
+      "item": "UX Team Sync & usability slide deck",
+      "match": "sync|usability|deck",
+      "start": "11:00",
+      "end": "12:15"
+    },
+    {
+      "item": "Midday puppy walk & lunch",
+      "match": "midday.*walk|lunch.*walk|lunch",
+      "start": "12:20",
+      "end": "13:20"
+    },
+    {
+      "item": "Vet booster appointment (with drive)",
+      "match": "vet|booster|appointment",
+      "start": "13:40",
+      "end": "15:15"
+    },
+    {
+      "item": "Q4 research roadmap doc & Chewy order",
+      "match": "roadmap|chewy|crate",
+      "start": "15:20",
+      "end": "17:20"
+    },
+    {
+      "item": "Evening decompression sniff walk",
+      "match": "evening.*walk|sniff|park",
+      "start": "17:30",
+      "end": "18:10"
+    },
+    {
+      "item": "Feed puppy & eat lentil curry dinner",
+      "match": "dinner|curry|feed",
+      "start": "18:15",
+      "end": "19:15"
+    },
+    {
+      "item": "Evening crate training & 10 PM potty break",
+      "match": "crate|train|potty",
+      "start": "19:30",
+      "end": "22:15"
+    }
+  ],
+  "events": [
+    {
+      "summary": "UX Research Team Sync",
+      "start": "11:00",
+      "end": "11:45"
+    },
+    {
+      "summary": "Biscuit - Vet Booster Shot @ Oakwood Vet",
+      "start": "14:00",
+      "end": "14:45"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Dog": "4-month-old puppy Biscuit; needs potty breaks every ~3h and crate naps for deep focus work."
+  },
+  "notes": [
+    {
+      "notebook": "Dog",
+      "title": "Biscuit Daily Routine",
+      "role": "routine",
+      "body": "- [ ] 06:30 Morning walk + puzzle bowl breakfast\n- [ ] 15-min morning clicker training ('sit', 'leave it')\n- [ ] 10:30 Mid-morning potty break\n- [ ] 12:15 Midday walk\n- [ ] 17:30 Evening sniff walk + dinner\n- [ ] 22:00 Last potty trip before bed"
+    },
+    {
+      "notebook": "Work",
+      "title": "UX Research Sprint",
+      "role": "today",
+      "body": "- [ ] Tag & synthesize 5 onboarding interview transcripts in Dovetail\n- [ ] Finish usability findings slide deck\n- [ ] Draft Q4 UX research roadmap doc"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Puppy & Home Errands",
+      "role": "list",
+      "body": "- [ ] Order replacement crate divider & enzyme cleaner on Chewy\n- [ ] Upload vet vaccine record to puppy daycare portal\n- [ ] Heat lentil curry for dinner"
+    }
+  ]
+}

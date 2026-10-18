@@ -1,0 +1,132 @@
+{
+  "id": "er_nurse_day_after",
+  "date": "2026-10-12",
+  "source": "made up: ER nurse sleeping until early afternoon after last 7 PM-7 AM night shift",
+  "wake": "13:30",
+  "bed": "23:30",
+  "work": null,
+  "persona": "Sam, an ER nurse coming off a stretch of three 12-hour night shifts (7 PM to 7 AM). Texts in short, lowercase bursts with occasional typos because of post-shift brain fog. Wants a gentle afternoon getting basic life stuff back on track without overpacking the schedule.",
+  "situation": "Monday early afternoon, waking up at 13:30 after getting home at 07:45 and crashing. Groggy, hungry, and trying to flip back to a normal daytime sleep schedule by tonight.",
+  "life": [
+    "13:35 Wake up groggy. Text the app that you're finally awake and ask for a gentle plan for the rest of the day: wake-up routine, laundry, groceries, calling the landlord about the leaky kitchen sink, and a short jog before dark.",
+    "13:40 If the app schedules calling the landlord after 17:00, remind it that the leasing office closes at 17:00.",
+    "13:42 Approve the plan once coffee/breakfast is first and the landlord call is before 17:00.",
+    "13:45 Make coffee, shower, and eat scrambled eggs; takes until 14:35 instead of 14:15 because you're moving in slow motion.",
+    "14:35 Report wake-up routine and breakfast done. Start a load of scrubs and sheets in the washer.",
+    "14:50 Call the leasing office about the kitchen sink; put on hold for 20 minutes before getting a maintenance ticket scheduled for Wednesday. Finish at 15:15.",
+    "15:18 Tell the app the landlord call took longer than expected and laundry is washing. Ask to push the grocery run to after moving clothes to the dryer at 15:45.",
+    "15:45 Move laundry to the dryer. Realize you haven't paid the electric bill yet; sit on the couch and pay it on your phone until 16:05.",
+    "16:05 Report laundry is in the dryer and electric bill is paid. Head out for Trader Joe's.",
+    "16:10 Stop at the gas station first because the low-fuel light came on right as you pulled out. Mention to the app when you get back that you had to get gas first.",
+    "16:25 Shop at Trader Joe's and drive home, getting back at 17:25.",
+    "17:30 Unpack groceries and tell the app groceries are done, including the surprise gas stop. Ask how much daylight is left for a jog.",
+    "17:35 Decide you're too wiped from the night shift to jog; ask to drop the jog and just fold laundry and stretch instead.",
+    "17:45 Fold laundry and put away scrubs while watching a show until 18:20.",
+    "18:25 Do 20 minutes of foam rolling and stretching on the living room rug.",
+    "18:50 Report laundry folded and stretching done. Start cooking stir-fry for dinner.",
+    "19:45 Finish eating dinner. Ask the app what's left from your Today list.",
+    "19:50 Decide to skip prepping meal containers tonight and save it for tomorrow. Ask to block out the rest of the evening to read and wind down so you can sleep at a normal hour.",
+    "23:15 Head to bed early to reset circadian rhythm."
+  ],
+  "constraints": [
+    "Leasing office / landlord phone lines close at 17:00 on weekdays.",
+    "Post-night-shift energy is low; needs a slow ramp-up after waking at 13:30 and no high-intensity exercise if exhausted.",
+    "Car needs gas before driving across town to the grocery store.",
+    "Needs to be in bed by 23:30 to flip back to a daytime schedule."
+  ],
+  "truth": [
+    {
+      "item": "Wake-up routine and breakfast",
+      "match": "coffee|breakfast|shower|routine",
+      "start": "13:45",
+      "end": "14:35"
+    },
+    {
+      "item": "Start laundry",
+      "match": "laundry|wash|scrubs",
+      "start": "14:35",
+      "end": "14:50"
+    },
+    {
+      "item": "Call landlord about sink",
+      "match": "landlord|leasing|sink",
+      "start": "14:50",
+      "end": "15:15"
+    },
+    {
+      "item": "Pay electric bill",
+      "match": "electric|bill",
+      "start": "15:45",
+      "end": "16:05"
+    },
+    {
+      "item": "Get gas and groceries",
+      "match": "grocer|trader|gas",
+      "start": "16:10",
+      "end": "17:30"
+    },
+    {
+      "item": "Fold laundry",
+      "match": "fold|laundry",
+      "start": "17:45",
+      "end": "18:20"
+    },
+    {
+      "item": "Stretch / foam roll",
+      "match": "stretch|foam",
+      "start": "18:25",
+      "end": "18:45"
+    },
+    {
+      "item": "Make and eat dinner",
+      "match": "dinner|stir-fry|cook|eat",
+      "start": "18:50",
+      "end": "19:45"
+    },
+    {
+      "item": "Jog outside",
+      "match": "jog|run",
+      "start": "17:30",
+      "end": "18:00",
+      "done": false
+    },
+    {
+      "item": "Meal prep containers",
+      "match": "meal prep|containers",
+      "start": "20:00",
+      "end": "21:00",
+      "done": false
+    }
+  ],
+  "events": [],
+  "setup": [],
+  "profile": {
+    "Schedule": "ER nurse working 19:00-07:00 shifts; flips to daytime hours on days off."
+  },
+  "notes": [
+    {
+      "notebook": "Daily",
+      "title": "Post-Shift Reset",
+      "role": "routine",
+      "body": "- [ ] Coffee + big glass of water\n- [ ] Hot shower\n- [ ] Real breakfast (eggs + toast)\n- [ ] Wash scrubs\n- [ ] 20 min sunlight / walk"
+    },
+    {
+      "notebook": "Daily",
+      "title": "Today",
+      "role": "today",
+      "body": "- [ ] Call leasing office about kitchen sink drip\n- [ ] Trader Joe's run\n- [ ] Pay electric bill\n- [ ] 3-mile jog\n- [ ] Meal prep containers for Wed/Thu"
+    },
+    {
+      "notebook": "Life",
+      "title": "Home & Errands",
+      "role": "list",
+      "body": "- [ ] Renew nursing license CEUs (due Nov 30)\n- [ ] Drop off goodwill bag in trunk\n- [ ] Order new compression socks\n- [ ] Schedule dentist cleaning\n- [x] Pick up dry cleaning"
+    },
+    {
+      "notebook": "Life",
+      "title": "Free Time Menu",
+      "role": "menu",
+      "body": "- [ ] Foam roll & stretch\n- [ ] Read thriller novel\n- [ ] Repot pothos\n- [ ] Bake banana bread"
+    }
+  ]
+}
