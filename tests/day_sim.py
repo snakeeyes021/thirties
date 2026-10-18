@@ -248,7 +248,8 @@ def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str
     joplin = run.manager.tools.services.joplin
     run.service = BackgroundService(cfg, notify, scheduler=run.scheduler, joplin_engine=joplin,
                                     inference_engine=engine, sync_engine=SimpleNamespace(sync=lambda: None))
-    run.service._manager, run.service._day = run.manager, run.service.today()
+    run.service.today = lambda: script.day  # the script's day throughout (before sunrise is still "yesterday")
+    run.service._manager, run.service._day = run.manager, script.day
     return run
 
 
