@@ -120,6 +120,12 @@ def thirty_of(dt: datetime) -> datetime:
     return dt.replace(minute=0 if dt.minute < 30 else 30, second=0, microsecond=0)
 
 
+def thirty_ceil(dt: datetime) -> datetime:
+    """The end of the thirty a time falls in (the time itself if it's already on a thirty)."""
+    start = thirty_of(dt)
+    return dt if start == dt else start + SHORT
+
+
 def group_short_items(items: Sequence[Tuple[datetime, datetime, str, str]]) -> List[Tuple[datetime, datetime, str, str]]:
     """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one
     row at the thirty's start ("5:00 – Feed cats, Message Brad"), ending when the thirty ends."""

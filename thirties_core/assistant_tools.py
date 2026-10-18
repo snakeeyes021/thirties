@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes
+from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
+                                 thirty_ceil, thirty_of)
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
@@ -451,10 +452,14 @@ class AssistantTools:
             span.actual_start = start_dt or span.start_dt
             span.actual_end = end_dt or span.end_dt
             if (span.actual_start, span.actual_end) != (span.start_dt, span.end_dt):
-                # Show what really happened; keep the original plan for statistics.
+                # Show what really happened, in the thirties it touched; the exact times and the original
+                # plan stay on the record for statistics.
                 if span.planned_start is None:
                     span.planned_start, span.planned_end = span.start_dt, span.end_dt
-                span.start_dt, span.end_dt = span.actual_start, span.actual_end
+                if span.actual_end - span.actual_start < timedelta(minutes=30):
+                    span.start_dt, span.end_dt = span.actual_start, span.actual_end
+                else:
+                    span.start_dt, span.end_dt = thirty_of(span.actual_start), thirty_ceil(span.actual_end)
             if started not in (None, "") and (finished not in (None, "") or duration not in (None, "")) and not guessed:
                 span.time_source = "reported"
             elif start_dt or end_dt:

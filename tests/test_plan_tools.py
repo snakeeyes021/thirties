@@ -120,13 +120,27 @@ class TestUpdateEvent(unittest.TestCase):
         spans = sorted((s for s in t.day_plan.spans if s.duration_minutes == 5), key=lambda s: s.start_dt)
         self.assertEqual([(s.title, s.start_dt.strftime("%H:%M")) for s in spans],
                          [("Feed the cats", "17:00"), ("Message Brad", "17:05"), ("Water the alligator", "17:10")])
-        self.assertIn("- 5:00 PM thirty: Feed the cats id=", t.list_schedule())
+        self.assertIn("- 5:00 PM – 5:30 PM: Feed the cats id=", t.list_schedule())
         self.assertIn(", then Message Brad id=", t.list_schedule())
         self.assertIn("5:05 PM – 5:10 PM: Message Brad", t.list_schedule(exact=True))
         block = t.day_plan.block_at(at("17:01"))
         self.assertEqual(t.day_plan.display_title(block), "Feed the cats\nMessage Brad\nWater the alligator")
         out = t.execute("add_event", {"title": "Laundry", "start": "5:00 PM", "duration": "20 min"})
         self.assertTrue(out.startswith(NOT_DONE), out)  # no room left in that thirty: a conflict, not an overlap
+
+    def test_the_user_only_ever_sees_thirties(self) -> None:
+        t = tools_for()
+        out = t.execute("add_event", {"title": "Glass", "start": "5:50 PM", "duration": "30 min"})
+        self.assertIn("Glass, 6:00 PM – 6:30 PM", out)  # it wouldn't fit in the 5:30 thirty: next one
+        t.execute("add_event", {"title": "Brad", "start": "5:00 PM", "duration": "15 min"})
+        free = t.open_windows(after=at("17:10"))
+        self.assertEqual(free[0][0], at("17:30"))  # the 5:00 thirty holds something: not free
+        out = t.execute("add_event", {"title": "Food", "start": "5:30 PM", "duration": "1 hour", "push_later": True})
+        self.assertIn("Glass now 6:30 PM – 7:00 PM", out)  # pushed along to the next thirty
+        out = t.execute("update_event", {"event": "food", "shift": "+10 minutes", "push_later": True})
+        self.assertIn("Food, 6:00 PM – 7:00 PM", out.split("→")[1])  # a 10-minute nudge still lands on a thirty
+        self.assertNotRegex(t.list_schedule(), r":(?!00|30)\d\d")
+        self.assertRegex(t.list_schedule(exact=True), r"5:15 PM")  # exact minutes only when asked
 
     def test_sleep_tonight_crosses_midnight(self) -> None:
         t = tools_for()
@@ -257,7 +271,7 @@ class TestReadOnlyAndCalendar(unittest.TestCase):
     def test_schedule_text_lists_ids_and_free_time(self) -> None:
         t = tools_for([event("dinner", "19:00", "21:00", "Team dinner", invite=True)])
         text = t.execute("list_schedule", {})
-        self.assertIn("8:30 AM – 4:00 PM: Work (7h 30m) [work]", text)
+        self.assertIn("8:30 AM – 4:00 PM: Work [work]", text)
         self.assertIn("UNCONFIRMED invite", text)
         self.assertIn(f"id={span_id(t, 'Work')}", text)
         self.assertIn("Free time: 7:00 AM – 8:30 AM", text)

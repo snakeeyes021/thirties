@@ -47,9 +47,11 @@ class TestOutcomes(ToolsTestCase):
         self.assertEqual([u[0] for u in self.api.updates], ["t_taxes"])
         span = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Taxes")
         self.assertEqual((span.status, span.actual_start, span.time_source), (SpanStatus.DONE, at("16:15"), "reported"))
-        # The schedule now shows what really happened; the plan is kept for statistics
+        # The schedule now shows what really happened, in the thirties it touched; the exact times and the
+        # plan are kept for statistics
         self.assertEqual((span.start_dt, span.end_dt, span.planned_start, span.planned_end),
-                         (at("16:15"), at("17:45"), at("16:00"), at("17:00")))
+                         (at("16:00"), at("18:00"), at("16:00"), at("17:00")))
+        self.assertEqual((span.actual_start, span.actual_end), (at("16:15"), at("17:45")))
         self.assertEqual(self.sched.state_db.get_task_history("t_taxes").completed_date, DAY.isoformat())
 
     def test_finish_time_only_is_estimated(self) -> None:

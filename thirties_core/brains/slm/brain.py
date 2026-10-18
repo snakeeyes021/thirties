@@ -932,7 +932,7 @@ class SlmBrain:
             before = [s.title for s in self.tools.day_plan.spans_in_view()
                       if s.id != span.id and not s.is_envelope and s.duration_minutes < 30
                       and thirty_of(s.start_dt) == block and s.end_dt <= span.start_dt]
-            return f"Added {span.title} to the {format_clock(block)} thirty" + \
+            return f"Added {span.title} at {format_clock(block)}" + \
                 (f", after {' and '.join(before)}." if before else ".")
         m = re.match(r"Added (.+?), (.+? – .+?) \((.+?)\)", out)
         if not m:

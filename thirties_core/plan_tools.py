@@ -26,6 +26,7 @@ from thirties_core.assistant_tools import (
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.clock import (
+    thirty_ceil,
     thirty_of,
     ClockError,
     format_clock,
@@ -270,8 +271,25 @@ class PlanTools:
             return after, after + length
         return start, end
 
+    @staticmethod
+    def _snap(start: datetime, end: datetime) -> Tuple[datetime, datetime]:
+        """The user lives in thirties: something 30 minutes or longer starts on a thirty, and anything that
+        wouldn't fit in the thirty it was put in moves to the next one. Lengths stay as they are."""
+        length = end - start
+        if length >= timedelta(minutes=30):
+            begin = thirty_ceil(start)
+        elif start + length <= thirty_of(start) + timedelta(minutes=30):
+            return start, end
+        else:
+            begin = thirty_ceil(start)
+        return begin, begin + length
+
     def describe(self, span: EventSpan) -> str:
-        return f"{span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)} ({format_duration(span.duration_minutes)})"
+        """An item as the user sees it: in thirties (exact minutes are only for the record)."""
+        if span.duration_minutes < 30 and thirty_of(span.start_dt) == thirty_of(span.end_dt - timedelta(seconds=1)):
+            return f"{span.title}, at {format_clock(thirty_of(span.start_dt))} (under 30m, sharing that thirty)"
+        start, end = thirty_of(span.start_dt), thirty_ceil(span.end_dt)
+        return f"{span.title}, {format_clock(start)} – {format_clock(end)} ({format_duration(int((end - start).total_seconds() // 60))})"
 
     def _find_span(self, ref: Any) -> EventSpan:
         ref_str = str(ref or "").strip()
@@ -369,7 +387,8 @@ class PlanTools:
         for span in followers:
             if span.start_dt >= cursor:
                 break
-            delta = cursor - span.start_dt
+            target, _ = self._snap(cursor, cursor + (span.end_dt - span.start_dt))
+            delta = target - span.start_dt
             moved.append((span, delta))
             cursor = span.end_dt + delta
         for span, delta in moved:
@@ -383,7 +402,7 @@ class PlanTools:
         for span, delta in moved:
             span.start_dt, span.end_dt = span.start_dt + delta, span.end_dt + delta
             self._persist(span)
-            notes.append(f"{span.title} now {format_clock(span.start_dt)} – {format_clock(span.end_dt)}")
+            notes.append(f"{self.describe(span).replace(', ', ' now ', 1)}")
         return notes
 
     def _save_plan_after_change(self) -> None:
@@ -430,6 +449,8 @@ class PlanTools:
         else:
             raise ToolError("Give an end time or a duration.")
 
+        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            start_dt, end_dt = self._snap(start_dt, end_dt)
         if not _as_bool(alongside):
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
@@ -490,6 +511,8 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
 
+        if not span.is_envelope and (new_start, new_end) != (span.start_dt, span.end_dt):
+            new_start, new_end = self._snap(new_start, new_end)
         if start not in (None, "") and shift in (None, ""):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
@@ -621,7 +644,17 @@ class PlanTools:
         return f"Cleared {format_clock(start_dt)} – {format_clock(end_dt)}: " + "; ".join(changes) + "."
 
     def open_windows(self, after: Optional[datetime] = None, before: Optional[datetime] = None) -> List[Tuple[datetime, datetime]]:
-        """Free stretches within the canvas (minute precision), optionally bounded."""
+        """Free stretches within the canvas, in whole thirties (a thirty with anything in it isn't free),
+        optionally bounded. With ``after`` (now), the current thirty counts if it's empty."""
+        windows = self._open_minutes(thirty_of(after) if after else None, before)
+        out = []
+        for start, end in windows:
+            start, end = thirty_ceil(start), thirty_of(end)
+            if end - start >= timedelta(minutes=30):
+                out.append((start, end))
+        return out
+
+    def _open_minutes(self, after: Optional[datetime] = None, before: Optional[datetime] = None) -> List[Tuple[datetime, datetime]]:
         lo = max(self.day_plan.day_start, after) if after else self.day_plan.day_start
         hi = min(self.day_plan.day_end, before) if before else self.day_plan.day_end
         if lo >= hi:
@@ -688,9 +721,9 @@ class PlanTools:
                 shown_blocks.add(block)
                 group = [x for x in plan.spans_in_view() if x.duration_minutes < 30 and not x.is_envelope
                          and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
-                lines.append(f"- {format_clock(block)} thirty: " + ", then ".join(
+                lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
                     f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
-                    for x in group) + " (short items, in this order; say them by their thirty, not minute times)")
+                    for x in group) + " (short items sharing this thirty, in this order)")
                 continue
             flags = [s.category.value]
             if s.tentative:
@@ -701,8 +734,9 @@ class PlanTools:
                 flags.append(s.status.value)
             if upcoming_from and s.end_dt <= upcoming_from:
                 flags.append("already over")
-            lines.append(f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title} "
-                         f"({format_duration(s.duration_minutes)}) [{', '.join(flags)}] id={s.id}")
+            start, end = (s.start_dt, s.end_dt) if exact else (thirty_of(s.start_dt), thirty_ceil(s.end_dt))
+            lines.append(f"- {format_clock(start)} – {format_clock(end)}: {s.title} "
+                         f"[{', '.join(flags)}] id={s.id}")
         windows = self.open_windows(after=upcoming_from)
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
         scope = "Free time remaining" if upcoming_from else "Free time"
