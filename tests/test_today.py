@@ -143,6 +143,19 @@ class TestWhatsLeft(TodayTestCase):
                               "On today's list, no time yet: Clip cat nails.")
 
 
+class TestSlmShortcuts(TodayTestCase):
+
+    def test_gemma_puts_things_on_todays_list_and_records_urgency(self):
+        from thirties_core.brains.slm import SlmBrain
+        brain = SlmBrain(self.t, tasks=self.services.tasks)
+        self.assertEqual(brain.respond("add call the bank and clip cat nails to today's list"),
+                         "Added to today's list: Call the bank, Clip cat nails.")
+        self.assertTrue(brain.respond("buy stamps isn't urgent").startswith("Noted: 'Buy stamps' is whenever"))
+        self.assertTrue(brain.respond("call the bank has to happen by friday").startswith(
+            "Noted: 'Call the bank' is by"))
+        self.assertIsNone(brain._list_shortcut("yeah put that on today"))  # answering the morning offer
+
+
 class TestMorning(TodayTestCase):
 
     def setUp(self):

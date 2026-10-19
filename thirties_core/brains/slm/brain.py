@@ -87,6 +87,11 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
 
 
 MAX_MESSAGE_CHARS = 2000
+TODAY_LIST_RE = re.compile(r"\b(?:add|put)\s+(?P<items>.+?)\s+(?:on|to)\s+(?:my\s+|the\s+)?today'?s?(?:\s+list|\s+note)?\b",
+                           re.I)
+URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgent|is pressing|isn'?t urgent|is not urgent|"
+                        r"can wait|is no rush|is a someday thing|has to happen by \w+|needs to happen by \w+|"
+                        r"is due by \w+|by \w+ at the latest)\b", re.I)
 STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to|into)|going to start|getting started|now doing|"
                          r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
 FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed)\b", re.I)
@@ -197,6 +202,11 @@ class SlmBrain:
         self.messages.append({"role": "user", "content": user_text})
         user_text = user_text[:MAX_MESSAGE_CHARS]  # a huge paste can't fit Gemma's context: read the start of it
         self._message = user_text
+        shortcut = self._list_shortcut(user_text)
+        if shortcut is not None:  # today's list and urgency: plain enough for Python, no parse needed
+            self.messages.append({"role": "assistant", "content": shortcut, "slm_state": self.state.to_dict(),
+                                  "slm_actions": [{"type": "list_shortcut"}]})
+            return shortcut
         if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text):  # a new plan: Python does it, no parse
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
             ok, reply = self._run("undo_redraw" if undo else "redraw", {})
@@ -1661,6 +1671,29 @@ class SlmBrain:
             ok, out = self._run("search_history", {"query": topic})
             return out, False
         return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    def _list_shortcut(self, text: str) -> Optional[str]:
+        """"Add X to today's list" and "X isn't urgent" / "X is urgent" / "X has to happen by Friday", handled in
+        Python. None when the message isn't one of these."""
+        m = TODAY_LIST_RE.search(text)
+        if m and m.group("items").strip(" .").lower() not in PRONOUNS | {"those", "these", "them", "everything", "all"}:
+            items = [x.strip(" .") for x in re.split(r",\s*|\s+and\s+", m.group("items")) if x.strip(" .")]
+            items = [x[:1].upper() + x[1:] if x.islower() else x for x in items]
+            ok, out = self._run("add_to_today", {"items": items})
+            return out if ok else f"I couldn't add that to today's list: {out}"
+        m = URGENCY_RE.search(text)
+        if m:
+            what, how = m.group("what").strip(" ."), m.group("how").lower()
+            args: Dict[str, Any] = {"task": what}
+            due = re.search(r"\bby (\w+)", how)
+            if due:
+                args["due"] = due.group(1)
+            else:
+                args["urgency"] = ("someday" if "someday" in how else
+                                   "whenever" if re.search(r"n[o']t|no rush|can wait", how) else "now")
+            ok, out = self._run("set_urgency", args)
+            return out if ok else None  # not a list item after all: let the parse handle it
+        return None
 
     def _list_named(self, message: str) -> Optional[str]:
         """The list a question names ("my Home list", "the errands list", "on Medical"), if any."""
