@@ -191,6 +191,16 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   No minute times were shown on any day. It found one design error: rounding to the nearest thirty turned a support worker's 10:45 break into 11:00, the wrong thirty. A time is now told by the thirty it's in (the 10:30 thirty), its exact minute only when asked for.
 
+**Gemma fixes from the milestone run, paired check (2026-10-19):** the same 10 scripts (8 made-up people, the user's 10-16 and 10-17), SLM brain, one run each, on the milestone commit (with the phantom-event harness fix) and after the fixes:
+
+| | Baseline | After c762540 | After dbc633b (layout, narrower replan) |
+|---|---|---|---|
+| User's rating | 3.1 | 3.5 (better on 5, worse on 1) | 3.4 (better on 4, worse on 3) |
+| Requests met | 0.52 | 0.53 | 0.48 (better on 4, worse on 5) |
+| Plan respect (judge) | 2.0 | 1.7 (worse on 3) | 1.6 (worse on 4) |
+
+  Single days swing widely between runs (one script went 0.56 → 0.25 of requests met), so 10 paired days can't separate small effects from noise. The next step is to measure that noise: the same version twice on the same days. The one consistent signal is lower plan respect after the fixes. Suspect: sliding later plans automatically instead of asking (c762540), which the judge may read as changing things unasked. Unproven.
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments

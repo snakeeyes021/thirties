@@ -234,7 +234,7 @@ Notes are organized by area of life (Home, Errands/Admin, Medical…), and urgen
 5. **The day view.** A Day page (Now, Next, Not reported with Done/Skipped, Done today at real times, Replan with Undo) and the Timeline page with drag to move.
 
 Still to do in 0.1:
-- Run the day sim baselines (0.0.1, then 0.1) and fix what they show.
+- Measure the day sim's noise (the same version twice on the same days), then the full 106-day run on the latest commit after the weekly quota resets (Fri Oct 23); check whether automatic sliding hurts plan respect (docs/SLM_BRAIN.md).
 - The SLM brain can redraw ("replan", "just figure it out") and carries the morning flow, but it has no actions yet for `add_to_today`, `set_urgency` or `set_item_facts`; add them once the day sim shows how often they're needed.
 - Try the day view and the lists pages for real, and adjust.
 
