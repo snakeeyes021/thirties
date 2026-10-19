@@ -155,6 +155,26 @@ class TestSlmShortcuts(TodayTestCase):
             "Noted: 'Call the bank' is by"))
         self.assertIsNone(brain._list_shortcut("yeah put that on today"))  # answering the morning offer
 
+    def test_gemma_lays_out_a_list_of_things_without_times(self):
+        from thirties_core.brains.slm import SlmBrain
+        from thirties_core.brains.slm.parse import Action
+        self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [ ] Feed kitties\n- [ ] Shower\n- [ ] PT\n"}
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        self.t.execute("remove_event", {"event": "Work"})  # a day off
+        brain = SlmBrain(self.t, tasks=self.services.tasks)
+        out = brain._run_actions([Action("add", {"title": "morning routine", "duration": "30 minutes"}),
+                                  Action("add", {"title": "Thirties dev", "duration": "1 hour"}),
+                                  Action("add", {"title": "lunch"}), Action("add", {"title": "walk", "duration": "1 hour"})],
+                                 "put down my morning routine, thirties dev, lunch and a walk, just figure it out")
+        self.assertTrue(out.startswith("Here's the day:"), out)
+        titles = {s.title: s for s in self.t.day_plan.spans}
+        self.assertTrue({"Feed kitties", "Shower", "PT", "Thirties dev", "Lunch", "Walk"} <= set(titles))  # routine as items
+        self.assertEqual(titles["Feed kitties"].start_dt.strftime("%H:%M"), "10:00")
+        self.assertEqual(titles["PT"].start_dt.strftime("%H:%M"), "10:20")  # short things share their block, in order
+        self.assertGreaterEqual(titles["Lunch"].start_dt.hour, 11)                       # lunch at lunchtime
+        from datetime import timedelta
+        self.assertGreaterEqual(titles["Walk"].start_dt - titles["Thirties dev"].end_dt, timedelta(minutes=30))  # room
+
 
 class TestMorning(TodayTestCase):
 

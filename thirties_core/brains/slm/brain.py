@@ -26,7 +26,8 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
-from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes, thirty_of
+from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes,
+                                 thirty_ceil, thirty_of)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -87,6 +88,8 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
 
 
 MAX_MESSAGE_CHARS = 2000
+FIGURE_IT_OUT_RE = re.compile(r"\b(figure (it|that|them) out|wherever|you (pick|choose|decide)|whenever works|"
+                              r"lay (it|them|the day|everything) out|fit (it|them) in)\b", re.I)
 BUILD_PLAN_RE = re.compile(r"\b(lay (it |them |the day |everything )?out|put (down|in)|add|schedule|plan (out )?(the|my) "
                            r"(day|morning|afternoon|evening)|include|whole (day|proposed day))\b", re.I)
 TODAY_LIST_RE = re.compile(r"\b(?:add|put)\s+(?P<items>.+?)\s+(?:on|to)\s+(?:my\s+|the\s+)?today'?s?(?:\s+list|\s+note)?\b",
@@ -813,12 +816,20 @@ class SlmBrain:
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
             "remind": self._do_remind, "mute": self._do_mute, "proposal_swap": self._do_proposal_swap,
         }
+        untimed = [a for a in actions if a.type == "add" and not any(a.get(k) for k in ("start", "end", "after", "before"))]
+        if len(untimed) >= 2 or (untimed and FIGURE_IT_OUT_RE.search(message)):
+            # several things and no times ("put down Brad, Torquio, the walk, lunch and dinner"): Python lays them
+            # out rather than asking "what time?" for each one
+            lines.append(self._lay_out(untimed))
+            changed = True
+            actions = [a for a in actions if a not in untimed]
         retry: List[Action] = []
         for action in actions:
             if action.type == "chat":
-                if len(actions) == 1:
+                if not lines and len(actions) == 1:
                     return self._chat(message)
                 continue
+
             snapshot = self.state.to_dict()
             text, did_change = handlers[action.type](action)
             failed = action.type in ("add", "move", "swap") and not did_change and \
@@ -1675,6 +1686,84 @@ class SlmBrain:
             ok, out = self._run("search_history", {"query": topic})
             return out, False
         return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    MEAL_WINDOWS = {"breakfast": (time(7, 0), time(11, 0), 30), "lunch": (time(11, 30), time(14, 30), 30),
+                    "dinner": (time(17, 30), time(20, 30), 60), "supper": (time(17, 30), time(20, 30), 60)}
+
+    def _lay_out(self, adds: List[Action]) -> str:
+        """Place several things with no times, in Python: meals in their usual windows, a routine as its own items
+        in order, everything else from now in the order given, with a free block after anything an hour or
+        longer (breathing room). Says what didn't fit."""
+        plan = self.tools.day_plan
+        tz = plan.day_start.tzinfo
+        now = self._now()
+        cursor = thirty_ceil(now) if self._is_today() and now > plan.day_start else plan.day_start
+        assistant = getattr(self.tools, "assistant", None)
+        items: List[Tuple[str, int, Optional[Tuple[time, time]]]] = []  # title, minutes, meal window
+        for a in adds:
+            title = (a.get("title") or "").strip()
+            if not title:
+                continue
+            title = title[:1].upper() + title[1:] if title.islower() else title
+            minutes = 0
+            try:
+                minutes = parse_duration_minutes(a.get("duration")) if a.get("duration") else 0
+            except ClockError:
+                minutes = 0
+            meal = next((w for k, w in self.MEAL_WINDOWS.items() if k in title.lower()), None)
+            routine = self._routine_items(title) if "routine" in title.lower() else []
+            if routine:
+                each = max(5, (minutes or 60) // len(routine))
+                items += [(step, each, None) for step in routine]
+                continue
+            if not minutes and assistant:
+                learned = assistant.typical_duration(title)
+                minutes = learned or 0
+            items.append((title, minutes or (meal[2] if meal else 60), (meal[0], meal[1]) if meal else None))
+        placed, missed = [], []
+        for title, minutes, window in sorted(items, key=lambda i: i[2] is None):  # meals first: they're anchored
+            length = timedelta(minutes=minutes)
+            lo = max(cursor, datetime.combine(plan.day_start.date(), window[0], tzinfo=tz)) if window else cursor
+            hi = datetime.combine(plan.day_start.date(), window[1], tzinfo=tz) if window else plan.day_end
+            ok, out = False, ""
+            if minutes < 30 and window is None:  # a short thing goes right after the last one: they share a block
+                ok, out = self._run("add_event", {"title": title, "start": self._clock_arg(cursor),
+                                                  "duration": f"{minutes} minutes"})
+            if not ok:
+                slot = next((max(a, lo) for a, b in self.tools.open_windows(after=lo)
+                             if min(b, hi) - max(a, lo) >= length), None)
+                if slot is None:
+                    missed.append(title)
+                    continue
+                ok, out = self._run("add_event", {"title": title, "start": self._clock_arg(slot),
+                                                  "duration": f"{minutes} minutes"})
+            if not ok:
+                missed.append(title)
+                continue
+            span = self._span_from_result(out, None)
+            if span is not None:
+                self._remember(span)
+                placed.append((span.start_dt, span.end_dt, span.title, ""))
+                if window is None:
+                    cursor = span.end_dt + (timedelta(minutes=30) if minutes >= 60 else timedelta())
+        lines = ["Here's the day:"] + agenda_lines(sorted(placed)) if placed else []
+        if missed:
+            lines.append("Didn't fit: " + ", ".join(missed) + ". Tomorrow, or let them go?")
+        return "\n".join(lines) or "I couldn't find room for those today."
+
+    def _routine_items(self, title: str) -> List[str]:
+        """The open items of the routine note a title names ("morning routine"), in order."""
+        assistant = getattr(self.tools, "assistant", None)
+        if assistant is None or self.tools.scheduler is None:
+            return []
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import note_items, notes_with_role
+        roles = ListCatalog(self.tools.scheduler.state_db).roles()
+        words = {_stem(w) for w in _words(title)} - {"routin"}
+        for note in notes_with_role(roles, assistant._joplin_notes(), "routine"):
+            if not words or words & {_stem(w) for w in _words(note["title"])}:
+                return [text for text, ticked in note_items(note) if not ticked]
+        return []
 
     def _list_shortcut(self, text: str) -> Optional[str]:
         """"Add X to today's list" and "X isn't urgent" / "X is urgent" / "X has to happen by Friday", handled in
