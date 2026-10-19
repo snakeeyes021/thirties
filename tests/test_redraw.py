@@ -93,6 +93,8 @@ class TestSlmRedraw(unittest.TestCase):
         from thirties_core.brains.slm.brain import NOT_RE, REDRAW_RE
         for text in ("please don't replan, I'm fine", "no need to push everything back", "I can't figure it out"):
             self.assertFalse(REDRAW_RE.search(text) and not NOT_RE.search(text), text)
+        from thirties_core.brains.slm.brain import BUILD_PLAN_RE
+        self.assertTrue(BUILD_PLAN_RE.search("Just figure it out and lay out the whole day"))  # building, not redrawing
 
 
 if __name__ == "__main__":

@@ -87,6 +87,8 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
 
 
 MAX_MESSAGE_CHARS = 2000
+BUILD_PLAN_RE = re.compile(r"\b(lay (it |them |the day |everything )?out|put (down|in)|add|schedule|plan (out )?(the|my) "
+                           r"(day|morning|afternoon|evening)|include|whole (day|proposed day))\b", re.I)
 TODAY_LIST_RE = re.compile(r"\b(?:add|put)\s+(?P<items>.+?)\s+(?:on|to)\s+(?:my\s+|the\s+)?today'?s?(?:\s+list|\s+note)?\b",
                            re.I)
 URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgent|is pressing|isn'?t urgent|is not urgent|"
@@ -207,12 +209,14 @@ class SlmBrain:
             self.messages.append({"role": "assistant", "content": shortcut, "slm_state": self.state.to_dict(),
                                   "slm_actions": [{"type": "list_shortcut"}]})
             return shortcut
-        if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text):  # a new plan: Python does it, no parse
+        if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text) and not BUILD_PLAN_RE.search(user_text):
+            # rearrange what's planned: Python does it, no parse. Asking to lay out a day goes to the parse instead
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
             ok, reply = self._run("undo_redraw" if undo else "redraw", {})
-            self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
-                                  "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
-            return reply
+            if undo or (ok and not reply.startswith("Nothing to redraw")):
+                self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
+                                      "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
+                return reply
         try:
             actions = self._parse(user_text)
         except SlmUnavailable as e:
