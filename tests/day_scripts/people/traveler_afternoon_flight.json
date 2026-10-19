@@ -1,0 +1,129 @@
+{
+  "id": "traveler_afternoon_flight",
+  "date": "2026-10-22",
+  "source": "made up: traveler with a 3 PM flight juggling a morning work meeting, packing, and airport logistics",
+  "wake": "07:00",
+  "bed": "23:00",
+  "work": [
+    "08:30",
+    "11:30"
+  ],
+  "persona": "Liam, a management consultant flying to Denver at 15:00 for a long weekend wedding. Texts briskly and methodically, works a half-day in the morning, and insists on arriving at the airport 2 hours before boarding—which means leaving the apartment in an Uber by 12:15.",
+  "situation": "Thursday morning at 07:00. Working a morning half-day 08:30–11:30 with a 09:30 client readout, hasn't finished packing his garment bag or carry-on yet, needs to drop his house keys with his neighbor for plant watering, and has a 15:00 flight out of the main terminal.",
+  "life": [
+    "07:05 Wake up and text the app: flying to Denver today at 15:00! Working 08:30–11:30 this morning (client readout at 09:30), and I MUST be in an Uber to the airport by 12:15. Before 12:15 I need to shower & eat breakfast, steam my suit and finish packing my carry-on, prep the slide deck for 09:30, take out the kitchen trash and perishables, drop my spare keys with neighbor Mrs. Gable, and grab a quick lunch.",
+    "07:10 If the app puts steaming the suit or packing after 12:15, remind it that 12:15 is my hard Uber departure time for the 15:00 flight.",
+    "07:15 Shower, make coffee and eggs, and start steaming the navy suit for the wedding until 08:25.",
+    "08:28 Report shower, breakfast, and suit steaming done. Logging into work now to finalize the client readout slides before 09:30.",
+    "08:30 Polish the executive summary slides and check data tables until 09:30.",
+    "09:30 Present the client readout on Zoom; client asks for an extra sensitivity table to be emailed before you head to the airport, keeping you on the call until 10:35.",
+    "10:38 Text the app: client call ran 5 mins over and I need 35 minutes right now to run and send an extra Excel sensitivity table before I can log off! Push packing my carry-on to 11:15.",
+    "10:40 Run the Excel sensitivity numbers and send the follow-up email to the client partner, logging off work at 11:15.",
+    "11:18 Report client email sent and out-of-office auto-reply turned on! Packing carry-on and toiletries now.",
+    "11:20 Pack suit, dress shoes, chargers, and toiletries into the carry-on roller, then clear old milk and greens out of the fridge until 11:50.",
+    "11:52 Knock on neighbor Mrs. Gable's door to hand over the spare keys—she asks you to show her which fern needs misting, taking until 12:08.",
+    "12:10 Text the app: keys handed off and trash goes down the chute on my way to the elevator! Didn't have time to make lunch at home—calling the Uber right now and I'll grab a sandwich past TSA security.",
+    "12:15 Take the Uber to the airport, clear TSA PreCheck at 13:05, and buy a turkey club and water bottle near Gate B14, eating until 13:50.",
+    "13:55 Text the app from the gate: through security and ate lunch at the terminal! Going to spend 30 minutes downloading podcasts and cleaning out my personal email inbox before boarding at 14:25.",
+    "13:55 Download flight podcasts and clear personal inbox at the gate until 14:25.",
+    "14:25 Board the 15:00 flight to Denver (lands at 19:15 local / 21:15 home time).",
+    "21:30 Check into the Denver hotel, unpack the suit so it doesn't wrinkle, and grab a late bite with college friends in the hotel bar until 23:00."
+  ],
+  "constraints": [
+    "Hard departure in an Uber to the airport at 12:15 for the 15:00 flight.",
+    "All home tasks (steaming suit, packing carry-on, emptying fridge perishables, dropping spare keys with neighbor, taking out trash) must be completed before 12:15.",
+    "Client follow-up sensitivity table must be emailed before turning on out-of-office at 11:15."
+  ],
+  "truth": [
+    {
+      "item": "Shower, breakfast & steam wedding suit",
+      "match": "shower|breakfast|steam|suit",
+      "start": "07:15",
+      "end": "08:25"
+    },
+    {
+      "item": "Prep client readout slides",
+      "match": "prep|slide|readout",
+      "start": "08:30",
+      "end": "09:30"
+    },
+    {
+      "item": "Client Q3 Readout call",
+      "match": "client.*readout|zoom|call",
+      "start": "09:30",
+      "end": "10:35"
+    },
+    {
+      "item": "Send client Excel sensitivity table & set OOO",
+      "match": "excel|sensitivity|email|ooo",
+      "start": "10:40",
+      "end": "11:15"
+    },
+    {
+      "item": "Pack carry-on & clear fridge perishables",
+      "match": "pack|carry-on|fridge",
+      "start": "11:20",
+      "end": "11:50"
+    },
+    {
+      "item": "Drop keys with Mrs. Gable & take out trash",
+      "match": "key|neighbor|gable|trash",
+      "start": "11:52",
+      "end": "12:15"
+    },
+    {
+      "item": "Uber to airport, TSA & terminal lunch",
+      "match": "uber|airport|tsa|lunch",
+      "start": "12:15",
+      "end": "13:50"
+    },
+    {
+      "item": "Download podcasts & clear inbox at gate",
+      "match": "podcast|inbox|gate",
+      "start": "13:55",
+      "end": "14:25"
+    },
+    {
+      "item": "Flight to Denver & hotel check-in",
+      "match": "flight|denver|board",
+      "start": "14:25",
+      "end": "21:30"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Client Q3 Strategy Readout",
+      "start": "09:30",
+      "end": "10:30"
+    },
+    {
+      "summary": "Flight UA 1482 to Denver (Boards 2:25 PM)",
+      "start": "15:00",
+      "end": "19:15"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Travel": "Always leaves for the airport 2h 45m before domestic flights."
+  },
+  "notes": [
+    {
+      "notebook": "Trips",
+      "title": "Denver Wedding Trip Prep",
+      "role": "project",
+      "body": "## Before 12:15 PM Uber\n- [ ] Steam navy suit & pack garment folder\n- [ ] Pack carry-on (dress shoes, belt, toiletries, chargers)\n- [ ] Empty fridge perishables & take trash down chute\n- [ ] Give spare keys to Mrs. Gable (4B) for plant watering\n- [x] Mobile check-in for UA 1482\n\n## At Airport / Gate\n- [ ] Download 3 episodes of Acquired podcast for plane\n- [ ] Clear personal email inbox"
+    },
+    {
+      "notebook": "Work",
+      "title": "Thursday Morning Half-Day",
+      "role": "today",
+      "body": "- [ ] Finalize executive summary slides before 9:30 AM\n- [ ] Send follow-up deliverables & turn on OOO auto-responder"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home Backlog",
+      "role": "list",
+      "body": "- [ ] Order replacement air purifier filter when back Monday\n- [ ] Schedule annual eye exam"
+    }
+  ]
+}

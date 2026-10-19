@@ -1,0 +1,150 @@
+{
+  "id": "parent_teenager_orthodontist",
+  "date": "2026-10-15",
+  "source": "made up: working parent of a teenager juggling an afternoon orthodontist run, work calls, and dinner",
+  "wake": "06:45",
+  "bed": "22:45",
+  "work": [
+    "08:30",
+    "17:30"
+  ],
+  "persona": "Claire, an HR director working from home and parenting 14-year-old Lucas. Texts pragmatically with dry humor about teenager logistics, blocks her calendar around picking Lucas up early from high school at 14:15 for his 14:45 orthodontist wire adjustment, and has to pivot when he asks for soft foods after his braces get tightened.",
+  "situation": "Thursday morning at 06:45. Working remotely 08:30–17:30 with a 10:00 benefits renewal meeting and a 16:00 candidate interview, plus signing Lucas out of school at 14:15 for his 14:45–15:30 orthodontist appointment.",
+  "life": [
+    "06:55 Wake up and text the app: Thursday plan! Need to make sure Lucas is awake and out the door for the school bus by 07:30, walk the dog and eat breakfast before 08:30, work 08:30–17:30 (with a break from 14:00 to 15:45 to pick Lucas up from high school, take him to his 14:45 orthodontist appointment, and bring him home before my 16:00 interview), then make dinner at 18:00.",
+    "07:00 Remind the app that during work today I need 90 minutes to review the 2027 open enrollment benefit guide PDF, 45 minutes to prep questions for the 16:00 VP of Finance interview, and 15 minutes this morning to call the high school attendance office so Lucas gets an early dismissal pass for 14:15.",
+    "07:05 Knock on Lucas's door twice, make coffee and toast, see him out to the bus at 07:30, and walk the golden retriever until 08:20.",
+    "08:25 Report Lucas on the bus, dog walked, and breakfast done. Calling the high school attendance office right now before my 08:30 work start.",
+    "08:25 Call the attendance line to request Lucas's 14:15 early dismissal pass, then start reviewing the 2027 open enrollment benefits guide PDF until 09:55.",
+    "09:58 Report attendance office called and benefits guide review done! Joining the 10:00 Benefits Broker Renewal meeting.",
+    "10:00 Attend Benefits Broker Renewal meeting until 11:15 (ran 15 minutes over discussing dental tier pricing).",
+    "11:18 Text the app: broker meeting ran until 11:15. Going to prep the interview scorecard and questions for the 16:00 VP candidate right now before lunch.",
+    "11:20 Draft the interview scorecard and behavioral questions in Ashby until 12:10.",
+    "12:12 Report interview prep done! Heating up minestrone soup for lunch and throwing a load of bath towels in the washer.",
+    "12:15 Eat lunch and start towel laundry until 13:00.",
+    "13:02 Report lunch done. Answering employee HR tickets and updating the open enrollment slide deck until 14:00.",
+    "14:00 Leave the house to pick Lucas up at the high school front office at 14:15 and drive to the 14:45 orthodontist appointment.",
+    "14:45 Orthodontist puts a heavier archwire on Lucas's braces; appointment finishes at 15:25 and Lucas says his teeth already ache too much to chew the crispy baked tacos planned for dinner.",
+    "15:30 Text the app from the car: orthodontist done, heading home for my 16:00 interview! Lucas's teeth are super sore from the new wire, so swap tonight's dinner from baked tacos to mashed potatoes and broccoli cheddar soup, and add a 25-minute grocery stop at 17:35 right after work to grab Yukon gold potatoes and soup.",
+    "15:48 Arrive home, grab a glass of water, and join the 16:00–17:00 VP of Finance candidate interview on Zoom.",
+    "17:00 Write up candidate feedback in Ashby and wrap up afternoon Slack messages until 17:35.",
+    "17:36 Report interview and feedback done! Running 5 minutes down the road to the grocery store for potatoes, cheddar, and ice cream for Lucas.",
+    "17:38 Quick grocery run, returning home at 18:05.",
+    "18:10 Make broccoli cheddar soup and garlic mashed potatoes, eat dinner with Lucas, and load the dishwasher until 19:35.",
+    "19:40 Report dinner and dishes done. Fold the clean bath towels from earlier while watching TV until 20:15, then read until bed at 22:45."
+  ],
+  "constraints": [
+    "High school attendance office must be called before 09:00 to issue a 14:15 early dismissal pass.",
+    "Must leave home at 14:00 for school pick-up and return by 15:50 for the 16:00 candidate interview.",
+    "After an orthodontist wire tightening, dinner must be soft food (soup/mashed potatoes) rather than crunchy tacos."
+  ],
+  "truth": [
+    {
+      "item": "Teenager bus send-off, breakfast & dog walk",
+      "match": "lucas|bus|dog|walk|breakfast",
+      "start": "07:05",
+      "end": "08:20"
+    },
+    {
+      "item": "Call school attendance & review 2027 benefits guide",
+      "match": "attendance|benefit|open enrollment|review",
+      "start": "08:25",
+      "end": "09:55"
+    },
+    {
+      "item": "Benefits Broker Renewal meeting",
+      "match": "broker|renewal|meeting",
+      "start": "10:00",
+      "end": "11:15"
+    },
+    {
+      "item": "Prep VP of Finance interview scorecard",
+      "match": "prep|scorecard|interview",
+      "start": "11:20",
+      "end": "12:10"
+    },
+    {
+      "item": "Lunch & start towel laundry",
+      "match": "lunch|soup|towel|laundry",
+      "start": "12:15",
+      "end": "13:00"
+    },
+    {
+      "item": "HR tickets & open enrollment slides",
+      "match": "hr|ticket|slide",
+      "start": "13:02",
+      "end": "14:00"
+    },
+    {
+      "item": "School pick-up & Lucas orthodontist appointment",
+      "match": "orthodontist|school|lucas",
+      "start": "14:00",
+      "end": "15:48"
+    },
+    {
+      "item": "VP of Finance interview & Ashby feedback",
+      "match": "vp|finance|interview|feedback",
+      "start": "16:00",
+      "end": "17:35"
+    },
+    {
+      "item": "Quick grocery run for soft dinner foods",
+      "match": "grocer|potato|store",
+      "start": "17:38",
+      "end": "18:05"
+    },
+    {
+      "item": "Make soup & mashed potatoes dinner",
+      "match": "dinner|soup|mashed|potato",
+      "start": "18:10",
+      "end": "19:35"
+    },
+    {
+      "item": "Fold bath towels",
+      "match": "fold|towel",
+      "start": "19:40",
+      "end": "20:15"
+    }
+  ],
+  "events": [
+    {
+      "summary": "2027 Benefits Broker Renewal Sync",
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "summary": "Lucas - Orthodontist Adjustment (Pick up at 2:15)",
+      "start": "14:45",
+      "end": "15:30"
+    },
+    {
+      "summary": "Interview: VP of Finance Candidate",
+      "start": "16:00",
+      "end": "17:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Family": "Son Lucas (14, freshman in high school); golden retriever."
+  },
+  "notes": [
+    {
+      "notebook": "Work",
+      "title": "HR Priorities",
+      "role": "today",
+      "body": "- [ ] Review 2027 Open Enrollment benefit guide PDF\n- [ ] Prep Ashby scorecard for 4 PM VP of Finance interview\n- [ ] Update Open Enrollment town hall slide deck\n- [ ] Submit candidate feedback after 4 PM interview"
+    },
+    {
+      "notebook": "Home",
+      "title": "Family & House",
+      "role": "list",
+      "body": "- [ ] Call high school attendance line before 9 AM for Lucas 2:15 early dismissal\n- [ ] Wash & fold bath towels\n- [ ] Make dinner at 6 PM\n- [ ] Pay orthodontist quarterly installment"
+    },
+    {
+      "notebook": "Home",
+      "title": "Morning Routine",
+      "role": "routine",
+      "body": "- [ ] Wake Lucas & get him to 7:30 bus\n- [ ] Coffee & toast\n- [ ] 30-min morning dog walk"
+    }
+  ]
+}
