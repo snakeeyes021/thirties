@@ -366,7 +366,8 @@ class PlanTools:
         Activities, tasks and calendar items may sit on top of work and sleep, but not on
         each other. Work and sleep only conflict with another span of the same kind.
         """
-        others = [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id]
+        others = [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
+                  and s.status != SpanStatus.SKIPPED]  # a skipped item didn't happen: its time is free
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
         return [s for s in others if not s.is_envelope]
@@ -716,7 +717,7 @@ class PlanTools:
         if lo >= hi:
             return []
         busy = _merge_intervals([(max(s.start_dt, lo), min(s.end_dt, hi))
-                                 for s in self.day_plan.spans_overlapping(lo, hi)])
+                                 for s in self.day_plan.spans_overlapping(lo, hi) if s.status != SpanStatus.SKIPPED])
         windows, cursor = [], lo
         for b_start, b_end in busy:
             if b_start > cursor:

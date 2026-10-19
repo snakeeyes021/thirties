@@ -124,9 +124,10 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("email recruiter 9 to 10 and push the natalie listening to 10 to 11",
                        {"type": "add", "title": "Email recruiter", "start": "9", "end": "10"},
                        {"type": "move", "target": "natalie listening", "start": "10", "end": "11"})
-        self.assertIn("Moved Natalie listening to 10:00 PM – 11:00 PM", out)
         self.assertIn("Added Email recruiter: 9:00 PM – 10:00 PM", out)
+        self.assertIn("Natalie listening now 10:00 PM – 11:00 PM", out)  # slid along by the add, as asked
         self.assertNotIn("overlap", out)
+        self.assertNotIn("couldn't", out)
 
     def test_tool_errors_are_humane(self):
         self.say("reading 8 to 9", {"type": "add", "title": "Reading", "start": "8", "end": "9"})
@@ -246,13 +247,13 @@ class TestSchedulingActions(SlmTestCase):
                                                          "duration": "30 minutes", "day": "tomorrow"})
         out = self.say("walk tmrw at 7:30 for an hour", {"type": "add", "title": "Walk", "start": "7:30 AM",
                                                           "duration": "1 hour", "day": "tomorrow"})
-        self.assertIn("would overlap Email the recruiter", out)
-        out = self.say("no, move the recruiter email to 8:30 instead", {"type": "reject"},
-                       {"type": "move", "target": "recruiter email", "start": "8:30 AM"})
+        self.assertIn("To make room: Email the recruiter now 8:30 AM – 9:00 AM", out)  # slid, not a question
+        out = self.say("actually move the recruiter email to 9:30", {"type": "move", "target": "recruiter email",
+                                                                      "start": "9:30 AM"})
         self.assertIn("Moved", out)
         tomorrow = self.sched.build_day_plan(DAY + timedelta(days=1))[0]
         email = next(s for s in tomorrow.spans if s.title == "Email the recruiter")
-        self.assertEqual(email.start_dt.strftime("%H:%M"), "08:30")
+        self.assertEqual(email.start_dt.strftime("%H:%M"), "09:30")
 
     def test_guards_against_common_misparses(self):
         self.say("composing 7 to 8", {"type": "add", "title": "Composing", "start": "7", "end": "8"})
@@ -595,6 +596,37 @@ class TestMessages(SlmTestCase):
         self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
         out = self.say("yes please", {"type": "chat"})
         self.assertIn("Rolled into today:\n- 7:00 PM – Taxes", out)
+
+
+class TestFromTheMilestoneRun(SlmTestCase):
+    """Failures the 0.1 milestone day sim found."""
+
+    def test_starting_something_isnt_finishing_it(self):
+        self.say("laundry at 5", {"type": "add", "title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
+        out = self.say("starting laundry now", {"type": "outcome", "target": "laundry", "status": "done"})
+        self.assertEqual(out, "Got it, Laundry is underway.")
+        laundry = next(s for s in self.m.day_plan.spans if s.title == "Laundry")
+        self.assertEqual(laundry.status.value, "planned")
+
+    def test_a_reported_time_is_the_most_recent_one(self):
+        set_debug_time(at("19:40"))
+        self.say("dinner at 6:30", {"type": "add", "title": "Dinner", "start": "6:30 PM", "duration": "1 hour"})
+        self.say("finished dinner at 7:30, started at 6:40", {"type": "outcome", "target": "dinner", "status": "done",
+                                                               "started": "6:40", "finished": "7:30"})
+        dinner = next(s for s in self.m.day_plan.spans if s.title == "Dinner")
+        self.assertEqual(dinner.actual_start.strftime("%H:%M"), "18:40")  # this evening, not 6:40 this morning
+
+    def test_a_question_about_one_list(self):
+        from thirties_core.models import TaskItem
+        self.brain.tasks = [TaskItem(id=f"h{i}", source_notebook="Tasks", title=t, is_checkbox_item=True,
+                                     parent_note_title="Home", parent_note_id="n_home")
+                            for i, t in enumerate(("Hide the cable", "Fix the door"))]
+        out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
+        self.assertEqual(out, "On Home:\n- Hide the cable\n- Fix the door")
+
+    def test_calendar_events_need_no_checking_off(self):
+        out = self.say("dentist done", {"type": "outcome", "target": "dentist", "status": "done"})
+        self.assertEqual(out, "Dentist is on your calendar, so there's nothing to check off.")
 
 
 class TestFromTheDaySim(unittest.TestCase):

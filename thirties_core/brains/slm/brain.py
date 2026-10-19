@@ -87,6 +87,9 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
 
 
 MAX_MESSAGE_CHARS = 2000
+STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to|into)|going to start|getting started|now doing|"
+                         r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
+FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed)\b", re.I)
 DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
@@ -276,7 +279,7 @@ class SlmBrain:
     # --- 2. resolution helpers ---
 
     def _loose_time(self, text: str, after: Optional[datetime] = None, prefer_future: bool = True,
-                    near: Optional[datetime] = None) -> datetime:
+                    near: Optional[datetime] = None, recent_past: bool = False) -> datetime:
         """A clock time on the planned day; adds AM/PM sensibly when the user left it out."""
         plan = self.tools.day_plan
         raw = str(text).strip().lower().replace("in the ", "").replace("this ", "")
@@ -321,6 +324,11 @@ class SlmBrain:
             raise ClockError(f"I couldn't place '{text}' on {plan.target_date.strftime('%A')}.")
         if after is not None:
             return min(candidates)
+        if recent_past and self._is_today():  # "finished at 6:30", said at 7 PM: 6:30 PM, not this morning
+            now = self._now()
+            past = [dt for dt in candidates if dt <= now + timedelta(minutes=15)]
+            if past:
+                return max(past)
         if near is not None and len(candidates) > 1:
             return min(candidates, key=lambda dt: abs(dt.timestamp() - near.timestamp()))
         now = self._now()
@@ -903,23 +911,30 @@ class SlmBrain:
             args["task_id"] = task.id
         ok, out = self._run("add_event", args)
         if ok:
-            span = self._span_from_result(out, day)
-            self._remember(span)
-            text = self._added_line(out)
-            heads_up = re.search(r"Weather heads-up: (.+?)\.(?:\s|$)", out)
-            if heads_up:
-                text += f" Heads-up: {heads_up.group(1)}."
-            if guessed:
-                text += " (I guessed an hour; tell me if it's different.)"
-            elif learned:
-                text += " (about as long as it usually takes you)"
-            slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
-            if slid:
-                text += "\nTo make room: " + "; ".join(slid) + "."
-            return text, True
+            return self._added_reply(out, day, guessed, learned)
+        if "would overlap" in out and "fixed calendar commitment" not in out and not args.get("push_later"):
+            ok, pushed = self._run("add_event", {**args, "push_later": True})  # slide what follows, like Gemini
+            if ok:
+                return self._added_reply(pushed, day, guessed, learned)
         if alternatives and "would overlap" in out:
             return self._offer_alternatives(args, out), False
         return f"I couldn't add {args['title']}: {out}", False
+
+    def _added_reply(self, out: str, day: Optional[str], guessed: bool, learned: bool) -> Tuple[str, bool]:
+        span = self._span_from_result(out, day)
+        self._remember(span)
+        text = self._added_line(out)
+        heads_up = re.search(r"Weather heads-up: (.+?)\.(?:\s|$)", out)
+        if heads_up:
+            text += f" Heads-up: {heads_up.group(1)}."
+        if guessed:
+            text += " (I guessed an hour; tell me if it's different.)"
+        elif learned:
+            text += " (about as long as it usually takes you)"
+        slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
+        if slid:
+            text += "\nTo make room: " + "; ".join(slid) + "."
+        return text, True
 
     def _span_from_result(self, out: str, day: Optional[str]) -> Optional[EventSpan]:
         m = re.search(r"\[id ([0-9a-f]+)\]", out)
@@ -1122,6 +1137,9 @@ class SlmBrain:
         if not any(k in args for k in ("shift", "start", "end", "duration")):
             return f"How should I change {span.title}?", False
         ok, out = self._run("update_event", args)
+        if not ok and "Nothing to change" in out:  # already where they asked (an earlier step slid it there)
+            self._remember(span)
+            return f"{span.title} is at {format_clock(span.start_dt)} – {format_clock(span.end_dt)}.", False
         if not ok:
             return f"I couldn't change {span.title}: {out}", False
         self._remember(span)
@@ -1181,13 +1199,19 @@ class SlmBrain:
     def _do_outcome(self, a: Action) -> Tuple[str, bool]:
         ref = a.get("target") or a.get("title") or ""
         found = self._span_candidates(ref) if ref.lower() not in PRONOUNS or self.state.last_ids else []
+        if found and all(s.source == "calendar" for s in found):
+            return f"{found[0].title} is on your calendar, so there's nothing to check off.", False
         found = [s for s in found if not s.is_envelope and s.source != "calendar"]
+        message = getattr(self, "_message", "") or ""
+        if (a.get("status") or "done") == "done" and STARTING_RE.search(message) and not FINISHED_RE.search(message):
+            name = found[0].title if len(found) == 1 else ref
+            return f"Got it, {name} is underway.", False  # starting something isn't finishing it
         event = found[0].id if len(found) == 1 else ref
         args: Dict[str, Any] = {"event": event, "status": a.get("status") or "done"}
         for key in ("started", "finished"):
             if a.get(key):
                 try:
-                    args[key] = self._clock_arg(self._loose_time(a.get(key), prefer_future=False))
+                    args[key] = self._clock_arg(self._loose_time(a.get(key), prefer_future=False, recent_past=True))
                 except ClockError:
                     pass
         if a.get("duration"):
@@ -1196,7 +1220,7 @@ class SlmBrain:
             args["estimated"] = True
         ok, out = self._run("log_outcome", args)
         if not ok:
-            return f"I couldn't find {ref} to mark it: {out}", False
+            return f"I couldn't find {ref} on today's plan to mark it.", False
         status = args["status"]
         name = found[0].title if len(found) == 1 else ref
         if status == "done":
@@ -1618,6 +1642,14 @@ class SlmBrain:
         message = getattr(self, "_message", "")
         if (not day or day == "today") and LEFT_TODAY_RE.search(f"{topic} {message}"):
             return self._left_today(), False
+        named_list = self._list_named(message)
+        if named_list:  # "what's on my Home list?": that list's open items
+            items = [t.title for t in self.tasks if t.parent_note_title == named_list and not t.someday
+                     and not t.parent_task_id]
+            if not items:
+                return f"Nothing open on {named_list}.", False
+            return f"On {named_list}:\n" + "\n".join(f"- {t}" for t in items[:12]) + \
+                (f"\n(and {len(items) - 12} more)" if len(items) > 12 else ""), False
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:
@@ -1629,6 +1661,15 @@ class SlmBrain:
             ok, out = self._run("search_history", {"query": topic})
             return out, False
         return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    def _list_named(self, message: str) -> Optional[str]:
+        """The list a question names ("my Home list", "the errands list", "on Medical"), if any."""
+        if not re.search(r"\b(list|note|on my|on the)\b", message, re.I):
+            return None
+        said = {_stem(w) for w in _words(message)}
+        names = {t.parent_note_title for t in self.tasks if t.parent_note_title}
+        hits = [n for n in names if {_stem(w) for w in _words(n)} and {_stem(w) for w in _words(n)} <= said]
+        return max(hits, key=len) if hits else None
 
     def _left_today(self) -> str:
         """What's left today: the rest of the plan (what's past and not reported, then what's ahead), and
