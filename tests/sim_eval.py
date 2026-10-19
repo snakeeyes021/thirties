@@ -94,6 +94,7 @@ class SimScenario:
     opening: str = ""
     max_turns: int = 10
     hide_tasks: List[str] = field(default_factory=list)  # backlog titles this scenario assumes aren't there
+    background_calendar: bool = True  # add synthetic_calendar's weekday standups and choir (not for day scripts)
     tags: List[str] = field(default_factory=list)  # goal kinds, for per-kind results
 
 
@@ -642,7 +643,7 @@ def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: Li
     cfg = load_config()
     cfg.assistant.brain = brain
     cfg.sync.enabled = False
-    events = synthetic_calendar(scn.day) + list(scn.extra_events)
+    events = (synthetic_calendar(scn.day) if scn.background_calendar else []) + list(scn.extra_events)
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp(prefix="sim_")) / "state.sqlite"),
                                    MockCalendarEngine(events))
     plan, pending = sched.build_day_plan(scn.day)

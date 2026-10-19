@@ -118,7 +118,8 @@ class DayScript:
         events = [cal(self.day, f"day-{i}", e["summary"], e["start"], e["end"], invite=bool(e.get("invite")))
                   for i, e in enumerate(self.events)]
         return SimScenario(self.id, self.day, self.wake, self.persona, self.situation, goals=[],
-                           extra_events=events, setup=setup, profile=dict(self.profile))
+                           extra_events=events, setup=setup, profile=dict(self.profile),
+                           background_calendar=False)  # a script's calendar is exactly its own events
 
 
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
