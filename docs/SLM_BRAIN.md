@@ -212,6 +212,8 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 | SLM | other people | 31 | 0.51 | 3.8/10 | 0.26 | 64% | 1.9 | 3.5 |
 | SLM | the user | 22 | 0.48 | 3.0/10 | 0.22 | 50% | 1.2 | 3.3 |
 
+  Gemma check after 9b6ee9a (the same 10 days): plan respect back to 2.0 (from 1.6), rating 3.6 against 3.1 and 3.3 for the baseline's two runs, requests met 0.55 against 0.52 and 0.54. Small gains, at the edge of the noise; the plan-respect regression is gone.
+
   No minute times or internal text on any day. The two worst Frontier days were people insisting on a minute-precise time ("3:15, not 3:00"; "leaving at 12:15, don't book for 12:00") while the rounding kept saying the block; a reply now keeps minutes when the user gave them (113737e).
 
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
