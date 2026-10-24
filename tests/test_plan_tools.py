@@ -59,6 +59,26 @@ class TestAddEvent(unittest.TestCase):
         self.assertEqual(occupant(t.day_plan, "18:00"), "Composing")
         self.assertEqual(occupant(t.day_plan, "18:30"), "Dinner")
 
+    def test_replacing_never_wipes_out_an_item(self) -> None:
+        t = tools_for()
+        t.execute("add_event", {"title": "Throne", "start": "3:00 PM", "duration": "30 min"})
+        out = t.execute("add_event", {"title": "Shower", "start": "3:00 PM", "duration": "30 min",
+                                      "replace_overlaps": True})
+        self.assertTrue(out.startswith(NOT_DONE) and "alongside" in out, out)  # 10-21: "removed Throne"
+        self.assertEqual(occupant(t.day_plan, "15:00"), "Throne")
+
+    def test_fixed_things_keep_their_minutes_and_flexible_ones_keep_to_blocks(self) -> None:
+        t = tools_for()
+        out = t.execute("add_event", {"title": "Uber to the airport", "start": "12:15 PM", "duration": "30 min"})
+        self.assertTrue(out.startswith("Added Uber to the airport, 12:15 PM – 12:45 PM (30m) (blocks 12:00 PM – "
+                                       "1:00 PM, fixed)"), out)
+        out = t.execute("add_event", {"title": "Packing", "start": "3:45 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith("Added Packing, 4:00 PM – 5:00 PM (1h)"), out)  # flexible: the next block
+        out = t.execute("add_event", {"title": "Hold music", "start": "5:15 PM", "duration": "1 hour", "fixed": True})
+        self.assertIn("5:15 PM – 6:15 PM", out)
+        out = t.execute("add_event", {"title": "Laundry", "start": "6:00 PM", "duration": "30 min", "push_later": True})
+        self.assertTrue(out.startswith(NOT_DONE) and "Hold music" in out, out)  # a fixed thing doesn't slide
+
     def test_bad_input_is_reported_not_raised(self) -> None:
         t = tools_for()
         for args in ({"title": "X", "start": "5:00"}, {"title": "X", "start": "5:00 PM"},

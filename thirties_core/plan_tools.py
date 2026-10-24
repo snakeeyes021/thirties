@@ -449,6 +449,13 @@ class PlanTools:
                 + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in conflicts)
                 + ". Ask the user, then retry with replace_overlaps=true, move it, or pick another time."
             )
+        kept = [s for s in conflicts if self._is_fixed(s) or s.status != SpanStatus.PLANNED
+                or (span.start_dt <= s.start_dt and s.end_dt <= span.end_dt)]
+        if kept:  # replacing only trims: it never deletes an item, a fixed one, or one that already happened
+            raise ToolError(
+                f"{span.title} would wipe out " + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in kept)
+                + ". To keep both, add it with alongside=true (same time) or push_later=true (slide what follows); "
+                "to drop that item, the user has to say so, then remove_event it.")
         return [self._carve(s, span.start_dt, span.end_dt) for s in conflicts]
 
     def _movable(self, span: EventSpan) -> bool:
@@ -549,9 +556,10 @@ class PlanTools:
         if _as_bool(alongside):
             notes = []
         elif _as_bool(push_later) and not span.is_envelope:
-            firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt) if c.is_firm or c.source == "calendar"]
+            firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
+                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
             if firm:
-                raise ToolError(f"{span.title} would overlap {firm[0].title}, a fixed calendar commitment.")
+                raise ToolError(f"{span.title} would overlap {self.describe(firm[0])}, which is fixed.")
             notes = self._push_following(span)
         else:
             notes = self._place(span, _as_bool(replace_overlaps))
