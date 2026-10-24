@@ -262,6 +262,12 @@ Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commi
 - **The version number is bumped at the start of a version's branch** (`meson.build` and a `<release>` entry in `data/tech.redfoxlabs.Thirties.metainfo.xml.in`, which serves as the release notes). Builds say what they are: version plus commit (About, logs, and each stored message).
 - **The branch is pushed as work lands**, with a draft PR to `main`, so "what's in 0.x" is always that PR's commit list. Commit freely; push when the user has seen the work (or says so).
 - **Releasing:** the user says the version is good after real use; the PR is marked ready and the user merges it. Then the merge commit on `main` is tagged `vX.Y.Z` and the tag pushed; CI publishes the GitHub pre-release with the Flatpak bundle.
+- **A release is a ratchet, not "done":** safe, better than the last release, no worse anywhere. Every friction the user reports gets a tag, proposed by the agent and overruled by the user if they disagree:
+  - **Blocker:** it harms the user's data (wrong Joplin writes, lost items, wrong stored times), it's worse than the last release, or it breaks the version's headline feature. Fixed before release.
+  - **Polish:** in scope and small (hours). Fixed on the branch if cheap, else the next version.
+  - **Next:** new capability, a design question, or out of scope. Goes into ROADMAP.md for a later version.
+- **A version merges when:** there are no open blockers; the user has used it for 3 real days with no new blocker (polish and next items don't reset the clock); and the paired day sim is no worse than the last release (requests met, user rating, zero internal text, unit tests green). Time box: about a week, after which what's there ships if those hold. A blocker found after a release gets a patch release (`0.x.1`) off `main`, carried into the current branch.
+- **The agent runs this process:** it tags frictions, tracks the 3-day clock, says when a version meets the bar, proposes the release, and tells the user what's theirs to do next.
 - **ROADMAP.md** names what each version contains; finished items are checked off there.
 - **Eval copies** (worktrees, `eval/*` branches) are local only and never pushed.
 - **Every reply that changes git ends with a status line:** the branch, the commits, whether they're pushed, and whether anything is running or scheduled.
