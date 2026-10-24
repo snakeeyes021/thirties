@@ -102,3 +102,21 @@ class TestDaySim(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMessageLevel(unittest.TestCase):
+
+    def test_each_person_picks_their_level_once(self):
+        import dataclasses
+        import tempfile
+        import tests.day_sim as ds
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ds, "LEVELS_FILE", Path(tmp) / "levels.json"):
+            asked = []
+
+            def sim(prompt):
+                asked.append(prompt)
+                return "High, I like to hear about everything."
+            self.assertEqual(ds.message_level(SCRIPT, sim), "heavy")
+            self.assertEqual(ds.message_level(SCRIPT, sim), "heavy")  # kept: paired runs use the same level
+            self.assertEqual(len(asked), 1)
+            self.assertEqual(ds.message_level(dataclasses.replace(SCRIPT, message_level="light"), sim), "light")

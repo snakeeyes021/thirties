@@ -91,6 +91,7 @@ class DayScript:
     source: str = ""
     # The person's own lists, if not the user's real Joplin: {"notebook", "title", "role", "body" (markdown)}
     notes: List[Dict[str, str]] = field(default_factory=list)
+    message_level: str = ""  # off / light / medium / heavy, as this person would set it (asked once if missing)
 
     def own_backlog(self) -> Tuple[List[TaskItem], List[Dict[str, Any]]]:
         """Tasks and notes from the script's own lists (note ids are made up and stable)."""
@@ -245,6 +246,7 @@ Honestly, in character: how was it? Return ONLY a JSON object:
 class DayRun:
     script: DayScript
     brain: str
+    message_level: str = ""
     manager: Any = None
     scheduler: Any = None
     service: Any = None
@@ -284,7 +286,35 @@ def _hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
 
-def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str = "") -> DayRun:
+LEVEL_PROMPT = """You are this person: {persona}
+
+You've just installed a planning assistant app. In its settings it asks how often it should message you:
+- Off: never (only pings you ask for)
+- Light: a heads-up shortly before each calendar event
+- Medium: what's planned at the start of each stretch of the day, and one check-in at its end
+- High: when each thing starts, and a check-in after each one
+
+Which would you pick? Answer with one word: Off, Light, Medium or High."""
+LEVELS_FILE = REPO_ROOT / "docs" / "eval_reports" / "day_scripts" / "message_levels.json"
+
+
+def message_level(script: DayScript, sim) -> str:
+    """The message level this person chose, like a real user at setup: from the script, else asked once and
+    kept (docs/eval_reports/day_scripts/message_levels.json), so paired runs use the same level."""
+    if script.message_level:
+        return script.message_level
+    known = json.loads(LEVELS_FILE.read_text()) if LEVELS_FILE.exists() else {}
+    if script.id not in known and sim is not None:
+        answer = (sim(LEVEL_PROMPT.format(persona=script.persona)) or "").strip().lower()
+        level = next((k for word, k in (("off", "off"), ("light", "light"), ("medium", "medium"), ("high", "heavy"))
+                      if word in answer), "medium")
+        known[script.id] = level
+        LEVELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LEVELS_FILE.write_text(json.dumps(known, indent=2, sort_keys=True))
+    return known.get(script.id, "medium")
+
+
+def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str = "", sim=None) -> DayRun:
     run = DayRun(script, brain)
     set_debug_time(at(script.day, script.wake))
     if script.notes:  # someone else's life: their own lists, with the roles they'd confirm at setup
@@ -310,6 +340,7 @@ def start_day(script: DayScript, brain: str, tasks, notes, engine, lists_db: str
         except ImportError:
             pass  # a version without list roles
     cfg = run.scheduler.config
+    cfg.assistant.message_level = run.message_level = message_level(script, sim)  # chosen by the person
     cfg.assistant.checkins = True
     cfg.telegram.notify_block_transitions = True
 
@@ -513,7 +544,7 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         print(f"\n== {script.id} [{brain}] ({n}/{len(jobs)})", flush=True)
         run = None
         try:
-            run = start_day(script, brain, tasks, notes, engine, args.lists_from)
+            run = start_day(script, brain, tasks, notes, engine, args.lists_from, sim)
             live_day(run, sim, args.max_moves)
             run.facts = measure(run)
             judge_day(run, judge, sim)
@@ -527,6 +558,7 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
             set_debug_time(None)
         result = {
             "script": script.id, "brain": brain, "end_reason": run.end_reason, "error": run.error,
+            "message_level": getattr(run, "message_level", ""),
             "requests_met": requests_met(run.judge), "judge": run.judge, "rating": run.rating, "facts": run.facts,
             "mean_latency": round(sum(run.latencies) / len(run.latencies), 1) if run.latencies else None,
             "log": run.log, "record": run.record_text() if run.scheduler else "",

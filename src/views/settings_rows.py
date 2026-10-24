@@ -571,11 +571,11 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                              "asleep or in a calendar event. Desktop notifications can be switched off "
                                              "in GNOME Settings → Apps → Thirties.")
     cfg = ctx.config()
-    levels = [("light", "Before calendar events", "A heads-up shortly before each calendar event"),
-              ("medium", "A few times a day", "What's planned at the start of each stretch of the day, and one "
-                                               "check-in at its end (plus heads-ups before calendar events)"),
-              ("heavy", "For every item", "When each thing starts, and a check-in after each one"),
-              ("off", "Never", "Only the reminders you ask for")]
+    levels = [("light", "Light: before calendar events", "A heads-up shortly before each calendar event"),
+              ("medium", "Medium: a few times a day", "What's planned at the start of each stretch of the day, and "
+                                                      "one check-in at its end (plus heads-ups before calendar events)"),
+              ("heavy", "High: for every item", "When each thing starts, and a check-in after each one"),
+              ("off", "Off: never", "Only the pings you ask for")]
     level = Adw.ComboRow(title="How often Thirties messages you",
                          model=Gtk.StringList.new([name for _, name, _ in levels]))
     current = getattr(cfg.assistant, "message_level", "medium")
