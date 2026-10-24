@@ -608,6 +608,11 @@ class TestFromTheMilestoneRun(SlmTestCase):
         laundry = next(s for s in self.m.day_plan.spans if s.title == "Laundry")
         self.assertEqual(laundry.status.value, "planned")
 
+    def test_done_words_win_over_starting_words(self):
+        from thirties_core.brains.slm.brain import FINISHED_RE, STARTING_RE
+        for text in ("flour order in, made the cutoff, starting on the bread", "sent the email, heading out now"):
+            self.assertTrue(STARTING_RE.search(text) and FINISHED_RE.search(text), text)
+
     def test_a_reported_time_is_the_most_recent_one(self):
         set_debug_time(at("19:40"))
         self.say("dinner at 6:30", {"type": "add", "title": "Dinner", "start": "6:30 PM", "duration": "1 hour"})

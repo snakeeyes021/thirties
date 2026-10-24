@@ -71,6 +71,14 @@ class TestRedraw(unittest.TestCase):
         times = self.times()
         self.assertEqual(times["Audiobook"], times["Shower"])
 
+    def test_sliding_never_pushes_into_bedtime_or_moves_whats_happening(self):
+        self.t.execute("add_event", {"title": "Prep clothes", "start": "10:00 PM", "duration": "1 hour"})
+        out = self.t.execute("add_event", {"title": "Bath", "start": "9:30 PM", "duration": "1 hour", "push_later": True})
+        self.assertTrue(out.startswith(NOT_DONE) and "bedtime" in out, out)
+        set_debug_time(at("17:40"))  # the walk (5:30 – 6:30) is happening now
+        self.t.execute("add_event", {"title": "Call", "start": "5:30 PM", "duration": "30 min", "push_later": True})
+        self.assertEqual(self.times()["Walk"], ("5:30 PM", "6:30 PM"))
+
     def test_facts_need_real_items(self):
         self.assertTrue(self.t.execute("set_item_facts", {"event": "walk", "after": "Walk"}).startswith(NOT_DONE))
         self.assertTrue(self.t.execute("set_item_facts", {"event": "walk", "after": "Nap"}).startswith(NOT_DONE))

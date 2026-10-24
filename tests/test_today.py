@@ -228,6 +228,12 @@ class TestMorning(TodayTestCase):
         titles = [p["title"] for p in self.t.assistant.rollover_plan()]
         self.assertEqual(titles, ["Return the library books"])
 
+    def test_an_unanswered_morning_offer_expires(self):
+        self.t.execute("rollover_proposal", {})
+        self.assertTrue(self.t.assistant.rollover_pending())
+        set_debug_time(at("15:00"))  # five hours later
+        self.assertFalse(self.t.assistant.rollover_pending())
+
     def test_the_morning_proposal_keeps_drops_and_adds(self):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})

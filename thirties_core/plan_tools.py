@@ -431,9 +431,12 @@ class PlanTools:
         """Slide planned activities that collide with ``anchor`` (and each other) later, keeping order."""
         cursor = anchor.end_dt
         moved: List[Tuple[EventSpan, timedelta]] = []
+        now = self._now()
         followers = sorted((s for s in self.day_plan.active_spans()
                             if s.id != anchor.id and self._movable(s) and s.end_dt > anchor.start_dt
-                            and s.start_dt >= anchor.start_dt - timedelta(minutes=1)), key=lambda s: s.start_dt)
+                            and s.start_dt >= anchor.start_dt - timedelta(minutes=1)
+                            and s.status == SpanStatus.PLANNED and not (s.start_dt <= now < s.end_dt)),
+                           key=lambda s: s.start_dt)  # what's done, or happening right now, stays where it is
         for span in followers:
             if span.start_dt >= cursor:
                 break
@@ -448,6 +451,10 @@ class PlanTools:
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
+            sleep = [c for c in self.day_plan.spans_overlapping(new_start, new_end) if c.category == SpanCategory.SLEEP]
+            if sleep:
+                raise ToolError(f"Sliding {span.title} later would push it into bedtime "
+                                f"({format_clock(sleep[0].start_dt)}).")
         notes = []
         for span, delta in moved:
             span.start_dt, span.end_dt = span.start_dt + delta, span.end_dt + delta

@@ -99,7 +99,8 @@ URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgen
                         r"is due by \w+|by \w+ at the latest)\b", re.I)
 STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to|into)|going to start|getting started|now doing|"
                          r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
-FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed)\b", re.I)
+FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed|made|sent|submitted|"
+                         r"placed|ordered|picked up|got (it|back|home)|back from|returned|is in|are in|went)\b", re.I)
 DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 

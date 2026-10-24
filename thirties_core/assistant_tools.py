@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
@@ -830,7 +830,8 @@ class AssistantTools:
             return "Nothing from yesterday is waiting: everything has an outcome."
         if self._db:
             import json
-            self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "today": carry, "state": "offered"}))
+            self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "today": carry, "state": "offered",
+                                                                     "offered_at": self.pt._now().isoformat()}))
         from datetime import datetime as _dt
         from thirties_core.lists import urgency_label
         lines = []
@@ -909,7 +910,13 @@ class AssistantTools:
         """A proposal was offered today and not yet applied or declined."""
         import json
         raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
-        return bool(raw) and json.loads(raw).get("state") == "offered"
+        if not raw:
+            return False
+        data = json.loads(raw)
+        if data.get("state") != "offered":
+            return False
+        offered = data.get("offered_at")  # a morning offer left unanswered doesn't catch a "yes" at night
+        return not offered or self.pt._now() - datetime.fromisoformat(offered) < timedelta(hours=4)
 
     def decline_rollover(self) -> None:
         import json
