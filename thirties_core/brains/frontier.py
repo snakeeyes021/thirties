@@ -184,12 +184,17 @@ RULES
         """The user's list for today (their Today note) and routines, with what's done."""
         if self.tools.scheduler is None:
             return ""
-        from thirties_core.today import note_items, notes_with_role
-        roles = ListCatalog(self.tools.scheduler.state_db).roles()
+        from thirties_core.backlog import DONE_HIDES_DAYS
+        from thirties_core.today import notes_with_role, with_done
+        db = self.tools.scheduler.state_db
+        roles = ListCatalog(db).roles()
+        today = self.tools.today()
+        done = {"today": db.completed_since(today - timedelta(days=DONE_HIDES_DAYS)),  # routines: today's only
+                "routine": db.completed_since(today)}
         lines = []
         for role, heading in (("today", "Today's list"), ("routine", "Routine")):
             for note in notes_with_role(roles, self.active_notes, role):
-                items = note_items(note)
+                items = with_done(note, done[role])
                 if items:
                     lines.append(f"{heading} ({note['title']}):")
                     lines += [f"- {'[done] ' if ticked else ''}{text}" for text, ticked in items]

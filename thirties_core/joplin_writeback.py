@@ -101,11 +101,18 @@ def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], oc
     return None
 
 
+DONE_HEADING_RE = re.compile(r"(done|completed?|finished|archived?)\b", re.IGNORECASE)
+
+
 def append_task(body: str, title: str, section: Optional[str] = None, more: Optional[List[str]] = None) -> str:
     """Add open items at the end of a section's list (by heading text) or of the note."""
     items = [f"- [ ] {t.strip()}" for t in [title] + list(more or []) if t.strip()]
     lines = body.splitlines()
     start, stop = 0, len(lines)
+    done_head = next((i for i, l in enumerate(lines)
+                      if HEADING_REGEX.match(l) and DONE_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip())), None)
+    if done_head is not None and not section:  # a Done section is for finished things: add above it
+        stop = done_head
     if section:
         heads = [(i, HEADING_REGEX.match(l).group(1).strip()) for i, l in enumerate(lines) if HEADING_REGEX.match(l)]
         here = next((n for n, (_, text) in enumerate(heads) if text.lower() == section.strip().lower()), None)
@@ -249,6 +256,8 @@ def clipper_running(host: str = "127.0.0.1", port: int = 41184) -> bool:
 class JoplinWriter:
     """Delivers write-back operations now if Joplin is up, else queues them in the outbox."""
 
+    MAX_ATTEMPTS = 5  # with Joplin up; a change it refuses that often is parked (one was retried 1,557 times)
+
     def __init__(self, config, state_db, api: Optional[JoplinAPIClient] = None) -> None:
         self.cfg = config.joplin
         self.db = state_db
@@ -294,9 +303,13 @@ class JoplinWriter:
                 delivered += 1
             elif msg.startswith("gone:"):
                 self.db.outbox_fail(row["id"], msg[5:])
-            else:
+            elif not self.api.ping():
                 self.db.outbox_attempt(row["id"], msg)
                 break  # Joplin went away; keep the order
+            elif row.get("attempts", 0) + 1 >= self.MAX_ATTEMPTS:  # Joplin is up and keeps refusing this one:
+                self.db.outbox_fail(row["id"], msg)               # park it, so it can't hold up the rest
+            else:
+                self.db.outbox_attempt(row["id"], msg)
         return delivered
 
     # --- the operations ---
@@ -304,6 +317,8 @@ class JoplinWriter:
     def _edit_body(self, note_id: str, edit) -> Tuple[bool, str]:
         note = self.api.get_note(note_id, fields="id,title,body")
         if not note or "body" not in note:
+            if self.api.ping():  # Joplin is up, so the note is what's missing
+                return False, "gone: the note isn't in Joplin any more."
             return False, "Couldn't read the note from Joplin."
         new = edit(note["body"])
         if new is None:
@@ -314,6 +329,8 @@ class JoplinWriter:
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
         kind = op.get("op")
+        if str(op.get("note_id", "")).startswith("media:"):  # a wishlist item, not a Joplin note
+            return False, "gone: not a Joplin item."
         if kind == "complete":
             if op.get("is_checkbox_item"):
                 return self._edit_body(op["note_id"], lambda b: check_off(b, op["title"], op.get("occurrence", 0)))
@@ -336,8 +353,9 @@ class JoplinWriter:
 
 
 def complete_op(task) -> Dict[str, Any]:
-    if task.is_checkbox_item:
-        return {"op": "complete", "is_checkbox_item": True, "note_id": task.parent_note_id, "title": task.title}
+    if task.is_checkbox_item:  # the occurrence: with the same text twice in a note, tick the right one
+        return {"op": "complete", "is_checkbox_item": True, "note_id": task.parent_note_id, "title": task.title,
+                "occurrence": getattr(task, "occurrence", 0)}
     return {"op": "complete", "is_checkbox_item": False, "note_id": task.id, "title": task.title}
 
 

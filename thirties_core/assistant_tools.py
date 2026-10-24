@@ -390,7 +390,9 @@ class AssistantTools:
             link = links.home_of(task.title)
             home = next((t for t in self.s.tasks if link and t.id == link["home_id"]), None)
             if home is not None:
-                writer.submit(complete_op(home))
+                self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
+                if not home.id.startswith("media:"):  # a wishlist item has nothing to tick in Joplin
+                    writer.submit(complete_op(home))
                 self.s.tasks = [t for t in self.s.tasks if t.id != home.id]
             return
         title = links.today_title_of(task.id)
@@ -723,7 +725,11 @@ class AssistantTools:
             return []
         yesterday = self.pt.plan_for(today - timedelta(days=1))
         now = self.pt._now()
-        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s)]
+        done_ids = self._db.completed_since(today - timedelta(days=1)) if self._db else set()
+        done_titles = {s.title.strip().lower() for p in (yesterday, self.pt.day_plan) for s in p.spans
+                       if s.status == SpanStatus.DONE}
+        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s)
+                   and s.task_id not in done_ids and s.title.strip().lower() not in done_titles]  # done another way
         floor = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
         windows = [(max(a, floor), b) for a, b in self.pt.open_windows() if b > floor]
         plan = []
@@ -767,11 +773,13 @@ class AssistantTools:
     def today_carryover(self) -> Dict[str, List[str]]:
         """For the morning: what's still open on the Today note ("keep"), and pressing list items that aren't on it
         yet ("add": now, or due within two days; at most three)."""
-        from thirties_core.today import note_items
+        from thirties_core.backlog import DONE_HIDES_DAYS
+        from thirties_core.today import with_done
         note = self._today_note()
         if note is None:
             return {"keep": [], "add": []}
-        keep = [text for text, ticked in note_items(note) if not ticked]
+        done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
+        keep = [text for text, ticked in with_done(note, done) if not ticked]
         on = {k.lower() for k in keep}
         today = self._today()
 

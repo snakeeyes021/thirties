@@ -38,6 +38,20 @@ def note_items(note: Optional[Dict[str, Any]]) -> List[Tuple[str, bool]]:
     return out
 
 
+def with_done(note: Optional[Dict[str, Any]], done_ids: set) -> List[Tuple[str, bool]]:
+    """note_items, with an open line counted as done when Thirties recorded it done: the record wins over a
+    tick that didn't reach Joplin yet (or never will), so a done item isn't offered again (Zein's text, 10-24)."""
+    from thirties_core.joplin_engine import item_id
+    out, seen = [], {}
+    for text, ticked in note_items(note):
+        if not ticked:
+            n = seen.get(text, 0)
+            seen[text] = n + 1
+            ticked = item_id((note or {}).get("id", ""), text, n) in done_ids
+        out.append((text, ticked))
+    return out
+
+
 def notes_with_role(roles: Dict[str, Dict[str, str]], notes: List[Dict[str, Any]], role: str) -> List[Dict[str, Any]]:
     return [n for n in notes if (roles.get(n["id"]) or {}).get("role") == role]
 

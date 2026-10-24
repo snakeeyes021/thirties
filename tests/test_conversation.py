@@ -305,3 +305,33 @@ class TestSummaries(ConversationTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFreshLists(unittest.TestCase):
+
+    def test_lists_are_read_again_when_joplin_changed(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        db = Path(tempfile.mkdtemp()) / "database.sqlite"
+        db.write_text("")
+        joplin = MagicMock()
+        joplin.config.resolve_joplin_db_path.return_value = db
+        zein = TaskItem(id="z", source_notebook="1. Tasks", title="Read Zein's text")
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [zein], []
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, joplin_engine=joplin,
+                                      inference_engine=MockInferenceEngine(), active_notes=[])
+        manager.refresh()
+        self.assertEqual([t.title for t in manager.tools.services.tasks], ["Read Zein's text"])
+        joplin.fetch_tasks.return_value = []  # ticked in Joplin
+        manager.refresh()
+        self.assertEqual(len(manager.tools.services.tasks), 1)  # unchanged file: not read again
+        os.utime(db, (1, 2))
+        manager.refresh()
+        self.assertEqual(manager.tools.services.tasks, [])
+        self.assertEqual(manager.brain.tasks, [])

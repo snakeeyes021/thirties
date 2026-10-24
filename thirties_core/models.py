@@ -204,6 +204,7 @@ class TaskItem:
     list_role: str = ""                   # what its note is for (lists.ROLES), once known
     urgency: str = ""                     # now / soon / whenever / someday (lists.URGENCIES), once known
     due: str = ""                         # ISO date it's due by, if the user gave one
+    occurrence: int = 0                   # which copy of the same text in its note (0 = the first open one)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

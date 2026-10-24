@@ -234,6 +234,25 @@ class TestMorning(TodayTestCase):
         set_debug_time(at("15:00"))  # five hours later
         self.assertFalse(self.t.assistant.rollover_pending())
 
+    def test_whats_recorded_done_is_never_offered_again(self):
+        from datetime import timedelta
+        from thirties_core.joplin_engine import item_id
+        self.t.assistant.start_the_day()
+        self.sched.state_db.record_task_completed(item_id("n_today", "Clip cat nails"), DAY - timedelta(days=1))
+        self.api.up = False  # the tick never reached Joplin (Zein's text, 10-21 to 10-24)
+        out = self.t.execute("rollover_proposal", {})
+        self.assertNotIn("Clip cat nails", out)
+        self.assertIn("Call the bank", out)
+        y = DAY - timedelta(days=1)
+        self.t.execute("add_event", {"title": "Read the text", "start": "7:00 PM", "duration": "30 min",
+                                     "day": y.isoformat()})
+        self.t.execute("add_event", {"title": "Read the text", "start": "8:00 PM", "duration": "30 min",
+                                     "day": y.isoformat()})
+        later = [s for s in self.t.plan_for(y).spans if s.title == "Read the text"][-1]
+        out = self.t.execute("log_outcome", {"event": later.id, "status": "done", "day": y.isoformat()})
+        self.assertNotIn(NOT_DONE, out)  # done as the later copy: the earlier one isn't still open
+        self.assertNotIn("Read the text", [p["title"] for p in self.t.assistant.rollover_plan()])
+
     def test_the_morning_proposal_keeps_drops_and_adds(self):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})

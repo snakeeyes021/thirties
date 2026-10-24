@@ -42,6 +42,9 @@ class TestBodyEdits(unittest.TestCase):
         self.assertIn("- [x] Mail the form\n- [ ] Return library books\n\n## Someday", out)
         self.assertTrue(append_task(BODY, "Juggle").endswith("- [ ] Learn the banjo\n- [ ] Juggle\n"))
         self.assertIn("## Later\n- [ ] Nap", append_task(BODY, "Nap", "Later"))
+        done = "# Errands\n- [ ] Taxes\n\n## Done\n- [x] Mail the form\n"
+        self.assertEqual(append_task(done, "Enable 2FA"),  # 10-21: new items landed under the user's Done heading
+                         "# Errands\n- [ ] Taxes\n- [ ] Enable 2FA\n\n## Done\n- [x] Mail the form\n")
 
     def test_the_days_list_edits(self):
         day = "- [x] Feed kitties\n- [ ] Shower\n    - [ ] Brush teeth\n- [x] PT\n\t- [ ] stretch\n- [ ] Lunch\n"
@@ -78,6 +81,25 @@ class TestWriter(unittest.TestCase):
         self.assertEqual(self.writer.flush(), 0)
         self.assertEqual(self.sched.state_db.outbox_pending(), [])  # dropped as failed, not retried forever
         self.assertEqual(self.api.updates, [])
+
+    def test_a_change_joplin_keeps_refusing_is_parked_and_the_rest_go_through(self):
+        self.writer.submit({"op": "complete", "is_checkbox_item": False, "note_id": "media:letterboxd:andre",
+                            "title": "Watch: My Dinner with Andre"})
+        self.writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": "gone-note", "title": "X"})
+        self.writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": "n1", "title": "Taxes"})
+        self.api.up = True
+        self.assertEqual(self.writer.flush(), 1)  # a wishlist item and a deleted note don't block Taxes
+        self.assertIn("- [x] Taxes", self.api.notes["n1"]["body"])
+        self.assertEqual(self.sched.state_db.outbox_pending(), [])
+
+    def test_the_right_copy_of_a_repeated_item_is_ticked(self):
+        self.api.notes["n1"]["body"] = "- [ ] Call mom\n- [ ] Taxes\n- [ ] Call mom\n"
+        self.api.up = True
+        task = TaskItem(id="t", source_notebook="", title="Call mom", is_checkbox_item=True, parent_note_id="n1",
+                        occurrence=1)
+        from thirties_core.joplin_writeback import complete_op
+        self.writer.submit(complete_op(task))
+        self.assertEqual(self.api.notes["n1"]["body"], "- [ ] Call mom\n- [ ] Taxes\n- [x] Call mom\n")
 
     def test_nothing_happens_without_permission(self):
         self.sched.config.joplin.write_back = False
