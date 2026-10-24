@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-24.
+> Last revised: 2026-10-24. Releases: 0.0.1 (2026-10-18). In progress: 0.1 on `feature/0.1`. Next: 0.2 (section B below).
 
 ---
 
@@ -138,7 +138,7 @@ Done means a generic user can install Thirties fresh and use it daily, with no c
 
 ---
 
-## 0.1: The day list (branch `feature/0.1`, agreed 2026-10-17)
+## 0.1: The day list (branch `feature/0.1`, agreed 2026-10-17; not released yet)
 
 Real use of the MVP showed the root problem: the schedule does two jobs, the plan and the record. So every drift became a schedule edit, which brought shuffles, confirmations, nagging, and a day view full of things that never happened. 0.1 separates them.
 
@@ -234,13 +234,15 @@ Notes are organized by area of life (Home, Errands/Admin, Medical…), and urgen
 5. **The day view.** A Day page (Now, Next, Not reported with Done/Skipped, Done today at real times, Replan with Undo) and the Timeline page with drag to move.
 
 Still to do in 0.1:
-- Measure the day sim's noise (the same version twice on the same days), then the full 106-day run on the latest commit after the weekly quota resets (Fri Oct 23); check whether automatic sliding hurts plan respect (docs/SLM_BRAIN.md).
+- ~~Measure the day sim's noise, then the full 106-day run~~ (done 2026-10-23, docs/SLM_BRAIN.md).
+- The fixes from the first week of use (A below): done 2026-10-24, checked on 8 paired Gemini days.
+- The user uses the 2026-10-24 build for a few days and says it's good; then 0.1.0 is released (AGENTS.md §6.3).
 - The SLM brain can redraw ("replan", "just figure it out") and carries the morning flow, but it has no actions yet for `add_to_today`, `set_urgency` or `set_item_facts`; add them once the day sim shows how often they're needed.
 - Try the day view and the lists pages for real, and adjust.
 
 ---
 
-## 0.2: Trust (from the first week on 0.1, agreed 2026-10-24)
+## From the first week on 0.1 (2026-10-24): fixes in 0.1, then 0.2
 
 The first week of real use on 0.1 (10-20 to 10-24) showed that most daily friction comes from a few gaps in the core, not from the model:
 - Joplin and Thirties disagree.
@@ -249,7 +251,7 @@ The first week of real use on 0.1 (10-20 to 10-24) showed that most daily fricti
 
 The model spends its effort on bookkeeping and apologies, where it should be using judgement. The guiding principles behind this section are in `AGENTS.md` §7. Each item below is tagged with its size: **S** (hours), **M** (a day or so), **L** (several days, needs design).
 
-### A. Fix now: bugs with an obvious right answer (they go into the next build)
+### A. In 0.1: bugs with an obvious right answer (all done 2026-10-24 on `feature/0.1`)
 1. **Every Joplin write is exactly linked** (M). An item scheduled from a list carries that item's `task_id`, and so does a Today line. A write happens only through the id; nothing is ever fuzzy-matched. "Dinner" once added *My Dinner with Andre* to Today, and "Kitty litter boxes" ticked "Near vanity boxes". When there's no exact link, the assistant asks.
 2. **What's done stays done** (S). Before offering an item (morning, rollover, pressing), check Thirties' own done record as well as Joplin. If Joplin couldn't be written, the item still isn't offered again.
 3. **Fresh notes** (M). Re-read Joplin when the day changes and after every write. The window, the background service and the Telegram bridge share one copy. The window never refreshed on a day change, which is how "Zein's text" came back on 10-24.
@@ -273,7 +275,7 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
       - The model judges the unclear cases, and the item stores which it is.
     - A flexible item that starts mid-block and crosses into the next block moves to the next block, to discourage overstuffing. A fixed item never moves.
 
-### B. Build next: design settled enough to build (in this order)
+### B. 0.2: design settled enough to build (in this order; branch `feature/0.2` once 0.1 is released)
 1. **Joplin stays clean, and Thirties does the upkeep** (M). The user never has to manage two places.
    - Thirties adds items to the right list, in the right section.
    - Thirties records done items and moves them out of their lists into its Done log (decided below).
@@ -313,7 +315,7 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
    Capture this at the moment it's logged, because the plan changes later. The analysis comes later.
 8. **Placement with judgement** (L). For a new item, Python lists the candidate slots with their context: right after a stretch, in the middle of a big gap, at its end, or in a later gap. The model picks with a reason, using the item's kind and what's nearby. The current behaviour, "the next free block", piles things on.
 
-### C. Design conversations (big; not started until A is in and B1–B2 are designed)
+### C. Later: design conversations (big; not before B1–B2 are designed)
 1. **The views, under natural units.** Today the Day view and the Timeline overlap. Decide what each view is for across the five domains (tasks, schedule, calendar, tracking, planning), and how each shows sizes and positions you can feel rather than clock times.
 2. **Planning across horizons.** Week, month and longer goals, broken down into days, with "how on track are we" at each level. Thirties currently plans no further than today.
 3. **Helpers for Gemma.** Split each message into small steps with helpers (for example, count and separate the requests first), so the small model never one-shots a whole turn. This goes together with the model spike (After 0.1, item 3).

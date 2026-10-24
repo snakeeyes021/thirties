@@ -256,6 +256,16 @@ Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commi
 
 ---
 
+### 6.3. Versions, Branches and Releases
+- **One branch per version** (`feature/0.1`, `feature/0.2`, …), holding a bundle of features. Fixes are commits on it. Merging it into `main` (by PR, which the user merges) *is* the release. `main` holds released code only.
+- **One version in flight at a time.** Everything goes on the current version's branch until it's merged. The next version's branch starts from `main` after that merge. Never label work as belonging to a version whose branch doesn't exist yet.
+- **The version number is bumped at the start of a version's branch** (`meson.build` and a `<release>` entry in `data/tech.redfoxlabs.Thirties.metainfo.xml.in`, which serves as the release notes). Builds say what they are: version plus commit (About, logs, and each stored message).
+- **The branch is pushed as work lands**, with a draft PR to `main`, so "what's in 0.x" is always that PR's commit list. Commit freely; push when the user has seen the work (or says so).
+- **Releasing:** the user says the version is good after real use; the PR is marked ready and the user merges it. Then the merge commit on `main` is tagged `vX.Y.Z` and the tag pushed; CI publishes the GitHub pre-release with the Flatpak bundle.
+- **ROADMAP.md** names what each version contains; finished items are checked off there.
+- **Eval copies** (worktrees, `eval/*` branches) are local only and never pushed.
+- **Every reply that changes git ends with a status line:** the branch, the commits, whether they're pushed, and whether anything is running or scheduled.
+
 ## 7. Guiding Principles from Real Use (2026-10-24)
 
 The **heavy** ones settle design questions. The **light** ones are a direction of travel.
