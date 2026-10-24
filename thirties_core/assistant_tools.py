@@ -165,11 +165,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "set_reminder",
-        "description": "Send the user a message at a given time (desktop notification, and Telegram if paired). "
-                       "If they don't say a time, pick a sensible one and tell them.",
-        "parameters": {"text": "What to remind them of.",
+        "description": "\"Remind me to X\": puts X on the plan at that time (and on today's list if it's today), "
+                       "with a ping when it's time. Almost every reminder is a thing to do, so this is the default. "
+                       "Only for a bare message with nothing to do (\"ping me at 3 that the laundry's done\"), "
+                       "set ping_only. If they don't say a time, pick a sensible one and tell them.",
+        "parameters": {"text": "The thing to do (or, with ping_only, the message).",
                        "date": "Which day: 'today', 'tomorrow', 'Saturday', 'next week', 'Oct 20' (default today).",
-                       "time": "Clock time like '3:00 PM', or 'in 2 hours' (default 9:00 AM)."},
+                       "time": "Clock time like '3:00 PM', or 'in 2 hours' (default 9:00 AM).",
+                       "ping_only": "true for just a message, not an item on the plan."},
         "required": ["text"],
     },
     {
@@ -1177,7 +1180,7 @@ class AssistantTools:
             due += timedelta(days=1)
         return due
 
-    def set_reminder(self, text: str, date: Any = None, time: Any = None, **_: Any) -> str:
+    def set_reminder(self, text: str, date: Any = None, time: Any = None, ping_only: Any = False, **_: Any) -> str:
         if self.s.reminders is None:
             raise ToolError("Reminders aren't available here.")
         try:
@@ -1186,8 +1189,27 @@ class AssistantTools:
             raise ToolError(f"I couldn't read when: {e}")
         if due <= self.pt._now():
             raise ToolError(f"{format_clock(due)} on {due.strftime('%A')} has already passed.")
-        rem = self.s.reminders.add(due, str(text))
-        return f"Reminder set for {due.strftime('%A, %B %d')} at {format_clock(due)}: {rem.text} (id {rem.id})."
+        when = f"{due.strftime('%A, %B %d')} at {format_clock(due)}"
+        if str(ping_only).strip().lower() in ("true", "1", "yes"):
+            rem = self.s.reminders.add(due, str(text))
+            return f"Ping set for {when}: {rem.text} (id {rem.id})."
+        # A thing to do: it goes on the plan (a short item, alongside whatever's there if the block is taken).
+        args = {"title": str(text).strip(), "start": format_clock(due), "duration": "15 min",
+                "day": due.date().isoformat()}
+        out = self.pt.execute("add_event", args)
+        if out.startswith(NOT_DONE_PREFIX):
+            out = self.pt.execute("add_event", {**args, "alongside": True})
+        if out.startswith(NOT_DONE_PREFIX):
+            raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
+        span_id = re.search(r"\[id (\w+)\]", out).group(1)
+        listed = ""
+        if due.date() == self._today():
+            try:
+                listed = " and on today's list" if self.add_to_today([str(text).strip()]).startswith("Added") else ""
+            except ToolError:
+                pass
+        rem = self.s.reminders.add(due, str(text), span_id=span_id)
+        return f"On the plan for {when}{listed}, with a ping when it's time: {rem.text} (item id {span_id})."
 
     def list_reminders(self, **_: Any) -> str:
         pending = self.s.reminders.pending() if self.s.reminders else []

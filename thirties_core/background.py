@@ -319,6 +319,10 @@ class BackgroundService:
         store = ReminderStore(self.scheduler.state_db)
         for rem in store.due(now):
             store.set_state(rem.id, "sent")  # first, so a crash can't repeat it forever
+            if rem.span_id:  # about a planned item: not if it's done, gone, or already announced by its start
+                span = next((s for s in self.manager().day_plan.spans if s.id == rem.span_id), None)
+                if span is None or span.status != SpanStatus.PLANNED or self.level() == "heavy":
+                    continue
             if now - rem.due > timedelta(hours=12):
                 text = f"⏰ Reminder (from {rem.due.astimezone(now.tzinfo).strftime('%a')} " \
                        f"{format_clock(rem.due.astimezone(now.tzinfo))}): {rem.text}"

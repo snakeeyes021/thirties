@@ -1332,11 +1332,18 @@ class SlmBrain:
     # --- messages ---
 
     def _do_remind(self, a: Action) -> Tuple[str, bool]:
-        ok, out = self._run("set_reminder", {k: v for k, v in a.fields.items() if k in ("text", "date", "time")})
+        fields = {k: v for k, v in a.fields.items() if k in ("text", "date", "time")}
+        ping = bool(re.search(r"\b(?:ping|text|message) me\b", getattr(self, "_message", ""), re.I))
+        ok, out = self._run("set_reminder", {**fields, "ping_only": ping})  # "remind me to" is a thing to do
         if not ok:
             return out, False
-        m = re.match(r"Reminder set for (.+?) at (.+?): (.+) \(id \w+\)\.$", out)
-        return (f"Okay, I'll remind you {m.group(1)} at {m.group(2)}: {m.group(3)}" if m else out), False
+        m = re.match(r"Ping set for (.+?) at (.+?): (.+) \(id \w+\)\.$", out)
+        if m:
+            return f"Okay, I'll ping you {m.group(1)} at {m.group(2)}: {m.group(3)}", False
+        m = re.match(r"On the plan for (.+?) at (.+?)( and on today's list)?, with a ping when it's time: (.+) "
+                     r"\(item id \w+\)\.$", out)
+        return (f"Okay: {m.group(4)}, {m.group(1)} at {m.group(2)}, on the plan" + (" and today's list" if m.group(3)
+                else "") + ", and I'll ping you then." if m else out), False
 
     def _do_mute(self, a: Action) -> Tuple[str, bool]:
         message = getattr(self, "_message", "").lower()

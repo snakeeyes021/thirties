@@ -121,8 +121,14 @@ class TestReminderTools(unittest.TestCase):
 
     def test_set_list_cancel_and_mute(self):
         out = self.m.execute_tool("set_reminder", {"text": "Water the alligator", "date": "Saturday", "time": "3:00 PM"})
-        self.assertIn("Saturday, October 17 at 3:00 PM: Water the alligator", out)
+        self.assertIn("On the plan for Saturday, October 17 at 3:00 PM, with a ping when it's time: Water the "
+                      "alligator", out)  # a thing to do goes on the plan (10-23: "not a disembodied reminder")
+        sat = [s.title for s in self.m.tools.plan_for("Saturday").spans]
+        self.assertIn("Water the alligator", sat)
         self.assertIn("9:00 AM", self.m.execute_tool("set_reminder", {"text": "Call mom", "date": "next week"}))
+        out = self.m.execute_tool("set_reminder", {"text": "the laundry's done", "time": "in 20 minutes",
+                                                   "ping_only": True})
+        self.assertTrue(out.startswith("Ping set for"), out)
         self.assertIn("Mon Oct 19 9:00 AM: Call mom", self.m.execute_tool("list_reminders", {}))
         self.assertIn("Cancelled the reminder: Call mom", self.m.execute_tool("cancel_reminder", {"reminder": "mom"}))
         self.assertIn("10:30 AM", self.m.execute_tool("set_reminder", {"text": "Stretch", "time": "in 30 minutes"}))

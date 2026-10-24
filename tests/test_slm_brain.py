@@ -565,17 +565,20 @@ class TestMessages(SlmTestCase):
 
     def test_remind_me_parses_day_time_and_text_in_python(self):
         out = self.say("remind me next week to water my pet alligator", {"type": "add", "title": "Water alligator"})
-        self.assertEqual(out, "Okay, I'll remind you Monday, October 19 at 9:00 AM: Water my pet alligator")
+        self.assertEqual(out, "Okay: Water my pet alligator, Monday, October 19 at 9:00 AM, on the plan, "
+                              "and I'll ping you then.")
         out = self.say("hey remind me saturday at 3 to call grandma", {"type": "chat"})
-        self.assertEqual(out, "Okay, I'll remind you Saturday, October 17 at 3:00 PM: Call grandma")
+        self.assertEqual(out, "Okay: Call grandma, Saturday, October 17 at 3:00 PM, on the plan, and I'll ping you "
+                              "then.")
         out = self.say("ping me in 20 minutes about the laundry", {"type": "chat"})
-        self.assertIn("5:00 PM: The laundry", out)
+        self.assertEqual(out, "Okay, I'll ping you Thursday, October 15 at 5:00 PM: The laundry")  # just a message
 
     def test_remind_me_what_is_a_question_and_today_gets_a_sensible_time(self):
         out = self.say("remind me what we agreed on for composing", {"type": "question", "topic": "past composing"})
-        self.assertNotIn("I'll remind you", out)
+        self.assertNotIn("ping you", out)
         out = self.say("remind me to pay the electric bill sometime today", {"type": "add", "title": "Electric bill"})
-        self.assertEqual(out, "Okay, I'll remind you Thursday, October 15 at 6:30 PM: Pay the electric bill")
+        self.assertEqual(out, "Okay: Pay the electric bill, Thursday, October 15 at 6:30 PM, on the plan, and I'll "
+                              "ping you then.")
 
     def test_stop_asking_mutes_the_item_just_asked_about(self):
         self.say("taxes 2 to 3", {"type": "add", "title": "Taxes", "start": "2:00 PM", "end": "3:00 PM"})
