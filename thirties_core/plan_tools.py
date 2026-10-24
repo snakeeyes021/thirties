@@ -496,6 +496,9 @@ class PlanTools:
             raise ToolError(f"Unknown category '{category}'. Use activity, task, work or sleep.")
         if cat == SpanCategory.CALENDAR:
             raise ToolError("Calendar events come from the user's calendar and can't be added here.")
+        if not task_id and self.assistant is not None and cat == SpanCategory.ACTIVITY:
+            same = self.assistant._exact_task(str(title))  # worded exactly as a list item: it's that item
+            task_id = same.id if same is not None and not same.id.startswith("media:") else None
         if task_id and cat == SpanCategory.ACTIVITY:
             cat = SpanCategory.TASK
         self._separate_things(str(title))

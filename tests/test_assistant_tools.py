@@ -67,6 +67,9 @@ class TestOutcomes(ToolsTestCase):
 
     def test_unscheduled_backlog_task_done(self) -> None:
         out = self.t.execute("log_outcome", {"event": "the taxes", "status": "done", "finished": "3:00 PM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "File quarterly taxes" in out, out)  # near: named, not ticked
+        tid = next(t.id for t in self.t.assistant.s.tasks if t.title == "File quarterly taxes")
+        out = self.t.execute("log_outcome", {"event": tid, "status": "done", "finished": "3:00 PM"})
         self.assertIn("Marked 'File quarterly taxes' done", out)
         self.assertIn("logged it 2:30 PM – 3:00 PM", out)
 

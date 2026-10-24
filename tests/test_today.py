@@ -64,6 +64,18 @@ class TestAddingToToday(TodayTestCase):
                                            "task_id": "t_stamps", "day": "tomorrow"})
         self.assertNotIn("today's list", out)  # tomorrow's things aren't on today's list
 
+    def test_only_the_same_wording_links_never_a_near_match(self):
+        self.services.tasks.append(TaskItem(id="media:letterboxd:andre", source_notebook="Letterboxd",
+                                            title="Watch: My Dinner with Andre (1981)"))
+        self.services.tasks.append(item("t_vanity", "Near vanity boxes"))
+        out = self.t.execute("add_to_today", {"items": ["Dinner"]})
+        self.assertEqual(out, "Added to today's list: Dinner.")  # 10-22: it added the film
+        self.assertIsNone(TodayLinks(self.sched.state_db).home_of("Dinner"))
+        out = self.t.execute("log_outcome", {"event": "Kitty litter boxes", "status": "done"})
+        self.assertTrue(out.startswith(NOT_DONE), out)  # 10-18: it ticked "Near vanity boxes" in Joplin
+        self.assertIn("- [ ] Call the bank\n- [ ] Buy stamps", self.body("n_errands"))
+        self.assertEqual(self.api.updates, [u for u in self.api.updates if u[0] == "n_today"])
+
     def test_by_task_id_too(self):
         self.assertEqual(self.t.execute("add_to_today", {"items": ["t_bank"]}), "Added to today's list: Call the bank.")
         self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], "t_bank")

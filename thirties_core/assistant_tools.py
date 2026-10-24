@@ -257,6 +257,13 @@ def _stem_words(text: str) -> set:
     return {_stem(w) for w in _words(text)}
 
 
+def _same_words(a: str, b: str) -> bool:
+    """The same wording: case, spacing, quotes and end punctuation aside."""
+    def norm(x: str) -> str:
+        return re.sub(r"\s+", " ", str(x).strip().strip("\"'“”‘’").rstrip(".!?").strip()).lower()
+    return norm(a) == norm(b) != ""
+
+
 def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskItem]:
     """Backlog tasks most relevant to a query (keyword overlap with title, note, notebook and section)."""
     q = {_stem(w) for w in _words(query)}
@@ -317,11 +324,27 @@ class AssistantTools:
     def _today(self):
         return self.pt.today()
 
+    def _exact_task(self, ref: str) -> Optional[TaskItem]:
+        """The list item this is, by id or by its exact wording (case, spacing and end punctuation aside); never
+        a near match. Anything that changes a list goes through this: near matches ticked "Near vanity boxes" for
+        "Kitty litter boxes" and put "My Dinner with Andre" on Today for "Dinner"."""
+        ref = ref.strip()
+        exact = [t for t in self.s.tasks if t.id == ref or _same_words(t.title, ref)]
+        return exact[0] if exact else None
+
+    def _no_exact_match(self, ref: str, what: str = "item") -> ToolError:
+        """The refusal when only near matches exist: they're named, with ids, for the model to ask about."""
+        near = [t for t in rank_tasks(self.s.tasks, ref, limit=3) if backlog_match(ref, t) != "different"]
+        if not near:
+            return ToolError(f"There is no {what} matching '{ref}' in the user's lists.")
+        return ToolError(f"No list item is exactly '{ref}'. Only similar: " + "; ".join(describe_task(t) for t in near)
+                         + ". If the user means one of these, call again with its task_id; if not, it's not on a list.")
+
     def _find_task(self, ref: str) -> Optional[TaskItem]:
         ref = ref.strip()
-        exact = [t for t in self.s.tasks if t.id == ref or t.title.lower() == ref.lower()]
+        exact = self._exact_task(ref)
         if exact:
-            return exact[0]
+            return exact
         q = {_stem(w) for w in _words(ref)}
 
         def overlap(t: TaskItem) -> int:
@@ -459,10 +482,7 @@ class AssistantTools:
         on_today |= {t.title.lower() for t in self.s.tasks if t.parent_note_id == note["id"]}
         added, already, queued = [], [], False
         for name in items or []:
-            task = self._find_task(str(name))
-            if (task is not None and task.id != str(name).strip() and task.parent_note_id != note["id"]
-                    and _stem_words(str(name)) - _stem_words(task.title)):
-                task = None  # only similar to a list item: it's something new
+            task = self._exact_task(str(name))  # only the same item links; anything else is new, as worded
             title = task.title if task is not None else str(name).strip()
             if title.lower() in on_today:
                 already.append(title)
@@ -562,7 +582,7 @@ class AssistantTools:
                 + f". To schedule it, use task_id={new_id}.")
 
     def break_down_task(self, task: str, steps: Any, list: str = "", **_: Any) -> str:
-        found, ticked_too = self._find_task(str(task)), False
+        found, ticked_too = self._exact_task(str(task)), False
         if found is not None and list and not {_stem(w) for w in _words(list)} & \
                 {_stem(w) for w in _words(found.parent_note_title or found.title)}:
             found = None
@@ -609,8 +629,10 @@ class AssistantTools:
             span = self.pt._find_span(event)
         except Exception:
             span = None
-        task = None if span else self._find_task(str(event))
+        task = None if span else self._exact_task(str(event))
         if span is None and task is None:
+            if rank_tasks(self.s.tasks, str(event), limit=1):
+                raise self._no_exact_match(str(event), "schedule item or list item")
             raise ToolError(f"There is no schedule item or backlog task matching '{event}'.")
 
         start_dt = self.pt._start(started) if started not in (None, "") else None
@@ -672,6 +694,11 @@ class AssistantTools:
         result = f"Marked {span.title} {st.value}"
         if span.actual_start and st != SpanStatus.SKIPPED:
             result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
+        if not span.task_id and span.category in (SpanCategory.TASK, SpanCategory.ACTIVITY):
+            same = self._exact_task(span.title)  # scheduled without its link, but worded exactly as a list item
+            if same is not None:
+                span.task_id = same.id
+                self.pt._persist(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
             if st == SpanStatus.DONE and task:
@@ -1199,9 +1226,9 @@ class AssistantTools:
 
     def set_urgency(self, task: str, urgency: str = "", due: Any = None, **_: Any) -> str:
         from thirties_core.lists import URGENCIES, ListCatalog, urgency_label
-        found = self._find_task(str(task))
+        found = self._exact_task(str(task))
         if found is None:
-            raise ToolError(f"There is no item matching '{task}' in the user's lists.")
+            raise self._no_exact_match(str(task))
         if self._db is None:
             raise ToolError("Urgency can't be saved here.")
         due_day = parse_day(str(due), self._today()) if due not in (None, "") else None

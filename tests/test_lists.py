@@ -91,11 +91,12 @@ class TestInUse(unittest.TestCase):
         services = Services.for_db(self.sched.state_db, tasks)
         plan, pending = self.sched.build_day_plan(DAY)
         t = PlanTools(plan, pending, self.sched, services=services)
-        out = t.execute("set_urgency", {"task": "thermals", "due": "Nov 1"})
+        self.assertTrue(t.execute("set_urgency", {"task": "thermals", "due": "Nov 1"}).startswith(NOT_DONE))
+        out = t.execute("set_urgency", {"task": "t_thermals", "due": "Nov 1"})
         self.assertTrue(out.startswith("Noted: 'Thermals for this winter' is by Nov 1"), out)
         row = ListCatalog(self.sched.state_db).urgencies()["t_thermals"]
         self.assertEqual((row["urgency"], row["source"]), ("soon", "user"))
-        self.assertTrue(t.execute("set_urgency", {"task": "thermals", "urgency": "asap"}).startswith(NOT_DONE))
+        self.assertTrue(t.execute("set_urgency", {"task": "t_thermals", "urgency": "asap"}).startswith(NOT_DONE))
 
     def test_the_backlog_skips_ignored_notes(self):
         joplin = MagicMock()
