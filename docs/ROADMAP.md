@@ -276,7 +276,7 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 ### B. Build next: design settled enough to build (in this order)
 1. **Joplin stays clean, and Thirties does the upkeep** (M). The user never has to manage two places.
    - Thirties adds items to the right list, in the right section.
-   - Thirties records done items and moves them out of their lists into a Done log that it owns. See the open question below on where done items live.
+   - Thirties records done items and moves them out of their lists into its Done log (decided below).
    - **Routine notes are templates**, never moved. Ongoing items stay on their lists and get a "worked on" line in the log.
    - **Every Joplin write is recorded** in Thirties' database: before and after, plus the conversation turn that caused it.
    - **Evals score those writes** as part of the grade. The day sim gets a Joplin fake whose writes are compared with the script's truth.
@@ -329,8 +329,8 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 
   Each is resolved by the item that replaces it.
 
-### Open question
-- **Where done items live in Joplin.** The proposal is one Done log owned by Thirties: a note per month in a Thirties notebook, one dated line per item with the list it came from. Undo moves an item back. Alternatives: also a Done section at the bottom of each list, or a Done note per notebook with a heading per list.
+### Decided
+- **Where done items live in Joplin** (2026-10-24): a single Thirties notebook with one Done note per month. Each done item is one dated line naming the list it came from. Items move out of their lists into it, and undo moves them back. There are no per-list or per-notebook Done sections, because more places means more ways to fall out of step. Routine items stay in place (they're templates). Ongoing items stay too, with a "worked on" line in the log.
 
 ---
 
