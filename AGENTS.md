@@ -253,3 +253,31 @@ python3 -m tests.interactive_eval repl --no-gpu
 The desktop app is built with meson and installs `src/` as the `thirties` package (build it with GNOME Builder or `flatpak-builder` using `tech.redfoxlabs.Thirties.json`). `python3 src/main.py` does not work directly because of the package-relative imports.
 
 Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commit only curated summaries, never raw transcripts or SQLite files.
+
+---
+
+## 7. Guiding Principles from Real Use (2026-10-24)
+
+The **heavy** ones settle design questions. The **light** ones are a direction of travel.
+
+### Heavy
+1. **Natural units, natural scales, natural orientation.**
+   - Thirties works across five domains: tasks, schedule, calendar, tracking and planning.
+   - Everything should be presented so the user *feels* how big things are and where they sit, rather than reading clocks. Clocks are a blight.
+   - The one big concession is that blocks align to the clock rather than to sunrise. Keep it the only one.
+   - **Events keep their real times; blocks are a view.** A schedule is shown in blocks. Asking about one item gives its real time plus its block.
+   - Times are rounded only when Thirties picks a time itself.
+2. **Thirties keeps the task backend clean and current.** If the user has to manage both Thirties and Joplin, Thirties adds friction instead of removing it.
+   - Thirties adds items to the right lists, and records and files done items.
+   - Every write goes through an exact link, never a fuzzy match. It is recorded, and it is scored in evals.
+3. **The model brings judgement; Python brings everything else.**
+   - Python works out the facts and the options: the kinds of items, what has gone moot, candidate slots, and conflicts.
+   - The model chooses among them and explains its choice: where something fits, what matters today, what to drop.
+   - If the model is spending effort on bookkeeping, or apologising for it, the core has a gap. Fix the core.
+4. **Obvious cases get defaults; unclear cases get judgement.** Fixed or flexible, the kind of item, whether something has gone moot: Python defaults the obvious cases, the model judges the rest, and the item stores the answer.
+5. **Memories never paper over bugs.** A memory note that makes the assistant behave around a bug hides the bug from tests. Fix the bug and delete the note. Evals run with no memory notes unless a scenario provides them.
+
+### Light
+- **Small models get helpers.** Don't ask the on-device model to understand a whole turn and produce every tool call at once. Break the work into small steps (separate the requests, then act on each) with Python, or smaller helpers, in between.
+- **Record context for learning later.** Statistics should capture what surrounded an outcome (how full the day was, nearby events, time since waking) as well as durations, so later analysis has something to work with.
+- **The bar for the Frontier brain** is a frontier model handed the raw backlog and asked to plan the day. Our harness should beat that.

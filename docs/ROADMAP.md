@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-18.
+> Last revised: 2026-10-24.
 
 ---
 
@@ -237,6 +237,100 @@ Still to do in 0.1:
 - Measure the day sim's noise (the same version twice on the same days), then the full 106-day run on the latest commit after the weekly quota resets (Fri Oct 23); check whether automatic sliding hurts plan respect (docs/SLM_BRAIN.md).
 - The SLM brain can redraw ("replan", "just figure it out") and carries the morning flow, but it has no actions yet for `add_to_today`, `set_urgency` or `set_item_facts`; add them once the day sim shows how often they're needed.
 - Try the day view and the lists pages for real, and adjust.
+
+---
+
+## 0.2: Trust (from the first week on 0.1, agreed 2026-10-24)
+
+The first week of real use on 0.1 (10-20 to 10-24) showed that most daily friction comes from a few gaps in the core, not from the model:
+- Joplin and Thirties disagree.
+- There is no idea of what kind of item something is.
+- Stored times get rewritten.
+
+The model spends its effort on bookkeeping and apologies, where it should be using judgement. The guiding principles behind this section are in `AGENTS.md` §7. Each item below is tagged with its size: **S** (hours), **M** (a day or so), **L** (several days, needs design).
+
+### A. Fix now: bugs with an obvious right answer (they go into the next build)
+1. **Every Joplin write is exactly linked** (M). An item scheduled from a list carries that item's `task_id`, and so does a Today line. A write happens only through the id; nothing is ever fuzzy-matched. "Dinner" once added *My Dinner with Andre* to Today, and "Kitty litter boxes" ticked "Near vanity boxes". When there's no exact link, the assistant asks.
+2. **What's done stays done** (S). Before offering an item (morning, rollover, pressing), check Thirties' own done record as well as Joplin. If Joplin couldn't be written, the item still isn't offered again.
+3. **Fresh notes** (M). Re-read Joplin when the day changes and after every write. The window, the background service and the Telegram bridge share one copy. The window never refreshed on a day change, which is how "Zein's text" came back on 10-24.
+4. **A failed Joplin change can't block the queue** (S). A permanent error parks that change, and the rest go through. One change failed about 1,500 times and held up everything queued after it while Joplin was closed. Media items are never ticked in Joplin.
+5. **New lines never land under a Done heading** (S).
+6. **The reply filter deletes real content** (S). Any paragraph containing "call" (for example "Call ENT") was removed as "tool talk", which is how the 10-21 pressing list vanished.
+7. **Telegram delivery** (S). Retry failed sends, keep a record of any reply that never reached Telegram and send it later, and log to a file rather than only to the Builder console. Example: on 10-24 at 9:18 a reply reached the app but not Telegram.
+8. **Each stored message carries its time, channel and build** (S), so issues can be placed by version and by channel.
+9. **Times you report are recorded as you said them** (S). "Done" with no start gives the start as an estimate, marked as a guess, never the planned start. The reported end is kept.
+10. **A failed tool can't be reported as done** (S). This is a deterministic check on the reply, not a prompt rule.
+11. **Things at the same time don't knock each other out** (M). Adding something to a busy block never deletes the item there, and never deletes Work or Sleep. Sliding things later stops at bedtime (partly fixed 10-23).
+12. **Start-of-block notices** (S). They go into the conversation history, under a lock against the Telegram thread. Repeats are blocked by item and time, not by internal id, which changes when the plan is re-made.
+13. **The time model** (M), as agreed 2026-10-24:
+    - Events keep their real times, and blocks are only how they're shown.
+    - Times are rounded only when Thirties picks a time itself.
+    - A schedule is shown in blocks. Asking about one item gives its real time plus its block ("12:15, in the 12:00 block").
+    - The reply filter turns a stray time into block wording ("in the 12:00 block"), never into a different clock time. `says_minutes` goes.
+    - **Fixed or flexible:**
+      - Fixed by default: calendar events, appointments, flights, rides, concerts, shows, anything set by someone else's clock, and any daily item at a set time (the cats' dinner at 5).
+      - Flexible by default: everything else.
+      - The model judges the unclear cases, and the item stores which it is.
+    - A flexible item that starts mid-block and crosses into the next block moves to the next block, to discourage overstuffing. A fixed item never moves.
+
+### B. Build next: design settled enough to build (in this order)
+1. **Joplin stays clean, and Thirties does the upkeep** (M). The user never has to manage two places.
+   - Thirties adds items to the right list, in the right section.
+   - Thirties records done items and moves them out of their lists into a Done log that it owns. See the open question below on where done items live.
+   - **Routine notes are templates**, never moved. Ongoing items stay on their lists and get a "worked on" line in the log.
+   - **Every Joplin write is recorded** in Thirties' database: before and after, plus the conversation turn that caused it.
+   - **Evals score those writes** as part of the grade. The day sim gets a Joplin fake whose writes are compared with the script's truth.
+   - **The write log gets audited** against the conversations in real use until it's trustworthy.
+2. **What kind of item** (M):
+   - **once:** done means finished.
+   - **ongoing:** done means "worked on it", and the item stays open until "finished".
+   - **daily:** done means done today.
+
+   Python reads the kind from the list's role, with a per-item override. The model only says "done" or "worked on it". Rollover, statistics and the Done log all follow from the kind. A skipped daily item is not "put off".
+3. **Routines and daily anchors** (L):
+   - **A routine is a template with a trigger:** daily, on some days (work days or days off), or on request. A packing list, for example, happens only when asked and is placed where asked.
+   - **Each item in a routine has a placement:**
+     - **fixed time:** the cats' dinner at 5, every day;
+     - **a usual spot with a fallback:** the morning routine belongs in the morning; if it's missed, after work on work days. Picking the fallback is the model's judgement, from the open slots Python lists;
+     - **wherever asked.**
+   - **Daily anchors that aren't on any list** (meals) are offered once as defaults and kept in the profile.
+   - Every morning Python puts the day's routines and anchors on the plan. They never roll over, so the morning message never asks about them.
+   - These facts live in Thirties' item facts, not in the notes.
+4. **Things go moot** (S, after B3). Each item gets a "moot after" point:
+   - a meal is moot at the next meal;
+   - a daily item is moot at the end of the day;
+   - a fixed item is moot once its time has passed.
+
+   Moot items are never offered, rolled over or asked about. They're stored as "unknown", not "skipped". "You didn't mark lunch done; roll it over?" can't happen.
+5. **"Remind me" schedules an item** (S). It goes on the list and the plan, and may carry a notification. A notification on its own is only for an explicit "ping me at 3", and it's called a ping or an alarm, not a reminder.
+6. **Actual wake, sleep and work times** (M). Thirties asks with the morning routine ("when did you start work?") and at the end of work ("done with work?"). Sleep and wake are asked for now; a fitness tracker can supply them later. The rollover and statistics use the actual times.
+7. **Context with each outcome** (S). When an outcome is logged, store:
+   - how full the day was;
+   - the gaps before and after;
+   - the nearby events and their kinds;
+   - the time since waking.
+
+   Capture this at the moment it's logged, because the plan changes later. The analysis comes later.
+8. **Placement with judgement** (L). For a new item, Python lists the candidate slots with their context: right after a stretch, in the middle of a big gap, at its end, or in a later gap. The model picks with a reason, using the item's kind and what's nearby. The current behaviour, "the next free block", piles things on.
+
+### C. Design conversations (big; not started until A is in and B1–B2 are designed)
+1. **The views, under natural units.** Today the Day view and the Timeline overlap. Decide what each view is for across the five domains (tasks, schedule, calendar, tracking, planning), and how each shows sizes and positions you can feel rather than clock times.
+2. **Planning across horizons.** Week, month and longer goals, broken down into days, with "how on track are we" at each level. Thirties currently plans no further than today.
+3. **Helpers for Gemma.** Split each message into small steps with helpers (for example, count and separate the requests first), so the small model never one-shots a whole turn. This goes together with the model spike (After 0.1, item 3).
+4. **The bar for the Frontier brain.** A frontier model handed the raw Joplin backlog can plan a day better than our harness does today. The harness should beat that baseline, so measure it as a reference.
+
+### D. Housekeeping tied to the above
+- **Memory notes that paper over bugs get deleted once their bug is fixed.** Six of eleven qualify (the list is in the 10-24 review). One was never right: shower things go after work only when the morning was missed. Keep the five real preferences.
+- **The profile's "Near-term goals"** are out of date (the Redfox merge is done), which feeds stale offers. A future fix: goals are dated, and they're checked during weekly planning (C2).
+- **Contradictions found:**
+  - Frontier rule 9 ("don't offer meals or routines") against B3.
+  - The memory note "items don't cross block boundaries" against A13.
+  - Routine items were copied into Today on 10-21, against §2 of 0.1 ("routines stay in their own notes").
+
+  Each is resolved by the item that replaces it.
+
+### Open question
+- **Where done items live in Joplin.** The proposal is one Done log owned by Thirties: a note per month in a Thirties notebook, one dated line per item with the list it came from. Undo moves an item back. Alternatives: also a Done section at the bottom of each list, or a Done note per notebook with a heading per list.
 
 ---
 
