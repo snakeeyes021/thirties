@@ -115,4 +115,11 @@ class TestToThirties(unittest.TestCase):
         self.assertEqual(to_thirties("Your Uber is at 12:15, in the 12:00 block.", real),
                          "Your Uber is at 12:15, in the 12:00 block.")
         self.assertEqual(to_thirties("11:00 sharp, then the Uber at 12:15", real), "11:00 sharp, then the Uber at 12:15")
+        from thirties_core.clock import real_times
+        from types import SimpleNamespace as NS
+        from tests.fixtures import at
+        flight = NS(title="Flight UA 1482 (boards 2:25)", start_dt=at("15:00"), end_dt=at("16:00"))
+        keep = real_times("boarding at 14:25", spans=[flight])  # a 24-hour time, and a time in a title
+        self.assertEqual(to_thirties("⏰ Flight UA 1482 (boards 2:25) at 3:00. Boarding at 2:25.", keep),
+                         "⏰ Flight UA 1482 (boards 2:25) at 3:00. Boarding at 2:25.")
         self.assertEqual(to_thirties("score 3:2, ratio 10:45:12"), "score 3:2, ratio 10:45:12")

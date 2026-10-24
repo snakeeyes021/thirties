@@ -157,15 +157,25 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.set_next_response(reply(text))
         self.assertEqual(self.manager.send_user_message("what's pressing?"), text)  # 10-21: the list vanished
 
-    def test_a_failure_the_reply_skips_over_is_said_anyway(self) -> None:
+    def test_a_reply_claiming_a_failed_change_is_corrected(self) -> None:
         self.engine.responses = [reply('CALL log_outcome {"event": "Put watch back on wrist", "status": "done"}'),
-                                 reply("All set, noted!")]
-        out = self.manager.send_user_message("I put the watch back on")
-        self.assertTrue(out.startswith("All set, noted!\n\n(Not done: "), out)  # 10-24: three refusals, then "All set"
-        self.assertIn("Put watch back on wrist", out)
+                                 reply("All set, noted!"),
+                                 reply("I couldn't find Put watch back on wrist on today's plan. Want me to add it?")]
+        out = self.manager.send_user_message("I put the watch back on")  # 10-24: three refusals, then "All set"
+        self.assertEqual(out, "I couldn't find Put watch back on wrist on today's plan. Want me to add it?")
         self.engine.responses = [reply('CALL log_outcome {"event": "Nope", "status": "done"}'),
-                                 reply("I couldn't find that one on today's plan.")]
-        self.assertEqual(self.manager.send_user_message("done with nope"), "I couldn't find that one on today's plan.")
+                                 reply("All set, noted!"), reply("All set!")]
+        out = self.manager.send_user_message("done with nope")
+        self.assertEqual(out, "All set, noted!\n\n(One part of that didn't go through, so it isn't recorded yet.)")
+        self.assertNotIn("NOT_DONE", out)
+
+    def test_a_refusal_the_model_got_around_isnt_reported(self) -> None:
+        self.engine.responses = [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"name": "log_outcome", "arguments": {"event": "Nope", "status": "done"}},
+                {"name": "add_event", "arguments": {"title": "Break", "start": "3:15 PM", "duration": "15 min"}}]},
+            reply("Moved your break to 3:15.")]
+        self.assertEqual(self.manager.send_user_message("break at 3:15 instead"), "Moved your break to 3:15.")
 
     def test_call_written_mid_sentence_still_runs(self) -> None:
         self.engine.set_next_response(reply('Moving it now.CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
@@ -342,3 +352,12 @@ class TestFreshLists(unittest.TestCase):
         manager.refresh()
         self.assertEqual(manager.tools.services.tasks, [])
         self.assertEqual(manager.brain.tasks, [])
+
+
+class TestTimesSaidEarlier(ConversationTestCase):
+
+    def test_a_time_the_user_gave_this_morning_stays_true_all_day(self) -> None:
+        self.engine.responses = [reply("Got it."), reply("Packing now keeps the 12:15 Uber on track.")]
+        self.manager.send_user_message("I MUST be in an Uber to the airport by 12:15")
+        out = self.manager.send_user_message("packing now")
+        self.assertEqual(out, "Packing now keeps the 12:15 Uber on track.")  # not "12:00" (traveller, 11:18)

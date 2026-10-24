@@ -188,11 +188,19 @@ _CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\
 def real_times(*texts: str, spans=()) -> frozenset:
     """Minute times that are facts, not arithmetic: the real start and end of items on the plan, and times the
     user said. A reply may say these as they are; any other time is said by its block."""
-    out = {(int(m.group(1)), int(m.group(2))) for t in texts for m in _CLOCK_MINUTES_RE.finditer(t or "")}
+    texts = list(texts) + [s.title for s in spans]  # "Flight (boards 2:25)": a time in a title is a fact too
+    out = set()
+    for t in texts:
+        for m in _ANY_CLOCK_RE.finditer(t or ""):  # 12-hour or 24-hour ("boarding at 14:25")
+            h = int(m.group(1))
+            out.add(((h % 12) or 12, int(m.group(2))))
     for s in spans:
         for dt in (s.start_dt, s.end_dt):
             out.add(((dt.hour % 12) or 12, dt.minute))
     return frozenset(out)
+
+
+_ANY_CLOCK_RE = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 
 
 _RANGE_RE = re.compile(_CLOCK_MINUTES_RE.pattern + r"\s*(–|-|to)\s*" +

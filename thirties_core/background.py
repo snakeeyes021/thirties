@@ -368,7 +368,10 @@ class BackgroundService:
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
         if rest:
-            self.send(f"🔔 {format_clock(block)}: " + ", ".join(s.title for s in rest), "start", now=now)
+            fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
+            said = [f"{s.title} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s) else s.title
+                    for s in rest]
+            self.send(f"🔔 {format_clock(block)}: " + ", ".join(said), "start", now=now)  # fixed: its real time
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
 

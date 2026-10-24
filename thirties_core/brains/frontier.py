@@ -454,28 +454,49 @@ RULES
         else:  # the reply was cleaned up or replaced: show it, but don't feed it back to the model as said twice
             self.messages.append({"role": "assistant", "content": reply, "display_only": True})
 
-    _ADMITS_RE = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|unable|didn'?t|failed|not able)\b",
-                            re.IGNORECASE)
+    _ADMITS_RE = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|unable|didn'?t|failed|not able|"
+                            r"won'?t|isn'?t on|not on (?:the|your))\b", re.IGNORECASE)
+    _CLAIMS_RE = re.compile(r"\b(marked|logged|noted|all set|done|added|moved|scheduled|updated|cleaned|cleared|"
+                            r"removed|checked (?:it )?off|ticked|taken care of)\b", re.IGNORECASE)
 
-    def _own_up(self, turn_start: int, reply: str) -> str:
-        """A tool that failed this turn, and wasn't retried successfully, is said in the reply, by Python: the
-        model has said "It is marked done now" over a failed write, and "All set" over three refusals (10-22, 10-24)."""
-        failed: Dict[str, str] = {}
+    def _failed_changes(self, turn_start: int) -> List[str]:
+        """Changes that failed this turn with nothing after them that worked: a refusal the model got around
+        another way (moving a break with a fresh add) isn't a failure the user needs to hear about."""
+        failed: List[str] = []
         for m in self.messages[turn_start:]:
-            if m.get("role") != "tool":
+            if m.get("role") != "tool" or m.get("name") in READ_ONLY_TOOLS:
                 continue
-            name, out = m.get("name") or "", str(m.get("content") or "")
+            out = str(m.get("content") or "")
             if out.startswith(NOT_DONE):
-                failed[name] = out[len(NOT_DONE):].lstrip(": ").strip()
+                failed.append(out[len(NOT_DONE):].lstrip(": ").strip())
             else:
-                failed.pop(name, None)  # retried, and it worked
+                failed = []
                 joplin = re.search(r"\((couldn'?t [^:]*Joplin.*)\)\.?$", out)  # done here, but not in Joplin
                 if joplin:
-                    failed["joplin:" + name] = re.sub(r"\s+", " ", joplin.group(1)).rstrip(".")
-        if not failed or self._ADMITS_RE.search(reply):
+                    failed.append(re.sub(r"\s+", " ", joplin.group(1)))
+        return failed
+
+    def _own_up(self, turn_start: int, reply: str) -> str:
+        """A reply that says a change happened, when the change failed, gets one more try with the failures
+        named ("It is marked done now" over a failed write, "All set" over three refusals: 10-22, 10-24). If it
+        still claims it, a plain line is added; the model's tool wording never reaches the user."""
+        failed = self._failed_changes(turn_start)
+        if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
             return reply
-        notes = [re.sub(r"\s*\[?id [0-9a-f]{6,}\]?", "", why) for why in failed.values()]
-        return reply.rstrip() + "\n\n(Not done: " + " ".join(n if n.endswith(".") else n + "." for n in notes) + ")"
+        logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
+        self.messages.append({"role": "user", "content": (
+            "[System check, not from the user] These didn't go through: " + " | ".join(failed) + ". Your reply "
+            "says otherwise. Rewrite it so it's true: say plainly what didn't happen and what you'll do instead.")})
+        response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+        self.messages.append(response)
+        for call in response.get("tool_calls", []) or []:
+            output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+            self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
+                                  "name": call.get("name"), "content": output})
+        fixed = str(response.get("content") or "").strip()
+        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes(turn_start)):
+            return fixed
+        return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
 
     _META_RE = re.compile(
         r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"

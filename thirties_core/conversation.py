@@ -333,7 +333,8 @@ class ConversationManager:
 
         reply = self.brain.respond(user_text)
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
-        keep = real_times(user_text, spans=self.day_plan.spans)  # real item times, and the user's own, as said
+        said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
+        keep = real_times(*said, user_text, spans=self.day_plan.spans)  # real item times, and the user's, as said
         shown = reply if EXACT_ASKED_RE.search(user_text) else to_thirties(reply, keep)  # else blocks
         trimmed = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
                                  if self.day_plan.target_date == self.tools.today() else None)
