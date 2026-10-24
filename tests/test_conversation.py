@@ -152,12 +152,67 @@ class TestTurnLoop(ConversationTestCase):
         out = self.manager.send_user_message("am I free later?")
         self.assertEqual(out, "You're free all afternoon.")
 
+    def test_a_list_with_a_phone_call_in_it_is_kept(self) -> None:
+        text = "Pressing today:\n- Call ENT\n- Call Hopkins about the bill\n\nWant those after lunch?"
+        self.engine.set_next_response(reply(text))
+        self.assertEqual(self.manager.send_user_message("what's pressing?"), text)  # 10-21: the list vanished
+
+    def test_a_reply_claiming_a_failed_change_is_corrected(self) -> None:
+        self.engine.responses = [reply('CALL log_outcome {"event": "Put watch back on wrist", "status": "done"}'),
+                                 reply("All set, noted!"),
+                                 reply("I couldn't find Put watch back on wrist on today's plan. Want me to add it?")]
+        out = self.manager.send_user_message("I put the watch back on")  # 10-24: three refusals, then "All set"
+        self.assertEqual(out, "I couldn't find Put watch back on wrist on today's plan. Want me to add it?")
+        self.engine.responses = [reply('CALL log_outcome {"event": "Nope", "status": "done"}'),
+                                 reply("All set, noted!"), reply("All set!")]
+        out = self.manager.send_user_message("done with nope")
+        self.assertEqual(out, "All set, noted!\n\n(One part of that didn't go through, so it isn't recorded yet.)")
+        self.assertNotIn("NOT_DONE", out)
+
+    def test_a_refusal_the_model_got_around_isnt_reported(self) -> None:
+        self.engine.responses = [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"name": "log_outcome", "arguments": {"event": "Nope", "status": "done"}},
+                {"name": "add_event", "arguments": {"title": "Break", "start": "3:15 PM", "duration": "15 min"}}]},
+            reply("Moved your break to 3:15.")]
+        self.assertEqual(self.manager.send_user_message("break at 3:15 instead"), "Moved your break to 3:15.")
+
     def test_call_written_mid_sentence_still_runs(self) -> None:
         self.engine.set_next_response(reply('Moving it now.CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
         self.engine.set_next_response(reply("Walk is at 5."))
         out = self.manager.send_user_message("walk at 5")
         self.assertEqual(occupant(self.manager.day_plan, "17:00"), "Walk")
         self.assertNotIn("CALL", out)
+
+    def test_the_chat_shows_one_reply_per_turn(self) -> None:
+        self.engine.responses = [
+            {"role": "assistant", "content": "Let me check your day.",
+             "tool_calls": [{"name": "list_schedule", "arguments": {}}]},
+            reply("Wait, looking at the transcript, the user asked about tonight."),
+            reply("You're free from 4:00 until 11:00."),
+        ]
+        out = self.manager.send_user_message("am I free tonight?")
+        self.assertEqual(out, "You're free from 4:00 until 11:00.")
+        self.assertEqual([m["content"] for m in self.manager.history()],
+                         ["am I free tonight?", "You're free from 4:00 until 11:00."])  # no drafts, no notes to itself
+
+    def test_minutes_are_said_by_their_block_unless_real_or_asked(self) -> None:
+        self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
+        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is in the 6:00 block tonight.")
+        self.assertEqual(self.manager.send_user_message("what's the exact time of sunset?"), "Sunset is at 6:28 tonight.")
+        self.engine.responses = [reply("Your break is in the 10:45 block.")]
+        self.assertEqual(self.manager.send_user_message("when's my break?"),
+                         "Your break is in the 10:30 block.")  # the block it's in, never the next one
+        self.engine.responses = [reply("Got it: your break is at 3:15, not 3:00.")]
+        self.assertEqual(self.manager.send_user_message("my break is 3:15, not 3:00, adherence is tracked"),
+                         "Got it: your break is at 3:15, not 3:00.")  # their own time is a fact, said as is
+        self.engine.responses = [reply('CALL add_event {"title": "Uber to the airport", "start": "12:15 PM", '
+                                       '"duration": "30 min"}'),
+                                 reply("Your Uber is at 12:15, in the 12:00 block. Packing at 11:45 fits.")]
+        self.assertEqual(self.manager.send_user_message("I'm leaving for the airport then"),
+                         "Your Uber is at 12:15, in the 12:00 block. Packing in the 11:30 block fits.")  # 10-23
+        uber = next(s for s in self.manager.day_plan.spans if s.title == "Uber to the airport")
+        self.assertEqual(uber.start_dt, at("12:15"))  # a ride is fixed: it keeps its real time
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
@@ -267,3 +322,42 @@ class TestSummaries(ConversationTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFreshLists(unittest.TestCase):
+
+    def test_lists_are_read_again_when_joplin_changed(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        db = Path(tempfile.mkdtemp()) / "database.sqlite"
+        db.write_text("")
+        joplin = MagicMock()
+        joplin.config.resolve_joplin_db_path.return_value = db
+        zein = TaskItem(id="z", source_notebook="1. Tasks", title="Read Zein's text")
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [zein], []
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, joplin_engine=joplin,
+                                      inference_engine=MockInferenceEngine(), active_notes=[])
+        manager.refresh()
+        self.assertEqual([t.title for t in manager.tools.services.tasks], ["Read Zein's text"])
+        joplin.fetch_tasks.return_value = []  # ticked in Joplin
+        manager.refresh()
+        self.assertEqual(len(manager.tools.services.tasks), 1)  # unchanged file: not read again
+        os.utime(db, (1, 2))
+        manager.refresh()
+        self.assertEqual(manager.tools.services.tasks, [])
+        self.assertEqual(manager.brain.tasks, [])
+
+
+class TestTimesSaidEarlier(ConversationTestCase):
+
+    def test_a_time_the_user_gave_this_morning_stays_true_all_day(self) -> None:
+        self.engine.responses = [reply("Got it."), reply("Packing now keeps the 12:15 Uber on track.")]
+        self.manager.send_user_message("I MUST be in an Uber to the airport by 12:15")
+        out = self.manager.send_user_message("packing now")
+        self.assertEqual(out, "Packing now keeps the 12:15 Uber on track.")  # not "12:00" (traveller, 11:18)

@@ -1,0 +1,151 @@
+{
+  "id": "swe_remote_oncall_page",
+  "date": "2026-10-22",
+  "source": "made up: remote software engineer on call who gets paged in the afternoon",
+  "wake": "07:30",
+  "bed": "23:30",
+  "work": [
+    "09:00",
+    "17:30"
+  ],
+  "persona": "Priya, a backend software engineer working remotely and serving as primary on-call this week. Texts concisely with technical shorthand ('PR', 'prod', 'sev2'), likes structured deep-work blocks, and immediately drops everything when PagerDuty goes off.",
+  "situation": "Thursday morning waking at 07:30. Primary on-call rotation today, with a 10:30 team standup, a 14:00 architecture review, a migration script to finish, and plans to make dal and go to a 18:00 climbing gym session.",
+  "life": [
+    "07:40 Wake up and text the app: primary on-call today, working 09:00–17:30. Before work I want to walk to get coffee, shower, and eat breakfast. During work I need to review 3 team PRs, finish the billing migration script, and prep docs for the 14:00 arch review. After work: climbing gym at 18:00 and cook dal for dinner.",
+    "07:45 Remind the app to leave a 30-minute lunch break at 12:30 and 30 minutes at 13:30 right before the arch review to finish the diagram.",
+    "07:50 Walk around the block for a cortado, shower, and eat yogurt and granola until 08:55.",
+    "08:58 Report morning walk, shower, and breakfast done. Logging in to check overnight on-call alerts and review the 3 team PRs.",
+    "09:00 Triage two low-priority alerts and review the 3 PRs until 10:25.",
+    "10:28 Report PR reviews done. Joining 10:30 standup now.",
+    "10:30 Attend daily standup (15 mins), then dive into writing the billing migration script until 12:30.",
+    "12:32 Report first block of billing migration script done. Taking lunch now and also going to water the balcony herbs while my soup heats up.",
+    "12:35 Eat tomato soup and grilled cheese and water the balcony herbs until 13:20.",
+    "13:22 Report lunch and watering herbs done. Polishing the sequence diagram for the 14:00 architecture review.",
+    "14:00 Attend architecture review meeting until 15:00.",
+    "15:05 Right after the meeting ends, PagerDuty triggers a Sev-2 alert: payment webhook queue is backing up in prod. Text the app: just got paged for a sev2 prod incident, push the rest of the afternoon back—don't know how long this will take yet.",
+    "15:05 Debug the Redis queue spike with two coworkers on a war-room huddle, roll back a bad config deploy, and drain the dead-letter queue until 17:10.",
+    "17:12 Text the app: incident mitigated! Still have to write the postmortem draft before logging off (about 45 mins), and I never finished the billing migration script. Cancel the 18:00 climbing gym—I'm fried and have to stay near my laptop on call tonight anyway. Move finishing the migration script to tomorrow, and schedule postmortem now, a 30-min neighborhood walk at 18:00 to decompress, and cooking dal at 18:30.",
+    "17:15 Write the Sev-2 incident postmortem doc until 18:00.",
+    "18:02 Report postmortem draft done and work finished for the day! Heading out for a short walk around the neighborhood (bringing my on-call phone).",
+    "18:05 Walk around the neighborhood until 18:35.",
+    "18:40 Report walk done. Start rinsing lentils and cooking tadka dal and rice for dinner.",
+    "19:45 Finish eating dinner and cleaning the Instant Pot. Ask the app what's left on the Home list—decide to spend 20 minutes cleaning the espresso machine backflush now and then play Baldur's Gate.",
+    "19:50 Backflush and descale the espresso machine until 20:15, then relax for the rest of the night."
+  ],
+  "constraints": [
+    "Primary on-call means PagerDuty incidents immediately preempt all scheduled work and personal blocks.",
+    "While primary on-call after an afternoon Sev-2, cannot go to the climbing gym (bad cell reception / can't respond within 10-minute SLA).",
+    "Needs 30 minutes immediately before the 14:00 architecture review to finalize the sequence diagram."
+  ],
+  "truth": [
+    {
+      "item": "Morning coffee walk, shower & breakfast",
+      "match": "coffee|walk|shower|breakfast",
+      "start": "07:50",
+      "end": "08:55"
+    },
+    {
+      "item": "Review 3 team PRs & alert triage",
+      "match": "pr|review|triage",
+      "start": "09:00",
+      "end": "10:25"
+    },
+    {
+      "item": "Team Standup",
+      "match": "standup",
+      "start": "10:30",
+      "end": "10:45"
+    },
+    {
+      "item": "Billing migration script",
+      "match": "billing|migration|script",
+      "start": "10:45",
+      "end": "12:30"
+    },
+    {
+      "item": "Lunch & water balcony herbs",
+      "match": "lunch|herb|water",
+      "start": "12:35",
+      "end": "13:20"
+    },
+    {
+      "item": "Prep architecture review diagram",
+      "match": "prep|diagram|arch",
+      "start": "13:22",
+      "end": "14:00"
+    },
+    {
+      "item": "Architecture Review",
+      "match": "architecture review|arch review",
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "item": "Sev-2 Prod Incident & Postmortem",
+      "match": "incident|sev2|page|postmortem",
+      "start": "15:05",
+      "end": "18:00"
+    },
+    {
+      "item": "Decompression walk",
+      "match": "walk|decompress",
+      "start": "18:05",
+      "end": "18:35"
+    },
+    {
+      "item": "Cook and eat dal dinner",
+      "match": "dal|dinner|cook",
+      "start": "18:40",
+      "end": "19:45"
+    },
+    {
+      "item": "Backflush espresso machine",
+      "match": "espresso|backflush|clean",
+      "start": "19:50",
+      "end": "20:15"
+    },
+    {
+      "item": "Climbing gym session",
+      "match": "climb|gym",
+      "start": "18:00",
+      "end": "19:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Payments Team Standup",
+      "start": "10:30",
+      "end": "10:45"
+    },
+    {
+      "summary": "Webhook Architecture Review",
+      "start": "14:00",
+      "end": "15:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Senior backend engineer, remote. On-call weeks require staying within 10 mins of laptop."
+  },
+  "notes": [
+    {
+      "notebook": "Work",
+      "title": "Sprint Tasks",
+      "role": "today",
+      "body": "- [ ] Review 3 open PRs on billing-service\n- [ ] Finish idempotent billing migration script\n- [ ] Prep sequence diagram for 2 PM Arch Review\n- [ ] Triage overnight low-urgency alerts"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home & Chores",
+      "role": "list",
+      "body": "- [ ] Water balcony herbs\n- [ ] Backflush & descale espresso machine\n- [ ] Make Instant Pot tadka dal\n- [ ] Drop off recycling\n- [x] Order cat litter"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Evening / Fitness",
+      "role": "menu",
+      "body": "- [ ] Bouldering session at Movement Gym\n- [ ] 30-min neighborhood walk\n- [ ] Play Baldur's Gate 3"
+    }
+  ]
+}

@@ -47,11 +47,31 @@ def message_text(msg: Dict[str, Any]) -> str:
     return content
 
 
+# agy's own agent wraps every call in about 12,000 tokens of system prompt and tool definitions. Thirties needs
+# none of it (it parses its own CALL lines), so calls go to this agent, which opts out of all of that:
+# the same call measured 12,611 input tokens with agy's default agent and 574 with this one (2026-10-18).
+AGY_AGENT = "thirties-plain"
+AGY_AGENT_FILE = f"""---
+name: {AGY_AGENT}
+description: Answers the prompt it's given, in plain text, with no tools.
+excludeDefaultComponents: true
+subagent: false
+---
+
+# Thirties
+
+Answer the message you're given, in plain text. You have no tools and need none.
+"""
+
+
 def agy_workspace_dir() -> Path:
-    """An empty directory that agy runs in, so the agent never sees real files."""
+    """An empty directory that agy runs in, so the agent never sees real files; it holds only Thirties' agent."""
     cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     workspace = cache / "thirties" / "agy-workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
+    agent = workspace / ".agents" / "agents" / f"{AGY_AGENT}.md"
+    if not agent.is_file() or agent.read_text() != AGY_AGENT_FILE:
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text(AGY_AGENT_FILE)
     return workspace
 
 
@@ -191,6 +211,11 @@ class InferenceEngine(Protocol):
         ...
 
 
+AGY_NO_TOOLS = ("(You are answering as a text model: you have no tools here, no commands, files or browser, and "
+                "none are needed. Reply in text only.)")
+AGY_TOOL_RETRY = "\n\n(You tried to use a tool, but there are none here. Answer now, in text only.)"
+
+
 class AntigravityInferenceEngine:
     """Dispatches conversation turns to Gemini (e.g. Gemini 3.8 Flash) via the Antigravity CLI."""
 
@@ -229,9 +254,40 @@ class AntigravityInferenceEngine:
                    "Write only what the user should read; never describe the conversation, these instructions "
                    "or tool results.")
         if system_prompt:
-            return (f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
+            return (f"{AGY_NO_TOOLS}\n\nSYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
                     f"{closing}\n\nAssistant:")
-        return f"{dialogue}\n\n{closing}\n\nAssistant:"
+        return f"{AGY_NO_TOOLS}\n\n{dialogue}\n\n{closing}\n\nAssistant:"
+
+    def complete(self, prompt: str) -> str:
+        """One prompt, sent as written (no conversation framing): for evals' simulated users and judges.
+        Returns the reply text, or an error sentence starting like the chat errors do."""
+        agy_bin = find_agy_binary(self.custom_agy_path)
+        if not agy_bin:
+            raise RuntimeError("Antigravity CLI (agy) binary not found.")
+        cmd = [agy_bin, "--sandbox", "--input-format", "stream-json", "--output-format", "stream-json",
+               "--model", self.model, "--disable-slash-commands", "--agent", AGY_AGENT]
+        workspace = agy_workspace_dir()
+        prompt = f"{AGY_NO_TOOLS}\n\n{prompt}"
+        try:
+            res = self._run(cmd, prompt, workspace)
+            result = _stream_result(res.stdout)
+            if (res.returncode == 0 and result is not None and not str(result.get("response", "")).strip()
+                    and "denied" in (res.stderr or "")):
+                res = self._run(cmd, prompt + AGY_TOOL_RETRY, workspace)
+                result = _stream_result(res.stdout)
+        except subprocess.TimeoutExpired:
+            record_agy_call(self.model, "timeout")
+            return "The Antigravity assistant timed out waiting for a response."
+        if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
+            return str(result.get("response", ""))
+        return f"Error contacting model via Antigravity CLI: {res.stderr or res.stdout[-1000:]}"
+
+    def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
+        stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
+        res = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True, timeout=self.timeout, cwd=workspace)
+        record_agy_call(self.model, "ok" if res.returncode == 0 else
+                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + res.stdout[-2000:]) else "error"))
+        return res
 
     def chat(
         self,
@@ -255,8 +311,8 @@ class AntigravityInferenceEngine:
             "--output-format", "stream-json",
             "--model", self.model,
             "--disable-slash-commands",
+            "--agent", AGY_AGENT,  # no agy system prompt or tools: about 12,000 fewer tokens per call
         ]
-        stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
         # agy is a coding agent: run it in an empty private directory, never in the
         # repository or wherever Thirties happened to be started.
         workspace = agy_workspace_dir()
@@ -264,14 +320,14 @@ class AntigravityInferenceEngine:
             cmd = ["flatpak-spawn", "--host", f"--directory={workspace}"] + cmd
 
         try:
-            res = subprocess.run(
-                cmd,
-                input=stdin_text,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                cwd=workspace,
-            )
+            res = self._run(cmd, prompt_text, workspace)
+            result = _stream_result(res.stdout)
+            if (res.returncode == 0 and result is not None and not str(result.get("response", "")).strip()
+                    and "denied" in (res.stderr or "")):
+                # It tried to use one of its own tools (headless mode denies them) and ended without
+                # answering: ask once more, plainly.
+                logger.warning("agy tried to use a tool instead of answering; asking again.")
+                res = self._run(cmd, prompt_text + AGY_TOOL_RETRY, workspace)
         except subprocess.TimeoutExpired:
             record_agy_call(self.model, "timeout")
             logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)
@@ -290,8 +346,6 @@ class AntigravityInferenceEngine:
 
         raw_output = res.stdout
         raw_reply = ""
-        record_agy_call(self.model, "ok" if res.returncode == 0 else
-                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + raw_output[-2000:]) else "error"))
         result = _stream_result(raw_output)
         if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
             raw_reply = result.get("response", "")

@@ -124,9 +124,10 @@ class TestSchedulingActions(SlmTestCase):
         out = self.say("email recruiter 9 to 10 and push the natalie listening to 10 to 11",
                        {"type": "add", "title": "Email recruiter", "start": "9", "end": "10"},
                        {"type": "move", "target": "natalie listening", "start": "10", "end": "11"})
-        self.assertIn("Moved Natalie listening to 10:00 PM – 11:00 PM", out)
         self.assertIn("Added Email recruiter: 9:00 PM – 10:00 PM", out)
+        self.assertIn("Natalie listening now 10:00 PM – 11:00 PM", out)  # slid along by the add, as asked
         self.assertNotIn("overlap", out)
+        self.assertNotIn("couldn't", out)
 
     def test_tool_errors_are_humane(self):
         self.say("reading 8 to 9", {"type": "add", "title": "Reading", "start": "8", "end": "9"})
@@ -246,13 +247,13 @@ class TestSchedulingActions(SlmTestCase):
                                                          "duration": "30 minutes", "day": "tomorrow"})
         out = self.say("walk tmrw at 7:30 for an hour", {"type": "add", "title": "Walk", "start": "7:30 AM",
                                                           "duration": "1 hour", "day": "tomorrow"})
-        self.assertIn("would overlap Email the recruiter", out)
-        out = self.say("no, move the recruiter email to 8:30 instead", {"type": "reject"},
-                       {"type": "move", "target": "recruiter email", "start": "8:30 AM"})
+        self.assertIn("To make room: Email the recruiter now 8:30 AM – 9:00 AM", out)  # slid, not a question
+        out = self.say("actually move the recruiter email to 9:30", {"type": "move", "target": "recruiter email",
+                                                                      "start": "9:30 AM"})
         self.assertIn("Moved", out)
         tomorrow = self.sched.build_day_plan(DAY + timedelta(days=1))[0]
         email = next(s for s in tomorrow.spans if s.title == "Email the recruiter")
-        self.assertEqual(email.start_dt.strftime("%H:%M"), "08:30")
+        self.assertEqual(email.start_dt.strftime("%H:%M"), "09:30")
 
     def test_guards_against_common_misparses(self):
         self.say("composing 7 to 8", {"type": "add", "title": "Composing", "start": "7", "end": "8"})
@@ -300,7 +301,7 @@ class TestSchedulingActions(SlmTestCase):
             span.actual_start, span.actual_end = start, start + timedelta(minutes=45)
             self.sched.state_db.upsert_span(span)
         out = self.say("reading at 8", {"type": "add", "title": "Reading", "start": "8"})
-        self.assertIn("Added Reading: 8:00 PM – 9:00 PM (1h). (about as long as it usually takes you)", out)
+        self.assertIn("Added Reading: 8:00 PM – 8:45 PM (45m). (about as long as it usually takes you)", out)
         reading = next(s for s in self.m.day_plan.spans if s.title == "Reading")
         self.assertEqual(reading.duration_minutes, 45)  # the real length stays underneath
 
@@ -564,17 +565,20 @@ class TestMessages(SlmTestCase):
 
     def test_remind_me_parses_day_time_and_text_in_python(self):
         out = self.say("remind me next week to water my pet alligator", {"type": "add", "title": "Water alligator"})
-        self.assertEqual(out, "Okay, I'll remind you Monday, October 19 at 9:00 AM: Water my pet alligator")
+        self.assertEqual(out, "Okay: Water my pet alligator, Monday, October 19 at 9:00 AM, on the plan, "
+                              "and I'll ping you then.")
         out = self.say("hey remind me saturday at 3 to call grandma", {"type": "chat"})
-        self.assertEqual(out, "Okay, I'll remind you Saturday, October 17 at 3:00 PM: Call grandma")
+        self.assertEqual(out, "Okay: Call grandma, Saturday, October 17 at 3:00 PM, on the plan, and I'll ping you "
+                              "then.")
         out = self.say("ping me in 20 minutes about the laundry", {"type": "chat"})
-        self.assertIn("5:00 PM: The laundry", out)
+        self.assertEqual(out, "Okay, I'll ping you Thursday, October 15 at 5:00 PM: The laundry")  # just a message
 
     def test_remind_me_what_is_a_question_and_today_gets_a_sensible_time(self):
         out = self.say("remind me what we agreed on for composing", {"type": "question", "topic": "past composing"})
-        self.assertNotIn("I'll remind you", out)
+        self.assertNotIn("ping you", out)
         out = self.say("remind me to pay the electric bill sometime today", {"type": "add", "title": "Electric bill"})
-        self.assertEqual(out, "Okay, I'll remind you Thursday, October 15 at 6:30 PM: Pay the electric bill")
+        self.assertEqual(out, "Okay: Pay the electric bill, Thursday, October 15 at 6:30 PM, on the plan, and I'll "
+                              "ping you then.")
 
     def test_stop_asking_mutes_the_item_just_asked_about(self):
         self.say("taxes 2 to 3", {"type": "add", "title": "Taxes", "start": "2:00 PM", "end": "3:00 PM"})
@@ -595,6 +599,88 @@ class TestMessages(SlmTestCase):
         self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
         out = self.say("yes please", {"type": "chat"})
         self.assertIn("Rolled into today:\n- 7:00 PM – Taxes", out)
+
+
+class TestFromTheMilestoneRun(SlmTestCase):
+    """Failures the 0.1 milestone day sim found."""
+
+    def test_starting_something_isnt_finishing_it(self):
+        self.say("laundry at 5", {"type": "add", "title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
+        out = self.say("starting laundry now", {"type": "outcome", "target": "laundry", "status": "done"})
+        self.assertEqual(out, "Got it, Laundry is underway.")
+        laundry = next(s for s in self.m.day_plan.spans if s.title == "Laundry")
+        self.assertEqual(laundry.status.value, "planned")
+
+    def test_done_words_win_over_starting_words(self):
+        from thirties_core.brains.slm.brain import FINISHED_RE, STARTING_RE
+        for text in ("flour order in, made the cutoff, starting on the bread", "sent the email, heading out now"):
+            self.assertTrue(STARTING_RE.search(text) and FINISHED_RE.search(text), text)
+
+    def test_a_reported_time_is_the_most_recent_one(self):
+        set_debug_time(at("19:40"))
+        self.say("dinner at 6:30", {"type": "add", "title": "Dinner", "start": "6:30 PM", "duration": "1 hour"})
+        self.say("finished dinner at 7:30, started at 6:40", {"type": "outcome", "target": "dinner", "status": "done",
+                                                               "started": "6:40", "finished": "7:30"})
+        dinner = next(s for s in self.m.day_plan.spans if s.title == "Dinner")
+        self.assertEqual(dinner.actual_start.strftime("%H:%M"), "18:40")  # this evening, not 6:40 this morning
+
+    def test_a_question_about_one_list(self):
+        from thirties_core.models import TaskItem
+        self.brain.tasks = [TaskItem(id=f"h{i}", source_notebook="Tasks", title=t, is_checkbox_item=True,
+                                     parent_note_title="Home", parent_note_id="n_home")
+                            for i, t in enumerate(("Hide the cable", "Fix the door"))]
+        out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
+        self.assertEqual(out, "On Home:\n- Hide the cable\n- Fix the door")
+
+    def test_calendar_events_need_no_checking_off(self):
+        out = self.say("dentist done", {"type": "outcome", "target": "dentist", "status": "done"})
+        self.assertEqual(out, "Dentist is on your calendar, so there's nothing to check off.")
+
+
+class TestFromTheDaySim(unittest.TestCase):
+    """Failures the day sim found on 0.0.1."""
+
+    def setUp(self):
+        set_debug_time(at("10:40"))
+        self.addCleanup(set_debug_time, None)
+        self.rt = FakeRuntime()
+        self.sched = make_scheduler([event("show1", "15:00", "17:00", "SB Show", invite=True),
+                                     event("show2", "19:30", "21:30", "SB Show", invite=True)])
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.m = ConversationManager(plan, list(TASKS), pending, self.sched, active_notes=[],
+                                     brain=None, inference_engine=None)
+        self.brain = SlmBrain(self.m.tools, tasks=list(TASKS), runtime=self.rt)
+        self.m.brain = self.brain
+        self.m._load(None)
+
+    def say(self, text, *parse):
+        self.rt.parse_replies.append(actions(*parse))
+        self.m.send_user_message(text)
+        return self.m.last_raw_reply
+
+    def shows(self):
+        return [s for s in self.m.day_plan.spans if s.title == "SB Show"]
+
+    def test_yes_answers_the_morning_offer_not_an_invite(self):
+        y = DAY - timedelta(days=1)
+        from tests.fixtures import TZ
+        from datetime import datetime, time as _t
+        from thirties_core.models import EventSpan, SpanCategory
+        self.sched.state_db.upsert_span(EventSpan("br", "Message Brad back", datetime.combine(y, _t(21, 30), TZ),
+                                                  datetime.combine(y, _t(21, 45), TZ), SpanCategory.ACTIVITY))
+        self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
+        out = self.say("yeah put that on today", {"type": "confirm"})
+        self.assertIn("Rolled into today", out)
+        self.assertTrue(all(s.tentative for s in self.shows()))  # the invites are still unanswered
+
+    def test_declining_both_invites_by_name(self):
+        out = self.say("decline both SB Show invites, not going", {"type": "remove", "target": "SB Show"})
+        self.assertTrue(out.startswith("Declined SB Show (3:00 PM and 7:30 PM): that time is free."), out)
+        self.assertEqual(self.shows(), [])
+
+    def test_tomorrow_when_the_parse_drops_the_day(self):
+        out = self.say("what does tomorrow look like?", {"type": "question", "topic": "schedule"})
+        self.assertNotIn("Here's today", out)
 
 
 if __name__ == "__main__":

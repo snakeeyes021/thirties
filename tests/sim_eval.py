@@ -23,7 +23,6 @@ import re
 import sys
 import tempfile
 import time as time_mod
-from types import SimpleNamespace
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -95,6 +94,7 @@ class SimScenario:
     opening: str = ""
     max_turns: int = 10
     hide_tasks: List[str] = field(default_factory=list)  # backlog titles this scenario assumes aren't there
+    background_calendar: bool = True  # add synthetic_calendar's weekday standups and choir (not for day scripts)
     tags: List[str] = field(default_factory=list)  # goal kinds, for per-kind results
 
 
@@ -435,13 +435,14 @@ QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many r
 # --- staying within a share of the agy quota (see docs/SLM_BRAIN.md, "Eval budget") ---
 
 QUOTA_WINDOW_SECONDS = 5 * 3600   # agy's quota window
-MEASURED_CAPACITY = 1650          # calls that used up a window on 2026-10-15 (sim/judge on medium then)
+MEASURED_CAPACITY = 2000          # calls per window on flash-low: 1,113 calls showed as 55% used (2026-10-18)
 CALLS_PER_CONVERSATION = {"slm": 6, "frontier": 9}  # simulator turns + judge (+ Frontier replies), measured
 
 
 def quota_capacity() -> int:
-    """Calls per window: the count before the last quota stop in the ledger, else the measured figure."""
-    rows = agy_ledger(7 * 86400)
+    """Calls per window: the count before a quota stop in the last day, else the measured figure (older stops
+    were measured with a different mix of models)."""
+    rows = agy_ledger(86400)
     stops = [t for t, _, outcome in rows if outcome == "quota"]
     if not stops:
         return MEASURED_CAPACITY
@@ -449,6 +450,52 @@ def quota_capacity() -> int:
     first_stop = min(t for t in stops if t > last - QUOTA_WINDOW_SECONDS)
     used = sum(1 for t, _, o in rows if first_stop - QUOTA_WINDOW_SECONDS <= t < first_stop and o != "quota")
     return max(used, 200)
+
+
+def agy_quota() -> Dict[str, Dict[str, Tuple[float, str]]]:
+    """agy's real quota, from its /quota command (free: no agent turn, no quota spent):
+    {group name: {"5h" | "weekly": (fraction remaining, reset time)}}; {} if it can't be read."""
+    import subprocess
+    from thirties_core.inference import agy_workspace_dir, find_agy_binary
+    agy = find_agy_binary(None)
+    if not agy:
+        return {}
+    try:
+        res = subprocess.run([agy, "-p", "/quota", "--output-format", "json"], capture_output=True, text=True,
+                             timeout=60, cwd=agy_workspace_dir())
+        data = json.loads(res.stdout)
+    except (subprocess.SubprocessError, ValueError, OSError):
+        return {}
+    out: Dict[str, Dict[str, Tuple[float, str]]] = {}
+    for group in ((data.get("command") or {}).get("data") or {}).get("groups", []):
+        for bucket in group.get("buckets", []):
+            out.setdefault(group["name"], {})[bucket["window"]] = (float(bucket["remaining_fraction"]),
+                                                                    bucket.get("reset_time", ""))
+    return out
+
+
+def quota_group(model: str) -> str:
+    """Which of agy's quota groups a model draws on."""
+    if model.startswith("gemini-4-argon"):
+        return "Gemini 4 Argon"
+    if model.startswith(("claude", "gpt")):
+        return "Claude and GPT models"
+    return "Gemini Models"
+
+
+def quota_stop(models: List[str], five_hour_share: float, weekly_share: float = 0.70) -> Optional[str]:
+    """Why evals should stop now (a group's 5-hour or weekly use past its share), or None to carry on. Reads the
+    real quota; if agy can't report it, falls back to the call-count estimate."""
+    quota = agy_quota()
+    if not quota:
+        used, allowed, capacity = budget_left(five_hour_share)
+        return None if used < allowed else f"estimated budget reached: {used} calls in 5 h (budget {allowed})"
+    for group in {quota_group(m) for m in models}:
+        for window, share in (("5h", five_hour_share), ("weekly", weekly_share)):
+            remaining, reset = quota.get(group, {}).get(window, (1.0, ""))
+            if 1 - remaining >= share:
+                return f"{group} {window} quota {1 - remaining:.0%} used (limit for evals {share:.0%}; resets {reset})"
+    return None
 
 
 def budget_left(share: float) -> Tuple[int, int, int]:
@@ -463,15 +510,17 @@ def raise_if_agy_failed(text: str) -> None:
         raise (QuotaExhausted if QUOTA_RE.search(text) else AgyError)(text[:400])
 
 
-def make_llm(model: str) -> Callable[[str], str]:
+def make_llm(model: str, timeout: int = 180) -> Callable[[str], str]:
     cfg = ThirtiesConfig()
     cfg.inference.gemini_model = model
-    cfg.inference.timeout_seconds = 180
+    cfg.inference.timeout_seconds = timeout
     engine = AntigravityInferenceEngine(cfg)
 
     def ask(prompt: str) -> str:
         for attempt in range(3):  # agy occasionally returns nothing or an error; try again
-            out = engine.chat([{"role": "user", "content": prompt}]).get("content", "")
+            # As written: wrapped as a chat turn ("write the assistant's next message"), the simulated user
+            # sometimes answered as the assistant, or thought out loud about the two instructions.
+            out = engine.complete(prompt)
             if out.strip() and not out.startswith(AGY_ERROR_PREFIXES):
                 return out
             if QUOTA_RE.search(out):
@@ -550,9 +599,13 @@ class SimJoplinAPI:
     """Joplin's API in memory, seeded from the backlog, so list edits work in evals and never touch the
     user's real notes."""
 
-    def __init__(self, tasks: List[TaskItem]) -> None:
+    def __init__(self, tasks: List[TaskItem], real_notes: Optional[List[Dict[str, Any]]] = None) -> None:
         self.notes: Dict[str, Dict[str, str]] = {}
+        for n in real_notes or []:  # the user's notes as they are: headings, ticked items, Today, routines
+            self.notes[n["id"]] = {"id": n["id"], "body": n.get("body") or ""}
         for t in tasks:
+            if t.parent_note_id in self.notes or t.id in self.notes:
+                continue
             if t.is_checkbox_item and t.parent_note_id:
                 note = self.notes.setdefault(t.parent_note_id, {"id": t.parent_note_id, "body": ""})
                 note["body"] += f"- [ ] {t.title}\n"
@@ -570,18 +623,34 @@ class SimJoplinAPI:
         return True
 
 
+class SimJoplin:
+    """The Joplin connector over SimJoplinAPI: the notes Thirties reads, as edited during the sim."""
+
+    def __init__(self, tasks: List[TaskItem], notes: List[Dict[str, Any]]) -> None:
+        self.api_client = SimJoplinAPI(tasks, notes)
+        self.meta = {n["id"]: n for n in notes}
+
+    def fetch_active_notes(self) -> List[Dict[str, Any]]:
+        return [dict(self.meta[nid], body=n["body"]) for nid, n in self.api_client.notes.items() if nid in self.meta]
+
+    def fetch_tasks(self) -> List[TaskItem]:
+        from thirties_core.joplin_engine import checklist_tasks
+        return [t for n in self.fetch_active_notes()
+                for t in checklist_tasks(n["id"], n["title"], n.get("source_notebook", ""), n["body"], [])]
+
+
 def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: List[Dict], engine) -> Tuple[Any, Any]:
     cfg = load_config()
     cfg.assistant.brain = brain
     cfg.sync.enabled = False
-    events = synthetic_calendar(scn.day) + list(scn.extra_events)
+    events = (synthetic_calendar(scn.day) if scn.background_calendar else []) + list(scn.extra_events)
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp(prefix="sim_")) / "state.sqlite"),
                                    MockCalendarEngine(events))
     plan, pending = sched.build_day_plan(scn.day)
     hidden = {h.lower() for h in scn.hide_tasks}
     tasks = [TaskItem(**t.to_dict()) for t in tasks if t.title.lower() not in hidden]
     cfg.joplin.write_back, cfg.joplin.api_token = True, "sim"
-    joplin = SimpleNamespace(api_client=SimJoplinAPI(tasks))
+    joplin = SimJoplin(tasks, notes)
     manager = ConversationManager(plan, tasks, pending, sched, inference_engine=engine, active_notes=notes)
     manager.tools.services.joplin = joplin
     for tool, args in scn.setup:
@@ -682,10 +751,10 @@ def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     frontier_engine = AntigravityInferenceEngine(fcfg)
     results = []
     for n, (scn, brain, i) in enumerate(jobs, 1):
-        used, allowed, capacity = budget_left(args.budget)
-        if used + CALLS_PER_CONVERSATION[brain] > allowed:
-            return results, (f"budget reached after {len(results)} finished conversations in this worker: {used} agy calls "
-                             f"in the last 5 h, budget {allowed} ({args.budget:.0%} of ~{capacity})")
+        models = [args.sim_model] + ([args.frontier_model] if brain == "frontier" else [])
+        stop = quota_stop(models, args.budget) if n == 1 or n % 5 == 0 else None  # /quota every few conversations
+        if stop:
+            return results, f"stopped after {len(results)} finished conversations in this worker: {stop}"
         print(f"\n== {scn.id} [{brain}] {i}/{args.repeat}  ({n}/{len(jobs)})", flush=True)
         try:
             run = run_scenario(scn, brain, sim, judge, tasks, notes, frontier_engine)

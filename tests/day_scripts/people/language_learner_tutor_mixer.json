@@ -1,0 +1,145 @@
+{
+  "id": "language_learner_tutor_mixer",
+  "date": "2026-10-15",
+  "source": "made up: dedicated Japanese language learner with a daily study routine, an online tutor session, and an evening language exchange mixer",
+  "wake": "07:00",
+  "bed": "23:00",
+  "work": [
+    "09:00",
+    "17:00"
+  ],
+  "persona": "kenji, a data analyst working from home who is obsessively studying for the December JLPT N2 Japanese exam. Texts enthusiastically with occasional Japanese study terms ('Anki', 'kanji', 'iTalki', 'Keigo'), refuses to let his 300-day Anki flashcard streak lapse, and always preps his grammar homework before his afternoon iTalki lesson.",
+  "situation": "Thursday morning at 07:00. Working remotely 09:00–17:00, has a 12:30–13:30 iTalki conversation lesson with his Tokyo tutor over lunch, needs to finish a grammar workbook chapter beforehand, and is attending a downtown Japanese-English language exchange mixer at 19:00.",
+  "life": [
+    "07:10 Wake up and text the app:おはよう! Let's plan Thursday: morning Anki SRS deck review (30 mins) + breakfast before 08:30, finish Shin Kanzen Master N2 grammar chapter 8 (30 mins) before work at 09:00, work 09:00–17:00 (with my 12:30–13:30 iTalki tutor lesson and a quick lunch right after at 13:30), then after 17:00 do 30 minutes of NHK Easy news reading, eat early dinner, and take the train at 18:30 to the 19:00 Japanese language exchange mixer.",
+    "07:15 Remind the app that the Shin Kanzen Master grammar chapter has to be finished BEFORE my 12:30 iTalki lesson because my tutor is quizzing me on those five grammar points today.",
+    "07:20 Make green tea and toast, and grind through 140 Anki kanji and vocab reviews until 08:15.",
+    "08:18 Report breakfast and morning Anki deck done (streak is at 301 days!). Starting the Shin Kanzen Master grammar chapter now.",
+    "08:20 Work through half of the grammar chapter, when your work Slack pings at 08:40: the overnight Snowflake ETL pipeline failed and the VP needs the sales dashboard fixed before the 09:30 leadership meeting! Immediately drop the grammar workbook and jump into SQL debugging.",
+    "08:42 Text the app: urgent work fire—overnight Snowflake pipeline failed so I had to jump into work 20 mins early and only finished half of my grammar homework! Schedule 20 minutes at 12:00 right before my 12:30 iTalki lesson so I can finish the grammar exercises.",
+    "08:40 Debug the broken dbt SQL model, rerun the Snowflake warehouse tables, and verify the Tableau dashboard until 10:45.",
+    "10:48 Report Snowflake pipeline fixed! Working on the Q3 customer churn cohort analysis now until 12:00.",
+    "10:50 Run Python churn queries until 12:00.",
+    "12:00 Finish the remaining three grammar exercises in Shin Kanzen Master and jot down two example sentences for the tutor until 12:25.",
+    "12:27 Report grammar homework finished just in time! Joining my 12:30 iTalki lesson with Takahashi-sensei.",
+    "12:30 Speak entirely in Japanese during the iTalki lesson until 13:30.",
+    "13:32 Report iTalki lesson done—went great! Heating up leftover katsudon and miso soup for lunch now and adding the 12 new vocab words from the lesson into Anki while I eat.",
+    "13:35 Eat lunch and enter new iTalki vocab cards into Anki until 14:15.",
+    "14:18 Report lunch and Anki card entry done. Back to finishing the Q3 churn analysis slide deck and answering tickets until 17:00.",
+    "14:20 Complete the churn slide deck and present it in the 16:00 analytics team check-in, wrapping up work at 17:05.",
+    "17:08 Text the app: workday done! Going to read two NHK news articles out loud for shadowing practice until 17:40, then shower and make yakisoba for early dinner before catching the 18:30 train.",
+    "17:10 Read two Japanese news articles and practice audio shadowing until 17:40.",
+    "17:42 Shower, get dressed, and stir-fry quick yakisoba noodles for dinner until 18:25.",
+    "18:28 Text the app: shadowing, shower, and yakisoba done! Walking to the metro station now for the 19:00 language exchange mixer.",
+    "18:30 Ride the train downtown, practice casual Japanese conversation with native speakers at the mixer from 19:00 to 21:30, and return home at 22:05.",
+    "22:10 Report mixer was super fun, winding down in bed until 23:00."
+  ],
+  "constraints": [
+    "Morning Anki flashcard review must be done every morning to preserve the 300+ day streak.",
+    "Shin Kanzen Master grammar exercises must be completed before the 12:30 iTalki tutor lesson begins.",
+    "Must leave the apartment by 18:30 to catch the train for the 19:00 downtown language exchange mixer."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast & morning Anki SRS review",
+      "match": "anki|breakfast|tea",
+      "start": "07:20",
+      "end": "08:15"
+    },
+    {
+      "item": "Shin Kanzen Master grammar (Part 1)",
+      "match": "grammar|shin kanzen",
+      "start": "08:20",
+      "end": "08:40"
+    },
+    {
+      "item": "Fix Snowflake ETL pipeline & Q3 churn analysis",
+      "match": "work|snowflake|churn|sql",
+      "start": "08:40",
+      "end": "12:00"
+    },
+    {
+      "item": "Finish Shin Kanzen Master grammar (Part 2)",
+      "match": "grammar|shin kanzen",
+      "start": "12:00",
+      "end": "12:25"
+    },
+    {
+      "item": "iTalki Japanese tutoring lesson",
+      "match": "italki|tutor|lesson",
+      "start": "12:30",
+      "end": "13:30"
+    },
+    {
+      "item": "Lunch & add lesson vocab to Anki",
+      "match": "lunch|katsudon|vocab",
+      "start": "13:35",
+      "end": "14:15"
+    },
+    {
+      "item": "Finish Q3 churn slide deck & analytics sync",
+      "match": "work|churn|deck|analytics",
+      "start": "14:20",
+      "end": "17:05"
+    },
+    {
+      "item": "NHK news reading & audio shadowing",
+      "match": "nhk|read|shadow",
+      "start": "17:10",
+      "end": "17:40"
+    },
+    {
+      "item": "Shower & yakisoba dinner",
+      "match": "shower|dinner|yakisoba",
+      "start": "17:42",
+      "end": "18:25"
+    },
+    {
+      "item": "Japanese-English Language Exchange Mixer (with train)",
+      "match": "mixer|exchange",
+      "start": "18:30",
+      "end": "22:05"
+    }
+  ],
+  "events": [
+    {
+      "summary": "iTalki Lesson w/ Takahashi-sensei",
+      "start": "12:30",
+      "end": "13:30"
+    },
+    {
+      "summary": "Analytics Team Check-in",
+      "start": "16:00",
+      "end": "16:45"
+    },
+    {
+      "summary": "Downtown Japanese-English Language Exchange",
+      "start": "19:00",
+      "end": "21:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Goals": "Preparing for December JLPT N2 exam; daily Anki + grammar + immersion."
+  },
+  "notes": [
+    {
+      "notebook": "Japanese",
+      "title": "Daily Immersion Routine",
+      "role": "routine",
+      "body": "- [ ] Morning Anki SRS review (kanji + core 6k vocab)\n- [ ] 30 mins Shin Kanzen Master N2 grammar\n- [ ] Mine new vocab cards after iTalki lessons\n- [ ] Read 2 NHK News Web Easy articles + shadowing"
+    },
+    {
+      "notebook": "Work",
+      "title": "Data Analytics Tasks",
+      "role": "today",
+      "body": "- [ ] Complete Q3 customer churn cohort analysis\n- [ ] Build slide deck for 4 PM analytics check-in\n- [ ] Check dbt morning run logs"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home & Errands",
+      "role": "list",
+      "body": "- [ ] Stir-fry yakisoba before 6:30 PM train\n- [ ] Register for mock JLPT practice test this weekend\n- [x] Order pilot fountain pen ink cartridges"
+    }
+  ]
+}

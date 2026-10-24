@@ -1,0 +1,153 @@
+{
+  "id": "remote_support_fixed_shift",
+  "date": "2026-10-20",
+  "source": "made up: remote customer-support worker with fixed 9-5 shift and strict break windows",
+  "wake": "07:15",
+  "bed": "23:00",
+  "work": [
+    "09:00",
+    "17:00"
+  ],
+  "persona": "Kevin, a remote tier-2 customer support specialist whose headset status is tracked to the minute from 09:00 to 17:00. Texts in quick, clock-conscious messages because he only gets two 15-minute breaks (10:45 and 15:15) and a strict 30-minute lunch (12:30–13:00). Hates when tasks get scheduled inside his queue hours.",
+  "situation": "Tuesday morning waking at 07:15. Fixed support shift is 09:00–17:00, and he needs to fit a post office package drop-off before 09:00, quick household tasks into his exact break slots, and an evening gym session and meal prep after 17:00.",
+  "life": [
+    "07:20 Wake up and text the app: working my 09:00–17:00 support shift today. Before 09:00 I need breakfast, shower, and walking to the post office to drop off an eBay return package (opens at 08:00). My only breaks during work are 10:45–11:00, 12:30–13:00 (lunch), and 15:15–15:30. After 17:00 I want to hit the gym, cook chicken fajitas, and vacuum the living room.",
+    "07:25 If the app schedules any personal tasks during my queue hours outside 10:45–11:00, 12:30–13:00, or 15:15–15:30, remind it that workforce management tracks my headset logins to the minute.",
+    "07:30 Shower and eat eggs and toast until 08:10.",
+    "08:12 Walk to the post office, scan the prepaid eBay return label at the self-service kiosk, and walk back home by 08:45.",
+    "08:48 Report breakfast, shower, and post office drop-off done. Setting up headset and logging into Zendesk for 09:00.",
+    "09:00 Work morning support ticket and live-chat queue until 10:45.",
+    "10:45 On 15-minute morning break: throw a load of towels into the washing machine and stretch back until 11:00.",
+    "11:01 Text the app: started the washer on my 10:45 break, back on the phones now until 12:30 lunch.",
+    "11:00 Work live-chat queue until 12:30.",
+    "12:30 On 30-minute lunch break: move wet towels to the dryer, microwave leftover chili, and eat at the kitchen table until 12:58.",
+    "12:59 Report lunch eaten and towels in the dryer. Back on queue at 13:00.",
+    "13:00 Handle afternoon support queue; at 15:10 a frustrated enterprise customer escalates a billing bug right before the 15:15 break, keeping you on the phone until 15:28.",
+    "15:30 Text the app: got stuck on an escalated call right through my 15:15 break, manager said I can take my 15-minute break at 15:45 instead. Going to unload the dishwasher then.",
+    "15:45 Take delayed afternoon break to unload the dishwasher and grab an apple until 16:00.",
+    "16:00 Finish the final hour of the support shift until 17:00.",
+    "17:02 Text the app: free from the headset! Going to fold the dry towels right now (15 mins), then head to the gym at 17:30.",
+    "17:05 Fold warm towels and pack gym bag until 17:25.",
+    "17:30 Drive to the gym, do a 50-minute upper-body lift, and drive back home by 18:50.",
+    "18:55 Report towels folded and gym session done! Starting to slice peppers and onions for chicken fajitas now, and ask to push vacuuming the living room to 20:00 after dinner.",
+    "19:00 Cook and eat chicken fajitas and wash the skillet until 19:55.",
+    "20:00 Vacuum the living room rug and hallway (20 mins), then report dinner and vacuuming done.",
+    "20:25 Play PlayStation with friends online until 22:45, then head to bed."
+  ],
+  "constraints": [
+    "Cannot do any personal tasks during 09:00–17:00 work hours except during the exact break windows (10:45–11:00, 12:30–13:00, 15:15–15:30).",
+    "Post office lobby counter/kiosk opens at 08:00 and the return must be dropped off before the 09:00 shift starts.",
+    "Lunch break is strictly 30 minutes (12:30–13:00), so lunch must be pre-made or microwavable."
+  ],
+  "truth": [
+    {
+      "item": "Shower & breakfast",
+      "match": "shower|breakfast|egg",
+      "start": "07:30",
+      "end": "08:10"
+    },
+    {
+      "item": "Drop off eBay package at post office",
+      "match": "post office|ebay|package",
+      "start": "08:12",
+      "end": "08:45"
+    },
+    {
+      "item": "Support shift (Block 1)",
+      "match": "work|shift|support|queue",
+      "start": "09:00",
+      "end": "10:45"
+    },
+    {
+      "item": "Start towel laundry (morning break)",
+      "match": "towel|washer|laundry",
+      "start": "10:45",
+      "end": "11:00"
+    },
+    {
+      "item": "Support shift (Block 2)",
+      "match": "work|shift|support|queue",
+      "start": "11:00",
+      "end": "12:30"
+    },
+    {
+      "item": "Lunch & move towels to dryer",
+      "match": "lunch|chili|dryer",
+      "start": "12:30",
+      "end": "12:58"
+    },
+    {
+      "item": "Support shift (Block 3)",
+      "match": "work|shift|support|queue",
+      "start": "13:00",
+      "end": "15:45"
+    },
+    {
+      "item": "Unload dishwasher (afternoon break)",
+      "match": "dishwasher|break",
+      "start": "15:45",
+      "end": "16:00"
+    },
+    {
+      "item": "Support shift (Block 4)",
+      "match": "work|shift|support|queue",
+      "start": "16:00",
+      "end": "17:00"
+    },
+    {
+      "item": "Fold towels & pack gym bag",
+      "match": "fold|towel",
+      "start": "17:05",
+      "end": "17:25"
+    },
+    {
+      "item": "Gym upper-body workout",
+      "match": "gym|lift|workout",
+      "start": "17:30",
+      "end": "18:50"
+    },
+    {
+      "item": "Cook and eat chicken fajitas",
+      "match": "fajita|dinner|cook",
+      "start": "19:00",
+      "end": "19:55"
+    },
+    {
+      "item": "Vacuum living room",
+      "match": "vacuum",
+      "start": "20:00",
+      "end": "20:20"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Support Queue Shift",
+      "start": "09:00",
+      "end": "17:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Customer support 09:00-17:00. Fixed breaks: 10:45-11:00, 12:30-13:00 (lunch), 15:15-15:30."
+  },
+  "notes": [
+    {
+      "notebook": "Daily",
+      "title": "Workday Break Micro-Chores",
+      "role": "routine",
+      "body": "- [ ] 10:45 break: start laundry load & stretch\n- [ ] 12:30 lunch: move laundry to dryer & heat lunch\n- [ ] 15:15 break: unload dishwasher"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Errands & Apartment",
+      "role": "list",
+      "body": "- [ ] Drop prepaid eBay return box at Post Office\n- [ ] Fold bathroom towels\n- [ ] Vacuum living room & hallway\n- [ ] Cook chicken fajitas for dinner\n- [ ] Wipe down bathroom vanity"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Fitness & Free Time",
+      "role": "menu",
+      "body": "- [ ] Upper-body lift at gym\n- [ ] PlayStation online with crew\n- [ ] Read sci-fi paperback"
+    }
+  ]
+}

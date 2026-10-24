@@ -149,9 +149,31 @@ class ThirtiesApplication(Adw.Application):
             self.set_accels_for_action(f"app.{name}", shortcuts)
 
 
+def _log_to_file():
+    """Logs also go to a file beside the app's data, so they outlive the terminal (or Builder's console)."""
+    from logging.handlers import RotatingFileHandler
+    from thirties_core.config import ThirtiesConfig
+    try:
+        folder = ThirtiesConfig().resolve_state_db_path().parent / "logs"
+        folder.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(folder / "thirties.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
+
+
 def main(version):
     """The application's entry point."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    _log_to_file()
+    from thirties_core.build import set_build
+    try:
+        from .build_info import COMMIT
+    except ImportError:
+        COMMIT = "unknown"
+    set_build(f"{version} ({COMMIT})")
+    logging.getLogger(__name__).info("Thirties %s (%s) starting", version, COMMIT)
     app = ThirtiesApplication()
     app.version = version
     return app.run(sys.argv)

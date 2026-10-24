@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from gi.repository import Gtk, Adw, GLib, Graphene
+from gi.repository import Adw, Gdk, GLib, Graphene, Gtk
 
 from thirties_core.astronomy import get_current_time
 from thirties_core.models import DayPlan, EventSpan, ThirtyBlock
@@ -71,7 +71,7 @@ class DayView(Gtk.Box):
         self.set_vexpand(True)
 
         self._build_header()
-        self._build_blocks_list()
+        self._build_pages()
 
         if self.day_plan:
             self.refresh_plan(self.day_plan)
@@ -112,6 +112,25 @@ class DayView(Gtk.Box):
 
         self.append(header_card)
 
+    def _build_pages(self) -> None:
+        """Day (where things stand: now and next, not reported, done) and Timeline (all 48 thirties)."""
+        from thirties.views.agenda import AgendaPage
+        self.run_tool = None
+        self.agenda = AgendaPage(run_tool=lambda name, args: self.run_tool(name, args) if self.run_tool else "",
+                                 on_replan=lambda result: self.on_replan(result) if self.on_replan else None)
+        self.on_replan = None
+        self.stack = Adw.ViewStack(vexpand=True)
+        self.stack.add_titled_with_icon(self.agenda, "day", "Day", "view-list-symbolic")
+        self._build_blocks_list()
+        self.stack.add_titled_with_icon(self.scrolled, "timeline", "Timeline", "x-office-calendar-symbolic")
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER)
+        self.append(switcher)
+        self.append(self.stack)
+
+    def set_actions(self, run_tool, on_replan=None) -> None:
+        """``run_tool(name, args)`` runs a schedule tool (and refreshes); ``on_replan(result)`` after Replan."""
+        self.run_tool, self.on_replan = run_tool, on_replan
+
     def _build_blocks_list(self) -> None:
         self.scrolled = Gtk.ScrolledWindow()
         self.scrolled.set_vexpand(True)
@@ -130,7 +149,6 @@ class DayView(Gtk.Box):
 
         clamp.set_child(self.list_box)
         self.scrolled.set_child(clamp)
-        self.append(self.scrolled)
 
     # --- time ---
 
@@ -195,6 +213,7 @@ class DayView(Gtk.Box):
             return
         self._signature = signature
         self._rebuild_list()
+        self.agenda.refresh(day_plan, self.live_now())
         self._update_tallies()
 
     def tick(self) -> None:
@@ -208,6 +227,7 @@ class DayView(Gtk.Box):
             self._now_idx = now_idx
             for row in self._rows:
                 row.update_now(now_idx)
+            self.agenda.refresh(self.day_plan, self.live_now())  # a new thirty: now and next move on
 
     def _rebuild_list(self) -> None:
         plan = self.day_plan
@@ -218,8 +238,30 @@ class DayView(Gtk.Box):
 
         for seg in build_segments(plan):
             row = self._build_row(plan, seg)
+            self._make_draggable(row, seg)
             self._rows.append(row)
             self.list_box.append(row)
+
+    # --- moving things by dragging them on the timeline ---
+
+    def _make_draggable(self, row: Gtk.Widget, seg: Segment) -> None:
+        movable = [s for s in seg.spans if not s.is_envelope and s.source != "calendar" and not s.tentative]
+        if len(movable) == 1:
+            source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+            span_id = movable[0].id
+            source.connect("prepare", lambda *_: Gdk.ContentProvider.new_for_value(span_id))
+            row.add_controller(source)
+        target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
+        start = seg.blocks[0].start_dt
+        target.connect("drop", lambda _t, value, _x, _y: self.move_to(value, start))
+        row.add_controller(target)
+
+    def move_to(self, span_id: str, start: datetime) -> bool:
+        """Move an item to a thirty; what's there slides later, in order."""
+        if self.run_tool is None:
+            return False
+        self.run_tool("update_event", {"event": span_id, "start": format_clock(start), "push_later": True})
+        return True
 
     def _build_row(self, plan: DayPlan, seg: Segment) -> Gtk.Widget:
         first = seg.blocks[0]

@@ -1,0 +1,134 @@
+{
+  "id": "musician_gig_tonight",
+  "date": "2026-10-16",
+  "source": "made up: indie musician with a 9 PM club gig doing rehearsal and gear prep during the day",
+  "wake": "10:00",
+  "bed": "02:30",
+  "work": [
+    "19:30",
+    "23:30"
+  ],
+  "persona": "eli, a bass player and synth programmer in an indie-electronic band playing a headline club show tonight (load-in at 19:30, set at 21:00). Texts casually in all lowercase, protective of vocal and ear rest before a show, and meticulous about cabling and backup gear.",
+  "situation": "Friday morning waking at 10:00. Band soundcheck/run-through at the rehearsal space is 13:00–15:00, load-in at The Velvet Room is 19:30, and in between eli needs to solder a patchy pedalboard cable, restring the P-bass, print setlists, and eat a solid early dinner.",
+  "life": [
+    "10:10 wake up and text the app: gig day! rehearsal run-through is 13:00–15:00 (need 30m drive each way) and club load-in is 19:30. help me plan the day: coffee/breakfast, restring my p-bass, fix the patchy trs cable on my pedalboard, print 6 setlists & stage plots at fedex, grab lunch before rehearsal, and eat a real dinner around 17:30 before resting my ears.",
+    "10:15 if the app schedules restringing the bass and fixing the pedalboard after rehearsal, remind it that both have to be done before leaving for rehearsal at 12:30 so we can test them at full volume.",
+    "10:20 make pour-over coffee and scrambled eggs, eating until 11:00.",
+    "11:02 report coffee and breakfast done. putting new flatwound strings on the p-bass and stretching/tuning them now.",
+    "11:05 restring the p-bass, clean the fretboard, and check intonation until 11:45.",
+    "11:48 report bass restrung. heating up the soldering iron to resolder the loose trs jack on the synth pedalboard.",
+    "11:50 resolder the trs patch cable, velcro the power supply, and pack the gig bag and pedalboard case until 12:25.",
+    "12:26 text the app: pedalboard fixed and gear packed! didn't have time for a real lunch—grabbing a protein bar in the car and heading to the rehearsal studio now.",
+    "12:30 drive to the rehearsal studio and run through the 45-minute setlist with the band from 13:00 to 15:20 (drummer wanted to re-work the transition into the last song).",
+    "15:50 get back from rehearsal (stopped at the taco truck outside the studio with the band at 15:20 for late lunch). text the app: rehearsal went until 15:20 and we grabbed tacos right after, just walked in the door. still need to print the 6 large-font setlists at fedex, iron my black stage shirt, and rest before 17:30 dinner.",
+    "16:00 walk 10 minutes to FedEx Office, print 6 copies of the setlist and stage plot on cardstock, buy a roll of white gaffer tape, and walk back by 16:40.",
+    "16:42 report setlists printed and gaffer tape acquired. ironing stage shirt and packing the cable trunk now.",
+    "16:45 iron black button-down shirt, pack extra 9V batteries and earplugs, and stage all cases by the front door until 17:15.",
+    "17:18 report gear staged by the door and shirt ironed. lying down in a quiet room for 30 minutes to rest ears before dinner.",
+    "17:50 heat up roasted sweet potatoes, salmon, and rice for pre-gig dinner until 18:35.",
+    "18:40 report dinner done. take a quick shower and get dressed for the show until 19:15.",
+    "19:18 tell the app you're loading the hatchback now to head to The Velvet Room for 19:30 load-in.",
+    "19:30 load into the venue, soundcheck at 20:00, play the 21:00–22:00 set, and load gear out after the headliner finishes at 23:30."
+  ],
+  "constraints": [
+    "Bass restringing and pedalboard soldering must be completed before leaving for the 13:00 band rehearsal at 12:30.",
+    "Rehearsal studio requires a 30-minute drive each way.",
+    "Needs at least 30 minutes of quiet ear rest in the late afternoon and a proper meal around 17:30–18:00 before the 19:30 venue load-in."
+  ],
+  "truth": [
+    {
+      "item": "Coffee & breakfast",
+      "match": "coffee|breakfast|egg",
+      "start": "10:20",
+      "end": "11:00"
+    },
+    {
+      "item": "Restring P-bass",
+      "match": "restring|bass|string",
+      "start": "11:05",
+      "end": "11:45"
+    },
+    {
+      "item": "Solder TRS pedalboard cable & pack gear",
+      "match": "solder|pedalboard|cable|trs",
+      "start": "11:50",
+      "end": "12:25"
+    },
+    {
+      "item": "Band rehearsal & taco truck lunch",
+      "match": "rehearsal|run-through|lunch|taco",
+      "start": "12:30",
+      "end": "15:50"
+    },
+    {
+      "item": "Print setlists at FedEx & buy gaffer tape",
+      "match": "setlist|fedex|print|gaffer",
+      "start": "16:00",
+      "end": "16:40"
+    },
+    {
+      "item": "Iron stage shirt & stage gear by door",
+      "match": "iron|shirt|stage gear|pack",
+      "start": "16:45",
+      "end": "17:15"
+    },
+    {
+      "item": "Quiet ear rest",
+      "match": "rest|quiet|ear",
+      "start": "17:18",
+      "end": "17:50"
+    },
+    {
+      "item": "Pre-gig dinner",
+      "match": "dinner|salmon|eat",
+      "start": "17:50",
+      "end": "18:35"
+    },
+    {
+      "item": "Shower & get dressed for show",
+      "match": "shower|dress",
+      "start": "18:40",
+      "end": "19:15"
+    },
+    {
+      "item": "Venue load-in, soundcheck & gig",
+      "match": "load-in|gig|show|velvet",
+      "start": "19:20",
+      "end": "23:30"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Band Rehearsal @ SoundSpace",
+      "start": "13:00",
+      "end": "15:00"
+    },
+    {
+      "summary": "Velvet Room Gig (Load-in 7:30, Set 9:00)",
+      "start": "19:30",
+      "end": "23:30"
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Band",
+      "title": "Velvet Room Gig Prep",
+      "role": "today",
+      "body": "- [ ] Put fresh flatwounds on P-bass & check intonation\n- [ ] Resolder patchy TRS jack on synth pedalboard\n- [ ] Print 6 large-font setlists + 2 stage plots at FedEx\n- [ ] Buy white gaffer tape\n- [ ] Iron black stage shirt\n- [ ] Pack spare 9V batteries, DI box, and in-ear monitors"
+    },
+    {
+      "notebook": "Band",
+      "title": "Album & Tour Backlog",
+      "role": "backlog",
+      "body": "- [ ] Bounce stems for track 4 mix notes\n- [ ] Update Bandcamp merch inventory\n- [ ] Email Philly promoter about November support slot"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Show Day Routine",
+      "role": "routine",
+      "body": "- [ ] Pour-over coffee & eggs\n- [ ] 30-min quiet ear rest before evening load-in\n- [ ] Solid pre-show dinner (5:30 PM)\n- [ ] Shower & stage clothes"
+    }
+  ]
+}

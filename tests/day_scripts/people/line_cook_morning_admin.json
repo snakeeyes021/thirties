@@ -1,0 +1,118 @@
+{
+  "id": "line_cook_morning_admin",
+  "date": "2026-10-15",
+  "source": "made up: restaurant line cook working 3 PM-11 PM doing life admin in the morning",
+  "wake": "09:30",
+  "bed": "01:30",
+  "work": [
+    "15:00",
+    "23:00"
+  ],
+  "persona": "Marco, a restaurant line cook working the 15:00–23:00 dinner service shift. Texts directly in short, punchy phrases, hates wasting his pre-shift hours waiting in lines, and always wants an hour to eat a heavy meal and rest his feet before leaving for the kitchen at 14:30.",
+  "situation": "Thursday morning waking at 09:30 after getting home past midnight. Has a few hours before the 15:00 line shift to get his knives sharpened, renew his car registration at the DMV kiosk, and clean out the fridge.",
+  "life": [
+    "09:40 Wake up and text the app: work is 15:00–23:00 today (have to leave at 14:30). Before work, need to make coffee and breakfast, drop chef knives at the sharpening shop, hit the grocery store for the DMV registration kiosk and lunch stuff, clean out the fridge, and soak/wrap my left wrist before shift.",
+    "09:45 If the app schedules picking up the knives right away, explain that the sharpening shop takes 2 hours, so drop-off and pick-up have to be separated (or picked up right before the DMV grocery run).",
+    "09:50 Approve the plan. Drink espresso, eat a breakfast burrito, and shower until 10:40.",
+    "10:42 Tell the app breakfast and shower are done. Heading out to drop off the knife roll at the sharpener.",
+    "10:45 Drive to the sharpening shop and drop off the knives, returning home at 11:20.",
+    "11:22 Report knives dropped off (ready around 13:00). Start cleaning out old takeout containers and wiping down the fridge shelves.",
+    "11:55 Chef texts asking if you can pick up two flats of Thai basil from the Asian market on your way in today (restaurant will reimburse). Text the app: chef just asked me to grab Thai basil from H Mart before shift, add that to the knife pickup + DMV kiosk errand loop at 12:30.",
+    "12:05 Finish cleaning the fridge and taking the trash out to the alley dumpster.",
+    "12:10 Report fridge and trash done. Put feet up and scroll phone for 20 minutes before the errand loop.",
+    "12:30 Drive to the grocery store to use the DMV registration kiosk—machine is out of paper, so you have to drive 10 minutes further to the municipal center kiosk. Pick up knives at 13:15 and grab the Thai basil at H Mart, finally getting home at 13:50.",
+    "13:52 Text the app: back from errands! DMV kiosk was broken at the first spot so the loop took until 13:50, but registration, knives, and Thai basil are all done. Skipping laundry and bank call—just need to eat a big meal and ice my wrist before leaving at 14:30.",
+    "13:55 Eat chicken and rice bowl while icing and wrapping left wrist until 14:30.",
+    "14:30 Tell the app you've eaten and wrapped your wrist, heading out to the restaurant now.",
+    "15:00 Work dinner prep and sauté station until 23:15 (late table walked in at 21:55).",
+    "23:45 Get home from the restaurant, exhausted and smelling like garlic. Text the app: home from shift, ran 15 mins late. Taking a quick shower and eating cereal before crashing.",
+    "00:30 Finish shower and late-night snack; wind down in bed until 01:30."
+  ],
+  "constraints": [
+    "Must leave the apartment by 14:30 for the 15:00–23:00 restaurant shift.",
+    "Knife sharpening requires dropping the knives off and waiting at least 90–120 minutes before picking them up.",
+    "Needs at least 35–45 minutes right before leaving for work to eat a substantial meal and sit off his feet."
+  ],
+  "truth": [
+    {
+      "item": "Morning espresso, breakfast & shower",
+      "match": "coffee|espresso|breakfast|shower",
+      "start": "09:50",
+      "end": "10:40"
+    },
+    {
+      "item": "Drop off knives at sharpener",
+      "match": "drop.*knive|sharpen",
+      "start": "10:45",
+      "end": "11:20"
+    },
+    {
+      "item": "Clean out fridge & take out trash",
+      "match": "fridge|trash|clean",
+      "start": "11:22",
+      "end": "12:05"
+    },
+    {
+      "item": "DMV kiosk, pick up knives & H Mart Thai basil",
+      "match": "dmv|registration|knive|basil|h mart|errand",
+      "start": "12:30",
+      "end": "13:50"
+    },
+    {
+      "item": "Pre-shift meal & wrap wrist",
+      "match": "lunch|meal|eat|wrist",
+      "start": "13:55",
+      "end": "14:30"
+    },
+    {
+      "item": "Restaurant shift (with commute)",
+      "match": "work|shift|restaurant",
+      "start": "14:30",
+      "end": "23:45"
+    },
+    {
+      "item": "Post-shift shower & snack",
+      "match": "shower|snack|cereal",
+      "start": "23:45",
+      "end": "00:30"
+    },
+    {
+      "item": "Wash kitchen aprons",
+      "match": "apron|laundry|wash",
+      "start": "13:00",
+      "end": "14:00",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Dinner Shift - Osteria",
+      "start": "15:00",
+      "end": "23:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Line cook, usually 15:00-23:00; needs 30m commute buffer and pre-shift meal."
+  },
+  "notes": [
+    {
+      "notebook": "Daily",
+      "title": "Pre-Shift Routine",
+      "role": "routine",
+      "body": "- [ ] Espresso + breakfast\n- [ ] Morning shower\n- [ ] Ice & wrap left wrist\n- [ ] Heavy pre-shift meal (1:30 PM)\n- [ ] Pack knife roll & thermometer"
+    },
+    {
+      "notebook": "Life",
+      "title": "Errands & Admin",
+      "role": "list",
+      "body": "- [ ] Get gyuto and petty knives sharpened at District Cutlery\n- [ ] Renew car registration at DMV kiosk\n- [ ] Clean out fridge & toss old containers\n- [ ] Wash kitchen aprons\n- [ ] Call credit union about debit card PIN\n- [x] Buy new non-slip clogs"
+    },
+    {
+      "notebook": "Life",
+      "title": "Kitchen Ideas & Prep",
+      "role": "reference",
+      "body": "- Fermented chili paste test batch\n- Duck confit agnolotti filling ratios\n- Ask chef about November schedule request"
+    }
+  ]
+}

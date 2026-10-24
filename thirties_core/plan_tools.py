@@ -61,6 +61,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
             "alongside": "true if it happens at the same time as something else (e.g. an audiobook during dinner).",
             "push_later": "true to make room by sliding the planned activities that follow it later, in order.",
+            "fixed": "true if its time is set by someone else's clock (an appointment, a ride, a show, a call at a "
+                     "set time): it keeps its exact time and never slides. false if it's flexible. Leave it out "
+                     "when it's obvious (appointments, flights and rides are fixed; chores are flexible).",
             "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
         },
         "required": ["title", "start"],
@@ -94,6 +97,33 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "parameters": {"first": "One item's id or title.", "second": "The other item's id or title.",
                        "day": "The day they're on (default: the day being planned)."},
         "required": ["first", "second"],
+    },
+    {
+        "name": "set_item_facts",
+        "description": "Record facts about a planned item that must hold whenever the day is redrawn: what it has "
+                       "to come after, a time it can't start before, that it needs daylight, or that it stays put.",
+        "parameters": {"event": "The item's id or title.",
+                       "after": "Item(s) it must come after, by id or title (e.g. 'Shower').",
+                       "not_before": "Clock time it can't start before (e.g. '3:00 PM').",
+                       "daylight": "true if it needs daylight (outdoors).",
+                       "stays_put": "true if it keeps its time when the day is redrawn (a meal at a set time).",
+                       "day": "The day it's on (default: the day being planned)."},
+        "required": ["event"],
+    },
+    {
+        "name": "redraw",
+        "description": "Redraw the rest of today from now: the planned items still to do (including ones that "
+                       "weren't reported) are laid out again in order, around fixed commitments and the items' "
+                       "facts, never earlier than they were planned. Only when the user asks for a new plan or "
+                       "agrees to one. Says what doesn't fit before bedtime. Can be undone with undo_redraw.",
+        "parameters": {},
+        "required": [],
+    },
+    {
+        "name": "undo_redraw",
+        "description": "Put today back the way it was before the last redraw.",
+        "parameters": {},
+        "required": [],
     },
     {
         "name": "clear_time",
@@ -306,12 +336,36 @@ class PlanTools:
             begin = thirty_ceil(start)
         return begin, begin + length
 
+    def _is_fixed(self, span: EventSpan) -> bool:
+        """Set by someone else's clock: a calendar event, a firm commitment, or an item that stays put."""
+        if span.source == "calendar" or span.is_firm:
+            return True
+        if self._state_db is None:
+            return False
+        try:
+            return self._facts().get(span.id).anchored
+        except ToolError:
+            return False
+
+    def _set_fixed(self, span: EventSpan, fixed: bool) -> None:
+        if self._state_db is None:
+            return
+        store = self._facts()
+        facts = store.get(span.id)
+        facts.anchored = fixed
+        store.set(span.id, facts)
+
     def describe(self, span: EventSpan) -> str:
-        """An item as the user sees it: in thirties (exact minutes are only for the record)."""
-        if span.duration_minutes < 30 and thirty_of(span.start_dt) == thirty_of(span.end_dt - timedelta(seconds=1)):
-            return f"{span.title}, at {format_clock(thirty_of(span.start_dt))} (under 30m, sharing that thirty)"
-        start, end = thirty_of(span.start_dt), thirty_ceil(span.end_dt)
-        return f"{span.title}, {format_clock(start)} – {format_clock(end)} ({format_duration(int((end - start).total_seconds() // 60))})"
+        """An item with its real times, and the block(s) it's in: the model reads both, and tells a schedule in
+        blocks but one item by its real time and block ("12:15, in the 12:00 block")."""
+        length = format_duration(span.duration_minutes)
+        first, last = thirty_of(span.start_dt), thirty_of(span.end_dt - timedelta(seconds=1))
+        where = f"in the {format_clock(first)} block" if first == last else \
+            f"blocks {format_clock(first)} – {format_clock(thirty_ceil(span.end_dt))}"
+        on_blocks = span.start_dt == first and span.end_dt == thirty_ceil(span.end_dt)
+        times = f"{format_clock(span.start_dt)} – {format_clock(span.end_dt)} ({length})"
+        fixed = ", fixed" if span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and self._is_fixed(span) else ""
+        return f"{span.title}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})")
 
     def _find_span(self, ref: Any) -> EventSpan:
         ref_str = str(ref or "").strip()
@@ -339,7 +393,8 @@ class PlanTools:
         Activities, tasks and calendar items may sit on top of work and sleep, but not on
         each other. Work and sleep only conflict with another span of the same kind.
         """
-        others = [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id]
+        others = [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
+                  and s.status != SpanStatus.SKIPPED]  # a skipped item didn't happen: its time is free
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
         return [s for s in others if not s.is_envelope]
@@ -394,6 +449,13 @@ class PlanTools:
                 + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in conflicts)
                 + ". Ask the user, then retry with replace_overlaps=true, move it, or pick another time."
             )
+        kept = [s for s in conflicts if self._is_fixed(s) or s.status != SpanStatus.PLANNED
+                or (span.start_dt <= s.start_dt and s.end_dt <= span.end_dt)]
+        if kept:  # replacing only trims: it never deletes an item, a fixed one, or one that already happened
+            raise ToolError(
+                f"{span.title} would wipe out " + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in kept)
+                + ". To keep both, add it with alongside=true (same time) or push_later=true (slide what follows); "
+                "to drop that item, the user has to say so, then remove_event it.")
         return [self._carve(s, span.start_dt, span.end_dt) for s in conflicts]
 
     def _movable(self, span: EventSpan) -> bool:
@@ -403,9 +465,13 @@ class PlanTools:
         """Slide planned activities that collide with ``anchor`` (and each other) later, keeping order."""
         cursor = anchor.end_dt
         moved: List[Tuple[EventSpan, timedelta]] = []
+        now = self._now()
         followers = sorted((s for s in self.day_plan.active_spans()
-                            if s.id != anchor.id and self._movable(s) and s.end_dt > anchor.start_dt
-                            and s.start_dt >= anchor.start_dt - timedelta(minutes=1)), key=lambda s: s.start_dt)
+                            if s.id != anchor.id and self._movable(s) and not self._is_fixed(s)
+                            and s.end_dt > anchor.start_dt
+                            and s.start_dt >= anchor.start_dt - timedelta(minutes=1)
+                            and s.status == SpanStatus.PLANNED and not (s.start_dt <= now < s.end_dt)),
+                           key=lambda s: s.start_dt)  # what's done, or happening right now, stays where it is
         for span in followers:
             if span.start_dt >= cursor:
                 break
@@ -416,10 +482,14 @@ class PlanTools:
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
-                    if c.id != span.id and (c.is_firm or c.source == "calendar")]
+                    if c.id != span.id and not c.is_envelope and self._is_fixed(c)]
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
+            sleep = [c for c in self.day_plan.spans_overlapping(new_start, new_end) if c.category == SpanCategory.SLEEP]
+            if sleep:
+                raise ToolError(f"Sliding {span.title} later would push it into bedtime "
+                                f"({format_clock(sleep[0].start_dt)}).")
         notes = []
         for span, delta in moved:
             span.start_dt, span.end_dt = span.start_dt + delta, span.end_dt + delta
@@ -451,6 +521,7 @@ class PlanTools:
         replace_overlaps: Any = False,
         alongside: Any = False,
         push_later: Any = False,
+        fixed: Any = None,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -461,6 +532,9 @@ class PlanTools:
             raise ToolError(f"Unknown category '{category}'. Use activity, task, work or sleep.")
         if cat == SpanCategory.CALENDAR:
             raise ToolError("Calendar events come from the user's calendar and can't be added here.")
+        if not task_id and self.assistant is not None and cat == SpanCategory.ACTIVITY:
+            same = self.assistant._exact_task(str(title))  # worded exactly as a list item: it's that item
+            task_id = same.id if same is not None and not same.id.startswith("media:") else None
         if task_id and cat == SpanCategory.ACTIVITY:
             cat = SpanCategory.TASK
         self._separate_things(str(title))
@@ -472,28 +546,36 @@ class PlanTools:
         else:
             raise ToolError("Give an end time or a duration.")
 
-        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
-            start_dt, end_dt = self._snap(start_dt, end_dt)
-        if not _as_bool(alongside):
+        from thirties_core.facts import looks_fixed
+        is_fixed = looks_fixed(str(title)) if fixed in (None, "") else _as_bool(fixed)
+        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
+            start_dt, end_dt = self._snap(start_dt, end_dt)  # flexible: keeps to blocks; fixed: its real time
+        if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if _as_bool(alongside):
             notes = []
         elif _as_bool(push_later) and not span.is_envelope:
-            firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt) if c.is_firm or c.source == "calendar"]
+            firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
+                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
             if firm:
-                raise ToolError(f"{span.title} would overlap {firm[0].title}, a fixed calendar commitment.")
+                raise ToolError(f"{span.title} would overlap {self.describe(firm[0])}, which is fixed.")
             notes = self._push_following(span)
         else:
             notes = self._place(span, _as_bool(replace_overlaps))
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
+        if is_fixed and not span.is_envelope and self._state_db is not None:
+            self._set_fixed(span, True)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
+        if task_id and self.assistant and self.day_plan.target_date == self.today():
+            listed = self.assistant.put_on_today(task_id)
+            extra += f" {listed}" if listed else ""
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
     def update_event(
@@ -507,9 +589,12 @@ class PlanTools:
         replace_overlaps: Any = False,
         push_later: Any = False,
         to_day: Any = None,
+        fixed: Any = None,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
+        if fixed not in (None, ""):
+            self._set_fixed(span, _as_bool(fixed))
         if span.source == "calendar":
             raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
         if title:
@@ -536,9 +621,9 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
 
-        if not span.is_envelope and (new_start, new_end) != (span.start_dt, span.end_dt):
+        if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
             new_start, new_end = self._snap(new_start, new_end)
-        if start not in (None, "") and shift in (None, ""):
+        if start not in (None, "") and shift in (None, "") and not self._is_fixed(span):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
@@ -591,8 +676,8 @@ class PlanTools:
             # It's over and didn't happen: moving it on is a skip, and it counts as put off.
             span.status, auto_skipped = SpanStatus.SKIPPED, True
             self._persist(span)
-            if span.task_id and self._state_db():
-                self._state_db().record_task_deferred(span.task_id)
+            if span.task_id and self._state_db:
+                self._state_db.record_task_deferred(span.task_id)
         if span.status != SpanStatus.PLANNED:
             # Keep today's record (done/skipped) as history; plan a fresh copy on the new day.
             moved.id = new_span_id()
@@ -647,7 +732,8 @@ class PlanTools:
         if span.source == "calendar":
             if span.tentative:
                 raise ToolError(f"{span.title} is an unconfirmed invite; use resolve_calendar_event with attend=false.")
-            raise ToolError(f"{span.title} comes from the user's calendar; remove it there.")
+            raise ToolError(f"{span.title} comes from the user's calendar. If they aren't going, decline it with "
+                            f"resolve_calendar_event (attend=false); to delete it, they remove it from their calendar.")
         self._drop(span)
         self._save_plan_after_change()
         return f"Removed {self.describe(span)}."
@@ -685,7 +771,7 @@ class PlanTools:
         if lo >= hi:
             return []
         busy = _merge_intervals([(max(s.start_dt, lo), min(s.end_dt, hi))
-                                 for s in self.day_plan.spans_overlapping(lo, hi)])
+                                 for s in self.day_plan.spans_overlapping(lo, hi) if s.status != SpanStatus.SKIPPED])
         windows, cursor = [], lo
         for b_start, b_end in busy:
             if b_start > cursor:
@@ -729,6 +815,159 @@ class PlanTools:
             return "No free stretch matches that."
         return "Free: " + "; ".join(self.describe_window(s, e) for s, e in fits) + "."
 
+    # --- facts and redrawing ---
+
+    def _facts(self):
+        from thirties_core.facts import SpanFacts
+        if self._state_db is None:
+            raise ToolError("Facts about items can't be saved here.")
+        return SpanFacts(self._state_db)
+
+    def set_item_facts(self, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
+                       stays_put: Any = None, **_: Any) -> str:
+        span = self._find_span(event)
+        store = self._facts()
+        facts = store.get(span.id)
+        if after not in (None, "", []):
+            refs = after if isinstance(after, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(after)) if a]
+            ids = [self._find_span(r).id for r in refs]
+            if span.id in ids:
+                raise ToolError("An item can't come after itself.")
+            facts.after = sorted(set(facts.after) | set(ids))
+        if not_before not in (None, ""):
+            facts.not_before = self._start(not_before)
+        if daylight not in (None, ""):
+            facts.daylight = _as_bool(daylight)
+        if stays_put not in (None, ""):
+            facts.anchored = _as_bool(stays_put)
+        store.set(span.id, facts)
+        titles = {s.id: s.title for s in self.day_plan.spans}
+        return f"Noted for {span.title}: " + (", ".join(facts.describe(titles)) or "nothing special") + "."
+
+    def _behind(self, now: datetime) -> List[EventSpan]:
+        """Planned items whose time has passed with nothing reported (not assumed done)."""
+        return [s for s in self.day_plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+                and s.status == SpanStatus.PLANNED and not s.tentative and s.end_dt <= now]
+
+    def redraw(self, **_: Any) -> str:
+        import json
+        plan = self.day_plan
+        now = self._now()
+        if not (plan.day_start <= now < plan.day_end):
+            raise ToolError("Redrawing works on today, from now; for another day, move items directly.")
+        store = self._facts()
+        start_from = thirty_ceil(now)
+        facts = {s.id: store.get(s.id) for s in plan.spans}
+        movable = sorted((s for s in plan.active_spans() if self._movable(s) and s.status == SpanStatus.PLANNED
+                          and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not facts[s.id].anchored
+                          and (s.start_dt >= start_from or s.end_dt <= now)), key=lambda s: s.start_dt)
+        movable = self._in_fact_order(movable, facts)
+        ids = {s.id for s in movable}
+        original = {s.id: (s.start_dt, s.end_dt) for s in movable}
+        blockers = [s for s in plan.active_spans() if s.id not in ids and not s.tentative and s.end_dt > start_from
+                    and s.status == SpanStatus.PLANNED]
+        ends: Dict[str, datetime] = {s.id: s.end_dt for s in plan.spans if s.id not in ids}
+        placed: Dict[str, Tuple[datetime, datetime]] = {}
+        no_room: List[EventSpan] = []
+        cursor = start_from
+        for span in movable:
+            length = span.end_dt - span.start_dt
+            f = facts[span.id]
+            partner = next((p for p in movable if p.id in placed and p.id != span.id and length >= timedelta(minutes=30)
+                            and original[p.id][0] < span.end_dt and span.start_dt < original[p.id][1]
+                            and original[p.id][1] - original[p.id][0] >= timedelta(minutes=30)), None)
+            if partner is not None:  # it happens alongside something (an audiobook during dinner): it moves with it
+                t = placed[partner.id][0] + (span.start_dt - original[partner.id][0])
+                placed[span.id] = (t, t + length)
+                ends[span.id] = t + length
+                continue
+            earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
+                           + ([f.not_before] if f.not_before else [])
+                           + [ends[a] for a in f.after if a in ends])
+            if f.daylight:
+                earliest = max(earliest, plan.sunrise)
+            t = earliest
+            for _ in range(200):
+                t, end = self._snap(t, t + length)
+                hit = [b for b in blockers if b.start_dt < end and t < b.end_dt]
+                hit += [s for s in movable if s.id in placed and placed[s.id][0] < end and t < placed[s.id][1]
+                        and (length >= timedelta(minutes=30) or placed[s.id][1] - placed[s.id][0] >= timedelta(minutes=30))]
+                if not hit:
+                    break
+                t = max(b.end_dt if b.id not in placed else placed[b.id][1] for b in hit)
+            fits = end <= plan.day_end and not (f.daylight and end > plan.sunset) and not any(
+                b.start_dt < end and t < b.end_dt for b in blockers if b.category == SpanCategory.SLEEP)
+            if not fits:
+                no_room.append(span)
+                ends[span.id] = span.end_dt
+                continue
+            placed[span.id] = (t, end)
+            ends[span.id] = end
+            cursor = end
+        if self._state_db is not None:
+            self._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}", json.dumps(
+                {"moved": {s.id: [s.start_dt.isoformat(), s.end_dt.isoformat()] for s in movable if s.id in placed},
+                 "removed": [s.to_dict() for s in no_room]}))
+        behind = {s.id for s in self._behind(now)}
+        for span in movable:
+            if span.id in placed:
+                span.start_dt, span.end_dt = placed[span.id]
+                self._persist(span)
+        for span in no_room:  # it can't stay where it was: something else may be there now
+            self._drop(span)
+        plan.spans.sort(key=lambda s: s.start_dt)
+        self._save_plan_after_change()
+        lines = [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in movable if s.id in placed]
+        out = ["Redrew the rest of today:" if lines else "Nothing to redraw: nothing flexible is left today."] + lines
+        if no_room:
+            out.append("Doesn't fit before bedtime, so it's off today's plan: " + ", ".join(s.title for s in no_room)
+                       + (". Plan it tomorrow, or let it go?" if len(no_room) == 1 else
+                          ". Plan them tomorrow, or let them go?"))
+        unreported = [s.title for s in movable if s.id in behind and s.id in placed]
+        if unreported:
+            out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
+        return "\n".join(out)
+
+    @staticmethod
+    def _in_fact_order(spans: List[EventSpan], facts) -> List[EventSpan]:
+        """Planned order, except that an item comes after whatever it has to come after."""
+        ids = {s.id for s in spans}
+        out, done = [], set()
+
+        def visit(span, seen=()):
+            if span.id in done or span.id in seen:
+                return
+            for before in facts[span.id].after:
+                if before in ids:
+                    visit(next(s for s in spans if s.id == before), seen + (span.id,))
+            done.add(span.id)
+            out.append(span)
+        for span in spans:
+            visit(span)
+        return out
+
+    def undo_redraw(self, **_: Any) -> str:
+        import json
+        raw = self._state_db.get_sync_meta(f"redraw_undo:{self.day_plan.target_date.isoformat()}") if self._state_db else None
+        if not raw:
+            raise ToolError("There's no redraw to undo today.")
+        before = json.loads(raw)
+        restored = []
+        for span in self.day_plan.spans:
+            if span.id in before["moved"]:
+                span.start_dt, span.end_dt = (datetime.fromisoformat(x) for x in before["moved"][span.id])
+                self._persist(span)
+                restored.append(span.title)
+        for data in before["removed"]:
+            if not any(s.id == data["id"] for s in self.day_plan.spans):
+                span = EventSpan.from_dict(data)
+                self.day_plan.spans.append(span)
+                self._persist(span)
+                restored.append(span.title)
+        self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        self._state_db.set_sync_meta(f"redraw_undo:{self.day_plan.target_date.isoformat()}", "")
+        return "Put back as it was before the redraw: " + (", ".join(restored) or "nothing to restore") + "."
+
     def list_schedule(self, exact: Any = False, **_: Any) -> str:
         return self.schedule_text(exact=_as_bool(exact))
 
@@ -748,7 +987,7 @@ class PlanTools:
                          and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
                 lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
                     f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
-                    for x in group) + " (short items sharing this thirty, in this order)")
+                    for x in group) + " (short items sharing this block, in this order)")
                 continue
             flags = [s.category.value]
             if s.tentative:
@@ -765,8 +1004,11 @@ class PlanTools:
         windows = self.open_windows(after=upcoming_from)
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
         scope = "Free time remaining" if upcoming_from else "Free time"
+        now = self._now()
+        behind = self._behind(now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
-                + f"\n{scope}: {free}")
+                + f"\n{scope}: {free}"
+                + ("\nNot reported yet (not assumed done): " + ", ".join(s.title for s in behind) if behind else ""))
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, **_: Any) -> str:
         span = self._find_span(event)
@@ -797,6 +1039,9 @@ class PlanTools:
             "find_open_time": self.find_open_time,
             "list_schedule": self.list_schedule,
             "resolve_calendar_event": self.resolve_calendar_event,
+            "set_item_facts": self.set_item_facts,
+            "redraw": self.redraw,
+            "undo_redraw": self.undo_redraw,
         }
         if self.assistant:
             handlers.update(self.assistant.handlers())

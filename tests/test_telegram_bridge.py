@@ -71,6 +71,23 @@ class TestTelegramClient(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(mock_urlopen.call_count, 2)
 
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_a_dropped_send_is_retried_then_kept_for_later(self, mock_urlopen, _sleep):
+        ok_resp = MagicMock()
+        ok_resp.read.return_value = json.dumps({"ok": True, "result": {}}).encode("utf-8")
+        sent = MagicMock(__enter__=MagicMock(return_value=ok_resp))
+        mock_urlopen.side_effect = [ConnectionResetError(), sent]
+        self.assertTrue(self.client.send_message(12345, "Lunch"))  # a second try gets through
+        mock_urlopen.side_effect = [ConnectionResetError()] * 3
+        self.assertFalse(self.client.send_message(12345, "We could start charging the watch"))
+        self.assertEqual(len(self.client.undelivered), 1)
+        mock_urlopen.side_effect = [sent]
+        self.client.flush_undelivered()
+        self.assertEqual(self.client.undelivered, [])
+        body = json.loads(mock_urlopen.call_args[0][0].data)
+        self.assertTrue(body["text"].startswith("(Sent late") and body["text"].endswith("charging the watch"))
+
 
 class TestThirtiesTelegramBridge(unittest.TestCase):
     def setUp(self):

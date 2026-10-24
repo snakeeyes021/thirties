@@ -1,0 +1,129 @@
+{
+  "id": "freelance_designer_cafe",
+  "date": "2026-10-15",
+  "source": "made up: freelance graphic designer working from a cafe with two client deadlines who forgets to eat",
+  "wake": "08:30",
+  "bed": "00:00",
+  "work": [
+    "09:30",
+    "19:00"
+  ],
+  "persona": "Jules, a freelance brand designer working out of neighborhood coffee shops. Uses upbeat, casual messages with dashes and exclamation points, gets hyperfocused in Illustrator/Figma, and routinely forgets to eat lunch until getting a headache mid-afternoon.",
+  "situation": "Thursday morning at 08:30. Two client deliverables due today: Solis Roasters packaging print files by 13:00 and Kestrel App icon concepts before a 16:00 client check-in call.",
+  "life": [
+    "08:40 Wake up, text the app to plan the day: pack laptop and walk to Bluebird Café by 09:30, finish Solis packaging print files (due 13:00), work on Kestrel App icon concepts before the 16:00 client call, send two overdue invoices, and pick up screenprints from the print shop before 18:00.",
+    "08:45 Get dressed, feed the gecko, and walk to Bluebird Café, grabbing an oat latte at the counter at 09:30.",
+    "09:35 Tell the app you're set up at the café and diving into the Solis packaging dielines.",
+    "09:35 Work nonstop on Solis packaging bleeds and Pantone callouts until 12:45.",
+    "12:48 Export final PDFs and send them to the Solis printer. Text the app: Solis files sent! Starting straight into Kestrel icon concepts now so I'm ready for 16:00.",
+    "12:50 If the app reminds you about lunch, wave it off and say you'll grab something after getting the first two icon directions working.",
+    "12:55 Hyperfocus on Kestrel vector icons right through lunch until 15:10, when you realize your hands are shaking from only having espresso all day.",
+    "15:12 Text the app: oops, totally forgot to eat and my brain is fried. Walking next door to grab a panini and eat for 30 minutes before the 16:00 Kestrel call.",
+    "15:15 Buy and eat a caprese panini, then export the Figma presentation deck at 15:45.",
+    "15:55 Tell the app you ate and need to walk 10 minutes home right now because the café is way too loud for a client call.",
+    "16:05 Arrive home 5 minutes late for the Kestrel call; present the icon concepts on Zoom until 16:50.",
+    "16:55 Text the app: Kestrel call went super well, they loved direction B! Only small color tweaks needed tomorrow. Remind me what else I wanted to do before 18:00?",
+    "17:00 Leave immediately to walk to the local print shop before it closes at 18:00; pick up the poster tube and get back at 17:50.",
+    "17:52 Report print shop pickup done. Sit down to send the two overdue invoices in Wave and log receipt expenses until 18:35.",
+    "18:38 Report invoices sent! Ask to drop cleaning the apartment tonight and just schedule making risotto at 19:30 and sketching in Procreate after.",
+    "19:30 Cook mushroom risotto and eat dinner until 20:40.",
+    "20:45 Sketch personal poster ideas on the iPad on the couch until 22:30."
+  ],
+  "constraints": [
+    "Solis packaging print files must be delivered to the printer by 13:00.",
+    "Cannot take client Zoom calls from the café because of background espresso machine noise; must be home by 16:00.",
+    "Local screenprint shop closes at 18:00."
+  ],
+  "truth": [
+    {
+      "item": "Morning routine & walk to café",
+      "match": "morning|walk|cafe|café",
+      "start": "08:45",
+      "end": "09:30"
+    },
+    {
+      "item": "Solis Roasters packaging print files",
+      "match": "solis|packaging|print files",
+      "start": "09:35",
+      "end": "12:48"
+    },
+    {
+      "item": "Kestrel App icon concepts",
+      "match": "kestrel|icon",
+      "start": "12:55",
+      "end": "15:10"
+    },
+    {
+      "item": "Late lunch (panini) & deck export",
+      "match": "lunch|eat|panini|food",
+      "start": "15:15",
+      "end": "15:55"
+    },
+    {
+      "item": "Kestrel client call",
+      "match": "kestrel.*call|client.*call",
+      "start": "16:05",
+      "end": "16:50"
+    },
+    {
+      "item": "Pick up screenprints at print shop",
+      "match": "screenprint|print shop|pickup|pick up",
+      "start": "17:00",
+      "end": "17:50"
+    },
+    {
+      "item": "Send overdue invoices & log expenses",
+      "match": "invoice|expense",
+      "start": "17:52",
+      "end": "18:35"
+    },
+    {
+      "item": "Cook and eat dinner",
+      "match": "dinner|risotto|cook",
+      "start": "19:30",
+      "end": "20:40"
+    },
+    {
+      "item": "Sketch in Procreate",
+      "match": "sketch|procreate|ipad",
+      "start": "20:45",
+      "end": "22:30"
+    },
+    {
+      "item": "Clean apartment",
+      "match": "clean|vacuum",
+      "start": "18:30",
+      "end": "19:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Kestrel App - Icon Review Call",
+      "start": "16:00",
+      "end": "16:45"
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Studio",
+      "title": "Today's Deadlines",
+      "role": "today",
+      "body": "- [ ] Export Solis Roasters final dielines + Pantone callouts (DUE 1 PM)\n- [ ] Kestrel App: 3 icon concept directions + Figma presentation\n- [ ] Pick up test screenprints from InkPress before 6 PM\n- [ ] Send invoices to Studio 4 and Harbor Tea"
+    },
+    {
+      "notebook": "Studio",
+      "title": "Admin & Studio Backlog",
+      "role": "list",
+      "body": "- [ ] Log October font license receipts\n- [ ] Update portfolio case study for Solis\n- [ ] Order new Apple Pencil nibs\n- [x] Renew Adobe CC annual plan"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home & Self",
+      "role": "list",
+      "body": "- [ ] Clean apartment / vacuum studio corner\n- [ ] Make mushroom risotto\n- [ ] Sketch botanical poster series in Procreate\n- [ ] Mist gecko tank & refill water dish"
+    }
+  ]
+}

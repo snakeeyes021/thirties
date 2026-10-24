@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.assistant_tools import _stem, _words, rank_tasks
@@ -26,8 +26,9 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
-from thirties_core.clock import ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes, thirty_of
-from thirties_core.models import EventSpan, SpanCategory, TaskItem
+from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes,
+                                 thirty_ceil, thirty_of)
+from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,30 @@ class DialogState:
     def from_dict(cls, data: Dict[str, Any]) -> "DialogState":
         return cls(list(data.get("last_ids", [])), list(data.get("proposal", [])), data.get("proposal_kind", ""),
                    dict(data.get("awaiting_time", {})))
+
+
+REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
+                       r"( else)? (back|later)|just figure it out|undo the (re-?plan|redraw))\b", re.I)
+NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\w.!?]+\w+){0,3}[^\w.!?]+"
+                    r"(re-?plan|redraw|re-?do|push|just figure)", re.I)  # within one sentence
+
+
+MAX_MESSAGE_CHARS = 2000
+FIGURE_IT_OUT_RE = re.compile(r"\b(figure (it|that|them) out|wherever|you (pick|choose|decide)|whenever works|"
+                              r"lay (it|them|the day|everything) out|fit (it|them) in)\b", re.I)
+BUILD_PLAN_RE = re.compile(r"\b(lay (it |them |the day |everything )?out|put (down|in)|add|schedule|plan (out )?(the|my) "
+                           r"(day|morning|afternoon|evening)|include|whole (day|proposed day))\b", re.I)
+TODAY_LIST_RE = re.compile(r"\b(?:add|put)\s+(?P<items>.+?)\s+(?:on|to)\s+(?:my\s+|the\s+)?today'?s?(?:\s+list|\s+note)?\b",
+                           re.I)
+URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgent|is pressing|isn'?t urgent|is not urgent|"
+                        r"can wait|is no rush|is a someday thing|has to happen by \w+|needs to happen by \w+|"
+                        r"is due by \w+|by \w+ at the latest)\b", re.I)
+STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to|into)|going to start|getting started|now doing|"
+                         r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
+FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed|made|sent|submitted|"
+                         r"placed|ordered|picked up|got (it|back|home)|back from|returned|is in|are in|went)\b", re.I)
+DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
+LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
 
 class SlmBrain:
@@ -181,7 +206,21 @@ class SlmBrain:
         if len(self.messages) > 1 and not self.state.last_ids and not self.state.proposal:
             self._restore_state()
         self.messages.append({"role": "user", "content": user_text})
+        user_text = user_text[:MAX_MESSAGE_CHARS]  # a huge paste can't fit Gemma's context: read the start of it
         self._message = user_text
+        shortcut = self._list_shortcut(user_text)
+        if shortcut is not None:  # today's list and urgency: plain enough for Python, no parse needed
+            self.messages.append({"role": "assistant", "content": shortcut, "slm_state": self.state.to_dict(),
+                                  "slm_actions": [{"type": "list_shortcut"}]})
+            return shortcut
+        if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text) and not BUILD_PLAN_RE.search(user_text):
+            # rearrange what's planned: Python does it, no parse. Asking to lay out a day goes to the parse instead
+            undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
+            ok, reply = self._run("undo_redraw" if undo else "redraw", {})
+            if undo or (ok and not reply.startswith("Nothing to redraw")):
+                self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
+                                      "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
+                return reply
         try:
             actions = self._parse(user_text)
         except SlmUnavailable as e:
@@ -220,7 +259,7 @@ class SlmBrain:
 
     def _last_assistant(self) -> str:
         for m in reversed(self.messages[:-1]):
-            if m.get("role") == "assistant":
+            if m.get("role") == "assistant" and m.get("kind") != "notice":  # not a start-of-block notice
                 return str(m.get("content", ""))
         return ""
 
@@ -258,7 +297,7 @@ class SlmBrain:
     # --- 2. resolution helpers ---
 
     def _loose_time(self, text: str, after: Optional[datetime] = None, prefer_future: bool = True,
-                    near: Optional[datetime] = None) -> datetime:
+                    near: Optional[datetime] = None, recent_past: bool = False) -> datetime:
         """A clock time on the planned day; adds AM/PM sensibly when the user left it out."""
         plan = self.tools.day_plan
         raw = str(text).strip().lower().replace("in the ", "").replace("this ", "")
@@ -303,6 +342,11 @@ class SlmBrain:
             raise ClockError(f"I couldn't place '{text}' on {plan.target_date.strftime('%A')}.")
         if after is not None:
             return min(candidates)
+        if recent_past and self._is_today():  # "finished at 6:30", said at 7 PM: 6:30 PM, not this morning
+            now = self._now()
+            past = [dt for dt in candidates if dt <= now + timedelta(minutes=15)]
+            if past:
+                return max(past)
         if near is not None and len(candidates) > 1:
             return min(candidates, key=lambda dt: abs(dt.timestamp() - near.timestamp()))
         now = self._now()
@@ -773,12 +817,20 @@ class SlmBrain:
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
             "remind": self._do_remind, "mute": self._do_mute, "proposal_swap": self._do_proposal_swap,
         }
+        untimed = [a for a in actions if a.type == "add" and not any(a.get(k) for k in ("start", "end", "after", "before"))]
+        if len(untimed) >= 2 or (untimed and FIGURE_IT_OUT_RE.search(message)):
+            # several things and no times ("put down Brad, Torquio, the walk, lunch and dinner"): Python lays them
+            # out rather than asking "what time?" for each one
+            lines.append(self._lay_out(untimed))
+            changed = True
+            actions = [a for a in actions if a not in untimed]
         retry: List[Action] = []
         for action in actions:
             if action.type == "chat":
-                if len(actions) == 1:
+                if not lines and len(actions) == 1:
                     return self._chat(message)
                 continue
+
             snapshot = self.state.to_dict()
             text, did_change = handlers[action.type](action)
             failed = action.type in ("add", "move", "swap") and not did_change and \
@@ -885,23 +937,30 @@ class SlmBrain:
             args["task_id"] = task.id
         ok, out = self._run("add_event", args)
         if ok:
-            span = self._span_from_result(out, day)
-            self._remember(span)
-            text = self._added_line(out)
-            heads_up = re.search(r"Weather heads-up: (.+?)\.(?:\s|$)", out)
-            if heads_up:
-                text += f" Heads-up: {heads_up.group(1)}."
-            if guessed:
-                text += " (I guessed an hour; tell me if it's different.)"
-            elif learned:
-                text += " (about as long as it usually takes you)"
-            slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
-            if slid:
-                text += "\nTo make room: " + "; ".join(slid) + "."
-            return text, True
+            return self._added_reply(out, day, guessed, learned)
+        if "would overlap" in out and "fixed calendar commitment" not in out and not args.get("push_later"):
+            ok, pushed = self._run("add_event", {**args, "push_later": True})  # slide what follows, like Gemini
+            if ok:
+                return self._added_reply(pushed, day, guessed, learned)
         if alternatives and "would overlap" in out:
             return self._offer_alternatives(args, out), False
         return f"I couldn't add {args['title']}: {out}", False
+
+    def _added_reply(self, out: str, day: Optional[str], guessed: bool, learned: bool) -> Tuple[str, bool]:
+        span = self._span_from_result(out, day)
+        self._remember(span)
+        text = self._added_line(out)
+        heads_up = re.search(r"Weather heads-up: (.+?)\.(?:\s|$)", out)
+        if heads_up:
+            text += f" Heads-up: {heads_up.group(1)}."
+        if guessed:
+            text += " (I guessed an hour; tell me if it's different.)"
+        elif learned:
+            text += " (about as long as it usually takes you)"
+        slid = re.findall(r"(?:; |\()([^;()]+? now \d[^;()]*?(?:AM|PM) – \d[^;()]*?(?:AM|PM))", out)
+        if slid:
+            text += "\nTo make room: " + "; ".join(slid) + "."
+        return text, True
 
     def _span_from_result(self, out: str, day: Optional[str]) -> Optional[EventSpan]:
         m = re.search(r"\[id ([0-9a-f]+)\]", out)
@@ -915,11 +974,11 @@ class SlmBrain:
         m = re.search(r"\b(chunks?|thirties)\b", getattr(self, "_message", "").lower())
         if not m:
             return None
-        return "chunks" if m.group(1).startswith("chunk") else "thirties"
+        return "chunks" if m.group(1).startswith("chunk") else "blocks"  # "1 thirty" next to a time misreads
 
     def _in_user_units(self, minutes: int) -> str:
         n, unit = minutes // 30, self._user_unit()
-        return f"{n} {unit if n != 1 else {'chunks': 'chunk', 'thirties': 'thirty'}[unit]}"
+        return f"{n} {unit if n != 1 else {'chunks': 'chunk', 'blocks': 'block'}[unit]}"
 
     def _added_line(self, out: str) -> str:
         day = ""
@@ -1104,6 +1163,9 @@ class SlmBrain:
         if not any(k in args for k in ("shift", "start", "end", "duration")):
             return f"How should I change {span.title}?", False
         ok, out = self._run("update_event", args)
+        if not ok and "Nothing to change" in out:  # already where they asked (an earlier step slid it there)
+            self._remember(span)
+            return f"{span.title} is at {format_clock(span.start_dt)} – {format_clock(span.end_dt)}.", False
         if not ok:
             return f"I couldn't change {span.title}: {out}", False
         self._remember(span)
@@ -1133,12 +1195,26 @@ class SlmBrain:
         return "Swapped:\n" + "\n".join(agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in (a_, b_)])), True
 
     def _do_remove(self, a: Action) -> Tuple[str, bool]:
-        span, problem = self._resolve_one(a)
+        ref = a.get("target") or a.get("title") or ""
+        found = self._span_candidates(ref) if ref and ref.lower() not in PRONOUNS else []
+        if len(found) > 1 and all(s.source == "calendar" for s in found) and len({s.title.lower() for s in found}) == 1:
+            span, problem = found[0], ""  # two invites with one name ("decline both SB Shows"): all of them
+        else:
+            span, problem = self._resolve_one(a)
         if span is None:
             return problem, False
-        if span.tentative:
-            ok, out = self._run("resolve_calendar_event", {"event": span.id, "attend": False})
-            return (f"Declined {span.title}." if ok else out), ok
+        if span.source == "calendar":  # not going: decline it (and its namesakes: "decline both SB Shows")
+            same = [s for s in self.tools.day_plan.spans_in_view()
+                    if s.source == "calendar" and s.title.lower() == span.title.lower()]
+            declined = []
+            for s in same:
+                ok, out = self._run("resolve_calendar_event", {"event": s.id, "attend": False})
+                if ok:
+                    declined.append(format_clock(s.start_dt))
+            if not declined:
+                return out, False
+            return f"Declined {span.title}" + (f" ({' and '.join(declined)})" if len(declined) > 1 else "") + \
+                ": that time is free.", True
         args = {"event": span.id, **({"day": a.get("day")} if a.get("day") else {})}
         ok, out = self._run("remove_event", args)
         if not ok:
@@ -1149,13 +1225,19 @@ class SlmBrain:
     def _do_outcome(self, a: Action) -> Tuple[str, bool]:
         ref = a.get("target") or a.get("title") or ""
         found = self._span_candidates(ref) if ref.lower() not in PRONOUNS or self.state.last_ids else []
+        if found and all(s.source == "calendar" for s in found):
+            return f"{found[0].title} is on your calendar, so there's nothing to check off.", False
         found = [s for s in found if not s.is_envelope and s.source != "calendar"]
+        message = getattr(self, "_message", "") or ""
+        if (a.get("status") or "done") == "done" and STARTING_RE.search(message) and not FINISHED_RE.search(message):
+            name = found[0].title if len(found) == 1 else ref
+            return f"Got it, {name} is underway.", False  # starting something isn't finishing it
         event = found[0].id if len(found) == 1 else ref
         args: Dict[str, Any] = {"event": event, "status": a.get("status") or "done"}
         for key in ("started", "finished"):
             if a.get(key):
                 try:
-                    args[key] = self._clock_arg(self._loose_time(a.get(key), prefer_future=False))
+                    args[key] = self._clock_arg(self._loose_time(a.get(key), prefer_future=False, recent_past=True))
                 except ClockError:
                     pass
         if a.get("duration"):
@@ -1164,7 +1246,7 @@ class SlmBrain:
             args["estimated"] = True
         ok, out = self._run("log_outcome", args)
         if not ok:
-            return f"I couldn't find {ref} to mark it: {out}", False
+            return f"I couldn't find {ref} on today's plan to mark it.", False
         status = args["status"]
         name = found[0].title if len(found) == 1 else ref
         if status == "done":
@@ -1201,6 +1283,8 @@ class SlmBrain:
         target = {_stem(w) for w in _words(a.get("target") or "")}
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         named = [s for s in invites if target & {_stem(w) for w in _words(s.title)}]
+        if not named and not self.state.proposal and self._rollover_pending():
+            invites = []  # a plain "yes" answers the morning offer, not an invite nobody mentioned
         if named or (invites and not self.state.proposal):
             invite = (named or invites)[0]
             ok, out = self._run("resolve_calendar_event", {"event": invite.id, "attend": True})
@@ -1248,18 +1332,25 @@ class SlmBrain:
     # --- messages ---
 
     def _do_remind(self, a: Action) -> Tuple[str, bool]:
-        ok, out = self._run("set_reminder", {k: v for k, v in a.fields.items() if k in ("text", "date", "time")})
+        fields = {k: v for k, v in a.fields.items() if k in ("text", "date", "time")}
+        ping = bool(re.search(r"\b(?:ping|text|message) me\b", getattr(self, "_message", ""), re.I))
+        ok, out = self._run("set_reminder", {**fields, "ping_only": ping})  # "remind me to" is a thing to do
         if not ok:
             return out, False
-        m = re.match(r"Reminder set for (.+?) at (.+?): (.+) \(id \w+\)\.$", out)
-        return (f"Okay, I'll remind you {m.group(1)} at {m.group(2)}: {m.group(3)}" if m else out), False
+        m = re.match(r"Ping set for (.+?) at (.+?): (.+) \(id \w+\)\.$", out)
+        if m:
+            return f"Okay, I'll ping you {m.group(1)} at {m.group(2)}: {m.group(3)}", False
+        m = re.match(r"On the plan for (.+?) at (.+?)( and on today's list)?, with a ping when it's time: (.+) "
+                     r"\(item id \w+\)\.$", out)
+        return (f"Okay: {m.group(4)}, {m.group(1)} at {m.group(2)}, on the plan" + (" and today's list" if m.group(3)
+                else "") + ", and I'll ping you then." if m else out), False
 
     def _do_mute(self, a: Action) -> Tuple[str, bool]:
         message = getattr(self, "_message", "").lower()
         everything = bool(re.search(r"\b(all|any|anything|every|today|tonight|for (the|a) (day|while))\b", message))
         target = None
         if not everything:
-            last = next((m.get("content", "") for m in reversed(self.messages[:-1]) if m.get("role") == "assistant"), "")
+            last = self._last_assistant()
             asked = re.search(r"did you get to (.+?)(?:, or are you still on it|\?)", last)
             ref = asked.group(1) if asked else ""
             named = [s for s in self._span_candidates(message) if not s.is_envelope] if not ref else []
@@ -1369,15 +1460,22 @@ class SlmBrain:
         return start, end
 
     def _score_task(self, task: TaskItem, topic_words: set, goal_words: set, scheduled_titles: set) -> float:
-        if task.someday or task.title.lower() in scheduled_titles:
+        if task.someday or task.list_role in ("reference", "backlog") or task.title.lower() in scheduled_titles:
             return -1.0
         words = {_stem(w) for w in _words(f"{task.title} {task.parent_note_title or ''} {task.section}")}
         score = 1.0
         score += 4.0 * len(topic_words & words)
         score += 2.0 * len(goal_words & words)
         score += min(task.deferred_count, 4) * 0.75
-        if (task.parent_note_title or "").lower() in ("today to-do", "today"):
+        if task.list_role == "today" or (not task.list_role and (task.parent_note_title or "").lower() in ("today to-do", "today")):
             score += 3.0
+        score += {"now": 3.0, "soon": 1.5}.get(task.urgency, 0.0)
+        if task.due:
+            try:
+                days = (date.fromisoformat(task.due) - self.tools.today()).days
+                score += 3.0 if days <= 2 else 1.5 if days <= 7 else 0.0
+            except ValueError:
+                pass
         if task.parent_task_id:
             score -= 0.5  # prefer whole tasks over sub-steps
         if not task.is_checkbox_item and not task.id.startswith("media:"):
@@ -1385,6 +1483,16 @@ class SlmBrain:
         if "media" in task.tags or task.id.startswith("media:"):
             score -= 1.5 if not (topic_words & {"watch", "read", "relax", "movi", "show", "book"}) else -1.0
         return score
+
+    def _project_blocks(self) -> List[TaskItem]:
+        """A project backlog is offered as time on the project ("Thirties dev"), never as single tickets."""
+        seen, out = set(), []
+        for t in self.tasks:
+            if t.list_role == "backlog" and t.parent_note_id and t.parent_note_id not in seen:
+                seen.add(t.parent_note_id)
+                out.append(TaskItem(id=f"project:{t.parent_note_id}", source_notebook=t.source_notebook,
+                                    title=f"{t.parent_note_title} dev", list_role="list", estimated_thirties=2))
+        return out
 
     def _do_suggest(self, a: Action) -> Tuple[str, bool]:
         topic = a.get("topic") or ""
@@ -1426,7 +1534,7 @@ class SlmBrain:
         from thirties_core.weather import OUTDOOR_RE
         scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled)
                           - (6.0 if rainy and OUTDOOR_RE.search(t.title) else 0.0), i, t)  # nothing outdoors in the rain
-                         for i, t in enumerate(self.tasks)),
+                         for i, t in enumerate(self.tasks + self._project_blocks())),
                         key=lambda x: (-x[0], x[1]))
         ranked, seen_notes = [], set()
         for score, _, t in scored:
@@ -1530,6 +1638,9 @@ class SlmBrain:
     def _do_question(self, a: Action) -> Tuple[str, bool]:
         topic = (a.get("topic") or "").lower()
         day = a.get("day")
+        named_day = DAY_WORD_RE.search(getattr(self, "_message", "") or "")
+        if not day and named_day:  # "what does tomorrow look like?": the parse sometimes drops the day
+            day = named_day.group(1).lower()
         if self._WEATHER_RE.search(topic) or self._WEATHER_RE.search(getattr(self, "_message", "")):
             ok, out = self._run("get_weather", {})
             return out, False
@@ -1561,6 +1672,17 @@ class SlmBrain:
                 a, b = windows[0]
                 return f"You're free from {format_clock(a)} to {format_clock(b)} ({length(a, b)}).", False
             return "You're free:\n" + "\n".join(f"- {format_clock(a)} – {format_clock(b)} ({length(a, b)})" for a, b in windows), False
+        message = getattr(self, "_message", "")
+        if (not day or day == "today") and LEFT_TODAY_RE.search(f"{topic} {message}"):
+            return self._left_today(), False
+        named_list = self._list_named(message)
+        if named_list:  # "what's on my Home list?": that list's open items
+            items = [t.title for t in self.tasks if t.parent_note_title == named_list and not t.someday
+                     and not t.parent_task_id]
+            if not items:
+                return f"Nothing open on {named_list}.", False
+            return f"On {named_list}:\n" + "\n".join(f"- {t}" for t in items[:12]) + \
+                (f"\n(and {len(items) - 12} more)" if len(items) > 12 else ""), False
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:
@@ -1572,6 +1694,140 @@ class SlmBrain:
             ok, out = self._run("search_history", {"query": topic})
             return out, False
         return self._schedule_answer(day, topic + " " + getattr(self, "_message", "")), False
+
+    MEAL_WINDOWS = {"breakfast": (time(7, 0), time(11, 0), 30), "lunch": (time(11, 30), time(14, 30), 30),
+                    "dinner": (time(17, 30), time(20, 30), 60), "supper": (time(17, 30), time(20, 30), 60)}
+
+    def _lay_out(self, adds: List[Action]) -> str:
+        """Place several things with no times, in Python: meals in their usual windows, a routine as its own items
+        in order, everything else from now in the order given, with a free block after anything an hour or
+        longer (breathing room). Says what didn't fit."""
+        plan = self.tools.day_plan
+        tz = plan.day_start.tzinfo
+        now = self._now()
+        cursor = thirty_ceil(now) if self._is_today() and now > plan.day_start else plan.day_start
+        assistant = getattr(self.tools, "assistant", None)
+        items: List[Tuple[str, int, Optional[Tuple[time, time]]]] = []  # title, minutes, meal window
+        for a in adds:
+            title = (a.get("title") or "").strip()
+            if not title:
+                continue
+            title = title[:1].upper() + title[1:] if title.islower() else title
+            minutes = 0
+            try:
+                minutes = parse_duration_minutes(a.get("duration")) if a.get("duration") else 0
+            except ClockError:
+                minutes = 0
+            meal = next((w for k, w in self.MEAL_WINDOWS.items() if k in title.lower()), None)
+            routine = self._routine_items(title) if "routine" in title.lower() else []
+            if routine:
+                each = max(5, (minutes or 60) // len(routine))
+                items += [(step, each, None) for step in routine]
+                continue
+            if not minutes and assistant:
+                learned = assistant.typical_duration(title)
+                minutes = learned or 0
+            items.append((title, minutes or (meal[2] if meal else 60), (meal[0], meal[1]) if meal else None))
+        placed, missed = [], []
+        for title, minutes, window in sorted(items, key=lambda i: i[2] is None):  # meals first: they're anchored
+            length = timedelta(minutes=minutes)
+            lo = max(cursor, datetime.combine(plan.day_start.date(), window[0], tzinfo=tz)) if window else cursor
+            hi = datetime.combine(plan.day_start.date(), window[1], tzinfo=tz) if window else plan.day_end
+            ok, out = False, ""
+            if minutes < 30 and window is None:  # a short thing goes right after the last one: they share a block
+                ok, out = self._run("add_event", {"title": title, "start": self._clock_arg(cursor),
+                                                  "duration": f"{minutes} minutes"})
+            if not ok:
+                slot = next((max(a, lo) for a, b in self.tools.open_windows(after=lo)
+                             if min(b, hi) - max(a, lo) >= length), None)
+                if slot is None:
+                    missed.append(title)
+                    continue
+                ok, out = self._run("add_event", {"title": title, "start": self._clock_arg(slot),
+                                                  "duration": f"{minutes} minutes"})
+            if not ok:
+                missed.append(title)
+                continue
+            span = self._span_from_result(out, None)
+            if span is not None:
+                self._remember(span)
+                placed.append((span.start_dt, span.end_dt, span.title, ""))
+                if window is None:
+                    cursor = span.end_dt + (timedelta(minutes=30) if minutes >= 60 else timedelta())
+        lines = ["Here's the day:"] + agenda_lines(sorted(placed)) if placed else []
+        if missed:
+            lines.append("Didn't fit: " + ", ".join(missed) + ". Tomorrow, or let them go?")
+        return "\n".join(lines) or "I couldn't find room for those today."
+
+    def _routine_items(self, title: str) -> List[str]:
+        """The open items of the routine note a title names ("morning routine"), in order."""
+        assistant = getattr(self.tools, "assistant", None)
+        if assistant is None or self.tools.scheduler is None:
+            return []
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import note_items, notes_with_role
+        roles = ListCatalog(self.tools.scheduler.state_db).roles()
+        words = {_stem(w) for w in _words(title)} - {"routin"}
+        for note in notes_with_role(roles, assistant._joplin_notes(), "routine"):
+            if not words or words & {_stem(w) for w in _words(note["title"])}:
+                return [text for text, ticked in note_items(note) if not ticked]
+        return []
+
+    def _list_shortcut(self, text: str) -> Optional[str]:
+        """"Add X to today's list" and "X isn't urgent" / "X is urgent" / "X has to happen by Friday", handled in
+        Python. None when the message isn't one of these."""
+        m = TODAY_LIST_RE.search(text)
+        if m and m.group("items").strip(" .").lower() not in PRONOUNS | {"those", "these", "them", "everything", "all"}:
+            items = [x.strip(" .") for x in re.split(r",\s*|\s+and\s+", m.group("items")) if x.strip(" .")]
+            items = [x[:1].upper() + x[1:] if x.islower() else x for x in items]
+            ok, out = self._run("add_to_today", {"items": items})
+            return out if ok else f"I couldn't add that to today's list: {out}"
+        m = URGENCY_RE.search(text)
+        if m:
+            what, how = m.group("what").strip(" ."), m.group("how").lower()
+            args: Dict[str, Any] = {"task": what}
+            due = re.search(r"\bby (\w+)", how)
+            if due:
+                args["due"] = due.group(1)
+            else:
+                args["urgency"] = ("someday" if "someday" in how else
+                                   "whenever" if re.search(r"n[o']t|no rush|can wait", how) else "now")
+            ok, out = self._run("set_urgency", args)
+            return out if ok else None  # not a list item after all: let the parse handle it
+        return None
+
+    def _list_named(self, message: str) -> Optional[str]:
+        """The list a question names ("my Home list", "the errands list", "on Medical"), if any."""
+        if not re.search(r"\b(list|note|on my|on the)\b", message, re.I):
+            return None
+        said = {_stem(w) for w in _words(message)}
+        names = {t.parent_note_title for t in self.tasks if t.parent_note_title}
+        hits = [n for n in names if {_stem(w) for w in _words(n)} and {_stem(w) for w in _words(n)} <= said]
+        return max(hits, key=len) if hits else None
+
+    def _left_today(self) -> str:
+        """What's left today: the rest of the plan (what's past and not reported, then what's ahead), and
+        what's on today's list (the Today note) with no time yet."""
+        from thirties_core.today import note_items
+        now = self._now()
+        plan = self.tools.plan_for(None) if self._is_today() else self.tools.day_plan
+        flexible = [s for s in plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+                    and s.status == SpanStatus.PLANNED and not s.tentative]
+        behind = [s.title for s in flexible if s.end_dt <= now]
+        ahead = sorted((s for s in flexible if s.end_dt > now), key=lambda s: s.start_dt)
+        planned = {s.title.lower() for s in flexible}
+        assistant = getattr(self.tools, "assistant", None)
+        note = assistant._today_note() if assistant else None
+        listed = [text for text, ticked in note_items(note) if not ticked and text.lower() not in planned]
+        lines = []
+        if ahead:
+            lines.append("Still planned today:")
+            lines += [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
+        if behind:
+            lines.append("Not reported yet: " + ", ".join(behind) + ".")
+        if listed:
+            lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
+        return "\n".join(lines) or "Nothing left for today: the plan and today's list are clear."
 
     def _schedule_answer(self, day: Optional[str], wording: str) -> str:
         """A clean, line-per-item view of a day (or part of it), without sleep or ids."""
