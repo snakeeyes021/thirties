@@ -186,16 +186,23 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual([m["content"] for m in self.manager.history()],
                          ["am I free tonight?", "You're free from 4:00 until 11:00."])  # no drafts, no notes to itself
 
-    def test_minutes_are_said_as_thirties_unless_asked(self) -> None:
+    def test_minutes_are_said_by_their_block_unless_real_or_asked(self) -> None:
         self.engine.responses = [reply("Sunset is at 6:28 tonight."), reply("Sunset is at 6:28 tonight.")]
-        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is at 6:00 tonight.")
+        self.assertEqual(self.manager.send_user_message("when's sunset?"), "Sunset is in the 6:00 block tonight.")
         self.assertEqual(self.manager.send_user_message("what's the exact time of sunset?"), "Sunset is at 6:28 tonight.")
-        self.engine.responses = [reply("Your break is in the 10:45 thirty.")]
+        self.engine.responses = [reply("Your break is in the 10:45 block.")]
         self.assertEqual(self.manager.send_user_message("when's my break?"),
-                         "Your break is in the 10:30 thirty.")  # the thirty it's in, never the next one
+                         "Your break is in the 10:30 block.")  # the block it's in, never the next one
         self.engine.responses = [reply("Got it: your break is at 3:15, not 3:00.")]
         self.assertEqual(self.manager.send_user_message("my break is 3:15, not 3:00, adherence is tracked"),
-                         "Got it: your break is at 3:15, not 3:00.")  # they gave the minute: they're asking for it
+                         "Got it: your break is at 3:15, not 3:00.")  # their own time is a fact, said as is
+        self.engine.responses = [reply('CALL add_event {"title": "Uber to the airport", "start": "12:15 PM", '
+                                       '"duration": "30 min"}'),
+                                 reply("Your Uber is at 12:15, in the 12:00 block. Packing at 11:45 fits.")]
+        self.assertEqual(self.manager.send_user_message("I'm leaving for the airport then"),
+                         "Your Uber is at 12:15, in the 12:00 block. Packing in the 11:30 block fits.")  # 10-23
+        uber = next(s for s in self.manager.day_plan.spans if s.title == "Uber to the airport")
+        self.assertEqual(uber.start_dt, at("12:15"))  # a ride is fixed: it keeps its real time
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):

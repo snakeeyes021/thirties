@@ -185,18 +185,69 @@ EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minu
 _CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
 
 
-def says_minutes(text: str) -> bool:
-    """The user gave a time to the minute ("leaving at 12:15, not 12:00"): they're asking for minute accuracy."""
-    return any(m.group(2) not in ("00", "30") for m in _CLOCK_MINUTES_RE.finditer(text or ""))
+def real_times(*texts: str, spans=()) -> frozenset:
+    """Minute times that are facts, not arithmetic: the real start and end of items on the plan, and times the
+    user said. A reply may say these as they are; any other time is said by its block."""
+    out = {(int(m.group(1)), int(m.group(2))) for t in texts for m in _CLOCK_MINUTES_RE.finditer(t or "")}
+    for s in spans:
+        for dt in (s.start_dt, s.end_dt):
+            out.add(((dt.hour % 12) or 12, dt.minute))
+    return frozenset(out)
 
 
-def to_thirties(text: str) -> str:
-    """Only :00 and :30 are ever said: any other clock time becomes the thirty it falls in (a break at 10:45
-    is in the 10:30 thirty, never "11:00"). For replies when the user hasn't asked for exact minutes."""
-    def fix(m: re.Match) -> str:
+_RANGE_RE = re.compile(_CLOCK_MINUTES_RE.pattern + r"\s*(–|-|to)\s*" +
+                       _CLOCK_MINUTES_RE.pattern.replace("(1[0-2]|0?[1-9])", "(?:1[0-2]|0?[1-9])", 1)
+                       .replace("([0-5]\\d)", "(?:[0-5]\\d)", 1).replace("(\\s?(?:AM", "(?:\\s?(?:AM", 1))
+_UNTIL_RE = re.compile(r"\b((?:until|till|til|by)\s+)(" + _CLOCK_MINUTES_RE.pattern.replace("(1[0-2]", "(1[0-2]", 1) + ")")
+_AT_RE = re.compile(r"\b(at|around|about)\s+" + _CLOCK_MINUTES_RE.pattern + r"(?!\s*(?:\(|,)?\s*(?:in the|block|chunk))")
+
+
+def to_thirties(text: str, keep: frozenset = frozenset()) -> str:
+    """Only :00 and :30 are said, unless the minute time is real (`keep`: an item's real time, or the user's).
+    "at 10:45" becomes "in the 10:30 block", never a different clock time ("at 10:30" would be false); a range
+    becomes the blocks it covers; any other stray time becomes the block it falls in (never the next one)."""
+    def odd(h: str, mm: str) -> bool:
+        return int(mm) not in (0, 30) and (int(h), int(mm)) not in keep
+
+    def span(m: re.Match) -> str:
+        whole = m.group(0)
+        first = _CLOCK_MINUTES_RE.match(whole)
+        second = list(_CLOCK_MINUTES_RE.finditer(whole))[-1]
+        if not (odd(first.group(1), first.group(2)) or odd(second.group(1), second.group(2))):
+            return whole
+        h1, m1, s1 = int(first.group(1)), int(first.group(2)), first.group(3) or ""
+        start = f"{h1}:{0 if m1 < 30 else 30:02d}{s1}"
+        return whole[:first.start()] + start + whole[first.end():second.start()] + ceil(second)
+
+    def ceil(m: re.Match) -> str:  # the end of the block it falls in
         h, mm, suffix = int(m.group(1)), int(m.group(2)), m.group(3) or ""
-        return m.group(0) if mm in (0, 30) else f"{h}:{0 if mm < 30 else 30:02d}{suffix}"
-    return _CLOCK_MINUTES_RE.sub(fix, text)
+        if mm in (0, 30):
+            return m.group(0)
+        if mm < 30:
+            return f"{h}:30{suffix}"
+        if h == 11 and suffix:  # 11:45 AM ends in the block that ends at 12:00 PM
+            flip = {"am": "pm", "pm": "am", "a.m.": "p.m.", "p.m.": "a.m."}
+            word = suffix.strip()
+            suffix = suffix.replace(word, flip[word.lower()].upper() if word.isupper() else flip[word.lower()])
+        return f"{h % 12 + 1}:00{suffix}"
+
+    def until(m: re.Match) -> str:
+        return m.group(1) + (ceil(_CLOCK_MINUTES_RE.match(m.group(2))) if odd(m.group(3), m.group(4)) else m.group(2))
+
+    def at(m: re.Match) -> str:
+        word, h, mm, suffix = m.group(1), m.group(2), m.group(3), m.group(4) or ""
+        if not odd(h, mm):
+            return m.group(0)
+        return f"in the {int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix} block"
+
+    def floor(m: re.Match) -> str:
+        h, mm, suffix = m.group(1), m.group(2), m.group(3) or ""
+        return f"{int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix}" if odd(h, mm) else m.group(0)
+
+    text = _RANGE_RE.sub(span, text)
+    text = _AT_RE.sub(at, text)
+    text = _UNTIL_RE.sub(until, text)
+    return _CLOCK_MINUTES_RE.sub(floor, text)
 
 
 def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:

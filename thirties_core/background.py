@@ -130,11 +130,12 @@ class BackgroundService:
     def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
              to_conversation: bool = True, now: Optional[datetime] = None) -> None:
         """Send a message to the desktop and, if a phone is paired here, to Telegram."""
-        from thirties_core.clock import to_thirties, trim_meridiems
+        from thirties_core.clock import real_times, to_thirties, trim_meridiems
         try:
             now = now or self.now()
-            text = trim_meridiems(to_thirties(text), now)
-            telegram_text = trim_meridiems(to_thirties(telegram_text), now) if telegram_text else None
+            keep = real_times(spans=self.manager().day_plan.spans)
+            text = trim_meridiems(to_thirties(text, keep), now)
+            telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
         except Exception:
             pass
         if self.desktop_notify is not None:
@@ -211,8 +212,9 @@ class BackgroundService:
             behind = [s.title for s in plan.active_spans() if self._unreported(s)
                       and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
             on_thirty = event.start_dt == thirty_of(event.start_dt)
-            text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else
-                    f"⏰ {event.title}, in the {format_clock(thirty_of(event.start_dt))} block.")
+            text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else  # its real time, and block
+                    f"⏰ {event.title} at {format_clock(event.start_dt)}, in the "
+                    f"{format_clock(thirty_of(event.start_dt))} block.")
             if behind:
                 text += " (" + (", ".join(behind[:-1]) + " and " + behind[-1] if len(behind) > 1 else behind[0]) + \
                         (" aren't" if len(behind) > 1 else " isn't") + " reported yet.)"

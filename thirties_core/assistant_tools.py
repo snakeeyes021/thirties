@@ -671,19 +671,19 @@ class AssistantTools:
             if start_dt and not end_dt:
                 end_dt = start_dt + timedelta(minutes=planned_minutes)
             if end_dt and not start_dt:
-                # "Took until 3:30": assume it started on time unless that's impossible.
-                start_dt = span.start_dt if end_dt > span.start_dt else end_dt - timedelta(minutes=planned_minutes)
+                # "Done at 5:30" (an estimate, marked as one): ending within twice its planned length of the
+                # planned start, it started on time and ran long; ending later, it started late and took as long
+                # as planned. Always "on time" made a planned half-hour shower 3:00 – 5:50 (10-20).
+                ran_long = span.start_dt < end_dt <= span.start_dt + timedelta(minutes=2 * planned_minutes)
+                start_dt = span.start_dt if ran_long else end_dt - timedelta(minutes=planned_minutes)
             span.actual_start = start_dt or span.start_dt
             span.actual_end = end_dt or span.end_dt
             if (span.actual_start, span.actual_end) != (span.start_dt, span.end_dt):
-                # Show what really happened, in the thirties it touched; the exact times and the original
-                # plan stay on the record for statistics.
+                # The item now sits where it really happened, at its real times (the day view and lists show it
+                # in the blocks it touched); the original plan stays on the record for statistics.
                 if span.planned_start is None:
                     span.planned_start, span.planned_end = span.start_dt, span.end_dt
-                if span.actual_end - span.actual_start < timedelta(minutes=30):
-                    span.start_dt, span.end_dt = span.actual_start, span.actual_end
-                else:
-                    span.start_dt, span.end_dt = thirty_of(span.actual_start), thirty_ceil(span.actual_end)
+                span.start_dt, span.end_dt = span.actual_start, span.actual_end
             if started not in (None, "") and (finished not in (None, "") or duration not in (None, "")) and not guessed:
                 span.time_source = "reported"
             elif start_dt or end_dt:

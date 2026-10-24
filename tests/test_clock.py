@@ -104,8 +104,15 @@ class TestToThirties(unittest.TestCase):
     def test_only_00_and_30_are_said(self):
         from thirties_core.clock import to_thirties
         # a time becomes the thirty it falls in: a break at 10:45 is in the 10:30 thirty, never "11:00"
-        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"), "Sunset at 6:00, then dinner 7:00 PM – 8:00 PM")
-        self.assertEqual(to_thirties("break at 10:45, back by 11:00"), "break at 10:30, back by 11:00")
-        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:00 PM")
-        self.assertEqual(to_thirties("at 11:50 PM"), "at 11:30 PM")
+        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"),
+                         "Sunset in the 6:00 block, then dinner 7:00 PM – 8:00 PM")  # never a false "at 6:00"
+        self.assertEqual(to_thirties("break at 10:45, back by 11:00"), "break in the 10:30 block, back by 11:00")
+        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:30 PM")
+        self.assertEqual(to_thirties("at 11:50 PM"), "in the 11:30 PM block")
+        self.assertEqual(to_thirties("Uber 12:15 PM – 12:45 PM"), "Uber 12:00 PM – 1:00 PM")  # the blocks it covers
+        self.assertEqual(to_thirties("work 8:30 AM – 11:45 AM"), "work 8:30 AM – 12:00 PM")
+        real = frozenset({(12, 15)})  # the Uber's real time: said as it is
+        self.assertEqual(to_thirties("Your Uber is at 12:15, in the 12:00 block.", real),
+                         "Your Uber is at 12:15, in the 12:00 block.")
+        self.assertEqual(to_thirties("11:00 sharp, then the Uber at 12:15", real), "11:00 sharp, then the Uber at 12:15")
         self.assertEqual(to_thirties("score 3:2, ratio 10:45:12"), "score 3:2, ratio 10:45:12")

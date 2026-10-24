@@ -61,6 +61,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
             "alongside": "true if it happens at the same time as something else (e.g. an audiobook during dinner).",
             "push_later": "true to make room by sliding the planned activities that follow it later, in order.",
+            "fixed": "true if its time is set by someone else's clock (an appointment, a ride, a show, a call at a "
+                     "set time): it keeps its exact time and never slides. false if it's flexible. Leave it out "
+                     "when it's obvious (appointments, flights and rides are fixed; chores are flexible).",
             "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
         },
         "required": ["title", "start"],
@@ -333,12 +336,36 @@ class PlanTools:
             begin = thirty_ceil(start)
         return begin, begin + length
 
+    def _is_fixed(self, span: EventSpan) -> bool:
+        """Set by someone else's clock: a calendar event, a firm commitment, or an item that stays put."""
+        if span.source == "calendar" or span.is_firm:
+            return True
+        if self._state_db is None:
+            return False
+        try:
+            return self._facts().get(span.id).anchored
+        except ToolError:
+            return False
+
+    def _set_fixed(self, span: EventSpan, fixed: bool) -> None:
+        if self._state_db is None:
+            return
+        store = self._facts()
+        facts = store.get(span.id)
+        facts.anchored = fixed
+        store.set(span.id, facts)
+
     def describe(self, span: EventSpan) -> str:
-        """An item as the user sees it: in thirties (exact minutes are only for the record)."""
-        if span.duration_minutes < 30 and thirty_of(span.start_dt) == thirty_of(span.end_dt - timedelta(seconds=1)):
-            return f"{span.title}, at {format_clock(thirty_of(span.start_dt))} (under 30m, sharing that block)"
-        start, end = thirty_of(span.start_dt), thirty_ceil(span.end_dt)
-        return f"{span.title}, {format_clock(start)} – {format_clock(end)} ({format_duration(int((end - start).total_seconds() // 60))})"
+        """An item with its real times, and the block(s) it's in: the model reads both, and tells a schedule in
+        blocks but one item by its real time and block ("12:15, in the 12:00 block")."""
+        length = format_duration(span.duration_minutes)
+        first, last = thirty_of(span.start_dt), thirty_of(span.end_dt - timedelta(seconds=1))
+        where = f"in the {format_clock(first)} block" if first == last else \
+            f"blocks {format_clock(first)} – {format_clock(thirty_ceil(span.end_dt))}"
+        on_blocks = span.start_dt == first and span.end_dt == thirty_ceil(span.end_dt)
+        times = f"{format_clock(span.start_dt)} – {format_clock(span.end_dt)} ({length})"
+        fixed = ", fixed" if span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and self._is_fixed(span) else ""
+        return f"{span.title}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})")
 
     def _find_span(self, ref: Any) -> EventSpan:
         ref_str = str(ref or "").strip()
@@ -433,7 +460,8 @@ class PlanTools:
         moved: List[Tuple[EventSpan, timedelta]] = []
         now = self._now()
         followers = sorted((s for s in self.day_plan.active_spans()
-                            if s.id != anchor.id and self._movable(s) and s.end_dt > anchor.start_dt
+                            if s.id != anchor.id and self._movable(s) and not self._is_fixed(s)
+                            and s.end_dt > anchor.start_dt
                             and s.start_dt >= anchor.start_dt - timedelta(minutes=1)
                             and s.status == SpanStatus.PLANNED and not (s.start_dt <= now < s.end_dt)),
                            key=lambda s: s.start_dt)  # what's done, or happening right now, stays where it is
@@ -447,7 +475,7 @@ class PlanTools:
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
-                    if c.id != span.id and (c.is_firm or c.source == "calendar")]
+                    if c.id != span.id and not c.is_envelope and self._is_fixed(c)]
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
@@ -486,6 +514,7 @@ class PlanTools:
         replace_overlaps: Any = False,
         alongside: Any = False,
         push_later: Any = False,
+        fixed: Any = None,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -510,9 +539,11 @@ class PlanTools:
         else:
             raise ToolError("Give an end time or a duration.")
 
-        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
-            start_dt, end_dt = self._snap(start_dt, end_dt)
-        if not _as_bool(alongside):
+        from thirties_core.facts import looks_fixed
+        is_fixed = looks_fixed(str(title)) if fixed in (None, "") else _as_bool(fixed)
+        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
+            start_dt, end_dt = self._snap(start_dt, end_dt)  # flexible: keeps to blocks; fixed: its real time
+        if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if _as_bool(alongside):
@@ -527,6 +558,8 @@ class PlanTools:
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
+        if is_fixed and not span.is_envelope and self._state_db is not None:
+            self._set_fixed(span, True)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
         weather = self.assistant.weather_warning(span) if self.assistant else None
@@ -548,9 +581,12 @@ class PlanTools:
         replace_overlaps: Any = False,
         push_later: Any = False,
         to_day: Any = None,
+        fixed: Any = None,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
+        if fixed not in (None, ""):
+            self._set_fixed(span, _as_bool(fixed))
         if span.source == "calendar":
             raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
         if title:
@@ -577,9 +613,9 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
 
-        if not span.is_envelope and (new_start, new_end) != (span.start_dt, span.end_dt):
+        if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
             new_start, new_end = self._snap(new_start, new_end)
-        if start not in (None, "") and shift in (None, ""):
+        if start not in (None, "") and shift in (None, "") and not self._is_fixed(span):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)

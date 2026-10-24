@@ -9,6 +9,7 @@ item (a span) and move with it.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -25,6 +26,22 @@ CREATE TABLE IF NOT EXISTS span_facts (
     updated_at TEXT NOT NULL
 );
 """
+
+
+# Things set by someone else's clock: they keep the time they were given and never slide. The obvious ones are
+# recognised here; the model says fixed=true/false for the rest, and the item keeps the answer (as "stays put").
+FIXED_RE = re.compile(
+    r"\b(appointments?|appts?|doctor|dr\.?|dentist|therap(y|ist)|vet|clinic|hospital|surgery|"
+    r"flights?|fly(ing)?|airport|boarding|uber|lyft|taxi|cab|ride|shuttle|train|bus|ferry|"
+    r"concerts?|shows?|gig|recital|play|theat(er|re)|movie|cinema|game|match|ceremony|wedding|funeral|"
+    r"meetings?|interview|class|lecture|lesson|exam|reservation|rsvp|"
+    r"pick ?up|drop ?off|depart(ure)?|leave for|check[- ]?(in|out)|haircut|massage|"
+    r"(call|meet|lunch|dinner|coffee|drinks|date) with)\b", re.IGNORECASE)
+
+
+def looks_fixed(title: str) -> bool:
+    """Obviously set by someone else's clock (an appointment, a flight, a ride, a show, a meeting)."""
+    return bool(FIXED_RE.search(title or ""))
 
 
 @dataclass
