@@ -185,6 +185,11 @@ EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minu
 _CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
 
 
+def says_minutes(text: str) -> bool:
+    """The user gave a time to the minute ("leaving at 12:15, not 12:00"): they're asking for minute accuracy."""
+    return any(m.group(2) not in ("00", "30") for m in _CLOCK_MINUTES_RE.finditer(text or ""))
+
+
 def to_thirties(text: str) -> str:
     """Only :00 and :30 are ever said: any other clock time becomes the thirty it falls in (a break at 10:45
     is in the 10:30 thirty, never "11:00"). For replies when the user hasn't asked for exact minutes."""

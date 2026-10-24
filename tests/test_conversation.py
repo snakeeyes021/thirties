@@ -178,6 +178,9 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.responses = [reply("Your break is in the 10:45 thirty.")]
         self.assertEqual(self.manager.send_user_message("when's my break?"),
                          "Your break is in the 10:30 thirty.")  # the thirty it's in, never the next one
+        self.engine.responses = [reply("Got it: your break is at 3:15, not 3:00.")]
+        self.assertEqual(self.manager.send_user_message("my break is 3:15, not 3:00, adherence is tracked"),
+                         "Got it: your break is at 3:15, not 3:00.")  # they gave the minute: they're asking for it
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):

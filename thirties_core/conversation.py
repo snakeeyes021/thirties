@@ -12,7 +12,7 @@ import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.clock import EXACT_ASKED_RE, to_thirties, trim_meridiems
+from thirties_core.clock import EXACT_ASKED_RE, says_minutes, to_thirties, trim_meridiems
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
@@ -273,7 +273,8 @@ class ConversationManager:
 
         reply = self.brain.respond(user_text)
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
-        shown = reply if EXACT_ASKED_RE.search(user_text) else to_thirties(reply)  # :00 and :30 unless asked
+        minutes_asked = EXACT_ASKED_RE.search(user_text) or says_minutes(user_text)  # "exactly?", or "12:15, not 12"
+        shown = reply if minutes_asked else to_thirties(reply)  # :00 and :30 unless asked
         trimmed = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
                                  if self.day_plan.target_date == self.tools.today() else None)
         if trimmed != reply:
