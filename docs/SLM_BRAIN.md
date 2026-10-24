@@ -201,6 +201,19 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   Single days swing widely between runs (one script went 0.56 → 0.25 of requests met), so 10 paired days can't separate small effects from noise. The next step is to measure that noise: the same version twice on the same days. The one consistent signal is lower plan respect after the fixes. Suspect: sliding later plans automatically instead of asking (c762540), which the judge may read as changing things unasked. Unproven.
 
+**Noise (2026-10-19, run 2026-10-23):** the same version (the milestone commit) twice on the same 9 Gemma days. The user's rating moved about 0.7 per day (+0.2 on average), and requests met about 0.09 per day. The judge's plan-respect score didn't move at all, so plan respect is the steadiest signal, and the 2.0 → 1.6 drop after the Gemma fixes was real (fixed in 9b6ee9a).
+
+**Milestone run of 0.1, all 106 days (2026-10-23)**, commit dde95f7: 53 scripts (31 made-up people, 22 of the user's days: 3 real, 19 variations) on both brains, fixed order, script calendars only. About 11% of a week's Gemini quota.
+
+| Brain | Whose days | Days | Requests met | User's rating | Messages per waking hour | Done items recorded | Plan respect | Message load |
+|---|---|---|---|---|---|---|---|---|
+| Frontier | other people | 31 | 0.91 | 6.9/10 | 0.26 | 72% | 4.2 | 4.4 |
+| Frontier | the user | 22 | 0.90 | 6.8/10 | 0.20 | 62% | 4.2 | 4.6 |
+| SLM | other people | 31 | 0.51 | 3.8/10 | 0.26 | 64% | 1.9 | 3.5 |
+| SLM | the user | 22 | 0.48 | 3.0/10 | 0.22 | 50% | 1.2 | 3.3 |
+
+  No minute times or internal text on any day. The two worst Frontier days were people insisting on a minute-precise time ("3:15, not 3:00"; "leaving at 12:15, don't book for 12:00") while the rounding kept saying the block; a reply now keeps minutes when the user gave them (113737e).
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments
