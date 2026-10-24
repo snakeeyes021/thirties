@@ -137,13 +137,6 @@ class BackgroundService:
             telegram_text = trim_meridiems(to_thirties(telegram_text), now) if telegram_text else None
         except Exception:
             pass
-        if to_conversation:
-            try:
-                manager = self.manager()
-                manager.refresh()
-                manager.add_assistant_message(text)
-            except Exception as e:
-                logger.warning("Couldn't add the message to the conversation: %s", e)
         if self.desktop_notify is not None:
             try:
                 self.desktop_notify(title, text, kind)
@@ -151,6 +144,14 @@ class BackgroundService:
                 logger.warning("Desktop notification failed: %s", e)
         if self.bridge is not None:
             self.bridge.broadcast(telegram_text or text)
+        if to_conversation:  # after delivery: this waits for a turn that's under way (Telegram) to finish
+            try:
+                manager = self.manager()
+                with manager.turn_lock:
+                    manager.refresh()
+                    manager.add_assistant_message(text, kind="notice" if kind == "start" else "")
+            except Exception as e:
+                logger.warning("Couldn't add the message to the conversation: %s", e)
 
     # --- duties ---
 
@@ -239,7 +240,7 @@ class BackgroundService:
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
                 self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + ".", "start",
-                          to_conversation=False, now=now)
+                          now=now)
             open_items = [s for s in items if not mutes.is_muted(s.id, now)]
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
@@ -333,23 +334,37 @@ class BackgroundService:
         if now - block > timedelta(minutes=5):
             return  # only right at the start of a thirty
         announced = self._remembered("starts_announced")
+        by_id = {s.id: s for s in plan.spans}
+
+        def told_already(s) -> bool:
+            """Announced before, as this item or as an earlier copy of it: re-planning makes a new item (a new
+            id), and "Wedding thank-yous" was announced four times on 10-21. A second one after the first is
+            done (teeth at night) is new."""
+            if s.id in announced:
+                return True
+            earlier = [by_id.get(i) for i in ids_titled(s)]
+            return any(e is None or e.status not in (SpanStatus.DONE, SpanStatus.SKIPPED) for e in earlier)
+
+        def ids_titled(s) -> List[str]:  # stored as "date|id id ...", so old days expire like the rest
+            value = announced.get("title:" + s.title.strip().lower(), "")
+            return value.split("|", 1)[1].split() if value.startswith(now.date().isoformat()) else []
+
         starting = [s for s in plan.active_spans()
-                    if thirty_of(s.start_dt) == block and s.id not in announced and not s.tentative
+                    if thirty_of(s.start_dt) == block and not told_already(s) and not s.tentative
                     and s.status == SpanStatus.PLANNED
                     and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR, SpanCategory.SLEEP)]
         if not starting:
             return
         for s in starting:
             announced[s.id] = now.date().isoformat()
+            announced["title:" + s.title.strip().lower()] = f"{now.date().isoformat()}|" + " ".join(ids_titled(s) + [s.id])
         self._remember("starts_announced", announced, now)
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
         if rest:
-            self.send(f"🔔 {format_clock(block)}: " + ", ".join(s.title for s in rest), "start",
-                      to_conversation=False, now=now)
+            self.send(f"🔔 {format_clock(block)}: " + ", ".join(s.title for s in rest), "start", now=now)
         if sleep:
-            self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start",
-                      to_conversation=False, now=now)
+            self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
 
     def rollover(self, now: datetime) -> None:
         """Once a day, after waking: offer to roll yesterday's unfinished items into today."""

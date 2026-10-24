@@ -45,6 +45,7 @@ class TelegramClient:
     def __init__(self, bot_token: str, base_url: str = "https://api.telegram.org") -> None:
         self.bot_token = bot_token.strip()
         self.api_url = f"{base_url.rstrip('/')}/bot{self.bot_token}"
+        self.undelivered: List[tuple] = []  # (chat_id, text, when) that never got through
 
     def _request(self, method: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
         url = f"{self.api_url}/{method}"
@@ -93,46 +94,62 @@ class TelegramClient:
             logger.debug("Failed to send chat action: %s", e)
             return False
 
+    RETRY_WAITS = (2.0, 5.0)  # seconds between attempts when the network drops a send
+    UNDELIVERED_HOURS = 3
+
     def send_message(
         self,
         chat_id: int | str,
         text: str,
         parse_mode: Optional[str] = "Markdown",
     ) -> bool:
-        """Send a text message, splitting into <= 4000 char chunks and retrying plain text on Markdown syntax errors."""
-        chunks = self._chunk_text(text, max_len=4000)
+        """Send a text message, splitting into <= 4000 char chunks and retrying plain text on Markdown syntax errors.
+        A send the network drops is tried again; one that still fails is kept in `undelivered`, and the bridge
+        sends it once Telegram answers again (a reply reached the app but not the phone, 10-24 9:18)."""
         success = True
-
-        for chunk in chunks:
-            payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
-            if parse_mode:
-                payload["parse_mode"] = parse_mode
-
-            try:
-                res = self._request("sendMessage", payload, timeout=15.0)
-                if not res.get("ok"):
-                    raise urllib.error.HTTPError(
-                        url="", code=400, msg="Telegram API error", hdrs={}, fp=None  # type: ignore
-                    )
-            except urllib.error.HTTPError as e:
-                if parse_mode:
-                    logger.debug("Failed sending markdown message (%s), retrying plain text", e)
-                    payload.pop("parse_mode", None)
-                    try:
-                        res = self._request("sendMessage", payload, timeout=15.0)
-                        if not res.get("ok"):
-                            success = False
-                    except Exception as ex:
-                        logger.error("Failed sending fallback plain message: %s", ex)
-                        success = False
-                else:
-                    logger.error("Failed sending message: %s", e)
-                    success = False
-            except Exception as e:
-                logger.error("Unexpected error sending message to chat %s: %s", chat_id, e)
-                success = False
-
+        for chunk in self._chunk_text(text, max_len=4000):
+            sent = self._send_chunk(chat_id, chunk, parse_mode)
+            if sent is False:
+                logger.error("Telegram never got a message (kept to send later): %r", chunk[:120])
+                self.undelivered.append((chat_id, chunk, time.time()))
+            success = success and bool(sent)
         return success
+
+    def _send_chunk(self, chat_id: int | str, chunk: str, parse_mode: Optional[str]) -> Optional[bool]:
+        """True when sent; False when the network kept failing (worth sending later); None when refused."""
+        payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        for attempt, wait in enumerate((*self.RETRY_WAITS, None)):
+            try:
+                if self._request("sendMessage", payload, timeout=15.0).get("ok"):
+                    return True
+                raise urllib.error.HTTPError(url="", code=400, msg="Telegram API error", hdrs={}, fp=None)  # type: ignore
+            except urllib.error.HTTPError as e:
+                if e.code == 400 and "parse_mode" in payload:  # Markdown Telegram can't read: send it plain
+                    logger.debug("Failed sending markdown message (%s), retrying plain text", e)
+                    payload.pop("parse_mode")
+                    continue
+                if e.code < 500 and e.code != 429:
+                    logger.error("Telegram refused a message: %s", e)
+                    return None
+                logger.warning("Telegram send failed (%s), attempt %d", e, attempt + 1)
+            except Exception as e:  # dropped connection, timeout
+                logger.warning("Telegram send failed (%s), attempt %d", e, attempt + 1)
+            if wait is None:
+                return False
+            time.sleep(wait)
+        return False
+
+    def flush_undelivered(self) -> None:
+        """Send what earlier failed, oldest first, marked as late; stop at the first that fails again. Anything
+        older than a few hours is dropped: by then it's stale (and the app's chat has it)."""
+        self.undelivered = [u for u in self.undelivered if time.time() - u[2] < self.UNDELIVERED_HOURS * 3600]
+        while self.undelivered:
+            chat_id, chunk, _ = self.undelivered[0]
+            if self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, None) is False:
+                return
+            self.undelivered.pop(0)
 
     @staticmethod
     def _chunk_text(text: str, max_len: int = 4000) -> List[str]:
@@ -326,7 +343,7 @@ class ThirtiesTelegramBridge:
             elif cmd == "/status":
                 self._cmd_status(chat_id)
             elif cmd == "/brain":
-                self.client.send_message(chat_id, self.conv_manager.send_user_message(text))
+                self.client.send_message(chat_id, self.conv_manager.send_user_message(text, via="telegram"))
             else:
                 self.client.send_message(
                     chat_id,
@@ -338,7 +355,7 @@ class ThirtiesTelegramBridge:
         # Natural Conversation with Gemini
         self.client.send_chat_action(chat_id, "typing")
         try:
-            reply = self.conv_manager.send_user_message(text)
+            reply = self.conv_manager.send_user_message(text, via="telegram")
 
             # Auto-push sync if plan changed
             if self.config.sync.enabled and self.config.sync.auto_push_on_change:
@@ -471,6 +488,8 @@ class ThirtiesTelegramBridge:
         while self.running:
             try:
                 updates = self.client.get_updates(offset=offset, timeout=25)
+                if self.client.undelivered:
+                    self.client.flush_undelivered()  # Telegram is answering again
                 for u in updates:
                     update_id = u.get("update_id")
                     if update_id is not None:

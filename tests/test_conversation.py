@@ -152,6 +152,21 @@ class TestTurnLoop(ConversationTestCase):
         out = self.manager.send_user_message("am I free later?")
         self.assertEqual(out, "You're free all afternoon.")
 
+    def test_a_list_with_a_phone_call_in_it_is_kept(self) -> None:
+        text = "Pressing today:\n- Call ENT\n- Call Hopkins about the bill\n\nWant those after lunch?"
+        self.engine.set_next_response(reply(text))
+        self.assertEqual(self.manager.send_user_message("what's pressing?"), text)  # 10-21: the list vanished
+
+    def test_a_failure_the_reply_skips_over_is_said_anyway(self) -> None:
+        self.engine.responses = [reply('CALL log_outcome {"event": "Put watch back on wrist", "status": "done"}'),
+                                 reply("All set, noted!")]
+        out = self.manager.send_user_message("I put the watch back on")
+        self.assertTrue(out.startswith("All set, noted!\n\n(Not done: "), out)  # 10-24: three refusals, then "All set"
+        self.assertIn("Put watch back on wrist", out)
+        self.engine.responses = [reply('CALL log_outcome {"event": "Nope", "status": "done"}'),
+                                 reply("I couldn't find that one on today's plan.")]
+        self.assertEqual(self.manager.send_user_message("done with nope"), "I couldn't find that one on today's plan.")
+
     def test_call_written_mid_sentence_still_runs(self) -> None:
         self.engine.set_next_response(reply('Moving it now.CALL add_event {"title": "Walk", "start": "5:00 PM", "duration": "30 min"}'))
         self.engine.set_next_response(reply("Walk is at 5."))

@@ -73,6 +73,31 @@ class TestBackground(unittest.TestCase):
         self.svc.starts(at("17:30"))
         self.assertEqual(len(self.desktop), 1)
 
+    def test_a_replanned_copy_is_not_announced_again_but_a_second_one_is(self):
+        self.svc.starts(at("17:00"))
+        self.sched.state_db.delete_span("tx")  # a redraw: the same item, a new id, later
+        self.sched.state_db.upsert_span(EventSpan("tx2", "Taxes", at("18:30"), at("19:30"), SpanCategory.TASK))
+        self.svc._manager = None
+        self.svc.starts(at("18:30"))
+        self.assertEqual(len(self.desktop), 1)  # 10-21: announced at 6:00, 6:30, 8:30 and 9:30
+        teeth = EventSpan("t1", "Brush teeth", at("08:00"), at("08:30"), SpanCategory.ACTIVITY)
+        self.sched.state_db.upsert_span(teeth)
+        self.svc._manager = None
+        self.svc.starts(at("08:00"))
+        from thirties_core.models import SpanStatus
+        teeth.status = SpanStatus.DONE
+        self.sched.state_db.upsert_span(teeth)
+        self.sched.state_db.upsert_span(EventSpan("t2", "Brush teeth", at("22:00"), at("22:30"), SpanCategory.ACTIVITY))
+        self.svc._manager = None
+        self.svc.starts(at("22:00"))
+        self.assertEqual(self.desktop[-1], ("start", "🔔 10:00: Brush teeth"))  # the first was done: this is new
+
+    def test_start_notices_are_in_the_conversation(self):
+        self.svc.starts(at("17:00"))
+        last = self.svc.manager().messages[-1]
+        self.assertEqual((last["content"], last.get("kind")), ("🔔 5:00: Taxes", "notice"))
+        self.assertIn("🔔 5:00: Taxes", [m["content"] for m in self.svc.manager().history()])
+
     def test_check_ins_batch_the_items_of_a_thirty(self):
         for title, minute in (("Feed kitties", 0), ("Caffeinate", 5)):
             start = at("11:00") + timedelta(minutes=minute)

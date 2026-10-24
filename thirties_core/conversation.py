@@ -9,6 +9,7 @@ developer slash commands that never reach a model.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,7 @@ class ConversationManager:
         conversation_id: Optional[str] = None,
     ) -> None:
         self.joplin_engine = joplin_engine
+        self.turn_lock = threading.RLock()  # one turn at a time: Telegram, the background service's messages
         if active_notes is None:
             active_notes = self.joplin_engine.fetch_active_notes() if self.joplin_engine else []
         services = Services.for_db(scheduler.state_db, tasks, joplin_engine) if scheduler else None
@@ -100,6 +102,8 @@ class ConversationManager:
         self.brain.reset()
         if conv:
             self.brain.messages = [self.brain.messages[0]] + list(conv.messages)
+            for m in conv.messages:  # stored before messages carried a time: don't give them today's
+                m.setdefault("at", "")
         self._note_if_latest()
 
     def _note_if_latest(self) -> None:
@@ -115,9 +119,20 @@ class ConversationManager:
             return
         if self.conversation is None:
             self.conversation = self._store.create(self.day_plan.target_date)
+        self._stamp()
         self.conversation.messages = [m for m in self.brain.messages if m.get("role") != "system"]
         self._store.save(self.conversation)
         self._note_if_latest()
+
+    def _stamp(self, via: str = "") -> None:
+        """When each message was stored, and by which build (and, for a turn, which channel it came through)."""
+        from thirties_core import build
+        now = get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")
+        for m in self.brain.messages:
+            if m.get("role") != "system" and "at" not in m:
+                m["at"], m["build"] = now, build.BUILD
+                if via:
+                    m["via"] = via
 
     def history(self) -> List[Dict[str, str]]:
         """The visible transcript of the current conversation: user and assistant text only."""
@@ -191,10 +206,16 @@ class ConversationManager:
                 logger.warning("Brain warm-up failed: %s", e)
         threading.Thread(target=run, daemon=True, name="BrainWarmup").start()
 
-    def add_assistant_message(self, text: str) -> None:
-        """Record something the assistant said on its own (e.g. a Telegram check-in)."""
-        self.brain.messages.append({"role": "assistant", "content": text})
-        self._save()
+    def add_assistant_message(self, text: str, kind: str = "") -> None:
+        """Record something the assistant said on its own (e.g. a Telegram check-in, or a start-of-block notice:
+        kind "notice")."""
+        message = {"role": "assistant", "content": text}
+        if kind:
+            message["kind"] = kind
+        with self.turn_lock:
+            self.brain.messages.append(message)
+            self._stamp(via="background")
+            self._save()
 
     @property
     def day_plan(self) -> DayPlan:
@@ -220,8 +241,14 @@ class ConversationManager:
         """Run a schedule tool directly, bypassing the model."""
         return self.tools.execute(name, arguments)
 
-    def send_user_message(self, user_text: str) -> str:
-        """Handle one user turn: developer slash commands here, everything else via the brain."""
+    def send_user_message(self, user_text: str, via: str = "app") -> str:
+        """Handle one user turn: developer slash commands here, everything else via the brain. `via` is the
+        channel ("app", "telegram"), stored with the turn's messages."""
+        with self.turn_lock:
+            return self._send_user_message(user_text, via)
+
+    def _send_user_message(self, user_text: str, via: str) -> str:
+        self._stamp()  # anything older is from before this turn
         if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
             self.scheduler.state_db.set_sync_meta("last_user_message_at",
                                                   get_current_time(self.day_plan.day_start.tzinfo).isoformat())
@@ -267,6 +294,7 @@ class ConversationManager:
 
             self.messages.append({"role": "user", "content": user_text})
             self.messages.append({"role": "assistant", "content": reply})
+            self._stamp(via)
             self._save()
             return reply
 
@@ -283,5 +311,6 @@ class ConversationManager:
                     if m.get("content") == reply:
                         m["content"] = trimmed
                     break
+        self._stamp(via)
         self._save()
         return trimmed

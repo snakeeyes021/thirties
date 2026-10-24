@@ -259,7 +259,7 @@ class SlmBrain:
 
     def _last_assistant(self) -> str:
         for m in reversed(self.messages[:-1]):
-            if m.get("role") == "assistant":
+            if m.get("role") == "assistant" and m.get("kind") != "notice":  # not a start-of-block notice
                 return str(m.get("content", ""))
         return ""
 
@@ -1343,7 +1343,7 @@ class SlmBrain:
         everything = bool(re.search(r"\b(all|any|anything|every|today|tonight|for (the|a) (day|while))\b", message))
         target = None
         if not everything:
-            last = next((m.get("content", "") for m in reversed(self.messages[:-1]) if m.get("role") == "assistant"), "")
+            last = self._last_assistant()
             asked = re.search(r"did you get to (.+?)(?:, or are you still on it|\?)", last)
             ref = asked.group(1) if asked else ""
             named = [s for s in self._span_candidates(message) if not s.is_envelope] if not ref else []

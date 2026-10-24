@@ -431,6 +431,7 @@ RULES
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        reply = self._own_up(turn_start, reply)
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
@@ -448,10 +449,34 @@ RULES
         else:  # the reply was cleaned up or replaced: show it, but don't feed it back to the model as said twice
             self.messages.append({"role": "assistant", "content": reply, "display_only": True})
 
+    _ADMITS_RE = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|unable|didn'?t|failed|not able)\b",
+                            re.IGNORECASE)
+
+    def _own_up(self, turn_start: int, reply: str) -> str:
+        """A tool that failed this turn, and wasn't retried successfully, is said in the reply, by Python: the
+        model has said "It is marked done now" over a failed write, and "All set" over three refusals (10-22, 10-24)."""
+        failed: Dict[str, str] = {}
+        for m in self.messages[turn_start:]:
+            if m.get("role") != "tool":
+                continue
+            name, out = m.get("name") or "", str(m.get("content") or "")
+            if out.startswith(NOT_DONE):
+                failed[name] = out[len(NOT_DONE):].lstrip(": ").strip()
+            else:
+                failed.pop(name, None)  # retried, and it worked
+                joplin = re.search(r"\((couldn'?t [^:]*Joplin.*)\)\.?$", out)  # done here, but not in Joplin
+                if joplin:
+                    failed["joplin:" + name] = re.sub(r"\s+", " ", joplin.group(1)).rstrip(".")
+        if not failed or self._ADMITS_RE.search(reply):
+            return reply
+        notes = [re.sub(r"\s*\[?id [0-9a-f]{6,}\]?", "", why) for why in failed.values()]
+        return reply.rstrip() + "\n\n(Not done: " + " ".join(n if n.endswith(".") else n + "." for n in notes) + ")"
+
     _META_RE = re.compile(
         r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"
         r"the previous (turn|assistant)|the assistant'?s? (previous|reply|turn)|in the (prompt|transcript|history)\b)|"
-        r"\b(tool results?|tool calls?|CALL [a-z_]+|system instructions|rule \d+\b|push_?later|replace_?overlaps|"
+        r"\b(tool results?|tool calls?|(?-i:CALL [a-z]+_[a-z_]+)|system instructions|rule \d+\b|push_?later|"
+        r"replace_?overlaps|"
         r"task_id|\bid=[0-9a-f]{6,})|\(Result of [a-z_]+|for the assistant only", re.IGNORECASE)
 
     def _is_meta(self, text: str) -> bool:
