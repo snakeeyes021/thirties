@@ -137,7 +137,12 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "add_task",
         "description": "Add a task to one of the user's lists (a Joplin note). Only when the user asks or agrees.",
         "parameters": {"title": "The task.", "list": "Which list (note title).",
-                       "section": "Optional heading within the note."},
+                       "section": "Optional heading within the note.",
+                       "start": "To also schedule it, the clock time it starts, e.g. '7:00 PM'. It's then linked: "
+                                "done on the plan means ticked in the list.",
+                       "duration": "How long, when scheduling it, e.g. '30 minutes'.",
+                       "day": "The day, when scheduling it for another day.",
+                       "schedule_as": "A shorter name for the schedule, when the list wording is long."},
         "required": ["title", "list"],
     },
     {
@@ -559,7 +564,8 @@ class AssistantTools:
                             "Which one? Give it as list.")
         return hits[0] if hits else None
 
-    def add_task(self, title: str, list: str = "", section: str = "", **_: Any) -> str:
+    def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
+                 day: Any = None, schedule_as: str = "", **_: Any) -> str:
         notes = self._notes()
         want = {_stem(w) for w in _words(list)}
         scored = sorted(((len(want & {_stem(w) for w in _words(name)}), name, nid) for nid, name in notes.items()),
@@ -581,8 +587,19 @@ class AssistantTools:
         self.s.tasks.append(TaskItem(id=new_id, source_notebook=notebook, title=title.strip(),
                                      is_checkbox_item=True, parent_note_title=note_title, parent_note_id=note_id,
                                      section=section or ""))
-        return (f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)" if status == "queued" else "")
-                + f". To schedule it, use task_id={new_id}.")
+        added = f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)" if status == "queued" else "")
+        if start in (None, ""):
+            return added + f". To schedule it, use task_id={new_id}."
+        # Added and scheduled in one call, so the plan item is linked: two parallel calls in one reply couldn't
+        # pass the task_id along, and ticking the plan item then left the list item open (10-24).
+        args = {"title": (schedule_as or title).strip(), "start": start, "duration": duration or "30 minutes",
+                "category": "task", "task_id": new_id}
+        if day not in (None, ""):
+            args["day"] = day
+        out = self.pt.execute("add_event", args)
+        if out.startswith(NOT_DONE_PREFIX):
+            return f"{added}, but it isn't scheduled: {out[len(NOT_DONE_PREFIX):].lstrip(': ')} To schedule it, use task_id={new_id}."
+        return f"{added}. {out}"
 
     def break_down_task(self, task: str, steps: Any, list: str = "", **_: Any) -> str:
         found, ticked_too = self._exact_task(str(task)), False

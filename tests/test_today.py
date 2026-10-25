@@ -64,6 +64,19 @@ class TestAddingToToday(TodayTestCase):
                                            "task_id": "t_stamps", "day": "tomorrow"})
         self.assertNotIn("today's list", out)  # tomorrow's things aren't on today's list
 
+    def test_adding_to_a_list_with_a_time_schedules_it_linked(self):
+        # 10-24: add_task and add_event in one reply left the plan item unlinked, so ticking it did nothing in Joplin
+        out = self.t.execute("add_task", {"title": "Torquio: check the machine id", "list": "errands",
+                                          "start": "7:00 PM", "schedule_as": "Tell Claude re: machine id"})
+        self.assertIn("Added 'Torquio: check the machine id' to Errands/Admin. Added Tell Claude re: machine id", out)
+        self.assertIn("(also added to today's list)", out)
+        span = next(s for s in self.t.day_plan.spans if s.title == "Tell Claude re: machine id")
+        self.assertEqual(span.duration_minutes, 30)
+        self.assertTrue(any(t.id == span.task_id and t.parent_note_id == "n_errands" for t in self.services.tasks))
+        self.assertIn("- [ ] Torquio: check the machine id", self.body("n_today"))
+        self.t.execute("log_outcome", {"event": span.id, "status": "done"})
+        self.assertIn("- [x] Torquio: check the machine id", self.body("n_errands"))
+
     def test_only_the_same_wording_links_never_a_near_match(self):
         self.services.tasks.append(TaskItem(id="media:letterboxd:andre", source_notebook="Letterboxd",
                                             title="Watch: My Dinner with Andre (1981)"))
