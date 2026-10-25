@@ -100,7 +100,7 @@ class DayViewTests(unittest.TestCase):
         view = DayView(plan)
         view.set_actions(lambda name, args: calls.append((name, args)) or "Redrew the rest of today:", None)
         groups = view.agenda.groups
-        self.assertEqual(list(groups), ["now", "next", "behind", "done"])
+        self.assertEqual(list(groups), ["behind", "now", "next", "done"])  # what's not marked yet comes first
 
         def titles(group):
             rows = []
@@ -119,6 +119,20 @@ class DayViewTests(unittest.TestCase):
                                                     ("Audiobook", "planned 6:00 PM – 7:00 PM")])
         self.assertIn(("Movie", "8:00 PM – 9:30 PM"), titles(groups["next"]))
         self.assertEqual(titles(groups["done"]), [("Research", "1:00 PM – 2:30 PM")])  # when it really happened
+        early = []
+
+        def find(w):
+            if isinstance(w, Gtk.Button) and w.get_tooltip_text() == "Mark Movie done":
+                early.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                find(c)
+                c = c.get_next_sibling()
+        find(groups["next"])
+        early[0].emit("clicked")  # done early, from Next
+        self.assertEqual(calls[-1][1]["event"], "movie")
+        self.assertEqual((calls[-1][0], calls[-1][1]["status"]), ("log_outcome", "done"))
+        self.assertIn("finished", calls[-1][1])
         view.agenda.replan_btn.emit("clicked")
         self.assertEqual(calls[-1], ("redraw", {}))
         self.assertTrue(view.move_to("movie", at("21:00")))

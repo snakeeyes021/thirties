@@ -164,6 +164,22 @@ class BackgroundService:
         cutoff = (now.date() - timedelta(days=3)).isoformat()
         self.scheduler.state_db.set_sync_meta(key, json.dumps({k: v for k, v in done.items() if v >= cutoff}))
 
+    def _unmarked_tail(self, now: datetime) -> str:
+        """The bottom of a message on the phone: items past their time with nothing said, by block, no times.
+        Said when something new has fallen behind since the last time they were listed (being behind is common;
+        silence about it isn't help, and the same list every half hour would be nagging)."""
+        from thirties_core.clock import unmarked_lines
+        manager = self.manager()
+        behind = [s for s in manager.tools._behind(now) if not (manager.tools.services and manager.tools.services.mutes
+                                                                and manager.tools.services.mutes.is_muted(s.id, now))]
+        listed = self._remembered("unmarked_listed")
+        before = set(listed.get("ids", "").split("|", 1)[-1].split()) if listed.get("ids", "").startswith(
+            now.date().isoformat()) else set()
+        if not behind or {s.id for s in behind} <= before:
+            return ""
+        self._remember("unmarked_listed", {"ids": f"{now.date().isoformat()}|" + " ".join(s.id for s in behind)}, now)
+        return "\n\nNot marked yet:\n" + "\n".join(unmarked_lines(behind))
+
     @staticmethod
     def _plannable(span) -> bool:
         return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
@@ -241,8 +257,8 @@ class BackgroundService:
             if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
-                self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + ".", "start",
-                          now=now)
+                self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + "."
+                          + self._unmarked_tail(now), "start", now=now)
             open_items = [s for s in items if not mutes.is_muted(s.id, now)]
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
@@ -371,7 +387,8 @@ class BackgroundService:
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
             said = [f"{s.title} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s) else s.title
                     for s in rest]
-            self.send(f"🔔 {format_clock(block)}: " + ", ".join(said), "start", now=now)  # fixed: its real time
+            self.send(f"🔔 {format_clock(block)}: " + ", ".join(said) + self._unmarked_tail(now), "start",
+                      now=now)  # a fixed thing by its real time; what's behind at the bottom
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
 

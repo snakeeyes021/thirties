@@ -1808,12 +1808,13 @@ class SlmBrain:
     def _left_today(self) -> str:
         """What's left today: the rest of the plan (what's past and not reported, then what's ahead), and
         what's on today's list (the Today note) with no time yet."""
+        from thirties_core.clock import unmarked_lines
         from thirties_core.today import note_items
         now = self._now()
         plan = self.tools.plan_for(None) if self._is_today() else self.tools.day_plan
         flexible = [s for s in plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
                     and s.status == SpanStatus.PLANNED and not s.tentative]
-        behind = [s.title for s in flexible if s.end_dt <= now]
+        behind = [s for s in flexible if s.end_dt <= now]
         ahead = sorted((s for s in flexible if s.end_dt > now), key=lambda s: s.start_dt)
         planned = {s.title.lower() for s in flexible}
         assistant = getattr(self.tools, "assistant", None)
@@ -1823,10 +1824,10 @@ class SlmBrain:
         if ahead:
             lines.append("Still planned today:")
             lines += [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
-        if behind:
-            lines.append("Not reported yet: " + ", ".join(behind) + ".")
         if listed:
             lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
+        if behind:  # at the bottom, by block, no times
+            lines += ["Not marked yet:"] + unmarked_lines(behind)
         return "\n".join(lines) or "Nothing left for today: the plan and today's list are clear."
 
     def _schedule_answer(self, day: Optional[str], wording: str) -> str:

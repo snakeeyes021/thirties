@@ -24,7 +24,7 @@ class TestRedraw(unittest.TestCase):
         return {s.title: (format_clock(s.start_dt), format_clock(s.end_dt)) for s in self.t.day_plan.spans}
 
     def test_not_reported_is_not_assumed_done(self):
-        self.assertIn("Not reported yet (not assumed done): Shower", self.t.list_schedule())
+        self.assertIn("Not marked yet (past their time, not assumed done; by block):\n- Shower", self.t.list_schedule())
 
     def test_redraw_keeps_order_facts_and_fixed_things(self):
         self.t.execute("set_item_facts", {"event": "glass", "after": "Shower"})

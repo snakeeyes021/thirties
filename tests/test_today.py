@@ -151,8 +151,9 @@ class TestWhatsLeft(TodayTestCase):
         brain = SlmBrain(self.t)
         brain._message = "back. what's still left for today?"
         out, _ = brain._do_question(Action("question", {"topic": "what's still left for today"}))
-        self.assertEqual(out, "Still planned today:\n- 2:00 PM – Call the bank\nNot reported yet: Shower.\n"
-                              "On today's list, no time yet: Clip cat nails.")
+        self.assertEqual(out, "Still planned today:\n- 2:00 PM – Call the bank\n"
+                              "On today's list, no time yet: Clip cat nails.\n"
+                              "Not marked yet:\n- Shower")  # at the bottom, by block, no times
 
 
 class TestSlmShortcuts(TodayTestCase):

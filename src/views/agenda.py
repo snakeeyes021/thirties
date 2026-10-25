@@ -1,9 +1,10 @@
-"""The day at a glance: now and next, what isn't reported yet, and what got done.
+"""The day at a glance: what's not marked yet, now and next, and what got done.
 
-The plan is a sketch; this page shows where the day stands. What's done shows
-at the times it actually happened, greyed; what's past with nothing reported is
-listed on its own (not assumed done), with buttons to say what happened. Replan
-lays the rest of today out again (Python's redraw), with Undo.
+The plan is a sketch; this page shows where the day stands. What's past with
+nothing said comes first (not assumed done; being behind is common), with buttons
+to say what happened; now and next can be marked too (things get done early).
+What's done shows at the times it actually happened, greyed. Replan lays the rest
+of today out again (Python's redraw), with Undo.
 """
 
 from __future__ import annotations
@@ -68,6 +69,10 @@ class AgendaPage(Gtk.ScrolledWindow):
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_done(spans)
             return
+        behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and s.end_dt <= now]
+        if behind:  # first: being behind is common, and these are what to sort out
+            self._fill(self._group("behind", "Not marked yet", "Past their time with nothing said: not assumed done."),
+                       behind, now, behind=True)
         current = [s for s in spans if s.start_dt <= now < s.end_dt and s.status == SpanStatus.PLANNED]
         group = self._group("now", "Now")
         group.set_header_suffix(self.replan_btn)
@@ -79,17 +84,15 @@ class AgendaPage(Gtk.ScrolledWindow):
             group.add(Adw.ActionRow(title=f"Free{until}"))
         upcoming = [s for s in spans if s.start_dt > now and s.status == SpanStatus.PLANNED]
         if upcoming:
-            self._fill(self._group("next", "Next"), upcoming, now)
-        behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and s.end_dt <= now]
-        if behind:
-            self._fill(self._group("behind", "Not reported", "Past their time with nothing said: not assumed done."),
-                       behind, now, behind=True)
+            self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
         self._fill_done(spans)
 
     def _fill(self, group: Adw.PreferencesGroup, spans: List[EventSpan], now: Optional[datetime],
-              current: bool = False, behind: bool = False) -> None:
-        """Rows by thirty (short items sharing one); items you can mark get a row each."""
-        rows = _rows_by_thirty(spans) if not (current or behind) else \
+              current: bool = False, behind: bool = False, ahead: bool = False) -> None:
+        """Rows by thirty (short items sharing one); items you can mark (now, behind, or next: done early) get a
+        row each."""
+        markable = current or behind or ahead
+        rows = _rows_by_thirty(spans) if not markable else \
             [(thirty_of(s.start_dt), [s]) for s in sorted(spans, key=lambda s: s.start_dt)]
         for block, items in rows:
             title = ", then ".join(s.title for s in items)
@@ -101,9 +104,9 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = Adw.ActionRow(title=title, subtitle=("planned " + when) if behind else when)
             if first.tentative:
                 row.set_subtitle(f"{when} · invite, not answered yet")
-            if (current or behind) and _flexible(first):
-                row.add_suffix(self._outcome_button(first, "done", now if current else None))
-                if behind:
+            if markable and _flexible(first):
+                row.add_suffix(self._outcome_button(first, "done", now if (current or ahead) else None))
+                if behind or ahead:
                     row.add_suffix(self._outcome_button(first, "skipped", None))
             group.add(row)
         if not spans:

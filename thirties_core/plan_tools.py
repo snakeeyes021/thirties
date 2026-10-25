@@ -28,6 +28,7 @@ from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.calendar_engine import CalendarEvent
 from thirties_core.clock import (
     thirty_ceil,
+    unmarked_lines,
     thirty_of,
     ClockError,
     format_clock,
@@ -1008,7 +1009,8 @@ class PlanTools:
         behind = self._behind(now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
-                + ("\nNot reported yet (not assumed done): " + ", ".join(s.title for s in behind) if behind else ""))
+                + ("\nNot marked yet (past their time, not assumed done; by block):\n"
+                   + "\n".join(unmarked_lines(behind)) if behind else ""))
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, **_: Any) -> str:
         span = self._find_span(event)

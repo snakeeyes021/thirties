@@ -176,6 +176,19 @@ def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered:
     return out
 
 
+def unmarked_lines(spans) -> List[str]:
+    """Items past their time with nothing said, for the bottom of a list on the phone: one line per block, in
+    order, with no times (they're behind; the block's time would only say how far)."""
+    rows: List[Tuple[datetime, List[str]]] = []
+    for s in sorted(spans, key=lambda s: s.start_dt):
+        block = thirty_of(s.start_dt)
+        if rows and rows[-1][0] == block:
+            rows[-1][1].append(s.title)
+        else:
+            rows.append((block, [s.title]))
+    return [f"- {', '.join(titles)}" for _, titles in rows]
+
+
 _TIME_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\s?(AM|PM)\b")
 _DAY_HINT_RE = re.compile(r"\b(?:tomorrow|yesterday|tonight|today|mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|"
                           r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d", re.IGNORECASE)
