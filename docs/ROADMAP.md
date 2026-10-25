@@ -237,6 +237,9 @@ Still to do in 0.1:
 - ~~Measure the day sim's noise, then the full 106-day run~~ (done 2026-10-23, docs/SLM_BRAIN.md).
 - The fixes from the first week of use (A below): done 2026-10-24, checked on 8 paired Gemini days.
 - The user uses the 2026-10-24 build for a few days and says it's good; then 0.1.0 is released (AGENTS.md §6.3).
+- **Soak, Oct 24–27** (AGENTS.md §6.3). This build is `0d6ecca`; the clock started Sat Oct 24 at 8:20 PM, and the evaluation is Tue Oct 27 evening. Frictions as reported, with the proposed tag:
+  1. **Polish (M):** calendar events aren't plan items you can tick off. An event is something you'd mark done, but Thirties treats it like a reminder: `log_outcome` refuses calendar events, and the Day page gives them no ✓. Make them plan items with an outcome, without changing the calendar.
+  2. **Polish (S):** the chat in the app shows no times on messages. Every message now has a time stored, so show it. Related: a user message is stamped when the reply is saved, not when it's sent, so it should be stamped on arrival.
 - The SLM brain can redraw ("replan", "just figure it out") and carries the morning flow, but it has no actions yet for `add_to_today`, `set_urgency` or `set_item_facts`; add them once the day sim shows how often they're needed.
 - Try the day view and the lists pages for real, and adjust.
 
