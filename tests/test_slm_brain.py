@@ -125,7 +125,7 @@ class TestSchedulingActions(SlmTestCase):
                        {"type": "add", "title": "Email recruiter", "start": "9", "end": "10"},
                        {"type": "move", "target": "natalie listening", "start": "10", "end": "11"})
         self.assertIn("Added Email recruiter: 9:00 PM – 10:00 PM", out)
-        self.assertIn("Natalie listening now 10:00 PM – 11:00 PM", out)  # slid along by the add, as asked
+        self.assertIn("Natalie listening to 10:00 PM – 11:00 PM", out)  # moved, as asked
         self.assertNotIn("overlap", out)
         self.assertNotIn("couldn't", out)
 
@@ -247,7 +247,8 @@ class TestSchedulingActions(SlmTestCase):
                                                          "duration": "30 minutes", "day": "tomorrow"})
         out = self.say("walk tmrw at 7:30 for an hour", {"type": "add", "title": "Walk", "start": "7:30 AM",
                                                           "duration": "1 hour", "day": "tomorrow"})
-        self.assertIn("To make room: Email the recruiter now 8:30 AM – 9:00 AM", out)  # slid, not a question
+        self.assertIn("Added Walk", out)  # it shares the time: nothing else moves unasked (item 17)
+        self.assertNotIn("To make room", out)
         out = self.say("actually move the recruiter email to 9:30", {"type": "move", "target": "recruiter email",
                                                                       "start": "9:30 AM"})
         self.assertIn("Moved", out)

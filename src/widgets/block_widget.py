@@ -48,6 +48,9 @@ class BlockWidget(Gtk.Box):
         is_current: bool = False,
         display_index: int = -1,
         title: str | None = None,
+        subtitle: str | None = None,
+        status: str | None = None,
+        context: str | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.block = block
@@ -55,6 +58,9 @@ class BlockWidget(Gtk.Box):
         self.is_current = False
         self.display_index = display_index
         self.title = title
+        self.subtitle = subtitle  # default: the thirty's own times
+        self.status = status      # "Done", "Skipped", "1 of 2 done"; default "Planned" for what's assigned
+        self.context = context    # e.g. "during Work"
 
         self.set_margin_start(8)
         self.set_margin_end(8)
@@ -102,7 +108,7 @@ class BlockWidget(Gtk.Box):
         self.title_label.set_xalign(0.0)
         self.title_label.add_css_class("body")
 
-        range_str = f"{start_time_str} – {format_clock(self.block.end_dt)}"
+        range_str = self.subtitle or f"{start_time_str} – {format_clock(self.block.end_dt)}"
         subtitle_label = Gtk.Label(label=range_str)
         subtitle_label.add_css_class("caption")
         subtitle_label.add_css_class("dim-label")
@@ -110,17 +116,24 @@ class BlockWidget(Gtk.Box):
 
         content_box.append(self.title_label)
         content_box.append(subtitle_label)
+        if self.context:
+            context_label = Gtk.Label(label=self.context)
+            context_label.add_css_class("caption")
+            context_label.add_css_class("dim-label")
+            context_label.set_ellipsize(Pango.EllipsizeMode.END)
+            context_label.set_xalign(0.0)
+            content_box.append(context_label)
         self.append(content_box)
 
-        # 4. Status badges: "Now" while current, otherwise "Planned" for assigned thirties
+        # 4. Status badges: "Now" while current, otherwise the item's status ("Planned", "Done", "Skipped")
         self.now_badge = Gtk.Label(label="Now")
         self.now_badge.add_css_class("badge-current")
         self.now_badge.set_valign(Gtk.Align.CENTER)
         self.append(self.now_badge)
 
         self.planned_badge = None
-        if self._is_assigned:
-            self.planned_badge = Gtk.Label(label="Planned")
+        if self._is_assigned or self.status:
+            self.planned_badge = Gtk.Label(label=self.status or "Planned")
             self.planned_badge.add_css_class("badge-assigned")
             self.planned_badge.set_valign(Gtk.Align.CENTER)
             self.append(self.planned_badge)
@@ -177,6 +190,8 @@ class GroupedBlockWidget(Gtk.Box):
         context: str | None = None,
         block_titles: list[str] | None = None,
         block_spans: list[EventSpan | None] | None = None,
+        rows: list | None = None,
+        status: str | None = None,
         expanded: bool = False,
         on_expanded_changed: Optional[Callable[["GroupedBlockWidget", bool], None]] = None,
     ) -> None:
@@ -193,6 +208,8 @@ class GroupedBlockWidget(Gtk.Box):
         self.context = context
         self.block_titles = block_titles
         self.block_spans = block_spans
+        self.rows = rows      # thirties_core.day_layout.CardRow: what the expanded card lists
+        self.status = status  # shown on the card once something in it is marked
         self.on_expanded_changed = on_expanded_changed
         self.is_current = False
         self.sub_widgets: list[BlockWidget] = []
@@ -223,7 +240,8 @@ class GroupedBlockWidget(Gtk.Box):
         # 1. Logical Range Pill (e.g. #33–#48) above the start time
         range_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         range_box.set_size_request(80, -1)
-        count_pill = Gtk.Label(label=f"#{self.indices[0]:02d}–#{self.indices[-1]:02d}")
+        count_pill = Gtk.Label(label=f"#{self.indices[0]:02d}" if len(self.indices) == 1
+                               else f"#{self.indices[0]:02d}–#{self.indices[-1]:02d}")
         count_pill.add_css_class("caption")
         count_pill.add_css_class("dim-label")
         count_pill.set_xalign(0.0)
@@ -250,7 +268,7 @@ class GroupedBlockWidget(Gtk.Box):
 
         minutes = int((self.end_dt.timestamp() - self.start_dt.timestamp()) // 60)
         summary = (f"{format_clock(self.start_dt)} – {format_clock(self.end_dt)} · "
-                   f"{format_duration(minutes)} · {len(self.blocks)} thirties")
+                   f"{format_duration(minutes)} · {len(self.blocks)} {'thirty' if len(self.blocks) == 1 else 'thirties'}")
         self.range_label = Gtk.Label(label=summary)
         self.range_label.add_css_class("caption")
         self.range_label.add_css_class("dim-label")
@@ -268,11 +286,16 @@ class GroupedBlockWidget(Gtk.Box):
             title_box.append(context_lbl)
         header_row.append(title_box)
 
-        # 4. "Now" indicator if current time is inside this collapsed block
+        # 4. "Now" indicator if current time is inside this collapsed block, and the status once marked
         self.now_badge = Gtk.Label(label="Now")
         self.now_badge.add_css_class("badge-current")
         self.now_badge.set_valign(Gtk.Align.CENTER)
         header_row.append(self.now_badge)
+        if self.status and self.status != "Planned":
+            status_badge = Gtk.Label(label=self.status)
+            status_badge.add_css_class("badge-assigned")
+            status_badge.set_valign(Gtk.Align.CENTER)
+            header_row.append(status_badge)
 
         # 5. Expand / Collapse Button
         self.toggle_btn = Gtk.Button(icon_name="pan-down-symbolic")
@@ -294,7 +317,13 @@ class GroupedBlockWidget(Gtk.Box):
         sub_list.set_margin_end(8)
         sub_list.set_margin_bottom(8)
 
-        for i, (b, disp_idx) in enumerate(self.items):
+        if self.rows:  # each item with its own title, time and status (soak 3), or each thirty of one item
+            for row in self.rows:
+                child = BlockWidget(row.block, span=row.span, display_index=row.block.number, title=row.title,
+                                    subtitle=row.subtitle, status=row.status)
+                self.sub_widgets.append(child)
+                sub_list.append(child)
+        for i, (b, disp_idx) in enumerate(self.items if not self.rows else []):
             span = self.block_spans[i] if self.block_spans else self.span
             title = self.block_titles[i] if self.block_titles else self.title
             child = BlockWidget(b, span=span, display_index=disp_idx, title=title)
