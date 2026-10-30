@@ -25,7 +25,7 @@ import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
-from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango, PangoCairo
 
 from thirties_core.astronomy import get_current_time
 from thirties_core.clock import format_clock
@@ -56,13 +56,16 @@ PIP_INSET = 11    # pips are right-justified: their centres this far from a card
 NOTCH = 10        # the dimples at a thirty boundary inside a card
 GRIP = 7          # a card's top and bottom edges, for resizing
 
-# GNOME palette colours for the week's bars (drawn, so CSS variables can't reach them): (light, dark).
+# Item colours by kind (the user, 10-30): never to be confused with the sky's goldenrod (daylight) or indigo (dark),
+# so no yellow, orange or deep blue-violet. The same in light and dark, and the cards' CSS (style.css, .tl-card)
+# uses the same four. (light, dark), drawn, so CSS variables can't reach them.
 LOOK_RGB = {
-    "once": ((0x35, 0x84, 0xe4), (0x62, 0xa0, 0xea)),
-    "daily": ((0x26, 0xa2, 0x69), (0x57, 0xe3, 0x89)),
-    "ongoing": ((0x91, 0x41, 0xac), (0xc0, 0x61, 0xcb)),
-    "calendar": ((0xe6, 0x61, 0x00), (0xff, 0xa3, 0x48)),
+    "once": ((0x4a, 0x90, 0xd9), (0x4a, 0x90, 0xd9)),       # one-off: blue
+    "daily": ((0x3f, 0xb3, 0x7f), (0x3f, 0xb3, 0x7f)),      # daily: green
+    "ongoing": ((0x9b, 0x6b, 0xd3), (0x9b, 0x6b, 0xd3)),    # ongoing (project time): purple
+    "calendar": ((0xe0, 0x6c, 0x75), (0xe0, 0x6c, 0x75)),   # calendar: rose
 }
+KIND_NAMES = (("once", "one-off"), ("daily", "daily"), ("ongoing", "project time"), ("calendar", "calendar"))
 
 
 def _dark() -> bool:
@@ -139,10 +142,13 @@ HAND_SCROLLS = ("M4 16 C4 7 13 5.5 14 10.5 C14.6 13.4 11.6 14.2 10.8 12.4",
 HAND_SPADE = "M16 16 C19 8 26 6.5 29 10 C26 11.5 25 13.5 35.5 16 C25 18.5 26 20.5 29 22 C26 25.5 19 24 16 16 Z"
 
 
-def draw_hand(cr, x: float, y: float, rgb: tuple) -> None:
-    """The hour hand with its left end at x and its axis at y."""
+def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: bool = False) -> None:
+    """The hour hand with its tail at x and its axis at y, pointing right (left when ``mirrored``: then x is its
+    right end). ``scale`` shrinks it (the Week tab's pair, inside today's column)."""
     cr.save()
-    cr.translate(x, y - HAND_H / 2)
+    cr.translate(x, y)
+    cr.scale(-scale if mirrored else scale, scale)
+    cr.translate(0, -HAND_H / 2)
     cr.set_source_rgb(*rgb)
     cr.set_line_cap(1)  # round
     cr.set_line_join(1)
@@ -624,7 +630,11 @@ def _legend_swatch(kind: str) -> Gtk.DrawingArea:
     area = Gtk.DrawingArea(content_width=16, content_height=10, valign=Gtk.Align.CENTER)
 
     def draw(widget, cr, w, h):
-        if kind == "work":
+        if kind in LOOK_RGB:
+            cr.set_source_rgb(*_rgb(kind))
+            _rounded(cr, 0, 0, w, h, 3)
+            cr.fill()
+        elif kind == "work":
             fg = _fg(widget)
             _rounded(cr, 0, 0, w, h, 3)
             cr.set_source_rgba(*fg, 0.08)
@@ -644,26 +654,41 @@ def _legend_swatch(kind: str) -> Gtk.DrawingArea:
     return area
 
 
-def _legend() -> Gtk.Widget:
-    box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=18)
+def _legend(kinds_only: bool = False) -> Gtk.Widget:
+    """The key: the sky's two colours and Work (Day tab), and the item colours by kind (both tabs). Wraps on a
+    narrow window, keeping each swatch with its word."""
+    box = Adw.WrapBox(child_spacing=12, line_spacing=4, align=0.5, margin_top=6, margin_bottom=18)
     box.add_css_class("tl-legend")
-    for kind in ("daylight", "dark", "work"):
-        box.append(_legend_swatch(kind))
-        lbl = Gtk.Label(label=kind, margin_end=8)
+    entries = ([] if kinds_only else [("daylight", "daylight"), ("dark", "dark"), ("work", "work")]) + list(KIND_NAMES)
+    box.entries = [name for _, name in entries]
+    for kind, name in entries:
+        pair = Gtk.Box(spacing=6)
+        pair.append(_legend_swatch(kind))
+        lbl = Gtk.Label(label=name)
         lbl.add_css_class("caption")
-        box.append(lbl)
-    hint = Gtk.Label(label="each slot is a thirty · one pip per thirty")
-    hint.add_css_class("caption")
-    hint.add_css_class("dim-label")
-    box.append(hint)
+        pair.append(lbl)
+        box.append(pair)
+    if not kinds_only:
+        hint = Gtk.Label(label="each slot is a thirty · one pip per thirty")
+        hint.add_css_class("caption")
+        hint.add_css_class("dim-label")
+        box.append(hint)
     return box
 
 
 # --- the Week tab ------------------------------------------------------------------------------------------------
 
+COL_PAD = 2                     # the waking day's band inside a column
+WORK_INSET = 6                  # items during Work sit this far inside its container, on each side
+WEEK_HAND_SCALE = 20 / HAND_W   # today's two hands, ~20x18 px, inside the column
+
+
 class WeekColumnArea(Gtk.DrawingArea):
-    """One day of the week, shrunken: its waking day, items as small bars, Work as a grey bar; today outlined in the
-    accent colour with a goldenrod line at the current time. A drop target for the week's chips."""
+    """One day of the week, shrunken: its waking day, items as small bars, and Work as a container (one hatched grey
+    rounded block the column's full width, "Work" small at its top-left, a faint inner outline) holding the items
+    during it, inset WORK_INSET on each side; items outside work take the full width (the mockup the user approved,
+    10-30). Today is outlined in the accent colour, with two small hour hands at the current time just inside its
+    edges, pointing in from both sides (no line across). A drop target for the week's chips."""
 
     def __init__(self, on_drop: Callable[[str, date], None]) -> None:
         super().__init__(content_height=320, hexpand=True)
@@ -690,8 +715,9 @@ class WeekColumnArea(Gtk.DrawingArea):
 
     def _bar_rects(self, w: float, h: float):
         c = self.column
-        inner_x, inner_w = 14, w - 18
         for b in c.bars:
+            inset = COL_PAD + (WORK_INSET if b.in_work else 2)
+            inner_x, inner_w = inset, w - 2 * inset
             lane_w = (inner_w - (b.lanes - 1) * 2) / b.lanes
             yield b, (inner_x + b.lane * (lane_w + 2), 4 + b.top * (h - 8), lane_w,
                       max(4.0, (b.bottom - b.top) * (h - 8) - 1))
@@ -703,12 +729,32 @@ class WeekColumnArea(Gtk.DrawingArea):
         fg = _fg(widget)
         top, bottom = 4 + c.awake[0] * (h - 8), 4 + c.awake[1] * (h - 8)
         cr.set_source_rgba(*fg, 0.035 if c.is_past else 0.06)
-        _rounded(cr, 2, top, w - 4, bottom - top, 8)
+        _rounded(cr, COL_PAD, top, w - 2 * COL_PAD, bottom - top, 8)
         cr.fill()
-        cr.set_source_rgba(*fg, 0.28)
-        for a, b in c.work:
-            _rounded(cr, 6, 4 + a * (h - 8), 4, (b - a) * (h - 8), 2)
-            cr.fill()
+        for a, b in c.work:  # Work: a hatched container the column's width, under the items during it
+            x, y, ww, wh = COL_PAD, 4 + a * (h - 8), w - 2 * COL_PAD, (b - a) * (h - 8)
+            cr.save()
+            _rounded(cr, x, y, ww, wh, 7)
+            cr.clip()
+            cr.set_source_rgba(*fg, 0.07)
+            cr.paint()
+            cr.set_source_rgba(*fg, 0.09)
+            cr.set_line_width(1.2)
+            for k in range(-int(wh), int(ww) + int(wh), 7):
+                cr.move_to(x + k, y + wh)
+                cr.line_to(x + k + wh, y)
+            cr.stroke()
+            cr.restore()
+            _rounded(cr, x + 1.5, y + 1.5, ww - 3, wh - 3, 6)  # the faint inner outline
+            cr.set_source_rgba(*fg, 0.16)
+            cr.set_line_width(1)
+            cr.stroke()
+            if wh >= 14:
+                label = widget.create_pango_layout("Work")
+                label.set_font_description(Pango.FontDescription.from_string("Sans Bold 7"))
+                cr.move_to(x + 4, y + 2)
+                cr.set_source_rgba(*fg, 0.5)
+                PangoCairo.show_layout(cr, label)
         for b, (x, y, bw, bh) in self._bar_rects(w, h):
             dim = b.state in ("done", "skipped", "moot") or c.is_past
             cr.set_source_rgba(*_rgb(b.look), 0.45 if dim else 0.9)
@@ -720,17 +766,15 @@ class WeekColumnArea(Gtk.DrawingArea):
             cr.set_line_width(2)
             _rounded(cr, 1, top - 1, w - 2, bottom - top + 2, 9)
             cr.stroke()
-            if c.now is not None:
+            if c.now is not None:  # two small hands inside the column's edges, pointing in at now
                 y = 4 + c.now * (h - 8)
-                cr.set_source_rgb(*GOLDENROD)
-                cr.set_line_width(2)
-                cr.move_to(3, y)
-                cr.line_to(w - 3, y)
-                cr.stroke()
+                rgb = GOLDENROD if c.now_daylight else PALE_INDIGO
+                draw_hand(cr, 2, y, rgb, scale=WEEK_HAND_SCALE)
+                draw_hand(cr, w - 2, y, rgb, scale=WEEK_HAND_SCALE, mirrored=True)
         if self.axis_hint:
             accent = Adw.StyleManager.get_default().get_accent_color().to_standalone_rgba(_dark())
             cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.15)
-            _rounded(cr, 2, top, w - 4, bottom - top, 8)
+            _rounded(cr, COL_PAD, top, w - 2 * COL_PAD, bottom - top, 8)
             cr.fill()
 
     def _tooltip(self, widget, x, y, _keyboard, tooltip) -> bool:
@@ -794,6 +838,8 @@ class WeekPage(Gtk.ScrolledWindow):
             self.areas.append(area)
             self.frees.append(free)
         box.append(self.grid)
+        self.legend = _legend(kinds_only=True)  # the item colours by kind
+        box.append(self.legend)
         self.loading = Gtk.Label(label="Loading the week…")
         self.loading.add_css_class("dim-label")
         box.append(self.loading)
@@ -905,7 +951,8 @@ class TimelinePage(Gtk.Box):
         clamp = Adw.Clamp(maximum_size=720, tightening_threshold=480)
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6, margin_top=4)
         inner.append(self.canvas)
-        inner.append(_legend())
+        self.day_legend = _legend()
+        inner.append(self.day_legend)
         clamp.set_child(inner)
         self.day_scroll.set_child(clamp)
         self.week = WeekPage()

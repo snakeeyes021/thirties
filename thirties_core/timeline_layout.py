@@ -384,6 +384,7 @@ class WeekBar:
     state: str = "planned"
     lane: int = 0
     lanes: int = 1
+    in_work: bool = False   # during Work: drawn inside Work's block, inset from its edges (the approved mockup)
 
 
 @dataclass
@@ -396,6 +397,7 @@ class WeekColumn:
     is_today: bool = False
     is_past: bool = False
     now: Optional[float] = None         # today: where now is on the axis
+    now_daylight: bool = True           # the hands are goldenrod by day, pale indigo after dark
 
 
 @dataclass
@@ -423,7 +425,8 @@ def _minutes(day: date, t: datetime) -> float:
 def week_layout(plans: Sequence[DayPlan], now: Optional[datetime], today: date,
                 ongoing: Optional[Ongoing] = None) -> WeekLayout:
     """Seven shrunken waking days on one axis (by time of day, so 3 PM lines up across the week): items as small
-    bars, side by side when they share time, Work as a bar, each day's free time (today's from now on)."""
+    bars, side by side when they share time, Work as a container holding the items during it (``in_work``), each
+    day's free time (today's from now on)."""
     days = [(p, day_layout(p, now, ongoing)) for p in plans]
     if not days:
         return WeekLayout([], (0.0, 1.0))
@@ -444,9 +447,12 @@ def week_layout(plans: Sequence[DayPlan], now: Optional[datetime], today: date,
                  pos(day, min(s.end_dt, d.end, key=lambda t: t.timestamp())))
                 for s in plan.active_spans() if s.category == SpanCategory.WORK and s.status != SpanStatus.SKIPPED
                 and s.overlaps(d.start, d.end)]
+        for b in bars:  # an item that shares any time with Work sits inside Work's container
+            b.in_work = any(b.top < wb and b.bottom > wa for wa, wb in work)
         col_now = pos(day, now) if now is not None and d.now_row is not None else None
         columns.append(WeekColumn(day, (pos(day, d.start), pos(day, d.end)), bars, work, d.free_blocks,
-                                  is_today=day == today, is_past=day < today, now=col_now))
+                                  is_today=day == today, is_past=day < today, now=col_now,
+                                  now_daylight=d.now_daylight if col_now is not None else True))
     return WeekLayout(columns, (lo, hi))
 
 

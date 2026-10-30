@@ -263,6 +263,9 @@ class TestTheWeek(DayCase):
         self.assertLess(thu.now, movie.top)
         self.assertEqual(len(thu.work), 1)
         self.assertEqual(w.columns[5].work, [])  # Saturday: no work
+        lunch = next(b for b in thu.bars if b.span.title == "Lunch with Sam")
+        self.assertTrue(lunch.in_work)  # drawn inside Work's container
+        self.assertFalse(dinner.in_work or movie.in_work)  # after work: the full width
 
     def test_items_pinned_to_the_week_but_no_day_are_chips(self):
         tasks = [TaskItem(id=t, source_notebook="Tasks", title=title, is_checkbox_item=True, parent_note_id="n1",

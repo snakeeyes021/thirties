@@ -342,6 +342,14 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(week.frees[3].get_text(), "5 blocks free")  # today, from now on
         self.assertEqual(week.frees[0].get_text(), "")  # Monday is over
         self.assertTrue(week.heads[3].has_css_class("accent"))
+        # Work is a container: what's during it is inset inside it, the rest takes the full width
+        from thirties.views import timeline
+        rects = {b.span.title: r for b, r in week.areas[3]._bar_rects(100, 320)}
+        lunch_x, after_x = rects["Lunch with Sam"][0], rects["Movie"][0]
+        self.assertEqual(lunch_x - after_x, timeline.WORK_INSET - 2)
+        self.assertEqual(week.legend.entries, ["one-off", "daily", "project time", "calendar"])
+        self.assertEqual(self.page.day_legend.entries[-4:],
+                         ["one-off", "daily", "project time", "calendar"])  # in the Day tab's key too
         chip = week.chip_box.get_first_child()
         self.assertEqual(chip.chip["title"], "Fix the door")
         week.on_pin("door", DAY + timedelta(days=1))  # dropped onto Friday

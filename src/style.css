@@ -115,18 +115,18 @@
     color: @accent_fg_color;
 }
 
-/* The Timeline page (views/timeline.py). Colours by kind from the GNOME palette; translucent, so they sit on the
+/* The Timeline page (views/timeline.py). Colours by kind (blue, green, purple, rose: the user, 10-30); translucent, so they sit on the
    slot bands in light and dark alike. The canvas draws the slots, the sky, pips and notches. */
 .tl-card {
-    --tl-edge: var(--blue-3);
+    --tl-edge: #4a90d9;  /* one-off; the kinds never use the sky's goldenrod or indigo (timeline.LOOK_RGB) */
     border-radius: 9px;
     border-left: 3px solid var(--tl-edge);
     background-color: color-mix(in srgb, var(--tl-edge) 20%, var(--window-bg-color));
     padding: 0 4px 0 6px;
 }
-.tl-card.daily { --tl-edge: var(--green-4); }
-.tl-card.ongoing { --tl-edge: var(--purple-2); }
-.tl-card.calendar { --tl-edge: var(--orange-3); }
+.tl-card.daily { --tl-edge: #3fb37f; }
+.tl-card.ongoing { --tl-edge: #9b6bd3; }
+.tl-card.calendar { --tl-edge: #e06c75; }
 .tl-card.done,
 .tl-card.skipped,
 .tl-card.moot { opacity: 0.6; }
