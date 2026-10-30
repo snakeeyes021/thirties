@@ -198,7 +198,8 @@ def onto_today(assistant, day: date) -> List[str]:
             assistant._routine_on_today(note, steps)
             done.append(f"put {note['title']} on Today")
         waiting = AheadLists(assistant._db).for_day(day)
-        names = singles + [r["home_id"] or r["title"] for r in waiting]
+        known = {t.id for t in assistant.s.tasks}  # linked by its id while its list item is still there
+        names = singles + [r["home_id"] if r["home_id"] in known else r["title"] for r in waiting]
         if names:
             out = assistant.add_to_today(names)
             if out.startswith("Added"):

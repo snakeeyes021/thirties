@@ -62,6 +62,17 @@ class TestTomorrow(ListsTestCase):
         self.assertIn("On today's list, no time yet: Buy stamps, Water plants.", morning)
 
 
+class TestTomorrowsListItemGone(ListsTestCase):
+
+    def test_a_list_item_done_in_the_meantime_goes_on_by_its_wording(self):
+        self.t.execute("add_to_today", {"items": ["Buy stamps"], "day": "tomorrow"})
+        self.services.tasks = [t for t in self.services.tasks if t.title != "Buy stamps"]  # done and filed since
+        set_debug_time(at("08:00", 1))
+        plan, pending = self.sched.build_day_plan(DAY + timedelta(days=1))
+        PlanTools(plan, pending, self.sched, services=self.services).assistant.start_the_day()
+        self.assertEqual(self.body("n_today"), "- [ ] Buy stamps\n")  # never its id
+
+
 class TestRemindMe(ListsTestCase):
 
     def test_remind_me_is_a_planned_linked_item_and_a_bare_ping_needs_asking(self):
