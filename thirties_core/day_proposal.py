@@ -38,8 +38,9 @@ MORNING_INSTRUCTION = (
     "[Morning, not from the user] The day has started, and its routines and anchors are on the plan. Propose the day: "
     "pick a few concrete things for the free time from DAY OPTIONS (what's pressing first; not the whole backlog), "
     "call propose_day with them, then write a short message: the proposal as a list, one line on why, and one "
-    "question. If yesterday's items were just offered too, one question covers both. If nothing is worth proposing, "
-    "reply with only: NOTHING")
+    "question. If yesterday's items were just offered too, one question covers both. If the week's plan says how it's "
+    "going (on track or behind), you may mention it in one line. If nothing is worth proposing, reply with only: "
+    "NOTHING")
 
 
 def usual_minutes(assistant: "AssistantTools", task: Optional[TaskItem], title: str) -> int:
@@ -450,8 +451,25 @@ def morning_proposal(manager) -> Tuple[str, bool]:
         listed = dp._store(items)
     finally:
         manager.tools.day_plan = saved
-    return "For the free time today, how about:\n" + listed + "\nWant these on the plan?", False
+    week = week_line(manager.tools)
+    return ((week + "\n" if week else "") + "For the free time today, how about:\n" + listed
+            + "\nWant these on the plan?"), False
+
+
+def week_line(pt) -> str:
+    """How this week's plan stands, in a line for the morning ("This week: on track, 2 of 5 done, 4 days left."),
+    or '' when the week has no plan (on_track.py)."""
+    if getattr(pt, "scheduler", None) is None:
+        return ""
+    try:
+        from thirties_core.horizons import HorizonPlanner, period_of
+        from thirties_core.on_track import track_line
+        planner = HorizonPlanner(pt)
+        return track_line(planner, period_of("week", planner.today(), planner.week_start), "this week")
+    except Exception as e:  # the morning never fails for want of it
+        logger.warning("This week's progress couldn't be read: %s", e)
+        return ""
 
 
 __all__ = ["DayProposal", "PROPOSAL_TOOL_SPECS", "PROPOSAL_READ_ONLY", "morning_proposal", "usual_minutes",
-           "MORNING_INSTRUCTION"]
+           "MORNING_INSTRUCTION", "week_line"]

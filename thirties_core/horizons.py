@@ -709,7 +709,10 @@ class HorizonPlanner:
                       "scheduled": f" (on the plan {r['on'].strftime('%a')})" if r.get("on") else " (on the plan)"
                       }.get(r["status"], "")
             lines.append(f"- {where}{r['title']}{status}")
-        out = head + ":\n" + ("\n".join(lines) if lines else "Nothing is planned for it yet.")
+        from thirties_core.on_track import track_line
+        how = track_line(self, p) if p.level != "day" else ""  # how on track it is (C2), counted by Python
+        out = head + ":\n" + (how + "\n" if how else "") + (
+            "\n".join(lines) if lines else "Nothing is planned for it yet.")
         if with_context:
             context = self.context(p)
             if context:
@@ -738,7 +741,7 @@ class HorizonPlanner:
             while w.start <= p.end:
                 if w.end >= today:
                     n = len(self.plans.in_period(w))
-                    lines.append(f"{self.label(w).capitalize()}: {n} planned" if n else
+                    lines.append(f"{self.label(w).capitalize()}: {_brief(self, w) or f'{n} planned'}" if n else
                                  f"{self.label(w).capitalize()}: nothing planned yet")
                 w = next_period(w, self.week_start)
             return lines
@@ -750,7 +753,7 @@ class HorizonPlanner:
                     continue
                 n = len(self.plans.in_period(month))
                 if n:
-                    lines.append(f"{month.start.strftime('%B')}: {n} planned")
+                    lines.append(f"{month.start.strftime('%B')}: {_brief(self, month) or f'{n} planned'}")
             return lines
         return []
 
@@ -924,7 +927,11 @@ class HorizonPlanner:
         """The offer at the natural moment, in the user's words: short, one proposal."""
         opening = {"week": "A new week", "month": f"A new month ({p.start.strftime('%B')})",
                    "year": f"A new year ({p.start.year})"}[p.level]
-        lines = [f"{opening}. For {self.label(p)} I'd plan:"]
+        from thirties_core.on_track import track_line
+        before = previous_period(p, self.week_start)
+        last = track_line(self, before, {"week": "last week", "month": before.start.strftime("%B"),
+                                         "year": str(before.start.year)}[p.level])  # how the last one went (C2)
+        lines = [f"{opening}." + (f" {last}" if last else "") + f" For {self.label(p)} I'd plan:"]
         for c in picks:
             why = c.facts()
             lines.append(f"- {c.title}" + (f" ({why})" if why else ""))
@@ -1038,7 +1045,9 @@ class HorizonPlanner:
             rows = [r for r in self.plan_items(p) if r["status"] in ("open", "scheduled")]
             if not rows:
                 continue
-            lines.append(f"{self.label(p).capitalize()}:")
+            from thirties_core.on_track import summary, track
+            how = summary(track(self, p))
+            lines.append(f"{self.label(p).capitalize()}" + (f" ({how})" if how else "") + ":")
             for r in rows[:15]:
                 slot = slot_period(r, self.week_start)
                 lines.append(f"- {r['title']}" + (f" ({self.label(slot)})" if slot else "")
@@ -1061,6 +1070,11 @@ def _score(c: Candidate, today: date) -> float:
     score += {"day": 6, "week": 3, "month": 1}.get(c.horizon, 0)
     score += min(c.deferred, 5) * 0.5 + min(c.carried, 3)
     return score
+
+
+def _brief(planner: "HorizonPlanner", p: Period) -> str:
+    from thirties_core.on_track import summary, track
+    return summary(track(planner, p))
 
 
 def _span_text(p: Period) -> str:

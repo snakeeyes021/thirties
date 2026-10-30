@@ -315,6 +315,42 @@ class TestBubblingDown(PlannerCase):
         self.assertNotIn("Mon Oct 12", text)  # past days aren't room
 
 
+class TestOnTrack(PlannerCase):
+    """C2: "how on track are we" at each level, counted by Python."""
+
+    def test_the_week_says_whats_done_what_slipped_and_whats_left(self):
+        from thirties_core.on_track import track_line
+        week = parse_period("this week", DAY)
+        self.assertEqual(track_line(self.hp, week), "")  # nothing planned: nothing to say
+        self.hp.pin(self.tasks[0], parse_period("Monday", MON))     # door: Monday's, not done
+        self.hp.pin(self.tasks[1], parse_period("Saturday", DAY))   # ENT: still ahead
+        self.hp.pin(self.tasks[5], week)                            # paint: done
+        self.sched.state_db.record_task_completed("paint", DAY)
+        self.assertEqual(track_line(self.hp, week, "this week"),
+                         "This week: behind, 1 of 3 done; slipped: Fix the door; 4 days left.")
+        out = self.t.execute("show_period", {"when": "this week"})
+        self.assertTrue(out.startswith("This week (Oct 12 – 18):\nBehind, 1 of 3 done; slipped: Fix the door; "
+                                       "4 days left.\n"), out)
+        self.hp.unpin("door")
+        self.assertEqual(track_line(self.hp, week), "On track, 1 of 2 done, 4 days left.")
+
+    def test_each_week_of_the_month_and_the_year_in_natural_units(self):
+        from thirties_core.on_track import track_line
+        self.hp.pin(self.tasks[0], parse_period("next week", DAY))
+        self.hp.pin(self.tasks[2], parse_period("this year", DAY))
+        out = self.t.execute("show_period", {"when": "this month"})
+        self.assertIn("Next week: 1 planned, starts in 4 days", out)
+        self.assertEqual(track_line(self.hp, parse_period("this year", DAY)),
+                         "On track, 0 of 1 done, about 3 months left.")
+        self.assertEqual(track_line(self.hp, parse_period("next week", DAY)), "1 planned, starts in 4 days.")
+
+    def test_the_morning_mentions_the_week(self):
+        from thirties_core.day_proposal import week_line
+        self.assertEqual(week_line(self.t), "")
+        self.hp.pin(self.tasks[0], parse_period("Monday", MON))
+        self.assertEqual(week_line(self.t), "This week: behind, 0 of 1 done; slipped: Fix the door; 4 days left.")
+
+
 class TestTools(PlannerCase):
 
     def run_tool(self, name, **args):
@@ -376,7 +412,7 @@ class TestTools(PlannerCase):
         self.hp.pin(self.tasks[2], parse_period("November", DAY))
         text = FrontierBrain(self.t, None, tasks=self.tasks, active_notes=[]).build_backlog_summary()
         self.assertIn("PLANS FOR THE WEEK, MONTH AND YEAR", text)
-        self.assertIn("This week:\n- Fix the door (Saturday) id=door", text)
+        self.assertIn("This week (on track, 0 of 1 done, 4 days left):\n- Fix the door (Saturday) id=door", text)
         self.assertNotIn("Clean the gutters", text.split("PLANS FOR")[1].split("\n\n")[0])  # November isn't now
 
 
@@ -393,6 +429,15 @@ class TestSessions(PlannerCase):
         out = self.t.execute("apply_period_proposal", {})
         self.assertTrue(out.startswith("Planned for this week: File the taxes"), out)
         self.assertIsNone(self.hp.pending())
+
+    def test_the_new_weeks_offer_says_how_last_week_went(self):
+        HorizonPlans(self.sched.state_db).put("door", "Fix the door", "n_home", "Home", period_of("week", MON),
+                                              slot=(MON + timedelta(days=3)).isoformat())
+        HorizonPlans(self.sched.state_db).put("paint", "Paint the hall", "n_home", "Home", period_of("week", MON))
+        self.sched.state_db.record_task_completed("paint", MON + timedelta(days=2))
+        text = self.hp.offer_session()
+        self.assertTrue(text.startswith("A new week. Last week: 1 of 2 done; slipped: Fix the door. For this week "
+                                        "I'd plan:"), text)
 
     def test_a_declined_offer_isnt_pending(self):
         self.hp.offer_session()
