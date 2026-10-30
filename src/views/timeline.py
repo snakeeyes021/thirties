@@ -142,7 +142,19 @@ HAND_SCROLLS = ("M4 16 C4 7 13 5.5 14 10.5 C14.6 13.4 11.6 14.2 10.8 12.4",
 HAND_SPADE = "M16 16 C19 8 26 6.5 29 10 C26 11.5 25 13.5 35.5 16 C25 18.5 26 20.5 29 22 C26 25.5 19 24 16 16 Z"
 
 
-HAND_OUTLINE = 3.0  # px of extra stroke, in the background colour, on every part: the hand shows over any card
+HAND_OUTLINE = 2.6  # px of extra stroke, in a darker shade of the hand's own colour, on every part (the user,
+# 10-30: a background-coloured outline cut a notch where the hand met today's frame; a dark-gold edge doesn't)
+# (fill, edge) per sky and theme: the sun's hand gold with a dark-gold edge, the moon's pale indigo with a deep one.
+HAND_COLOURS = {
+    ("sun", "dark"): ((0xe0 / 255, 0xaa / 255, 0x1c / 255), (0x7a / 255, 0x5a / 255, 0x06 / 255)),
+    ("sun", "light"): ((0xe8 / 255, 0xb4 / 255, 0x25 / 255), (0xa7 / 255, 0x80 / 255, 0x0f / 255)),
+    ("moon", "dark"): ((0x8f / 255, 0x9b / 255, 0xd6 / 255), (0x2e / 255, 0x38 / 255, 0x6e / 255)),
+    ("moon", "light"): ((0x8f / 255, 0x9b / 255, 0xd6 / 255), (0x5a / 255, 0x66 / 255, 0xa8 / 255)),
+}
+
+
+def hand_colours(daylight: bool) -> tuple:
+    return HAND_COLOURS[("sun" if daylight else "moon", "dark" if _dark() else "light")]
 
 
 def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: bool = False,
@@ -635,7 +647,8 @@ class DayCanvas(Gtk.Widget):
             cy = self.y_of(layout.now_row)
             cx = SKY_X + SKY_W / 2
             draw_badge(cr, cx, cy, layout.now_daylight, bg)
-            draw_hand(cr, cx + BADGE / 2 - 2, cy, GOLDENROD if layout.now_daylight else PALE_INDIGO, outline=bg)
+            fill, edge = hand_colours(layout.now_daylight)
+            draw_hand(cr, cx + BADGE / 2 - 2, cy, fill, outline=edge)
 
 
 def _legend_swatch(kind: str) -> Gtk.DrawingArea:
@@ -693,10 +706,7 @@ def _legend(kinds_only: bool = False) -> Gtk.Widget:
 COL_PAD = 2                     # the waking day's band inside a column
 WORK_INSET = 6                  # items during Work sit this far inside its container, on each side
 WEEK_HAND_SCALE = 31 / HAND_W   # today's two hands, ~31x28 px, inside the column
-TODAY_FRAME = 4                 # today's 2 px inner edge ends here; the hands start just inside it
-# Today's 2 px inner edge, just inside its accent outline (the user, 10-30): black in the dark theme; in the light
-# theme solid black read as harsh on the screenshots, so it's the dark theme's window colour there.
-TODAY_INNER_EDGE = {"dark": (0.0, 0.0, 0.0, 1.0), "light": (0x22 / 255, 0x22 / 255, 0x26 / 255, 1.0)}
+TODAY_FRAME = 3                 # the hands start just inside today's accent outline
 
 
 class WeekColumnArea(Gtk.DrawingArea):
@@ -784,15 +794,9 @@ class WeekColumnArea(Gtk.DrawingArea):
             cr.stroke()
             if c.now is not None:  # two hands inside the column's edges, pointing in at now
                 y = 4 + c.now * (h - 8)
-                rgb = GOLDENROD if c.now_daylight else PALE_INDIGO
-                bg = _lookup(widget, "window_bg_color", (0.13, 0.13, 0.15, 1) if _dark() else (0.98, 0.98, 0.98, 1))
-                draw_hand(cr, TODAY_FRAME, y, rgb, scale=WEEK_HAND_SCALE, outline=bg)
-                draw_hand(cr, w - TODAY_FRAME, y, rgb, scale=WEEK_HAND_SCALE, mirrored=True, outline=bg)
-            # a frame just inside the accent outline, over the contents and the hands
-            cr.set_source_rgba(*TODAY_INNER_EDGE["dark" if _dark() else "light"])
-            cr.set_line_width(2)
-            _rounded(cr, 3, top + 1, w - 6, bottom - top - 2, 7)
-            cr.stroke()
+                fill, edge = hand_colours(c.now_daylight)
+                draw_hand(cr, TODAY_FRAME, y, fill, scale=WEEK_HAND_SCALE, outline=edge)
+                draw_hand(cr, w - TODAY_FRAME, y, fill, scale=WEEK_HAND_SCALE, mirrored=True, outline=edge)
         if self.axis_hint:
             accent = Adw.StyleManager.get_default().get_accent_color().to_standalone_rgba(_dark())
             cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.15)
