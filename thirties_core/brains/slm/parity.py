@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from thirties_core.assistant_tools import _stem, _words
 from thirties_core.brains.slm.parse import Action
 from thirties_core.clock import ClockError, format_clock, thirty_ceil, thirty_of
-from thirties_core.models import EventSpan, SpanCategory, SpanStatus
+from thirties_core.models import EventSpan, SpanStatus
 
 # A routine with no placement known: its steps go in thirties of this many, in the note's order. The user's own
 # morning routine is two thirties of four (R2: "kitties, caffeinate, water and breakfast in one; throne, shower, PT

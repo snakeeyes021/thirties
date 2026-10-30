@@ -1,7 +1,6 @@
 """The model-neutral runtime: parser sessions over any backend, the llama.cpp backend (with a stand-in for the
 library: no model is loaded), and the model catalog."""
 
-import json
 import os
 import sys
 import tempfile

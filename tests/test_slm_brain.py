@@ -849,6 +849,15 @@ class TestHelpersForGemma(ParityTestCase):
         self.assertIn("Added Reading", out)
         self.assertIn("Work now ends at 4:30 PM.", out)
 
+    def test_a_reminder_doesnt_swallow_the_other_request(self):
+        self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
+        self.rt.parse_replies.extend([actions({"type": "add", "title": "Call mom"}),
+                                      actions({"type": "move", "target": "dinner", "start": "8"})])
+        self.m.send_user_message("remind me tomorrow at 9 to call mom, and push dinner to 8")
+        out = self.m.last_raw_reply
+        self.assertIn("Call mom", out)
+        self.assertIn("Moved Dinner to 8:00 PM – 9:00 PM.", out)
+
     def test_dinner_with_a_book_alongside_is_one_dinner(self):
         out = self.say("Dinner at 7, cooking and eating, listening to Project Hail Mary",
                        {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"},

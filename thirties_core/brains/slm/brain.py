@@ -1,9 +1,12 @@
 """The SLM brain: Gemma turns each message into actions; Python does everything else.
 
 Per user turn:
-1. Python builds a small context (time, today's items, the last assistant line,
-   anything pending, a few backlog items related to the message).
-2. Gemma returns actions as schema-constrained JSON (one model call).
+1. Python separates the requests in the message (steps.py) and builds a small
+   context for each (time, today's items, the last assistant line, anything
+   pending, a few backlog items related to it).
+2. The model returns actions as JSON for each request on its own (one call per
+   request). Python checks every part that asks for something got an action;
+   a part that didn't is parsed again alone, else the reply asks about it.
 3. Python resolves references ("it", "the second one", "taxes"), reads times
    (adding AM/PM when the user left it out), plans suggestions from the scored
    backlog and free time, executes through the shared ``PlanTools``, and writes
@@ -682,9 +685,15 @@ class SlmBrain(ParityActions, TiredDay):
         swap = self._proposal_swap(message)
         if swap is not None:
             return [swap]
-        reminder = self._reminder_from(message)
+        pieces = steps.split_requests(message, max_requests=99)
+        reminder = self._reminder_from(next((p for p in pieces if self._REMIND_RE.search(p)), message))
         if reminder is not None:
-            return [reminder]
+            # "remind me to call mom, and push dinner to 7": the other requests stay (anything about the reminded
+            # thing is the model reading the reminder as an add, so it goes)
+            about = steps.content_stems(reminder.get("text") or "")
+            others = [a for a in actions if a.type in ("move", "remove", "swap", "outcome", "add")
+                      and not (steps.action_stems([a]) & about)]
+            return [reminder] + others
         if self._MUTE_RE.search(message):
             return [a for a in actions if a.type == "outcome"] + [Action("mute", {})]
         m = self._ADD_TO_LIST_RE.search(message) or self._ON_LIST_RE.search(message)
@@ -1601,7 +1610,7 @@ class SlmBrain(ParityActions, TiredDay):
                         key=lambda x: (-x[0], x[1]))
         ranked, seen_notes = [], set()
         for score, _, t in scored:
-            if score <= 0 or (t.parent_task_id and not tired) or (tired and steps.task_effort(t) > 1):
+            if score <= 0 or (t.parent_task_id and not tired) or (tired and steps.task_effort(t) >= 3):
                 continue
             note = t.parent_note_id or t.source_notebook
             if note in seen_notes:
