@@ -254,6 +254,8 @@ class SlmBrain:
         for s in self.tools.day_plan.spans_in_view():
             if self._is_today() and s.end_dt <= now - timedelta(hours=1) and not s.is_envelope:
                 continue
+            if s.shown_only:  # someone else's calendar event: never brought up (O1)
+                continue
             note = " (unconfirmed invite)" if s.tentative else ""
             lines.append(f"{s.title} {format_clock(s.start_dt)}-{format_clock(s.end_dt)}{note}")
         return lines[:10]
