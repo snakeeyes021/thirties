@@ -18,7 +18,8 @@ from thirties_core.clock import (ClockError, format_clock, format_duration, pars
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
-from thirties_core.stats import fact_lines, unreviewed_spans
+from thirties_core.kinds import ONGOING, put_off_counts, rolls_over
+from thirties_core.stats import fact_lines, session_lines, unreviewed_spans
 
 if TYPE_CHECKING:
     from thirties_core.joplin_engine import JoplinEngine
@@ -64,6 +65,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
             "finished": "Clock time it actually finished, if known.",
             "duration": "How long it actually took, if known, e.g. '45 minutes'.",
             "estimated": "true if the times are your best guess rather than what the user said.",
+            "finished_for_good": "true only when the user says an ongoing thing (project time, something worked on "
+                                 "over many sessions) is finished for good; plain done on it means a session.",
             "note": "Optional note.",
         },
         "required": ["event", "status"],
@@ -330,6 +333,23 @@ def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
     return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
 
 
+def rollover_question(plan: List[Dict[str, Any]], carry: Dict[str, List[str]]) -> str:
+    """One plain question for the morning offer, naming what it would do (10-29: "Want today like that?" got
+    "Today like what?")."""
+    timed = any(p["start"] for p in plan)
+    asks = []
+    if timed:
+        asks.append("plan these today at those times" if not carry["keep"] else "plan the ones with a time today")
+    if carry["keep"]:
+        asks.append("keep " + ("the others" if timed else "these") + " on today's list")
+    if carry["add"]:
+        asks.append("add the pressing " + ("one" if len(carry["add"]) == 1 else "ones"))
+    if not asks:  # only what has no room today: it goes back to the lists
+        return "Should I put " + ("it" if len(plan) == 1 else "them") + " back on your lists?"
+    joined = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
+    return f"Should I {joined}? Say which to leave out."
+
+
 class AssistantTools:
     """Outcome, review, memory, profile, history and statistics tools."""
 
@@ -337,6 +357,7 @@ class AssistantTools:
         self.pt = plan_tools
         self.s = services
         self._quiet_today = False  # put_routine lists its steps on Today together, as one group
+        self._for_good = False  # an ongoing item's home stays open unless it's finished for good (_tick_twin)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
 
     # --- helpers ---
@@ -387,7 +408,8 @@ class AssistantTools:
         from thirties_core.joplin_writeback import JoplinWriter
         return JoplinWriter(self.pt.scheduler.config, self._db, self.s.joplin.api_client)
 
-    def _complete_backlog_task(self, task: TaskItem) -> str:
+    def _complete_backlog_task(self, task: TaskItem, for_good: bool = False) -> str:
+        self._for_good = for_good  # _tick_twin: an ongoing home item stays open unless it's finished for good
         if self._db:
             self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
         if task.id.startswith("media:"):
@@ -439,6 +461,8 @@ class AssistantTools:
         if task.parent_note_id == today["id"]:
             link = links.home_of(task.title)
             home = next((t for t in self.s.tasks if link and t.id == link["home_id"]), None)
+            if home is not None and self.kind_of(home) == ONGOING and not getattr(self, "_for_good", False):
+                return  # today's session is done; the thing itself goes on (B2)
             if home is not None:
                 self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
@@ -478,13 +502,15 @@ class AssistantTools:
         on_today = {text.lower(): ticked for text, ticked in note_items(today)}
         links = TodayLinks(self._db)
         routine_ids = {n["id"] for n in self._routines()}
+        ctx = self._kind_context()
         for link in links.all():
             home_items = {text.lower(): (text, ticked) for text, ticked in note_items(notes.get(link["home_note_id"]))}
             home = home_items.get(link["home_title"].lower())
             mine = on_today.get(link["today_title"])
             if home is None or mine is None:
                 continue
-            if mine and not home[1] and link["home_note_id"] not in routine_ids:  # a routine is never written to
+            if mine and not home[1] and link["home_note_id"] not in routine_ids \
+                    and self._link_kind(link, ctx) != ONGOING:  # a routine is never written to; ongoing stays open
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": link["home_note_id"],
                                "title": home[0]})
             elif home[1] and not mine:
@@ -811,12 +837,13 @@ class AssistantTools:
     # --- outcomes ---
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
-                    estimated: Any = False, note: str = "", **_: Any) -> str:
+                    estimated: Any = False, note: str = "", finished_for_good: Any = False, **_: Any) -> str:
         try:
             st = SpanStatus(str(status).strip().lower())
         except ValueError:
             raise ToolError("status must be 'done', 'partial' or 'skipped'.")
-        if st == SpanStatus.PLANNED:
+        for_good = str(finished_for_good).strip().lower() in ("true", "1", "yes")
+        if st in (SpanStatus.PLANNED, SpanStatus.UNKNOWN):
             raise ToolError("status must be 'done', 'partial' or 'skipped'.")
 
         span = None
@@ -859,13 +886,18 @@ class AssistantTools:
         if span is None:
             # A backlog task done outside the plan: record it on the schedule if we know when.
             result = f"Marked '{task.title}' {st.value}"
-            if st == SpanStatus.DONE:
-                result += " " + self._complete_backlog_task(task)
-            elif st == SpanStatus.SKIPPED and self._db:
+            kind = self.kind_of(task)
+            if st == SpanStatus.DONE and kind == ONGOING and not for_good:
+                result += " " + self._worked_on(task)
+                end_dt = end_dt or (None if start_dt else self.pt._now())  # the session is recorded, as said
+            elif st == SpanStatus.DONE:
+                result += " " + self._complete_backlog_task(task, for_good)
+            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):
                 self._db.record_task_deferred(task.id)
             if start_dt or end_dt:
-                end_dt = end_dt or start_dt + timedelta(minutes=30)
-                start_dt = start_dt or end_dt - timedelta(minutes=30)
+                usual = self.pt._lasting().for_item(task.title).minutes if self._db else 0
+                end_dt = end_dt or start_dt + timedelta(minutes=usual or 30)
+                start_dt = start_dt or end_dt - timedelta(minutes=usual or 30)
                 logged = EventSpan(new_span_id(), task.title, start_dt, end_dt, SpanCategory.TASK, task_id=task.id,
                                    status=st, actual_start=start_dt, actual_end=end_dt, notes=note,
                                    time_source="estimated" if guessed or not (started and finished) else "reported")
@@ -912,6 +944,7 @@ class AssistantTools:
             if same is not None:
                 span.task_id = same.id
                 self.pt._persist(span)
+        kind = self.kind_of(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
             if st == SpanStatus.DONE and (self._routine_of(span.title) is not None
@@ -920,11 +953,15 @@ class AssistantTools:
                 self._tick_on_today(span.title)
                 if self._db:
                     self._db.record_task_completed(span.task_id, self.pt.day_plan.target_date)
+            elif st == SpanStatus.DONE and task and kind == ONGOING and not for_good:
+                result += " " + self._worked_on(task)  # a session: the list item stays open (B2)
             elif st == SpanStatus.DONE and task:
-                result += " " + self._complete_backlog_task(task)
-            elif st == SpanStatus.SKIPPED and self._db:
+                result += " " + self._complete_backlog_task(task, for_good)
+            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):  # a skipped daily isn't put off
                 count = self._db.record_task_deferred(span.task_id)
                 result += f"; it has now been put off {count} times"
+        elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
+            result += " (a session on it; it carries on)"
         return result + "."
 
     def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
@@ -943,7 +980,8 @@ class AssistantTools:
             return "Everything that has ended so far has an outcome recorded."
         lines = [f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title} id={s.id}" for s in pending]
         out = "No outcome recorded yet for:\n" + "\n".join(lines)
-        tasks = [s for s in pending if s.task_id]
+        ctx = self._kind_context()
+        tasks = [s for s in pending if s.task_id and rolls_over(self.kind_of(s, ctx))]
         if tasks and self.pt.scheduler:
             tomorrow = plan.target_date + timedelta(days=1)
             next_plan, _ = self.pt.scheduler.build_day_plan(tomorrow)
@@ -963,18 +1001,21 @@ class AssistantTools:
     # --- rollover: yesterday's unfinished items, as one proposal ---
 
     def rollover_plan(self) -> List[Dict[str, Any]]:
-        """Yesterday's planned items that ended with no outcome, each placed today: at the same time if that's
-        open and still ahead, else in the first open stretch long enough; no start if nothing fits."""
+        """Yesterday's one-off items that ended with no outcome and haven't gone moot, each placed today: at the
+        same time if that's open and still ahead, else in the first open stretch after that time long enough, else
+        the first one at all (10-27: a 9 PM item was offered at 3); no start if nothing fits."""
         from datetime import datetime as _dt
         today = self._today()
         if self.pt.day_plan.target_date != today:
             return []
         yesterday = self.pt.plan_for(today - timedelta(days=1))
         now = self.pt._now()
+        ctx = self._kind_context()
+        self.settle_moot(yesterday, now, ctx)  # yesterday's breakfast isn't eaten today (10-29)
         done_ids = self._db.completed_since(today - timedelta(days=1)) if self._db else set()
         done_titles = {s.title.strip().lower() for p in (yesterday, self.pt.day_plan) for s in p.spans
                        if s.status == SpanStatus.DONE}
-        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s)
+        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s, ctx)
                    and s.task_id not in done_ids and s.title.strip().lower() not in done_titles]  # done another way
         floor = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
         windows = [(max(a, floor), b) for a, b in self.pt.open_windows() if b > floor]
@@ -985,6 +1026,9 @@ class AssistantTools:
             slot = next(((a, b) for a, b in windows if a <= same and same + need <= b), None)
             start = same if slot else None
             if slot is None:
+                slot = next(((a, b) for a, b in windows if b > same and b - max(a, thirty_ceil(same)) >= need), None)
+                start = max(slot[0], thirty_ceil(same)) if slot else None
+            if slot is None:
                 slot = next(((a, b) for a, b in windows if b - a >= need), None)
                 start = slot[0] if slot else None
             if slot:
@@ -994,24 +1038,10 @@ class AssistantTools:
                          "start": start.isoformat() if start else None})
         return plan
 
-    def _carries_over(self, span: EventSpan) -> bool:
-        """Daily things (items of a routine note) and time on a project ("Redfox dev", a backlog's time) happen
-        again anyway: they don't carry over to the next day as unfinished."""
-        from thirties_core.lists import ListCatalog
-        from thirties_core.today import note_items, notes_with_role
-        title = span.title.strip().lower()
-        task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
-        if task is not None and task.list_role in ("routine", "backlog"):
-            return False
-        if self._db is None:
-            return True
-        roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
-        routine = {text.lower() for n in notes_with_role(roles, notes, "routine") for text, _ in note_items(n)}
-        projects = {n["title"].strip().lower() for n in notes_with_role(roles, notes, "backlog")}
-        if title in routine:
-            return False
-        project = re.sub(r"\s+(dev|work|time|session|block)$", "", title)
-        return not (project != title and project in projects)
+    def _carries_over(self, span: EventSpan, ctx: Optional[Dict[str, Any]] = None) -> bool:
+        """Only one-off things carry over: daily things (routine steps, meals) and time on a project ("Torquio dev",
+        a backlog's time) come round again anyway (kinds.rolls_over; 10-18, 10-27, 10-30)."""
+        return rolls_over(self.kind_of(span, ctx))
 
     def _rollover_key(self) -> str:
         return f"rollover:{self._today().isoformat()}"
@@ -1028,13 +1058,19 @@ class AssistantTools:
         routine = {n["title"].strip().lower() for n in self._routines()}
         routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
         done_on_plan = {t.lower() for t in self._done_on_plan(note)}
+        ctx = self._kind_context()
+        recent = [self._plan_peek(self._today() - timedelta(days=1)), self._plan_peek(self._today())]
+        self.settle_moot(recent[0], ctx=ctx)
+        moot = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.UNKNOWN}
         keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
-                and text.lower() not in done_on_plan]
+                and text.lower() not in done_on_plan and text.lower() not in moot
+                and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
         on = {k.lower() for k in keep}
         today = self._today()
 
         def pressing(t: TaskItem) -> bool:
-            if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference"):
+            if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference") \
+                    or not rolls_over(self.kind_of(t, ctx)):
                 return False
             if t.due:
                 try:
@@ -1124,7 +1160,7 @@ class AssistantTools:
         if carry["add"]:
             lines.append("Also pressing: " + ", ".join(
                 f"{tasks[t].title} ({urgency_label(tasks[t])})" for t in carry["add"]) + ".")
-        lines.append("Want today like that?" if carry["keep"] or carry["add"] else "Want me to put them in today like that?")
+        lines.append(rollover_question(plan, carry))
         return "\n".join(lines)
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
@@ -1272,9 +1308,11 @@ class AssistantTools:
         now = self.pt._now()
         db = self.pt.scheduler.state_db
         spans = db.get_spans_between(now - timedelta(days=days), now + timedelta(days=1))
-        deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2),
-                          key=lambda x: -x[1])
+        ctx = self._kind_context()
+        deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2
+                           and put_off_counts(self.kind_of(t, ctx))), key=lambda x: -x[1])
         facts = fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+        facts += session_lines(spans, lambda s: self.kind_of(s, ctx) == ONGOING)
         note = self.capacity_note()
         return ([note] if note else []) + facts
 
@@ -1505,6 +1543,123 @@ class AssistantTools:
                                           title=found.title, source="user")
         found.urgency, found.due, found.someday = urgency, due_day.isoformat() if due_day else "", urgency == "someday"
         return f"Noted: '{found.title}' is {urgency_label(found)}."
+
+    # --- kinds, moot and lasting facts (kinds.py, item_facts.py): for the rollover, the morning and the brains ---
+
+    def _kind_context(self) -> Dict[str, Any]:
+        """What reading kinds needs, read once: routine names and steps, list roles, Today links, lasting facts."""
+        from thirties_core.item_facts import LastingFacts
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import TodayLinks, note_items
+        if self._db is None:
+            return {"steps": set(), "roles": {}, "links": None, "lasting": None}
+        routines = self._routines()
+        steps = {text.lower() for n in routines for text, _ in note_items(n)} | {n["title"].strip().lower()
+                                                                                for n in routines}
+        return {"steps": steps, "roles": ListCatalog(self._db).roles(), "links": TodayLinks(self._db),
+                "lasting": LastingFacts(self._db)}
+
+    def kind_of(self, item: Any, ctx: Optional[Dict[str, Any]] = None) -> str:
+        """'once', 'ongoing' or 'daily' (kinds.py) for a planned item (EventSpan), a list item (TaskItem) or a
+        name: the user's word if they gave one, else its list's role (a Today line's home list's), else the
+        obvious wording, else once."""
+        from thirties_core.kinds import kind_of
+        ctx = ctx or self._kind_context()
+        if isinstance(item, EventSpan):
+            title = item.title
+            task = next((t for t in self.s.tasks if item.task_id and t.id == item.task_id), None)
+            task = task or self._exact_task(title)
+        elif isinstance(item, TaskItem):
+            title, task = item.title, item
+        else:
+            title = str(item)
+            task = self._exact_task(title)
+        home, home_role = None, ""
+        link = ctx["links"].home_of(task.title if task is not None else title) if ctx["links"] is not None else None
+        if link and (task is None or task.list_role in ("today", "")):
+            home = next((t for t in self.s.tasks if t.id == link["home_id"]), None)
+            home_role = (ctx["roles"].get(link["home_note_id"]) or {}).get("role", "")
+        names = [n for n in (title, task.title if task else None, home.title if home else None,
+                             link["home_title"] if link else None) if n]
+        stored = ctx["lasting"].kind_override(*names) if ctx["lasting"] is not None else ""
+        return kind_of(title, task, home=home, home_role=home_role, routine_steps=ctx["steps"], stored=stored)
+
+    def _link_kind(self, link: Dict[str, str], ctx: Dict[str, Any]) -> str:
+        """The kind of a Today item's home item, from the link alone (the home item may be ticked already)."""
+        from thirties_core.kinds import kind_of
+        stored = ctx["lasting"].kind_override(link["home_title"]) if ctx["lasting"] is not None else ""
+        return kind_of(link["home_title"], home_role=(ctx["roles"].get(link["home_note_id"]) or {}).get("role", ""),
+                       routine_steps=ctx["steps"], stored=stored)
+
+    def put_off_counts(self, span: EventSpan) -> bool:
+        """Whether not doing this counts as putting it off (a daily item's doesn't)."""
+        return put_off_counts(self.kind_of(span))
+
+    def _worked_on(self, task: TaskItem) -> str:
+        """Done on an ongoing item means a session: today's copy is ticked, the item itself stays open (B2)."""
+        writer = self._writer()
+        if task.list_role == "today":
+            return self._complete_backlog_task(task, for_good=False)
+        if writer is not None:
+            self._tick_twin(task, writer)  # its Today copy, if it has one
+        return f"(worked on it: {task.title} stays open on {task.parent_note_title or 'its list'})"
+
+    def _plan_peek(self, day: date):
+        """A day's plan as it's stored, without keeping it in PlanTools' cache of other days (a prompt or a check
+        mustn't leave a stale copy behind for the next tool call)."""
+        if day == self.pt.day_plan.target_date:
+            return self.pt.day_plan
+        cached = getattr(self.pt, "_other_days", {}).get(day)
+        if cached is not None or self.pt.scheduler is None:
+            return cached or self.pt.day_plan
+        return self.pt.scheduler.build_day_plan(day, events=[])[0]  # its own items; calendar events have no outcome
+
+    def _plan_of(self, span: EventSpan):
+        """The day plan a span belongs to (the diurnal day its start falls in)."""
+        for plan in [self.pt.day_plan] + list(getattr(self.pt, "_other_days", {}).values()):
+            if plan.day_start <= span.start_dt < plan.day_end:
+                return plan
+        gen = self.pt.scheduler.config.general if self.pt.scheduler else None
+        if gen is None:
+            return self.pt.day_plan
+        from thirties_core.astronomy import get_diurnal_date
+        return self._plan_peek(get_diurnal_date(span.start_dt, lat=gen.latitude, lon=gen.longitude,
+                                                 tz_name=gen.timezone))
+
+    def is_moot(self, span: EventSpan, now: Optional[datetime] = None, ctx: Optional[Dict[str, Any]] = None) -> bool:
+        """Past the point where it's worth doing, offering or asking about (kinds.moot_after), with nothing said."""
+        from thirties_core import kinds
+        plan = self._plan_of(span)
+        return kinds.is_moot(span, now or self.pt._now(), self.kind_of(span, ctx), plan.day_end, plan.spans,
+                             self.pt._is_fixed(span))
+
+    def settle_moot(self, plan=None, now: Optional[datetime] = None,
+                    ctx: Optional[Dict[str, Any]] = None) -> List[EventSpan]:
+        """Store what has gone moot with nothing said as "unknown" (not skipped, not put off), on one plan or on
+        yesterday's and today's. The background service runs this every tick; the morning before offering."""
+        from thirties_core import kinds
+        now = now or self.pt._now()
+        if plan is None:
+            today = self._today()
+            plans = [self._plan_peek(today - timedelta(days=1)), self._plan_peek(today)]
+        else:
+            plans = [plan]
+        changed: List[EventSpan] = []
+        for p in plans:
+            if not any(kinds.trackable(s) and s.status == SpanStatus.PLANNED and s.end_dt <= now for s in p.spans):
+                continue
+            ctx = ctx or self._kind_context()
+            changed += kinds.settle_moot(p.spans, now, p.day_end, lambda s: self.kind_of(s, ctx), self.pt._is_fixed,
+                                         self.pt._persist)
+        if changed:
+            logger.info("Gone moot, stored as unknown: %s.", ", ".join(s.title for s in changed))
+        return changed
+
+    def lasting_facts(self, title: str):
+        """What holds every day for an item by name (item_facts.Lasting; empty if nothing is known)."""
+        from thirties_core.item_facts import Lasting
+        store = self.pt._lasting()
+        return store.for_item(title) if store is not None else Lasting(name=title)
 
     def handlers(self) -> Dict[str, Any]:
         return {

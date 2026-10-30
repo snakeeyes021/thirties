@@ -120,6 +120,8 @@ class AgendaPage(Gtk.ScrolledWindow):
         for s in sorted(done, key=lambda s: s.actual_start or s.start_dt):
             if s.status == SpanStatus.SKIPPED:
                 subtitle = "skipped"
+            elif s.status == SpanStatus.UNKNOWN:  # gone moot with nothing said: not known to have happened
+                subtitle = "not reported"
             else:
                 start, end = s.actual_start or s.start_dt, s.actual_end or s.end_dt
                 subtitle = f"{format_clock(thirty_of(start))} – {format_clock(thirty_of(end - timedelta(seconds=1)) + timedelta(minutes=30))}"
