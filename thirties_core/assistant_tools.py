@@ -290,6 +290,8 @@ ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "re
 ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
 from thirties_core.sun_notices import SUN_TOOL_SPECS  # noqa: E402
 ASSISTANT_TOOL_SPECS += SUN_TOOL_SPECS  # a message at sunrise / sunset: thirties_core/sun_notices.py
+from thirties_core.calendar_modes import CALENDAR_MODE_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += CALENDAR_MODE_TOOL_SPECS  # mine / ask / show / ignore per calendar: calendar_modes.py
 ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
 
 
@@ -513,6 +515,20 @@ class AssistantTools(KindTools):
         if self.pt.scheduler is None:
             raise ToolError("There are no settings to change here.")
         return set_sun_notices(self.pt.scheduler.config, settings_for(self._db) if self._db else None, sunrise, sunset)
+
+    def set_calendar_mode(self, calendar: Any = None, mode: Any = None, **_: Any) -> str:
+        from thirties_core.calendar_modes import CalendarModeError, refresh_calendar_spans, set_calendar_mode
+        from thirties_core.settings import settings_for
+        if self.pt.scheduler is None:
+            raise ToolError("There are no calendars here.")
+        try:
+            out = set_calendar_mode(self.pt.scheduler, settings_for(self._db) if self._db else None, calendar, mode,
+                                    plan=self.pt.day_plan)
+        except CalendarModeError as e:
+            raise ToolError(str(e))
+        if calendar not in (None, ""):
+            refresh_calendar_spans(self.pt)
+        return out
 
     def _tick_on_today(self, title: str) -> None:
         from thirties_core.today import note_items
@@ -1760,6 +1776,7 @@ class AssistantTools(KindTools):
             **self.proposals.handlers(),
             **horizon_handlers(self),
             "set_sun_notices": self.set_sun_notices,
+            "set_calendar_mode": self.set_calendar_mode,
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
 

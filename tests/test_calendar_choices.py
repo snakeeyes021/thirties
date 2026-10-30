@@ -106,5 +106,45 @@ class CalendarModesTest(unittest.TestCase):
         self.assertEqual(settings.apply(ThirtiesConfig()).calendar.modes, {"sarah": "show"})
 
 
+class CalendarModeToolTest(unittest.TestCase):
+    """Choosing per calendar in chat: exact names only, the same synced setting as Preferences."""
+
+    def setUp(self):
+        holiday = CalendarEvent(id="hol@1", summary="Halloween eve", start_dt=at("09:00"), end_dt=at("10:00"),
+                                calendar_name="Holidays in United States", is_primary=False, is_ambiguous=True)
+        self.sched = make_scheduler([wifes("acting", "19:00", "21:00"), holiday])
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.tools = PlanTools(plan, pending, self.sched)
+
+    def test_show_only_by_exact_name_sets_the_synced_choice_and_redraws(self):
+        self.assertEqual(len(self.tools.ambiguous_events), 2)
+        out = self.tools.execute("set_calendar_mode", {"calendar": "sarah", "mode": "show-only"})
+        self.assertIn("Sarah: show only", out)
+        from thirties_core.settings import Settings
+        self.assertEqual(Settings(self.sched.state_db).get("calendar.modes"), {"sarah": "show"})
+        self.assertEqual(self.sched.config.calendar.modes, {"sarah": "show"})
+        acting = next(s for s in self.tools.day_plan.spans if s.title == "Advanced Acting")
+        self.assertTrue(acting.shown_only)
+        self.assertEqual([e.summary for e in self.tools.ambiguous_events], ["Halloween eve"])
+
+    def test_ignore_then_ask_again(self):
+        self.tools.execute("set_calendar_mode", {"calendar": "Holidays in United States", "mode": "ignore"})
+        self.assertNotIn("Halloween eve", [s.title for s in self.tools.day_plan.spans])
+        out = self.tools.execute("set_calendar_mode", {"calendar": "Holidays in United States", "mode": "ask"})
+        self.assertIn("ask about its events", out)
+        self.assertEqual(self.sched.config.calendar.modes, {})
+        self.assertIn("Halloween eve", [e.summary for e in self.tools.ambiguous_events])
+
+    def test_a_near_name_lists_the_calendars_and_changes_nothing(self):
+        out = self.tools.execute("set_calendar_mode", {"calendar": "Holidays", "mode": "ignore"})
+        self.assertTrue(out.startswith("NOT_DONE"), out)
+        self.assertIn("Holidays in United States", out)
+        self.assertEqual(self.sched.config.calendar.modes, {})
+
+    def test_listing_and_a_bad_mode(self):
+        self.assertIn("Sarah (ask about its events)", self.tools.execute("set_calendar_mode", {}))
+        self.assertIn("isn't a choice", self.tools.execute("set_calendar_mode", {"calendar": "Sarah", "mode": "x"}))
+
+
 if __name__ == "__main__":
     unittest.main()
