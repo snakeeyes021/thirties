@@ -157,7 +157,9 @@ class StateDatabase:
     # --- spans ---
 
     def upsert_span(self, span: EventSpan, updated_at: Optional[str] = None) -> None:
+        from thirties_core.plan_log import record_span_change, stored_span
         with self._get_connection() as conn:
+            old = stored_span(conn, span.id)  # for the plan change log (plan_log.py)
             conn.execute("""
             INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, 0)
@@ -166,20 +168,28 @@ class StateDatabase:
                 updated_at = excluded.updated_at, deleted = 0
             """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
                   updated_at or utc_now_iso()))
+            record_span_change(self, conn, old, span.to_dict())
 
     def insert_span_if_absent(self, span: EventSpan, updated_at: str) -> None:
         """Insert a span unless a row with its id exists (live or deleted)."""
+        from thirties_core.plan_log import record_span_change
         with self._get_connection() as conn:
-            conn.execute("""
+            inserted = conn.execute("""
             INSERT OR IGNORE INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, 0)
-            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt), updated_at))
+            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
+                  updated_at)).rowcount
+            if inserted:
+                record_span_change(self, conn, None, span.to_dict())
 
     def delete_span(self, span_id: str, updated_at: Optional[str] = None) -> None:
         """Soft-delete, so the deletion can sync to other devices."""
+        from thirties_core.plan_log import record_span_change, stored_span
         with self._get_connection() as conn:
+            old = stored_span(conn, span_id)
             conn.execute("UPDATE spans SET deleted = 1, updated_at = ? WHERE id = ?",
                          (updated_at or utc_now_iso(), span_id))
+            record_span_change(self, conn, old, None)
 
     def get_spans_between(self, start: datetime, end: datetime) -> List[EventSpan]:
         """Live spans overlapping [start, end)."""
@@ -204,6 +214,8 @@ class StateDatabase:
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             span = EventSpan.from_dict(record["data"])
+            from thirties_core.plan_log import record_span_change, stored_span
+            old = stored_span(conn, record["id"])
             conn.execute("""
             INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -212,6 +224,7 @@ class StateDatabase:
                 updated_at = excluded.updated_at, deleted = excluded.deleted
             """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
                   record["updated_at"], int(record.get("deleted", False))))
+            record_span_change(self, conn, old, None if record.get("deleted") else span.to_dict(), via="another device")
             return True
 
     # --- day metadata ---
@@ -559,9 +572,11 @@ class DeterministicScheduler:
         meta = self.state_db.get_day_meta(target_date)
         if meta.routines_applied:
             return
-        for span in self.routine_spans(target_date):
-            # The oldest possible timestamp: any real edit or deletion, on any device, wins over a default.
-            self.state_db.insert_span_if_absent(span, updated_at=ROUTINE_TIMESTAMP)
+        from thirties_core.plan_log import caused_by
+        with caused_by("day set-up"):
+            for span in self.routine_spans(target_date):
+                # The oldest possible timestamp: any real edit or deletion, on any device, wins over a default.
+                self.state_db.insert_span_if_absent(span, updated_at=ROUTINE_TIMESTAMP)
         meta.routines_applied = True
         self.state_db.save_day_meta(meta)
 

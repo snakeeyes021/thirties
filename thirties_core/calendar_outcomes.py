@@ -37,7 +37,17 @@ class CalendarOutcomes:
             conn.executescript(_SCHEMA)
 
     def record(self, span: EventSpan) -> None:
-        """Store the span's outcome as it now stands (status, actual times, notes)."""
+        """Store the span's outcome as it now stands (status, actual times, notes), and log the change
+        (plan_log: calendar events aren't in the span store, so their outcomes are logged here)."""
+        from thirties_core.plan_log import record_span_change
+        with self.db._get_connection() as conn:
+            row = conn.execute("SELECT status, actual_start, actual_end FROM calendar_outcomes WHERE span_id = ?",
+                               (span.id,)).fetchone()
+            before = span.to_dict()
+            before.update({"status": row["status"], "actual_start": row["actual_start"] or None,
+                           "actual_end": row["actual_end"] or None} if row else
+                          {"status": "planned", "actual_start": None, "actual_end": None})
+            record_span_change(self.db, conn, before, span.to_dict())
         self._write({"span_id": span.id, "status": span.status.value,
                      "actual_start": span.actual_start.isoformat() if span.actual_start else "",
                      "actual_end": span.actual_end.isoformat() if span.actual_end else "",

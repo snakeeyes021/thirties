@@ -171,6 +171,10 @@ class TestItemHistory(MessagesCase):
         manager = self.manager()
         out = manager.execute_tool("item_history", {"item": "Lunch"})
         self.assertIn("Lunch: 12:00 PM – 1:00 PM, planned.", out)
+        self.assertIn("Lunch added (at 12:00 PM – 1:00 PM), caused by: background", out)  # stored with no cause
+        with self.sched.state_db._get_connection() as conn:
+            conn.execute("DELETE FROM plan_changes")
+        out = manager.execute_tool("item_history", {"item": "Lunch"})
         self.assertIn("say you don't know", out)
 
     def test_list_writes_and_what_was_said(self):

@@ -47,9 +47,10 @@ MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "item_history",
-        "description": "What is recorded about an item on the plan: its status and times, the writes to the "
-                       "user's lists about it (with the message that caused each), and what was said about it "
-                       "today. Use it before explaining how something came to be. Read-only.",
+        "description": "What is recorded about an item on the plan: its status and times, every change to it "
+                       "(added, moved, resized, marked, removed: when, by which tool, and the message or Day page "
+                       "action that caused it), the writes to the user's lists about it, and what was said about "
+                       "it today. Use it before explaining how something came to be. Read-only.",
         "parameters": {"item": "The item's id or title."},
         "required": ["item"],
     },
@@ -106,6 +107,10 @@ class MessageTools:
                          + ".")
         db = tools._state_db
         title = span.title.strip().lower()
+        if db is not None:  # every change to it on the plan, with the tool and the message behind it (plan_log)
+            from thirties_core.plan_log import changes_for, describe
+            for row in changes_for(db, span.id, span.title, span.start_dt.date().isoformat()):
+                lines.append(describe(row, tz))
         if db is not None:
             from thirties_core.joplin_writeback import WriteLog
             since = tools.day_plan.day_start.astimezone(timezone.utc).isoformat()
@@ -125,8 +130,8 @@ class MessageTools:
                         when = format_clock(datetime.fromisoformat(at).astimezone(tz)) if at else "earlier"
                         lines.append(f"{when}: the user said \"{str(m['content'])[:200]}\"")
         if len(lines) == 1:
-            lines.append("Nothing else is recorded about it: no list writes and nothing said today. If asked how it "
-                         "got this way, say you don't know.")
+            lines.append("Nothing else is recorded about it: no changes logged, no list writes and nothing said "
+                         "today. If asked how it got this way, say you don't know.")
         return "\n".join(lines)
 
 

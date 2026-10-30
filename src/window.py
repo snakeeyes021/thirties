@@ -209,8 +209,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         where they were changed by hand)."""
         assistant = self.conv_manager.tools.assistant if self.conv_manager else None
         if assistant is not None:
+            from thirties_core.plan_log import caused_by
             try:
-                assistant.routines._refresh_envelopes()
+                with caused_by("new work hours in Preferences"):  # the plan change log's cause
+                    assistant.routines._refresh_envelopes()
             except Exception as e:
                 logger.warning("Updating Work and Sleep to the new hours failed: %s", e)
 
@@ -413,8 +415,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         if self.conv_manager is None:
             return ""
         from thirties_core.plan_tools import NOT_DONE
+        from thirties_core.plan_log import caused_by
         self._local_changes += 1
-        result = self.conv_manager.execute_tool(name, args)
+        with caused_by("Day page"):  # the plan change log says "Day page drag" etc. (plan_log.py)
+            result = self.conv_manager.execute_tool(name, args)
         if result.startswith(NOT_DONE):
             self._toast(result.split(":", 1)[1].split(". Ask the user")[0].strip())
         self.day_view.refresh_plan(self.conv_manager.day_plan)

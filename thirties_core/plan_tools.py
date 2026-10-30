@@ -1356,9 +1356,11 @@ class PlanTools:
         if "_parse_error" in args:
             return f"{NOT_DONE}: {name} {args['_parse_error']}. Write the arguments as a JSON object."
         saved = self.day_plan
+        from thirties_core.plan_log import tool_call
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
-            result = handler(**args)
+            with tool_call(name, self.user_message):  # every change it makes is logged with its cause (plan_log)
+                result = handler(**args)
             if name not in READ_ONLY_TOOLS:
                 self.successful_changes += 1
             if self.day_plan is not saved:
