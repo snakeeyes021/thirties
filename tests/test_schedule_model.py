@@ -11,6 +11,7 @@ from thirties_core.day_layout import build_segments, card_rows, segment_context,
 from thirties_core.models import SpanStatus
 from thirties_core.placement import candidate_slots, early_tick_times, fullness, part_of_day
 from thirties_core.plan_tools import NOT_DONE, PlanTools
+from tests.test_slm_brain import SlmTestCase
 
 
 def tools_for(events=None, now="12:00") -> PlanTools:
@@ -279,6 +280,16 @@ class TestNow(ScheduleCase):
         engine.responses = [reply("It's 8:41, so you have time before work.")]
         self.assertEqual(manager.send_user_message("what time is it?"), "It's 8:41, so you have time before work.")
         self.assertIn("Current time: 8:41 AM.", manager.messages[0]["content"])
+
+
+class TestSlmPushBack(SlmTestCase):
+
+    def test_push_everything_back_by_an_amount(self):
+        self.say("walk at 4:30 for an hour", {"type": "add", "title": "Walk", "start": "4:30", "duration": "1 hour"})
+        out = self.say("push everything back an hour")
+        self.assertTrue(out.startswith("Pushed back 1h:"), out)
+        walk = next(s for s in self.m.day_plan.spans if s.title == "Walk")
+        self.assertEqual(walk.start_dt, at("18:30"))  # the one happening now moves too, past the fixed dentist
 
 
 if __name__ == "__main__":

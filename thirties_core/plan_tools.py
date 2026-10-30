@@ -1061,7 +1061,8 @@ class PlanTools:
             self._drop(span)
         plan.spans.sort(key=lambda s: s.start_dt)
         self._save_plan_after_change()
-        lines = [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in movable if s.id in placed]
+        from thirties_core.clock import agenda_lines  # things moved together still read as one entry (A + B)
+        lines = agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in movable if s.id in placed])
         out = ["Redrew the rest of today:" if lines else "Nothing to redraw: nothing flexible is left today."] + lines
         if no_room:
             out.append("Doesn't fit before bedtime, so it's off today's plan: " + ", ".join(s.title for s in no_room)
