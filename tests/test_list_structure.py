@@ -103,6 +103,17 @@ class TestTriage(ListsTestCase):
         self.assertNotIn("Call the dentist", self.body("n_big"))
         self.assertIn("Build a shed", self.body("n_big"))  # not in a group: stays
 
+    def test_two_items_with_the_same_wording_move_together(self):
+        self.api.notes["n_big"]["body"] = BIG.replace("- [ ] Paint the fence", "- [ ] Call the dentist")
+        self.services.tasks = self.read_tasks()
+        both = [t.id for t in self.services.tasks if t.parent_note_id == "n_big" and t.title == "Call the dentist"]
+        self.assertEqual(len(both), 2)
+        out = self.t.execute("apply_triage_group", {"list": "Big List", "items": both, "new_list": "Health"})
+        self.assertIn("Moved 2 items", out)
+        made = next(n for n in self.api.notes.values() if n.get("title") == "Health")
+        self.assertEqual(made["body"], "- [ ] Call the dentist\n- [ ] Call the dentist\n")
+        self.assertNotIn("Call the dentist", self.body("n_big"))
+
     def test_only_items_of_that_list(self):
         out = self.t.execute("apply_triage_group", {"list": "Big List", "items": ["Buy stamps"], "to_list": "Home"})
         self.assertTrue(out.startswith(NOT_DONE), out)

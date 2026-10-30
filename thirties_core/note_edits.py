@@ -21,8 +21,9 @@ from typing import Iterable, List, Optional, Tuple
 
 from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEADING_REGEX
 
-# A heading under which finished things are kept (never a place for a new or moved open item).
-DONE_HEADING_RE = re.compile(r"(done|completed?|finished|archived?)\b", re.IGNORECASE)
+# A heading under which finished things are kept (never a place for a new or moved open item): "Done", "Completed
+# (October)", "Archive: 2025"; not "Done by Friday".
+DONE_HEADING_RE = re.compile(r"^(done|completed?|finished|archived?)\s*(?:[:(\-–—/].*)?$", re.IGNORECASE)
 # Headings that say "not committed" even when the user's settings don't list them (10-24: a dated item went under
 # Probation). The settings' someday_sections are added to these.
 SOMEDAY_HEADING_RE = re.compile(r"\b(someday|some day|maybe|probation|backburner|back burner|later|ideas?|"
@@ -60,15 +61,37 @@ def is_someday_heading(name: str, someday_sections: Iterable[str] = ()) -> bool:
     return bool(low) and (low in {s.strip().lower() for s in someday_sections} or bool(SOMEDAY_HEADING_RE.search(low)))
 
 
+def heading_level(line: str) -> int:
+    return len(re.match(r"\s*(#*)", line).group(1))
+
+
+class HeadingTrail:
+    """Which kind of section a line is in, sub-headings included: "### October" under "## Done" is still done, and
+    "## Home" under "# Someday" is still someday."""
+
+    def __init__(self, someday_sections: Iterable[str] = ()) -> None:
+        self.someday_sections = list(someday_sections)
+        self.stack: List[Tuple[int, bool, bool]] = []  # (level, someday, done)
+
+    def enter(self, line: str) -> Tuple[bool, bool]:
+        level, name = heading_level(line), HEADING_REGEX.match(line).group(1).strip()
+        while self.stack and self.stack[-1][0] >= level:
+            self.stack.pop()
+        someday = is_someday_heading(name, self.someday_sections) or any(s for _, s, _ in self.stack)
+        done = bool(DONE_HEADING_RE.match(name)) or any(d for _, _, d in self.stack)
+        self.stack.append((level, someday, done))
+        return someday, done
+
+
 def outline(body: str, someday_sections: Iterable[str] = ()) -> List[Section]:
     """The note's sections in order, each with its items. The top section is included only if it has items."""
     sections = [Section("", -1)]
+    trail = HeadingTrail(someday_sections)
     for i, line in enumerate((body or "").splitlines()):
         head = HEADING_REGEX.match(line)
         if head:
-            name = head.group(1).strip()
-            sections.append(Section(name, i, someday=is_someday_heading(name, someday_sections),
-                                    done=bool(DONE_HEADING_RE.match(name))))
+            someday, done = trail.enter(line)
+            sections.append(Section(head.group(1).strip(), i, someday=someday, done=done))
             continue
         m = _match(line)
         if m:
@@ -96,16 +119,25 @@ def item_end(lines: List[str], i: int) -> int:
     """The line after item ``i`` and everything nested under it (blank lines inside the nesting included)."""
     m = _match(lines[i])
     width = _width(m.group(1)) if m else 0
+
+    def nested(line: str) -> bool:  # a child item, or a note or continuation line indented under the item
+        if HEADING_REGEX.match(line) or not line.strip():
+            return False
+        child = _match(line)
+        return _width(child.group(1) if child else re.match(r"[ \t]*", line).group(0)) > width
     end = i + 1
     while end < len(lines):
-        line = lines[end]
-        child = _match(line)
-        if child and _width(child.group(1)) > width:
+        if nested(lines[end]):
             end += 1
-        elif not child and line.strip() and not HEADING_REGEX.match(line) and _width(re.match(r"[ \t]*", line).group(0)) > width:
-            end += 1  # a continuation line or note nested under the item
-        else:
-            break
+            continue
+        if not lines[end].strip():  # a blank line belongs to the item only if more of it follows
+            after = end
+            while after < len(lines) and not lines[after].strip():
+                after += 1
+            if after < len(lines) and nested(lines[after]):
+                end = after
+                continue
+        break
     return end
 
 
@@ -180,10 +212,23 @@ def insert_lines(body: str, block: List[str], section: Optional[str] = None) -> 
     return "\n".join(out) + "\n"
 
 
-def rename_item(body: str, text: str, new: str, occurrence: int = 0) -> Optional[str]:
+def safe_section(body: str, someday_sections: Iterable[str] = ()) -> Optional[str]:
+    """Where a new item goes when nobody chose a section: None in a note without headings (its end); else the top
+    if items are there, else the first section that isn't someday or Done, else the top. Never after a trailing
+    someday section (10-24)."""
+    sections = outline(body, someday_sections)
+    if not any(s.name for s in sections):
+        return None
+    if any(not s.name for s in sections):
+        return ""
+    ok = next((s for s in sections if s.name and not s.someday and not s.done), None)
+    return ok.name if ok else ""
+
+
+def rename_item(body: str, text: str, new: str, occurrence: int = 0, open_only: bool = False) -> Optional[str]:
     """Reword one item, keeping its indent, tick and children."""
     lines = (body or "").splitlines()
-    i = find_item(lines, text, occurrence)
+    i = find_item(lines, text, occurrence, open_only=open_only)
     if i is None or not new.strip():
         return None
     m = _match(lines[i])
@@ -192,12 +237,12 @@ def rename_item(body: str, text: str, new: str, occurrence: int = 0) -> Optional
     return _join(lines, body.endswith("\n"))
 
 
-def split_item(body: str, text: str, parts: List[str], occurrence: int = 0) -> Optional[str]:
+def split_item(body: str, text: str, parts: List[str], occurrence: int = 0, open_only: bool = False) -> Optional[str]:
     """One line becomes several, side by side at its level ("Call bank and dentist" → two calls). Anything nested
     under it stays under the last part."""
     parts = [p.strip() for p in parts if p and p.strip()]
     lines = (body or "").splitlines()
-    i = find_item(lines, text, occurrence)
+    i = find_item(lines, text, occurrence, open_only=open_only)
     if i is None or len(parts) < 2:
         return None
     m = _match(lines[i])
@@ -206,9 +251,10 @@ def split_item(body: str, text: str, parts: List[str], occurrence: int = 0) -> O
     return _join(lines, body.endswith("\n"))
 
 
-def move_within(body: str, text: str, section: Optional[str], occurrence: int = 0) -> Optional[str]:
+def move_within(body: str, text: str, section: Optional[str], occurrence: int = 0,
+                open_only: bool = False) -> Optional[str]:
     """Move an item (with its children) to another section of the same note."""
-    taken = take_item(body, text, occurrence)
+    taken = take_item(body, text, occurrence, open_only=open_only)
     if taken is None:
         return None
     rest, block, _ = taken
@@ -222,5 +268,6 @@ def untick(block: List[str]) -> List[str]:
     return [re.sub(r"^([ \t]*)-\s*\[[xX]\]", r"\1- [ ]", block[0], count=1)] + block[1:]
 
 
-__all__ = ["Section", "outline", "find_item", "item_end", "section_of", "take_item", "insert_lines", "rename_item",
-           "split_item", "move_within", "untick", "is_someday_heading", "DONE_HEADING_RE", "SOMEDAY_HEADING_RE"]
+__all__ = ["Section", "HeadingTrail", "outline", "find_item", "item_end", "section_of", "take_item", "insert_lines",
+           "safe_section", "rename_item", "split_item", "move_within", "untick", "is_someday_heading",
+           "DONE_HEADING_RE", "SOMEDAY_HEADING_RE"]

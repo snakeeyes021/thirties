@@ -27,9 +27,11 @@ def apply(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
     kind = op["op"]
     occ = int(op.get("occurrence") or 0)
     if kind == "rename":
-        return writer._edit_body(op["note_id"], lambda b: ne.rename_item(b, op["title"], op["new_title"], occ))
+        return writer._edit_body(op["note_id"], lambda b: ne.rename_item(b, op["title"], op["new_title"], occ,
+                                                                         open_only=bool(op.get("open_only"))))
     if kind == "split":
-        return writer._edit_body(op["note_id"], lambda b: ne.split_item(b, op["title"], op["parts"], occ))
+        return writer._edit_body(op["note_id"], lambda b: ne.split_item(b, op["title"], op["parts"], occ,
+                                                                        open_only=bool(op.get("open_only"))))
     if kind == "untick":
         def untick(body: str) -> Optional[str]:
             lines = body.splitlines()
@@ -51,12 +53,13 @@ def apply(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
 def _move(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
     target = op.get("to_note_id") or op["note_id"]
     section = op.get("section")
+    open_only = bool(op.get("open_only"))  # an open list item: never an old ticked line with the same wording
     if target == op["note_id"]:
-        return writer._edit_body(target, lambda b: ne.move_within(b, op["title"], section, occ))
+        return writer._edit_body(target, lambda b: ne.move_within(b, op["title"], section, occ, open_only=open_only))
     held: Dict[str, Any] = {}
 
     def take(body: str) -> Optional[str]:
-        taken = ne.take_item(body, op["title"], occ, ticked_too=bool(op.get("ticked_too")))
+        taken = ne.take_item(body, op["title"], occ, ticked_too=bool(op.get("ticked_too")), open_only=open_only)
         if taken is None:
             return None
         held["block"] = taken[1]
@@ -70,12 +73,19 @@ def _move_many(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
     blocks: List[str] = []
 
     def take_all(body: str) -> Optional[str]:
-        for item in op["items"]:
-            taken = ne.take_item(body, item["title"], int(item.get("occurrence") or 0), ticked_too=False)
+        # The later copies of a wording first, so taking one doesn't renumber the others; written in the given order.
+        items = op["items"]
+        order = sorted(range(len(items)), key=lambda k: -int(items[k].get("occurrence") or 0))
+        taken_blocks: Dict[int, List[str]] = {}
+        for k in order:
+            taken = ne.take_item(body, items[k]["title"], int(items[k].get("occurrence") or 0), ticked_too=False,
+                                 open_only=True)
             if taken is None:
                 return None
-            body = taken[0]
-            blocks.extend(taken[1])
+            body, taken_blocks[k] = taken[0], taken[1]
+        blocks.clear()
+        for k in range(len(items)):
+            blocks.extend(taken_blocks[k])
         return body
     if op.get("to_note_id"):
         return writer._edit_bodies([(op["note_id"], take_all),
@@ -94,7 +104,9 @@ def _move_many(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
         return False, "Joplin didn't make the new note."
     writer._edits.append((made["id"], op["new_title"], "", body))
     if not writer.api.update_note(op["note_id"], {"body": rest}):
-        return False, "Joplin made the new note but didn't take the items out of the old one."
+        # Parked, never retried: a retry would make a second new note. The log shows the half-done change.
+        return False, "gone: half done (the new note was made, but the items couldn't be taken out of the old one)."
+
     writer._edits.append((op["note_id"], source.get("title", ""), source["body"], rest))
     return True, f"note:{made['id']}"
 
@@ -137,8 +149,10 @@ def _done(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
             return None
         held["block"], held["section"] = taken[1], taken[2]
         return taken[0]
-    ok, msg = writer._edit_bodies([(op["note_id"], take),
-                                   (done_id, lambda b: ne.insert_lines(b, [f"- [x] {line}"], None))])
+
+    def file(body: str) -> str:  # the dated line, with what was nested under the item kept under it
+        return ne.insert_lines(body, [f"- [x] {line}"] + held["block"][1:], None)  # (already indented under it)
+    ok, msg = writer._edit_bodies([(op["note_id"], take), (done_id, file)])
     if ok:
         log.save_filed(op["key"], op["title"], op["note_id"], op.get("list_title") or "", held.get("section"),
                        held.get("block") or [], line, op["month"], op["day"])

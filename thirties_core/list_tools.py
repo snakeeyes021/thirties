@@ -205,10 +205,11 @@ class ListTools:
                             "change the routine itself.")
         note_id, note_title = found.parent_note_id, found.parent_note_title or ""
         occ = found.occurrence
+        is_open = any(t is found for t in self.a.s.tasks)  # an open list item: never an old tick with its wording
         if str(rename_to).strip():
             new = str(rename_to).strip()
             queued = self._submit({"op": "rename", "note_id": note_id, "title": found.title, "new_title": new,
-                                   "occurrence": occ})
+                                   "occurrence": occ, "open_only": is_open})
             old_title = found.title
             rekey(self.a._db, self._plans(), self.a.s.tasks, found, _checkbox_id(note_id, new), new, note_id, note_title)
             return f"Reworded '{old_title}' to '{new}' in {note_title}{queued}."
@@ -216,7 +217,7 @@ class ListTools:
             if len(split) < 2:
                 raise ToolError("Split it into at least two lines.")
             queued = self._submit({"op": "split", "note_id": note_id, "title": found.title, "parts": split,
-                                   "occurrence": occ})
+                                   "occurrence": occ, "open_only": is_open})
             old_title = found.title
             for part in split[1:]:
                 self.a.s.tasks.append(TaskItem(id=_checkbox_id(note_id, part), source_notebook=found.source_notebook,
@@ -255,7 +256,8 @@ class ListTools:
             raise ToolError("Say which section to move it to.")
         queued = self._submit({"op": "move", "note_id": found.parent_note_id, "title": found.title,
                                "occurrence": found.occurrence, "to_note_id": target["id"], "section": section,
-                               "ticked_too": True, "reason": str(reason or "")[:200]})
+                               "ticked_too": True, "open_only": any(t is found for t in self.a.s.tasks),
+                               "reason": str(reason or "")[:200]})
         old_note = found.parent_note_title
         rekey(self.a._db, self._plans(), self.a.s.tasks, found, _checkbox_id(target["id"], found.title), found.title,
               target["id"], target["title"])
@@ -401,7 +403,8 @@ class ListTools:
             raise ToolError("Which items?")
         found = []
         from thirties_core.assistant_tools import _same_words
-        mine = [t for t in self.a.s.tasks if t.parent_note_id == source["id"] and t.is_checkbox_item]
+        mine = [t for t in self.a.s.tasks if t.parent_note_id == source["id"] and t.is_checkbox_item
+                and not t.parent_task_id]  # top-level items: sub-items move with their parent
         for ref in refs:
             t = next((x for x in mine if x.id == ref.strip()), None) or next(
                 (x for x in mine if _same_words(x.title, ref) and x not in found), None)

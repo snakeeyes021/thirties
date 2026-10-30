@@ -413,11 +413,19 @@ class JoplinWriter:
             if new is None:
                 return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
             bodies[note_id] = new
+        written: List[str] = []
         for note_id in dict.fromkeys(nid for nid, _ in reversed(edits)):
             if bodies[note_id] == notes[note_id]["body"]:
                 continue
             if not self.api.update_note(note_id, {"body": bodies[note_id]}):
-                return False, "Joplin didn't accept the change."
+                # Half done: put back what was written, so a retry can't add the copy twice. If that fails too,
+                # the change is parked (never retried) and the log shows the copy.
+                undone = all(self.api.update_note(nid, {"body": notes[nid]["body"]}) for nid in reversed(written))
+                if undone:
+                    self._edits = [e for e in self._edits if e[0] not in written]
+                    return False, "Joplin didn't accept the change."
+                return False, "gone: half done (the copy was written, the original couldn't be taken out)."
+            written.append(note_id)
             self._edits.append((note_id, notes[note_id].get("title", ""), notes[note_id]["body"], bodies[note_id]))
         return True, ""
 
@@ -444,9 +452,14 @@ class JoplinWriter:
             return ok, "" if ok else "Joplin didn't accept the change."
         if kind == "add_task":
             if "place" in op:  # a section chosen by placement_lists: None (the end), "" (the top) or a heading
-                from thirties_core.note_edits import insert_lines
+                from thirties_core.note_edits import insert_lines, safe_section
+
+                def place(body: str):  # chosen without seeing the note (Joplin was closed): the safe section now
+                    if op["place"] is None and op.get("safe"):
+                        return safe_section(body, op.get("someday") or [])
+                    return op["place"]
                 return self._edit_body(op["note_id"], lambda b: insert_lines(b, [f"- [ ] {op['title'].strip()}"],
-                                                                             op["place"]))
+                                                                             place(b)))
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
         if kind == "remove":
             return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"]))

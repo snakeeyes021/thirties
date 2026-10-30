@@ -15,8 +15,10 @@ class TestTickedToFile(unittest.TestCase):
 
     def test_only_finished_items_not_steps_of_open_ones_or_the_users_done_section(self):
         body = ("- [x] Call the bank\n    - [x] Find the number\n- [ ] Taxes\n    - [x] Gather forms\n"
-                "# Done\n- [x] Old thing\n# Later\n- [x] Buy stamps\n- [x] Buy stamps\n")
-        self.assertEqual(ticked_to_file(body), [("Call the bank", 0), ("Buy stamps", 0), ("Buy stamps", 1)])
+                "- [x] Plan trip\n    - [ ] Book hotel\n"  # a step still to do: it stays
+                "## Done\n- [x] Old thing\n### October\n- [x] Older thing\n"  # the user's own archive, sub-headings too
+                "## Later\n- [x] Buy stamps\n- [x] Buy stamps\n- [x] Mail it\n")  # twice: which is new can't be told
+        self.assertEqual(ticked_to_file(body), [("Call the bank", 0), ("Mail it", 0)])
 
 
 class TestFiling(ListsTestCase):
@@ -105,6 +107,33 @@ class TestFiling(ListsTestCase):
         out = self.t.execute("reopen_item", {"item": "Call the bank"})
         self.assertIn("unticked 'Call the bank' in Errands/Admin", out)
         self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+
+    def test_what_was_nested_under_it_goes_into_the_done_note_too(self):
+        self.api.notes["n_errands"]["body"] = ("# Active\n- [ ] Call the bank\n    - [x] Find the number\n    "
+                                               "branch on Main St\n- [ ] Buy stamps\n")
+        self.sweep(at("14:01"))  # seen open
+        self.api.notes["n_errands"]["body"] = self.body("n_errands").replace("- [ ] Call the bank", "- [x] Call the bank")
+        self.sweep(at("14:05"))
+        self.sweep(at("14:40"))
+        self.assertEqual(self.done_note()["body"], "- [x] 2026-10-15: Call the bank (Errands/Admin)\n"
+                                                   "    - [x] Find the number\n    branch on Main St\n")
+        self.assertEqual(self.body("n_errands"), "# Active\n- [ ] Buy stamps\n")
+
+    def test_one_unticked_line_puts_back_one_item(self):
+        self.api.notes["n_more"] = {"id": "n_more", "title": "Errands/Admin", "parent_id": "f_x",
+                                    "body": "- [ ] Buy stamps\n"}
+        self.meta["n_more"] = ("Errands/Admin", "Other")
+        self.catalog.set_role("n_more", "list", "Errands/Admin")
+        self.sweep(at("14:01"))
+        for nid in ("n_errands", "n_more"):  # the same wording, filed from two lists called the same
+            self.api.notes[nid]["body"] = self.body(nid).replace("- [ ] Buy stamps", "- [x] Buy stamps")
+        self.sweep(at("14:05"))
+        self.sweep(at("14:40"))
+        done = self.done_note()
+        self.assertEqual(done["body"].count("Buy stamps (Errands/Admin)"), 2)
+        done["body"] = done["body"].replace("- [x]", "- [ ]", 1)
+        self.assertEqual(len(self.sweep(at("14:45"))), 1)
+        self.assertEqual(done["body"].count("Buy stamps (Errands/Admin)"), 1)
 
     def test_unticking_the_done_line_by_hand_puts_it_back(self):
         self.api.notes["n_errands"]["body"] = self.body("n_errands").replace("- [ ] Buy stamps", "- [x] Buy stamps")

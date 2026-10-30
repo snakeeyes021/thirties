@@ -835,8 +835,11 @@ class AssistantTools(KindTools):
         due_day = parse_day(str(due), self._today()) if due not in (None, "") else None
         dated = start not in (None, "") or day not in (None, "") or due_day is not None or urgency == "now"
         place, where = placement.choose_section(note, section or None, title, dated)
-        status, msg = writer.submit({"op": "add_task", "note_id": note_id, "title": title.strip(), "place": place,
-                                     "reason": str(reason or "")[:200]})
+        op = {"op": "add_task", "note_id": note_id, "title": title.strip(), "place": place,
+              "reason": str(reason or "")[:200]}
+        if place is None:  # the note's sections weren't known (Joplin closed): the safe one when it's delivered
+            op.update(safe=True, someday=[*placement.someday])  # (``list`` is the argument here)
+        status, msg = writer.submit(op)
         if status in ("not_allowed", "failed"):
             raise ToolError(msg)
         notebook = note.get("source_notebook") or next((t.source_notebook for t in self.s.tasks

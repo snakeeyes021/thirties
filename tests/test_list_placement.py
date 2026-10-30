@@ -116,6 +116,26 @@ class TestPlacement(ListsTestCase):
         self.assertTrue(self.t.execute("add_task", {"title": "Buy milk", "list": "Morning Routine"}).startswith(NOT_DONE))
         self.assertEqual(self.body("n_wish"), "- [ ] A boat\n")
 
+    def test_with_joplin_closed_it_still_never_lands_in_the_trailing_someday_section(self):
+        self.api.up = False
+        self.services.joplin.fetch_active_notes.side_effect = lambda: []  # nothing read: the note's body is unknown
+        out = self.t.execute("add_task", {"title": "Renew passport", "list": "Errands/Admin", "due": "Friday"})
+        self.assertIn("Joplin will get it when it's open", out)
+        self.api.up = True
+        from thirties_core.joplin_writeback import JoplinWriter
+        JoplinWriter(self.sched.config, self.sched.state_db, self.api).flush(launch=False)
+        self.assertIn("- [ ] Buy stamps\n- [ ] Renew passport\n\n# Probation", self.body("n_errands"))
+
+    def test_a_move_that_fails_halfway_is_put_back_so_a_retry_cant_copy_it_twice(self):
+        stamps = next(t for t in self.services.tasks if t.title == "Buy stamps")
+        real = self.api.update_note
+        self.api.update_note = lambda nid, data: False if nid == "n_errands" and "Buy stamps" not in data["body"] \
+            else real(nid, data)  # Joplin takes the copy in Home, then refuses to take it out of Errands
+        out = self.t.execute("edit_list_item", {"item": stamps.id, "to_list": "Home"})
+        self.assertIn("Joplin will get it when it's open", out)  # queued for a retry
+        self.assertEqual(self.body("n_home"), HOME)  # the copy was taken back
+        self.assertIn("Buy stamps", self.body("n_errands"))
+
     def test_the_drop_box_by_name(self):
         out = self.t.execute("add_task", {"title": "Check the fan noise", "list": "drop box", "reason": "unclear"})
         self.assertTrue(out.startswith("Added 'Check the fan noise' to Assorted Quickies"), out)

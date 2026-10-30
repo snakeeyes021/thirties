@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEADING_REGEX, item_id
-from thirties_core.note_edits import DONE_HEADING_RE
+from thirties_core.note_edits import HeadingTrail, item_end
 from thirties_core.scheduler import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -135,33 +135,31 @@ def worked_on_op(title: str, list_title: str, day: date) -> Dict[str, Any]:
 
 
 def ticked_to_file(body: str) -> List[tuple]:
-    """Ticked items that can be filed: (text, which ticked copy of that text it is). Not sub-steps of an item
-    that's still open, not what's under the user's own Done heading, and a ticked item's own ticked children go
-    with it rather than on their own."""
-    out, counts = [], {}
-    stack: List[tuple] = []  # (indent, ticked)
+    """Ticked items that can be filed: (text, which ticked copy of that text it is). Only top-level ones, with
+    nothing still open under them (a sub-step left to do keeps the item where it is); never what's under the
+    user's own Done heading (sub-headings too); and only a wording ticked once in the note, since which of two
+    ticked copies is the new one can't be told (an old tick would be filed in its place)."""
+    lines = (body or "").splitlines()
+    trail = HeadingTrail()
     under_done = False
-    for line in (body or "").splitlines():
-        head = HEADING_REGEX.match(line)
-        if head:
-            under_done, stack = bool(DONE_HEADING_RE.match(head.group(1).strip())), []
+    counts: Dict[str, int] = {}
+    found = []
+    for i, line in enumerate(lines):
+        if HEADING_REGEX.match(line):
+            under_done = trail.enter(line)[1]
             continue
-        m = CHECKBOX_REGEX.match(line)
-        d = None if m else DONE_CHECKBOX_REGEX.match(line)
-        if not (m or d):
+        d = DONE_CHECKBOX_REGEX.match(line)
+        if not d:
             continue
-        indent = len((m or d).group(1).replace("\t", "    "))
-        while stack and stack[-1][0] >= indent:
-            stack.pop()
-        inside = bool(stack)
-        stack.append((indent, bool(d)))
-        if d:
-            text = d.group(2).strip()
-            n = counts.get(text.lower(), 0)
-            counts[text.lower()] = n + 1
-            if not inside and not under_done:
-                out.append((text, n))
-    return out
+        text = d.group(2).strip()
+        n = counts.get(text.lower(), 0)
+        counts[text.lower()] = n + 1
+        if d.group(1) or under_done:
+            continue
+        if any(CHECKBOX_REGEX.match(x) for x in lines[i + 1:item_end(lines, i)]):
+            continue
+        found.append((text, n))
+    return [(text, n) for text, n in found if counts[text.lower()] == 1]
 
 
 class DoneLog:
@@ -320,10 +318,13 @@ class DoneLog:
             note = writer.api.get_note(note_id, fields="id,title,body") if note_id else None
             if not note:
                 continue
-            open_lines = {m.group(2).strip() for m in map(CHECKBOX_REGEX.match, (note.get("body") or "").splitlines())
-                          if m}
+            open_lines: Dict[str, int] = {}  # each open line puts back one item (two lists can file the same line)
+            for m in map(CHECKBOX_REGEX.match, (note.get("body") or "").splitlines()):
+                if m:
+                    open_lines[m.group(2).strip()] = open_lines.get(m.group(2).strip(), 0) + 1
             for rec in self.filed(month):
-                if rec["month"] == month and rec["line"] in open_lines:
+                if rec["month"] == month and open_lines.get(rec["line"], 0) > 0:
+                    open_lines[rec["line"]] -= 1
                     status, _ = writer.submit({"op": "unfile_done", "key": rec["key"], "title": rec["title"],
                                                "note_id": rec["source_note_id"]})
                     if status in ("done", "queued"):

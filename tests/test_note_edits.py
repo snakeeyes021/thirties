@@ -73,6 +73,26 @@ class TestEdits(unittest.TestCase):
         out = ne.insert_lines("# A\n- [ ] a\n    - [ ] a1\n# B\n", ["- [ ] new"], "A")
         self.assertEqual(out, "# A\n- [ ] a\n    - [ ] a1\n- [ ] new\n# B\n")
 
+    def test_children_after_a_blank_line_go_with_their_item(self):
+        body = "- [ ] Other\n- [ ] Parent\n    - [ ] c1\n\n    - [ ] c2\n\n- [ ] Next\n"
+        rest, block, _ = ne.take_item(body, "Parent")
+        self.assertEqual(block, ["- [ ] Parent", "    - [ ] c1", "", "    - [ ] c2"])
+        self.assertEqual(rest, "- [ ] Other\n\n- [ ] Next\n")
+
+    def test_sub_headings_of_done_and_someday_sections_count_as_them(self):
+        out = ne.outline("## Errands\n- [ ] a\n## Done\n### October\n- [x] b\n# Someday\n## Home\n- [ ] c\n")
+        self.assertEqual([(s.name, s.done, s.someday) for s in out],
+                         [("Errands", False, False), ("Done", True, False), ("October", True, False),
+                          ("Someday", False, True), ("Home", False, True)])
+        self.assertFalse(ne.DONE_HEADING_RE.match("Done by Friday"))
+        self.assertTrue(ne.DONE_HEADING_RE.match("Completed (October)"))
+
+    def test_the_safe_section_when_nobody_chose(self):
+        self.assertIsNone(ne.safe_section("- [ ] a\n"))
+        self.assertEqual(ne.safe_section("# Active\n- [ ] a\n# Probation\n- [ ] b\n"), "Active")
+        self.assertEqual(ne.safe_section("- [ ] a\n# Probation\n- [ ] b\n"), "")
+        self.assertEqual(ne.safe_section("# Probation\n- [ ] b\n"), "")
+
     def test_ticked_only_finds_the_done_copy(self):
         body = "- [ ] Milk\n- [x] Milk\n"
         rest, block, _ = ne.take_item(body, "Milk", ticked_only=True)
