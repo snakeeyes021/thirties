@@ -330,6 +330,11 @@ class HorizonCatalog:
     def set_note(self, note_id: str, horizon: str, title: str = "", source: str = "user") -> bool:
         return self._set("note", note_id, horizon, note_id, title, source)
 
+    def clear_note(self, note_id: str) -> None:
+        """Forget a note's horizon, so it's guessed again."""
+        with self.db._get_connection() as conn:
+            conn.execute("DELETE FROM horizon_marks WHERE ref = ?", (f"note:{note_id}",))
+
     def clear_item_guesses(self, note_id: str) -> int:
         """Forget the guessed horizons of a note's items, so the note's own horizon shows through (a bulk change:
         "everything on Home is for this year"). The user's own choices stay."""
@@ -780,7 +785,9 @@ class HorizonPlanner:
         rows = self.plans.rows()
         pinned_ids = {r["item_id"] for r in rows}
         tasks = {t.id: t for t in self.tasks if not t.id.startswith("media:") or t.id in pinned_ids}
-        done = self._done_since(p.start - timedelta(days=400))
+        # Done lately (since the week before this period, or this week's): an item done long ago and open again
+        # in the list is a new round of it (backlog.DONE_HIDES_DAYS hides the recent ones the same way).
+        done = self._done_since(min(p.start, period_of("week", today, self.week_start).start) - timedelta(days=7))
         scheduled = self._scheduled(p)
         on_today = self._on_today() if p.level == "day" else set()
         out: Dict[str, Candidate] = {}
@@ -818,7 +825,7 @@ class HorizonPlanner:
         due_by = p.end + timedelta(days=2 if p.level == "day" else 0)
         for t in tasks.values():
             due = _as_date(t.due)
-            if due and due <= due_by and t.id not in placed_elsewhere and self._plannable(t, maps):
+            if due and due <= due_by and t.id not in placed_elsewhere and self._plannable(t):
                 add(t, "due", "overdue" if due < today else f"due {self.label(period_of('day', due))}")
 
         # 3. left over: planned for an earlier period at this level and not done
@@ -852,7 +859,7 @@ class HorizonPlanner:
         here = "day" if p.level == "day" else p.level
         above = PARENT.get(here)
         for t in tasks.values():
-            if t.id in placed_elsewhere or not self._plannable(t, maps):
+            if t.id in placed_elsewhere or not self._plannable(t):
                 continue
             h = self.horizon_of(t, maps)
             if finer(h, here):
@@ -867,7 +874,7 @@ class HorizonPlanner:
         return ranked[:limit] if limit else ranked
 
     @staticmethod
-    def _plannable(t: TaskItem, maps) -> bool:
+    def _plannable(t: TaskItem) -> bool:
         """Not pinned: only items from lists and projects (and, when due, menus), never someday."""
         if t.someday or t.id.startswith("media:"):
             return False
