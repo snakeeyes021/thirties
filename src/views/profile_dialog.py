@@ -1,4 +1,5 @@
-"""Dialog showing what the assistant has learned: the user profile, its memory notes, and your lists."""
+"""Dialog showing what the assistant has learned: the user profile, its memory notes, your lists, and your routines
+and daily anchors."""
 
 from __future__ import annotations
 
@@ -23,8 +24,9 @@ class ProfileMemoryDialog(Adw.Dialog):
     """
 
     def __init__(self, profile, memory, on_changed: Optional[Callable[[], None]] = None, lists=None,
-                 load_lists=None) -> None:
-        """``lists`` is a ``ListCatalog`` and ``load_lists`` returns (notes, tasks) from the task backend."""
+                 load_lists=None, routines=None) -> None:
+        """``lists`` is a ``ListCatalog`` and ``load_lists`` returns (notes, tasks) from the task backend;
+        ``routines`` returns the assistant's RoutineTools (routines and daily anchors), or None."""
         super().__init__()
         self.profile = profile
         self.memory = memory
@@ -43,6 +45,9 @@ class ProfileMemoryDialog(Adw.Dialog):
         from .lists_page import ListsPage
         self.lists_page = ListsPage(lists, load_lists, on_changed=self._changed)
         self.stack.add_titled_with_icon(self.lists_page, "lists", "Lists", "view-list-symbolic")
+        from .routines_page import RoutinesPage
+        self.routines_page = RoutinesPage(routines, on_changed=self._changed, toast=self._toast)
+        self.stack.add_titled_with_icon(self.routines_page, "routines", "Routines", "alarm-symbolic")
 
         header = Adw.HeaderBar()
         switcher = Adw.ViewSwitcher()

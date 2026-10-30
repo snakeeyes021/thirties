@@ -478,6 +478,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             on_changed=self._push_sync,
             lists=ListCatalog(self.scheduler.state_db) if self.scheduler else None,
             load_lists=lambda: (engine.fetch_active_notes(), engine.fetch_tasks()) if engine else ([], []),
+            routines=lambda: (self.conv_manager.tools.assistant.routines
+                              if self.conv_manager and self.conv_manager.tools.assistant else None),
         )
         if page:
             dialog.stack.set_visible_child_name(page)

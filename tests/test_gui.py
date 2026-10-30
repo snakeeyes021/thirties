@@ -547,10 +547,62 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertEqual((row["urgency"], row["source"]), ("whenever", "user"))
         self.assertEqual(changes, [1])
 
+    def test_routines_and_anchors(self) -> None:
+        from tests.test_routines import FIRST, SECOND, RoutineCase
+        from thirties_core.routines import RoutineBook
+        case = RoutineCase()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        routines = case.t.assistant.routines
+        routines.set_routine(routine="Morning Routine", parts=[{"start": "9:00 AM", "items": FIRST},
+                                                               {"start": "3:00 PM", "items": SECOND}])
+        changes = []
+        dialog = ProfileMemoryDialog(None, None, on_changed=lambda: changes.append(1), routines=lambda: routines)
+        page = dialog.routines_page
+        page.reload()
+        morning = page.routine_rows["Morning Routine"]
+        self.assertEqual(morning.get_subtitle(), "Every day · 9:00 AM and 3:00 PM")
+        self.assertEqual(morning.part_rows[1]["steps"].get_text(), ", ".join(SECOND))
+        # every 12 days, through set_routine
+        page.routine_rows["Deep Clean"].repeat_row.set_selected(1)
+        page.routine_rows["Deep Clean"].every_row.set_value(12)
+        _iterate_until(lambda: "every 12 days" in page.routine_rows["Deep Clean"].get_subtitle().lower())
+        self.assertEqual(RoutineBook(case.sched.state_db).get("n_clean").repeat, {"every": "days", "n": 12})
+        # a part's usual time and fallback
+        morning = page.routine_rows["Morning Routine"]
+        morning.part_rows[1]["time"].set_text("5:00 PM")
+        morning.part_rows[1]["fallback"].set_text("after work")
+        morning.part_rows[1]["time"].emit("apply")
+        parts = RoutineBook(case.sched.state_db).get("n_routine").parts
+        self.assertEqual([(p["at"], p["fallback"]) for p in parts], [("09:00", ""), ("17:00", "after work")])
+        # anchors: the defaults offered again, one added, then removed
+        _iterate_until(lambda: "Deep Clean" in page.routine_rows)
+        page.offer_button.emit("clicked")
+        self.assertEqual([r.get_title() for r in page.offer_rows], ["Lunch", "Dinner"])
+        next(c for c in _walk(page.offer_rows[1]) if isinstance(c, Gtk.Button) and c.get_label() == "Add").emit("clicked")
+        _iterate_until(lambda: "Dinner" in page.anchor_rows)
+        self.assertEqual(page.anchor_rows["Dinner"].get_subtitle(), "6:00 PM · 1 hour · every day")
+        page.new_anchor.name_row.set_text("Cats' dinner")
+        page.new_anchor.fields["time"].set_text("5:00 PM")
+        page.new_anchor.fields["fixed"].set_active(True)
+        page.new_anchor.add_row_button.emit("activated")
+        _iterate_until(lambda: "Cats' dinner" in page.anchor_rows)
+        self.assertEqual(page.anchor_rows["Cats' dinner"].get_subtitle(), "5:00 PM · 30 min · every day · fixed")
+        page.anchor_rows["Dinner"].remove_row.emit("activated")
+        _iterate_until(lambda: "Dinner" not in page.anchor_rows)
+        self.assertEqual([a.title for a in RoutineBook(case.sched.state_db).anchors()], ["Cats' dinner"])
+        self.assertTrue(changes)
+
     def _day(self):
         sched = make_scheduler()
         plan, pending = sched.build_day_plan(DAY)
         return plan, [], pending, sched
+
+
+def _walk(widget):
+    for child in _children(widget):
+        yield child
+        yield from _walk(child)
 
 
 def _children(widget):
