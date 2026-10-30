@@ -38,6 +38,7 @@ class SpanStatus(str, Enum):
     DONE = "done"
     PARTIAL = "partial"
     SKIPPED = "skipped"
+    UNKNOWN = "unknown"  # gone moot with nothing said (kinds.py): not skipped, not put off, never asked about again
 
 
 def new_span_id() -> str:

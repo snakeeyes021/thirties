@@ -377,7 +377,8 @@ class TestMorning(TodayTestCase):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
         self.assertEqual(out, "From yesterday, still open:\n- Call the bank\n- Clip cat nails\n"
-                              "Also pressing: Buy stamps (now).\nWant today like that?")
+                              "Also pressing: Buy stamps (now).\nShould I keep these on today's list and add the "
+                              "pressing one? Say which to leave out.")
         out = self.t.execute("apply_rollover", {"skip": ["bank", "nails"]})
         self.assertIn("Back to your lists: Call the bank.", out)
         self.assertIn("Added to today's list: Buy stamps.", out)

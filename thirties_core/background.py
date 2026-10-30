@@ -73,6 +73,7 @@ class BackgroundService:
     SYNC_EVERY = 300
     LISTS_EVERY = 1800
     TODAY_EVERY = 120
+    MOOT_EVERY = 60
 
     def __init__(self, config, desktop_notify: Optional[DesktopNotify] = None, *, scheduler=None, joplin_engine=None,
                  inference_engine=None, sync_engine=None) -> None:
@@ -95,6 +96,7 @@ class BackgroundService:
         self._last_sync = 0.0
         self._last_lists = 0.0
         self._last_today = 0.0
+        self._last_moot = 0.0
         self._sorting = False
         self.sort_lists_enabled = not os.environ.get("THIRTIES_OFFLINE")  # off in tests and evals
         self._threads: List[threading.Thread] = []
@@ -392,6 +394,18 @@ class BackgroundService:
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
 
+    def moot(self, now: datetime) -> None:
+        """Before anything asks: what has gone moot with nothing said (lunch once dinner's begun, yesterday's
+        breakfast) is stored as unknown, so no check-in, wrap-up or morning offer brings it up (kinds.py; 10-23,
+        10-29)."""
+        if time.time() - self._last_moot < self.MOOT_EVERY:
+            return
+        self._last_moot = time.time()
+        manager = self.manager()
+        if manager.tools.assistant is not None:
+            with manager.turn_lock:
+                manager.tools.assistant.settle_moot(now=now)
+
     def rollover(self, now: datetime) -> None:
         """Once a day, after waking: offer to roll yesterday's unfinished items into today."""
         db = self.scheduler.state_db
@@ -504,7 +518,7 @@ class BackgroundService:
                 manager.reload_plan()  # 10:53 were listed as "not marked yet" at 11:00
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
-        for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
+        for duty in (self.moot, self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
                      self.starts, self.day_times, self.today_sync):
             try:
                 duty(now)

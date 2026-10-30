@@ -578,9 +578,12 @@ def joplin_facts(run: DayRun) -> Dict[str, Any]:
         out["today_duplicates"] = [t for t, n in Counter(x.lower() for x in top).items() if n > 1]
         open_ids = {t.id for t in (joplin.fetch_tasks() if joplin is not None else [])}
         today_open = {t.lower() for t, ticked in note_items(today) if not ticked}
+        assistant = run.manager.tools.assistant
+        ongoing = {s.id for s in planned if assistant is not None and assistant.kind_of(s) == "ongoing"}
         out["done_but_open"] = [s.title for s in planned if s.status == SpanStatus.DONE
-                                and (s.task_id in open_ids - {t.id for t in joplin.fetch_tasks()
-                                                              if t.parent_note_id in routine_ids}
+                                and ((s.task_id in open_ids - {t.id for t in joplin.fetch_tasks()
+                                                               if t.parent_note_id in routine_ids}
+                                      and s.id not in ongoing)  # done on ongoing is a session: its item stays open
                                      or s.title.lower() in today_open)]
     return out
 
