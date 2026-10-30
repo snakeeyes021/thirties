@@ -88,6 +88,7 @@ NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\
 
 
 MAX_MESSAGE_CHARS = 2000
+AGAIN_RE = re.compile(r"\b(again|another|twice|second (?:session|time|one))\b", re.IGNORECASE)
 FIGURE_IT_OUT_RE = re.compile(r"\b(figure (it|that|them) out|wherever|you (pick|choose|decide)|whenever works|"
                               r"lay (it|them|the day|everything) out|fit (it|them) in)\b", re.I)
 BUILD_PLAN_RE = re.compile(r"\b(lay (it |them |the day |everything )?out|put (down|in)|add|schedule|plan (out )?(the|my) "
@@ -805,6 +806,7 @@ class SlmBrain:
         return actions
 
     def _run_actions(self, actions: List[Action], message: str) -> str:
+        self._message = message
         lines: List[str] = []
         changed = False
         handlers: Dict[str, Callable[[Action], Tuple[str, bool]]] = {
@@ -935,6 +937,8 @@ class SlmBrain:
         task = self._task_for(title)
         if task:
             args["task_id"] = task.id
+        if AGAIN_RE.search(getattr(self, "_message", "")):
+            args["again"] = True  # "upgrades at 7 and again at 9": a second session, not a move
         ok, out = self._run("add_event", args)
         if ok:
             return self._added_reply(out, day, guessed, learned)

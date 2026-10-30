@@ -803,6 +803,16 @@ class AssistantTools:
             span = self.pt._find_span(event)
         except Exception:
             span = None
+        if span is not None and str(event).strip() != span.id and span.source != "calendar":
+            # Named by title while yesterday's copy is still open: which one isn't Python's guess to make (10-28:
+            # "clearing yesterday's check-in" marked today's Email back GitHub skipped).
+            yesterday = self.pt.plan_for(self.pt.day_plan.target_date - timedelta(days=1))
+            older = [s for s in yesterday.spans if s.status == SpanStatus.PLANNED and s.id != span.id
+                     and s.title.strip().lower() == span.title.strip().lower()]
+            if older:
+                raise ToolError(f"{span.title} is on this day's plan ({self.pt.describe(span)} [id {span.id}]) and still "
+                                f"open on the day before ({self.pt.describe(older[0])} [id {older[0].id}, day "
+                                f"{yesterday.target_date.strftime('%b %d')}]). Which one? Use the id (and that day).")
         task = None if span else self._exact_task(str(event))
         if span is None and task is None:
             if rank_tasks(self.s.tasks, str(event), limit=1):

@@ -66,6 +66,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
                      "set time): it keeps its exact time and never slides. false if it's flexible. Leave it out "
                      "when it's obvious (appointments, flights and rides are fixed; chores are flexible).",
             "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
+            "again": "true to plan a second session of something already planned that day (e.g. two dev sessions). "
+                     "To move an item, use update_event instead.",
         },
         "required": ["title", "start"],
     },
@@ -523,6 +525,7 @@ class PlanTools:
         alongside: Any = False,
         push_later: Any = False,
         fixed: Any = None,
+        again: Any = False,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -538,6 +541,15 @@ class PlanTools:
             task_id = same.id if same is not None and not same.id.startswith("media:") else None
         if task_id and cat == SpanCategory.ACTIVITY:
             cat = SpanCategory.TASK
+        if not _as_bool(again) and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            # Adding what's already planned that day makes a ghost copy that nags and rolls over (10-27 to 10-30:
+            # "Email back GitHub" five times, "So Voice! dev" listed twice): moving is update_event.
+            same = [s for s in self.day_plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
+                    and s.source != "calendar"
+                    and ((task_id and s.task_id == task_id) or s.title.strip().lower() == str(title).strip().lower())]
+            if same:
+                raise ToolError(f"{self.describe(same[0])} is already planned [id {same[0].id}]. To move it, use "
+                                "update_event with that id; to plan a second session as well, add it with again=true.")
         self._separate_things(str(title))
         start_dt = self._start(start)
         if end not in (None, ""):

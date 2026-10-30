@@ -71,6 +71,29 @@ class TestOutcomes(ToolsTestCase):
         out = self.t.execute("log_outcome", {"event": "Lunch", "status": "done"})  # hours later: nobody knows when
         self.assertIn("12:00 PM – 12:30 PM, planned", out)
 
+    def test_adding_whats_already_planned_is_a_move_or_a_second_session(self) -> None:
+        # 10-27 to 10-30: re-adding instead of moving left ghost copies that nagged and rolled over
+        self.t.execute("add_event", {"title": "So Voice! dev", "start": "3:30 PM", "duration": "1 hour"})
+        out = self.t.execute("add_event", {"title": "so voice! dev", "start": "5:00 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith("NOT_DONE") and "update_event" in out and "again=true" in out, out)
+        out = self.t.execute("add_event", {"title": "So Voice! dev", "start": "8:00 PM", "duration": "1 hour",
+                                           "again": True})
+        self.assertTrue(out.startswith("Added"), out)
+        self.assertEqual(len([s for s in self.t.day_plan.spans if s.title == "So Voice! dev"]), 2)
+
+    def test_an_outcome_by_title_asks_when_yesterdays_copy_is_open(self) -> None:
+        # 10-28: "clearing yesterday's check-in" marked today's Email back GitHub skipped
+        self.t.execute("add_event", {"title": "Email back GitHub", "start": "7:30 PM", "duration": "30 min",
+                                     "day": "yesterday"})
+        self.t.execute("add_event", {"title": "Email back GitHub", "start": "3:00 PM", "duration": "30 min"})
+        out = self.t.execute("log_outcome", {"event": "Email back GitHub", "status": "skipped"})
+        self.assertTrue(out.startswith("NOT_DONE") and "Which one?" in out, out)
+        old = next(s for s in self.t.plan_for("yesterday").spans if s.title == "Email back GitHub")
+        out = self.t.execute("log_outcome", {"event": old.id, "status": "skipped", "day": "yesterday"})
+        self.assertTrue(out.startswith("[") and "Marked Email back GitHub skipped" in out, out)
+        today = next(s for s in self.t.day_plan.spans if s.title == "Email back GitHub")
+        self.assertEqual(today.status, SpanStatus.PLANNED)
+
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
