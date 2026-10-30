@@ -130,8 +130,8 @@ class TestAsking(DayTimesCase):
                          "☀️ For the record: when did you wake up?")
         self.assertIsNone(due_question(plan, at("16:00"), {"morning:2026-10-15": "x"}, self.history()))
 
-    def test_the_background_service_asks_once_at_medium(self):
-        self.sched.config.assistant.message_level = "medium"
+    def test_the_background_service_asks_once_at_heavy(self):
+        self.sched.config.assistant.message_level = "heavy"  # medium: never (10-30 sim: it read as nagging)
         joplin = MagicMock()
         joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
         sent = []

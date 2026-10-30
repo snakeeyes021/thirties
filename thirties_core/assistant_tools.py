@@ -797,8 +797,9 @@ class AssistantTools(KindTools):
             raise ToolError(f"Which list should '{title}' go on? Lists: {options}.")
         _, note_title, note_id = scored[0]
         said = (self.pt.user_message or "").lower()
-        if any(n["id"] == note_id for n in self._routines()) and self.pt.user_message is not None and not (
-                "routine" in said or note_title.lower() in said):
+        asked = re.search(r"\b(add|put|include|make)\b[^.?!]*\b(to|in|into|part of)\b[^.?!]*\b(routine|"
+                          + re.escape(note_title.lower()) + r")\b", said)  # "add brush teeth to my morning routine"
+        if any(n["id"] == note_id for n in self._routines()) and self.pt.user_message is not None and not asked:
             raise ToolError(f"{note_title} is a routine, and the user didn't ask to change it. To plan a step with it "
                             "today only, give it to put_routine; ask before adding it to the routine itself.")
         if start not in (None, "") and any(n["id"] == note_id for n in self._routines()):
