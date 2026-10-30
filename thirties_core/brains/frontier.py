@@ -430,6 +430,8 @@ RULES
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
+        reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
+                          if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
         if self._claims_change(reply) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
             reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"

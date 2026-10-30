@@ -713,7 +713,8 @@ class LiteRTInferenceEngine:
         }
 
 
-_CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\{.*\})?\s*$")
+_CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*(\{.*\})?\s*\)|(\{.*\}))?\s*;?\s*$")
+_CALL_START_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
@@ -728,14 +729,28 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
     visible: list[str] = []
     calls: list[dict[str, Any]] = []
     # a call written mid-sentence ("...as planned.CALL update_event {...}") still gets its own line
-    raw_reply = re.sub(r"(?<=\S)[ \t]*(CALL\s+[A-Za-z_][A-Za-z0-9_]*\s*\{)", r"\n\1", raw_reply or "")
-    for line in raw_reply.splitlines():
+    raw_reply = re.sub(r"(?<=\S)[ \t]*(CALL\s+[A-Za-z_][A-Za-z0-9_]*\s*[\{(])", r"\n\1", raw_reply or "")
+    lines = raw_reply.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
         stripped = line.strip().strip("`")
+        start = _CALL_START_RE.match(stripped)
+        if start and stripped.count("{") > stripped.count("}"):
+            # arguments over several lines (10-29: a CALL update_event {...} reached the user): read to the close
+            while i < len(lines) and stripped.count("{") > stripped.count("}"):
+                stripped += " " + lines[i].strip().strip("`")
+                i += 1
         m = _CALL_LINE_RE.match(stripped)
         if not m:
+            if start:  # still a call, but not one we can read ("CALL redraw()" went to Telegram, 10-27): never shown
+                calls.append({"id": f"call_{len(calls) + 1}", "name": start.group(1), "arguments": {
+                    "_parse_error": f"could not read {stripped[:120]!r}"}})
+                continue
             visible.append(line)
             continue
-        name, arg_text = m.group(1), m.group(2)
+        name, arg_text = m.group(1), m.group(2) or m.group(3)
         try:
             args = json.loads(arg_text) if arg_text else {}
             if not isinstance(args, dict):
