@@ -393,27 +393,45 @@ class BackgroundService:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
 
     def rollover(self, now: datetime) -> None:
-        """Once a day, after waking: offer to roll yesterday's unfinished items into today."""
+        """Once a day, after waking: the morning reset, the day's routines and anchors put on by themselves (R1),
+        the offer to roll yesterday's unfinished items into today, and a proposal for the free time (A6)."""
+        from thirties_core.week import day_hours
         db = self.scheduler.state_db
         manager = self.manager()
         day = manager.day_plan.target_date
         key = f"rollover_offered:{day.isoformat()}"
         if db.get_sync_meta(key):
             return
-        gen = self.config.general
         wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
-            timedelta(minutes=30 * gen.sleep_end_thirty + 30)
+            timedelta(minutes=30 * day_hours(self.config.general, day).sleep_end + 30)  # that weekday's wake time
         if now < wake:
             return
         db.set_sync_meta(key, "1")
+        set_up = ""
         if manager.tools.assistant is not None:
             started = manager.tools.assistant.start_the_day()
             if started:
                 logger.info("Morning: %s.", started)
+            with manager.turn_lock:
+                set_up = manager.tools.assistant.routines.set_up_day(manager.day_plan)
         text = manager.execute_tool("rollover_proposal", {})
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
+            text = ""
+        if set_up or text:
+            self.send("☀️ Good morning! " + "\n\n".join(t for t in (set_up, text) if t), "rollover", now=now)
+        self.propose_the_day(now)
+
+    def propose_the_day(self, now: datetime) -> None:
+        """After the morning message: one short proposal for the free time (day_proposal.py)."""
+        from thirties_core.day_proposal import morning_proposal
+        manager = self.manager()
+        try:
+            text, stored = morning_proposal(manager)
+        except Exception as e:
+            logger.warning("The morning proposal failed: %s", e)
             return
-        self.send("☀️ Good morning! " + text, "rollover", now=now)
+        if text:
+            self.send(text, "proposal", now=now, to_conversation=not stored)
 
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
