@@ -1908,16 +1908,18 @@ class SlmBrain(ParityActions, TiredDay):
         return max(hits, key=len) if hits else None
 
     def _left_today(self) -> str:
-        """What's left today: the rest of the plan (what's past and not reported, then what's ahead), and
+        """What's left today: what's past and not reported (first, as everywhere: C2), then what's ahead, and
         what's on today's list (the Today note) with no time yet."""
-        from thirties_core.clock import unmarked_lines
+        from thirties_core.messages import MissedTracker, missed_block, missed_for
         from thirties_core.today import note_items
         now = self._now()
         plan = self.tools.plan_for(None) if self._is_today() else self.tools.day_plan
         flexible = [s for s in plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
                     and s.status == SpanStatus.PLANNED and not s.tentative]
-        behind = [s for s in flexible if s.end_dt <= now]
-        ahead = sorted((s for s in flexible if s.end_dt > now), key=lambda s: s.start_dt)
+        behind = missed_for(self.tools, now) if plan is self.tools.day_plan else []
+        if behind:
+            MissedTracker(self.tools._state_db).mark(now, behind)
+        ahead = sorted((s for s in flexible if s.end_dt > now and s not in behind), key=lambda s: s.start_dt)
         planned = {s.title.lower() for s in flexible}
         assistant = getattr(self.tools, "assistant", None)
         note = assistant._today_note() if assistant else None
@@ -1928,9 +1930,9 @@ class SlmBrain(ParityActions, TiredDay):
             lines += [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
         if listed:
             lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
-        if behind:  # at the bottom, by block, no times
-            lines += ["Not marked yet:"] + unmarked_lines(behind)
-        return "\n".join(lines) or "Nothing left for today: the plan and today's list are clear."
+        parts = [missed_block(behind)] if behind else []  # first: one per line, no times, not the current block
+        parts += ["\n".join(lines)] if lines else []
+        return "\n\n".join(parts) or "Nothing left for today: the plan and today's list are clear."
 
     def _schedule_answer(self, day: Optional[str], wording: str) -> str:
         """A clean, line-per-item view of a day (or part of it), without sleep or ids."""
@@ -1952,6 +1954,15 @@ class SlmBrain(ParityActions, TiredDay):
                     if part in ("afternoon", "morning"):
                         start = min(start, self._window_for(part)[0])
                     break
+            if label == "today" and not whole_day and self._is_today() and plan is saved:
+                # The day being lived reads from now on: where they are, what's not marked yet, the rest (A5, C2)
+                from thirties_core.messages import MissedTracker, missed_for, render_schedule
+                now = self._now()
+                if plan.day_start <= now < plan.day_end:
+                    missed = missed_for(self.tools, now)
+                    if missed:
+                        MissedTracker(self.tools._state_db).mark(now, missed)
+                    return render_schedule(plan, now, missed=missed)
             items = [s for s in plan.spans_overlapping(start, end, include_tentative=True)
                      if s.category != SpanCategory.SLEEP]
             if not items:

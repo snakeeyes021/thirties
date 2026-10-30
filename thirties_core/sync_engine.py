@@ -270,6 +270,7 @@ class SyncEngine:
     def _stores(self) -> Dict[str, Any]:
         from thirties_core.calendar_outcomes import CalendarOutcomes
         from thirties_core.sharing import SharingRules
+        from thirties_core.contextual import ContextualFlags
         from thirties_core.facts import SpanFacts
         from thirties_core.item_facts import LastingFacts
         from thirties_core.lists import ListCatalog
@@ -302,6 +303,7 @@ class SyncEngine:
             "routines": RoutineBook(self.state_db),
             "outcome_context": OutcomeContextStore(self.state_db),
             "memory_review": MemoryReview(self.state_db),
+            "contextual_flags": ContextualFlags(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

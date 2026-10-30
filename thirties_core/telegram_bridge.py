@@ -9,7 +9,9 @@ Uses zero external dependencies (pure Python standard library urllib.request).
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import re
 import logging
 import signal
 import sys
@@ -20,7 +22,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from thirties_core.brains import BRAINS
 from thirties_core.astronomy import get_diurnal_date
@@ -38,13 +40,38 @@ from thirties_core.sync_engine import SyncEngine
 logger = logging.getLogger(__name__)
 
 
+_CODE_RE = re.compile(r"(`[^`\n]+`)")
+_BOLD2_RE = re.compile(r"\*\*(\S(?:.*?\S)?)\*\*")
+_BOLD_RE = re.compile(r"(?<![\w*])\*(\S(?:[^*\n]*?\S)?)\*(?![\w*])")
+_ITALIC_RE = re.compile(r"(?<![\w_])_(\S(?:[^_\n]*?\S)?)_(?![\w_])")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+
+
+def telegram_html(text: str) -> str:
+    """Our light markdown (*bold*, **bold**, _italic_, `code`, [links](…)) as Telegram HTML, with everything else
+    escaped. Telegram's own Markdown read the underscore in "verr_voice" as italics (T3, 10-28 13:02); here an
+    underscore inside a word is just a character, as in CommonMark, and <, > and & can't break the message."""
+    out = []
+    for part in _CODE_RE.split(text or ""):
+        if len(part) > 2 and part.startswith("`") and part.endswith("`"):
+            out.append("<code>" + html.escape(part[1:-1], quote=False) + "</code>")
+            continue
+        s = html.escape(part, quote=False)
+        s = _LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', s)
+        s = _BOLD2_RE.sub(r"<b>\1</b>", s)
+        s = _BOLD_RE.sub(r"<b>\1</b>", s)
+        s = _ITALIC_RE.sub(r"<i>\1</i>", s)
+        out.append(s)
+    return "".join(out)
+
+
 class TelegramClient:
     """Minimal, dependency-free Telegram Bot API client using urllib.request."""
 
     def __init__(self, bot_token: str, base_url: str = "https://api.telegram.org") -> None:
         self.bot_token = bot_token.strip()
         self.api_url = f"{base_url.rstrip('/')}/bot{self.bot_token}"
-        self.undelivered: List[tuple] = []  # (chat_id, text, when) that never got through
+        self.undelivered: List[tuple] = []  # (chat_id, text, when, expires, parse_mode) that never got through
 
     def _request(self, method: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
         url = f"{self.api_url}/{method}"
@@ -101,23 +128,28 @@ class TelegramClient:
         chat_id: int | str,
         text: str,
         parse_mode: Optional[str] = "Markdown",
+        expires: Optional[datetime] = None,
     ) -> bool:
-        """Send a text message, splitting into <= 4000 char chunks and retrying plain text on Markdown syntax errors.
-        A send the network drops is tried again; one that still fails is kept in `undelivered`, and the bridge
-        sends it once Telegram answers again (a reply reached the app but not the phone, 10-24 9:18)."""
+        """Send a text message, splitting into <= 4000 char chunks. "Markdown" means our light markdown, sent as
+        Telegram HTML (telegram_html); if Telegram can't read that, the text goes plain. A send the network drops is
+        tried again; one that still fails is kept in `undelivered`, and the bridge sends it once Telegram answers
+        again (a reply reached the app but not the phone, 10-24 9:18), unless it ``expires`` first."""
         success = True
         for chunk in self._chunk_text(text, max_len=4000):
             sent = self._send_chunk(chat_id, chunk, parse_mode)
             if sent is False:
                 logger.error("Telegram never got a message (kept to send later): %r", chunk[:120])
-                self.undelivered.append((chat_id, chunk, time.time()))
+                self.undelivered.append((chat_id, chunk, time.time(),
+                                         expires.timestamp() if expires is not None else None, parse_mode))
             success = success and bool(sent)
         return success
 
     def _send_chunk(self, chat_id: int | str, chunk: str, parse_mode: Optional[str]) -> Optional[bool]:
         """True when sent; False when the network kept failing (worth sending later); None when refused."""
         payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
-        if parse_mode:
+        if parse_mode == "Markdown":
+            payload["text"], payload["parse_mode"] = telegram_html(chunk), "HTML"
+        elif parse_mode:
             payload["parse_mode"] = parse_mode
         for attempt, wait in enumerate((*self.RETRY_WAITS, None)):
             try:
@@ -125,9 +157,10 @@ class TelegramClient:
                     return True
                 raise urllib.error.HTTPError(url="", code=400, msg="Telegram API error", hdrs={}, fp=None)  # type: ignore
             except urllib.error.HTTPError as e:
-                if e.code == 400 and "parse_mode" in payload:  # Markdown Telegram can't read: send it plain
-                    logger.debug("Failed sending markdown message (%s), retrying plain text", e)
+                if e.code == 400 and "parse_mode" in payload:  # formatting Telegram can't read: send it plain
+                    logger.debug("Failed sending formatted message (%s), retrying plain text", e)
                     payload.pop("parse_mode")
+                    payload["text"] = chunk
                     continue
                 if e.code < 500 and e.code != 429:
                     logger.error("Telegram refused a message: %s", e)
@@ -141,12 +174,16 @@ class TelegramClient:
         return False
 
     def flush_undelivered(self) -> None:
-        """Send what earlier failed, oldest first, marked as late; stop at the first that fails again. Anything
-        older than a few hours is dropped: by then it's stale (and the app's chat has it)."""
-        self.undelivered = [u for u in self.undelivered if time.time() - u[2] < self.UNDELIVERED_HOURS * 3600]
+        """Send what earlier failed, oldest first, marked as late; stop at the first that fails again. A notice
+        past its moment is dropped, never sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower", 33 minutes
+        late), and anything older than a few hours is dropped too (the app's chat has it)."""
+        now = time.time()
+        self.undelivered = [u for u in self.undelivered if now - u[2] < self.UNDELIVERED_HOURS * 3600
+                            and (len(u) < 4 or u[3] is None or now < u[3])]
         while self.undelivered:
-            chat_id, chunk, _ = self.undelivered[0]
-            if self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, None) is False:
+            chat_id, chunk = self.undelivered[0][:2]
+            mode = self.undelivered[0][4] if len(self.undelivered[0]) > 4 else None
+            if self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode) is False:
                 return
             self.undelivered.pop(0)
 
@@ -302,8 +339,9 @@ class ThirtiesTelegramBridge:
                 active_notes=self.active_notes,
             )
 
-    def handle_message(self, chat_id: int, text: str) -> None:
-        """Process incoming message from a chat."""
+    def handle_message(self, chat_id: int, text: str, earlier: Sequence[str] = ()) -> None:
+        """Process incoming message from a chat. ``earlier`` are messages of the same burst that came before it:
+        they're answered together, in one reply (A8)."""
         text = text.strip()
 
         if not self.allowed_chat_ids:
@@ -354,7 +392,12 @@ class ThirtiesTelegramBridge:
         # Natural Conversation with Gemini
         self.client.send_chat_action(chat_id, "typing")
         try:
-            reply = self.conv_manager.send_user_message(text, via="telegram")
+            manager = self.conv_manager
+            for before in earlier:
+                manager.enqueue(before.strip(), via="telegram")
+            reply = manager.send_user_message(text, via="telegram")
+            if not reply:
+                return  # it went into a turn that was already answered (one reply to a burst)
 
             # Auto-push sync if plan changed
             if self.config.sync.enabled and self.config.sync.auto_push_on_change:
@@ -393,6 +436,7 @@ class ThirtiesTelegramBridge:
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
     def _cmd_now(self, chat_id: int) -> None:
+        from thirties_core.messages import missed_for, with_missed
         now = self._get_current_time()
         plan = self.conv_manager.day_plan
         curr = self._get_current_block()
@@ -416,26 +460,24 @@ class ThirtiesTelegramBridge:
             until = int((sleep.start_dt - now).total_seconds() // 60)
             sleep_str = f"\n🌙 *Until sleep*: {format_duration(until)} (sleep at {format_clock(sleep.start_dt)})"
 
-        msg = (
+        msg = with_missed(
             f"🕒 *Now*: {format_clock(now)} (thirty #{curr.number:02d}, {format_clock(curr.start_dt)} – {format_clock(curr.end_dt)})\n"
             f"📝 *Doing*: {doing}\n"
             f"⏳ *Left in this thirty*: {rem_mins} minutes"
-            f"{sleep_str}"
-        )
+            f"{sleep_str}", missed_for(self.conv_manager.tools, now))  # what's not marked yet, right under it
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
     def _cmd_day(self, chat_id: int) -> None:
+        """The whole day, laid out the same way as the assistant's schedule replies (messages.render_schedule):
+        the phone and the app never show the day two different ways (10-24 12:03)."""
+        from thirties_core.messages import missed_for, render_schedule
         plan = self.conv_manager.day_plan
         now = self._get_current_time()
-        lines = [f"📅 *Schedule for {self.current_date.strftime('%A, %b %d')}*\n"]
-        spans = plan.spans_in_view()
-        if not spans:
-            lines.append("Nothing scheduled.")
-        for span in spans:
-            marker = "👉 " if span.covers(now) else "• "
-            note = " (unconfirmed)" if span.tentative else " (not yours)" if span.shown_only else ""
-            lines.append(f"{marker}{format_clock(span.start_dt)} – {format_clock(span.end_dt)}: {span.title}{note}")
-        self.client.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+        live = plan.day_start <= now < plan.day_end
+        text = render_schedule(plan, now if live else None, whole_day=True,
+                               missed=missed_for(self.conv_manager.tools, now) if live else [], label="today")
+        title = f"📅 *Schedule for {plan.target_date.strftime('%A, %b %d')}*\n\n"
+        self.client.send_message(chat_id, title + text, parse_mode="Markdown")
 
     def _cmd_sync(self, chat_id: int) -> None:
         self.client.send_chat_action(chat_id, "typing")
@@ -474,10 +516,44 @@ class ThirtiesTelegramBridge:
         )
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
-    def broadcast(self, text: str) -> None:
-        """Send a message to the paired phone(s)."""
+    def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown") -> None:
+        """Send a message to the paired phone(s). A notice that ``expires`` is dropped if it can't go before then."""
         for chat_id in list(self.allowed_chat_ids):
-            self.client.send_message(chat_id, text, parse_mode="Markdown")
+            self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires)
+
+    def _rest_of_burst(self, offset: Optional[int]) -> tuple:
+        """After a message arrives, wait for a few seconds of quiet: quick messages sent one after another are
+        one burst, answered once (A8, 10-26 10:17–10:18). Returns (more updates, the new offset)."""
+        from thirties_core.turns import BURST_MAX_WAIT, BURST_QUIET
+        more: List[Dict[str, Any]] = []
+        deadline = time.monotonic() + BURST_MAX_WAIT
+        while self.running and time.monotonic() < deadline:
+            got = self.client.get_updates(offset=offset, timeout=int(BURST_QUIET))
+            if not got:
+                break
+            for u in got:
+                if u.get("update_id") is not None:
+                    offset = u["update_id"] + 1
+            more += got
+        return more, offset
+
+    def handle_updates(self, updates: List[Dict[str, Any]]) -> None:
+        """Answer a batch of updates: commands one by one, and each chat's plain messages as one burst."""
+        bursts: Dict[int, List[str]] = {}
+        for u in updates:
+            msg = u.get("message") or u.get("edited_message")
+            if not msg:
+                continue
+            chat_id = msg.get("chat", {}).get("id")
+            text = msg.get("text", "")
+            if chat_id is None or not text:
+                continue
+            if text.strip().startswith("/"):
+                self.handle_message(chat_id, text)
+            else:
+                bursts.setdefault(chat_id, []).append(text)
+        for chat_id, texts in bursts.items():
+            self.handle_message(chat_id, texts[-1], earlier=texts[:-1])
 
     def poll_forever(self) -> None:
         """Answer messages until stopped. Another computer polling the same bot makes Telegram refuse
@@ -493,13 +569,10 @@ class ThirtiesTelegramBridge:
                     update_id = u.get("update_id")
                     if update_id is not None:
                         offset = update_id + 1
-                    msg = u.get("message") or u.get("edited_message")
-                    if not msg:
-                        continue
-                    chat_id = msg.get("chat", {}).get("id")
-                    text = msg.get("text", "")
-                    if chat_id is not None and text:
-                        self.handle_message(chat_id, text)
+                if any(not str(((u.get("message") or {}).get("text") or "/")).startswith("/") for u in updates):
+                    more, offset = self._rest_of_burst(offset)
+                    updates += more
+                self.handle_updates(updates)
             except urllib.error.HTTPError as e:
                 if e.code == 409:
                     logger.warning("Another computer is running the Telegram bridge for this bot; backing off.")

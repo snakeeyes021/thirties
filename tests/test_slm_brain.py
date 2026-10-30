@@ -805,9 +805,11 @@ class TestParityWithGemini(ParityTestCase):
             self.sched.state_db.upsert_span(EventSpan(f"y{i}", title, start, start + timedelta(minutes=5),
                                                       SpanCategory.TASK))
         set_debug_time(at("08:10"))
-        out = self.say("put the morning routine on please", {"type": "routine", "title": "morning routine"})
-        self.assertIn("9:00 AM: Feed kitties, Caffeinate, Water bottle, Breakfast; 3:00 PM: Throne, Shower, PT, "
-                      "Brush teeth.", out)
+        self.say("put the morning routine on please", {"type": "routine", "title": "morning routine"})
+        # the morning set-up (routines.py) may already have put it on: either way, it's on the way it went last time
+        placed = {s.title: s.start_dt for s in self.m.day_plan.spans if s.title in layout}
+        from thirties_core.clock import thirty_of
+        self.assertEqual({t: thirty_of(d).strftime("%H:%M") for t, d in placed.items()}, layout)
         set_debug_time(at("10:10"))  # the morning's thirty has passed: after work on a work day (B3's fallback)
         note = self.brain._routine_note("morning")
         parts = self.brain._routine_parts(note, self.STEPS, None)

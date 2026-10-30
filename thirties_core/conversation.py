@@ -9,8 +9,8 @@ developer slash commands that never reach a model.
 from __future__ import annotations
 
 import logging
-import threading
-from datetime import timedelta
+import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.clock import EXACT_ASKED_RE, real_times, to_thirties, trim_meridiems
@@ -24,6 +24,8 @@ from thirties_core.memory import Conversation
 from thirties_core.models import DayPlan, TaskItem
 from thirties_core.plan_tools import PlanTools
 from thirties_core.scheduler import DeterministicScheduler
+from thirties_core.turns import (LOST_RETRY_MINUTES, LOST_GIVE_UP_HOURS, LOST_TURN_REPLY, BrainUnavailable, Incoming,
+                                 RetryingEngine, gate_for, mirror_turn)
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +51,13 @@ class ConversationManager:
         conversation_id: Optional[str] = None,
     ) -> None:
         self.joplin_engine = joplin_engine
-        self.turn_lock = threading.RLock()  # one turn at a time: Telegram, the background service's messages
-        self._backlog_stamp = None  # when Joplin's data was last read (its file's mtime)
+        # One turn at a time per day's conversation, across every manager in this process (the window's and the
+        # background service's, which runs Telegram), and an inbox for messages that arrive meanwhile (turns.py).
+        self.gate = gate_for(getattr(scheduler.state_db, "db_path", None) if scheduler else None,
+                             day_plan.target_date.isoformat())
+        self.turn_lock = self.gate.lock
+        self._backlog_stamp = None
+        inference_engine = RetryingEngine.wrap(inference_engine)  # timeouts are retried, then reported (T1)  # when Joplin's data was last read (its file's mtime)
         if active_notes is None:
             active_notes = self.joplin_engine.fetch_active_notes() if self.joplin_engine else []
         services = Services.for_db(scheduler.state_db, tasks, joplin_engine) if scheduler else None
@@ -63,6 +70,8 @@ class ConversationManager:
             ("slm" if type(brain).__name__ == "SlmBrain" else "frontier")
         self.brain: Brain = brain or make_brain(config, self.tools, self._brain_args[1], tasks=tasks,
                                                 active_notes=active_notes, choice=self.brain_name)
+        if brain is not None and getattr(brain, "inference_engine", None) is not None:
+            brain.inference_engine = RetryingEngine.wrap(brain.inference_engine)
         self.conversation: Optional[Conversation] = None
         self._followed_latest: Optional[str] = None
         if services:
@@ -164,9 +173,10 @@ class ConversationManager:
                 if via:
                     m["via"] = via
 
-    def history(self) -> List[Dict[str, str]]:
-        """The visible transcript of the current conversation: user and assistant text only."""
-        return [{"role": m["role"], "content": m.get("content", "")}
+    def history(self, times: bool = False) -> List[Dict[str, str]]:
+        """The visible transcript of the current conversation: user and assistant text only. With ``times``, each
+        message also has "at" (when it arrived or was said; "" for old messages) for the app's chat."""
+        return [{"role": m["role"], "content": m.get("content", ""), **({"at": m.get("at", "")} if times else {})}
                 for m in self.brain.messages
                 if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
                 and not m.get("hidden") and not str(m.get("content", "")).startswith("[System check")]
@@ -253,6 +263,7 @@ class ConversationManager:
         if kind:
             message["kind"] = kind
         with self.turn_lock:
+            self._catch_up()
             self.brain.messages.append(message)
             self._stamp(via="background")
             self._save()
@@ -293,91 +304,268 @@ class ConversationManager:
         """Run a schedule tool directly, bypassing the model."""
         return self.tools.execute(name, arguments)
 
-    def send_user_message(self, user_text: str, via: str = "app") -> str:
-        """Handle one user turn: developer slash commands here, everything else via the brain. `via` is the
-        channel ("app", "telegram"), stored with the turn's messages."""
-        from thirties_core.joplin_writeback import current_turn
-        with self.turn_lock:
-            token = current_turn.set(f"[{via}] {user_text}")  # each Joplin write is logged with its cause
-            try:
-                return self._send_user_message(user_text, via)
-            finally:
-                current_turn.reset(token)
-                self.tools.user_message = None  # a drag in the Day page later isn't judged by this message
+    def _now_iso(self) -> str:
+        return get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")
 
-    def _send_user_message(self, user_text: str, via: str) -> str:
-        self.tools.user_message = user_text
+    def _catch_up(self) -> None:
+        """Another manager (the window's, or the background service's for Telegram) may have added to this
+        conversation since this one last looked: continue from the stored copy, never write over it."""
+        if self._store is None:
+            return
+        if self.conversation is None:  # the day had none when this one started; another client may have begun it
+            latest = self._store.latest_for_day(self.day_plan.target_date)
+            if latest is not None:
+                self._load(latest)
+            return
+        stored = self._store.get(self.conversation.id)
+        if stored is not None and stored.updated_at > self.conversation.updated_at:
+            self._load(stored)
+
+    def enqueue(self, user_text: str, via: str = "app") -> Incoming:
+        """Add a message to the day's inbox without taking a turn: the next turn answers it with the rest (the
+        Telegram bridge uses this for a burst that arrived together)."""
+        return self.gate.enqueue(user_text, via, self._now_iso())
+
+    def send_user_message(self, user_text: str, via: str = "app", quiet: float = 0.0) -> str:
+        """Handle one user message: developer slash commands here, everything else via the brain. `via` is the
+        channel ("app", "telegram"), stored with the turn's messages.
+
+        Messages that arrive while a turn is under way are answered together by the next turn, so a burst gets
+        one reply (A8); with ``quiet``, this also waits that many seconds of quiet before starting. A caller whose
+        message went into another caller's turn gets "" back: the reply is already in the conversation (and was
+        sent where that turn came from)."""
+        if user_text.strip().startswith("/"):
+            with self.turn_lock:
+                self._catch_up()
+                return self._command(user_text, via)
+        mine = self.enqueue(user_text, via)
+        self.gate.wait_quiet(quiet)
+        with self.turn_lock:
+            if mine.taken:
+                return ""
+            batch = self.gate.take() or [mine]
+            reply, _ = self._turn(batch, via)
+            return reply
+
+    def _turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
+        from thirties_core.joplin_writeback import current_turn
+        token = current_turn.set(f"[{via}] " + " / ".join(i.text for i in batch))  # each Joplin write's cause
+        try:
+            return self._run_turn(batch, via, attempts)
+        finally:
+            current_turn.reset(token)
+            self.tools.user_message = None  # a drag in the Day page later isn't judged by this message
+
+    def _command(self, user_text: str, via: str) -> str:
+        """Developer / runtime simulation slash commands: never reach a model."""
+        self._stamp()
+        clean_text = user_text.strip()
+        cmd = clean_text.lower()
+        if cmd == "/night":
+            set_debug_time("22:30")
+            reply = "Simulated time set to 10:30 PM (Nighttime Mode). The Solar Arc has shifted to the Nocturnal Lunar Arc."
+        elif cmd == "/midnight":
+            set_debug_time("00:00")
+            reply = "Simulated time set to 12:00 AM (Midnight Mode)."
+        elif cmd in ("/day", "/midday"):
+            day_sec = (self.day_plan.sunset - self.day_plan.sunrise).total_seconds()
+            midday_dt = self.day_plan.sunrise + timedelta(seconds=day_sec / 2.0)
+            set_debug_time(midday_dt.strftime("%H:%M"))
+            reply = f"Simulated time set to daytime solar midday ({midday_dt.strftime('%I:%M %p').lstrip('0')})."
+        elif cmd == "/noon":
+            set_debug_time("12:00")
+            reply = "Simulated time set to 12:00 PM (Clock Noon Mode)."
+        elif cmd in ("/morning", "/sunrise"):
+            set_debug_time(self.day_plan.sunrise.strftime("%H:%M"))
+            reply = f"Simulated time set to sunrise ({self.day_plan.sunrise.strftime('%I:%M %p').lstrip('0')})."
+        elif cmd in ("/reset", "/now"):
+            set_debug_time(None)
+            reply = "Simulated time cleared. Real-world system clock restored."
+        elif cmd.split()[0] == "/brain":
+            arg = clean_text.split(maxsplit=1)[1] if len(clean_text.split()) > 1 else ""
+            if not arg:
+                reply = (f"Using {BRAINS[self.brain_name]}. Switch with /brain gemini or /brain gemma.")
+            else:
+                try:
+                    reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."
+                except ValueError as e:
+                    reply = str(e)
+        elif cmd.startswith("/time"):
+            val = clean_text[5:].strip()
+            set_debug_time(val)
+            reply = f"Simulated time set to {val}."
+        else:
+            reply = f"Unknown command: {clean_text}. Available: /brain, /night, /midnight, /day, /midday, /noon, /sunrise, /reset, /time HH:MM"
+        self.messages.append({"role": "user", "content": user_text})
+        self.messages.append({"role": "assistant", "content": reply})
+        self._stamp(via)
+        self._save()
+        return reply
+
+    def _run_turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
+        """One turn for everything in ``batch``. Returns (reply, answered); answered is False when the model
+        couldn't be reached and the messages were kept for later."""
+        self._catch_up()
+        merged = "\n".join(i.text for i in batch)
+        self.tools.user_message = merged
+        self.tools.shown_schedule = None
         self._stamp()
         self.reload_backlog()  # anything older is from before this turn
         if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
             self.scheduler.state_db.set_sync_meta("last_user_message_at",
                                                   get_current_time(self.day_plan.day_start.tzinfo).isoformat())
-        # Developer / Runtime Simulation Slash Commands
-        clean_text = user_text.strip()
-        if clean_text.startswith("/"):
-            cmd = clean_text.lower()
-            if cmd == "/night":
-                set_debug_time("22:30")
-                reply = "Simulated time set to 10:30 PM (Nighttime Mode). The Solar Arc has shifted to the Nocturnal Lunar Arc."
-            elif cmd == "/midnight":
-                set_debug_time("00:00")
-                reply = "Simulated time set to 12:00 AM (Midnight Mode)."
-            elif cmd in ("/day", "/midday"):
-                day_sec = (self.day_plan.sunset - self.day_plan.sunrise).total_seconds()
-                midday_dt = self.day_plan.sunrise + timedelta(seconds=day_sec / 2.0)
-                set_debug_time(midday_dt.strftime("%H:%M"))
-                reply = f"Simulated time set to daytime solar midday ({midday_dt.strftime('%I:%M %p').lstrip('0')})."
-            elif cmd == "/noon":
-                set_debug_time("12:00")
-                reply = "Simulated time set to 12:00 PM (Clock Noon Mode)."
-            elif cmd in ("/morning", "/sunrise"):
-                set_debug_time(self.day_plan.sunrise.strftime("%H:%M"))
-                reply = f"Simulated time set to sunrise ({self.day_plan.sunrise.strftime('%I:%M %p').lstrip('0')})."
-            elif cmd in ("/reset", "/now"):
-                set_debug_time(None)
-                reply = "Simulated time cleared. Real-world system clock restored."
-            elif cmd.split()[0] == "/brain":
-                arg = clean_text.split(maxsplit=1)[1] if len(clean_text.split()) > 1 else ""
-                if not arg:
-                    reply = (f"Using {BRAINS[self.brain_name]}. Switch with /brain gemini or /brain gemma.")
-                else:
-                    try:
-                        reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."
-                    except ValueError as e:
-                        reply = str(e)
-            elif cmd.startswith("/time"):
-                val = clean_text[5:].strip()
-                set_debug_time(val)
-                reply = f"Simulated time set to {val}."
-            else:
-                reply = f"Unknown command: {clean_text}. Available: /brain, /night, /midnight, /day, /midday, /noon, /sunrise, /reset, /time HH:MM"
-
-            self.messages.append({"role": "user", "content": user_text})
-            self.messages.append({"role": "assistant", "content": reply})
-            self._stamp(via)
-            self._save()
-            return reply
-
-
+        for m in self.brain.messages:  # a message kept from a lost turn is answered by this one
+            for key in ("unanswered", "retry_after", "attempts"):
+                m.pop(key, None)
         if self.tools.assistant is not None:  # the day's routines and anchors are on before the model looks (R1)
             try:
                 self.tools.assistant.routines.set_up_current()
             except Exception as e:
                 logger.warning("Setting up the day failed: %s", e)
-        reply = self.brain.respond(user_text)
+        before = len(self.brain.messages)
+        changes_before = self.tools.successful_changes
+        try:
+            if self.brain_name == "slm":  # its parse reads one message: give it the burst as one
+                reply = self.brain.respond(merged)
+            else:  # the model sees each message as the user sent it, and answers them together
+                for i in batch[:-1]:
+                    self.brain.messages.append({"role": "user", "content": i.text})
+                reply = self.brain.respond(batch[-1].text)
+        except BrainUnavailable as e:
+            logger.warning("The model couldn't be reached: %s", e)
+            return self._lost(batch, before, changes_before, e, via, attempts), False
+        self._stamp_arrivals(batch, before)
+
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
+        final = reply
+        if self.tools.shown_schedule:
+            from thirties_core.messages import place_schedule
+            final = place_schedule(final, self.tools.shown_schedule)  # Python's layout, whatever the model made
         said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
-        keep = real_times(*said, user_text, spans=self.day_plan.spans,  # real item times, the user's, and now
+        keep = real_times(*said, merged, spans=self.day_plan.spans,  # real item times, the user's, and now
                           now=get_current_time(self.day_plan.day_start.tzinfo))
-        shown = reply if EXACT_ASKED_RE.search(user_text) else to_thirties(reply, keep)  # else blocks
-        trimmed = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
-                                 if self.day_plan.target_date == self.tools.today() else None)
-        if trimmed != reply:
+        shown = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep)  # else blocks
+        final = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
+                               if self.day_plan.target_date == self.tools.today() else None)
+        final = self._no_repeat_checkins(final)
+        if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":
                     if m.get("content") == reply:
-                        m["content"] = trimmed
+                        m["content"] = final
                     break
         self._stamp(via)
         self._save()
-        return trimmed
+        mirror_turn(batch, final, via)
+        return final, True
+
+    def _stamp_arrivals(self, batch: List[Incoming], before: int) -> None:
+        """Each user message is stamped when it arrived, not when the reply was saved (soak friction 2)."""
+        users = [m for m in self.brain.messages[before:] if m.get("role") == "user" and "at" not in m
+                 and not str(m.get("content", "")).startswith("[System check")]
+        from thirties_core import build
+        if self.brain_name == "slm" and users:
+            users[0]["at"], users[0]["via"], users[0]["build"] = batch[0].at, batch[0].via, build.BUILD
+            return
+        for item, m in zip(batch, users):
+            if item.at:
+                m["at"], m["via"], m["build"] = item.at, item.via, build.BUILD
+
+    def _no_repeat_checkins(self, reply: str) -> str:
+        """Don't ask again about missed items the user was already shown or asked about (C5), and count what
+        this reply shows or asks as shown."""
+        if self.scheduler is None or not self.tools.is_current(self.day_plan):
+            return reply
+        from thirties_core.messages import MISSED_HEADING, MissedTracker, drop_repeat_checkins, missed_for
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        if not (self.day_plan.day_start <= now < self.day_plan.day_end):
+            return reply
+        missed = missed_for(self.tools, now)
+        if not missed:
+            return reply
+        tracker = MissedTracker(self.scheduler.state_db)
+        out, asked = drop_repeat_checkins(reply, missed, tracker.titles_shown(now))
+        listed = [s for s in missed if MISSED_HEADING in out and f"- {s.title}" in out]
+        tracker.mark(now, listed, asked)
+        return out
+
+    def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
+              attempts: int) -> str:
+        """The model couldn't be reached. If something was already changed this turn, say plainly what; otherwise
+        keep the user's messages, marked unanswered, so they're answered later (never silently dropped, T1)."""
+        if self.tools.successful_changes > changes_before:
+            from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
+            done = [str(m.get("content") or "").splitlines()[0] for m in self.brain.messages[before:]
+                    if m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
+                    and str(m.get("content") or "").strip() and not str(m.get("content")).startswith(NOT_DONE)]
+            done = [re.sub(r"\s*\[?\bid[= ][0-9a-z:_-]+\]?", "", d).strip() for d in done]
+            for m in self.brain.messages[before:]:
+                if m.get("role") == "assistant":
+                    m["hidden"] = True
+            reply = ("The connection to the model dropped partway through, so I couldn't finish my reply. "
+                     "This went through:\n" + "\n".join(f"- {d}" for d in done if d))
+            self.brain.messages.append({"role": "assistant", "content": reply, "display_only": True})
+            self._stamp_arrivals(batch, before)
+            self._stamp(via)
+            self._save()
+            return reply
+        del self.brain.messages[before:]
+        attempts += 1
+        wait = LOST_RETRY_MINUTES[min(attempts - 1, len(LOST_RETRY_MINUTES) - 1)]
+        retry_after = (get_current_time(self.day_plan.day_start.tzinfo) + timedelta(minutes=wait)).isoformat()
+        for i in batch:
+            self.brain.messages.append({"role": "user", "content": i.text, "at": i.at, "via": i.via,
+                                        "unanswered": True, "attempts": attempts, "retry_after": retry_after})
+        note = LOST_TURN_REPLY.format(why=error.why)
+        if attempts == 1:  # said once; a retry that fails again stays quiet
+            self.brain.messages.append({"role": "assistant", "content": note, "display_only": True,
+                                        "kind": "status"})
+        self._stamp(via)
+        self._save()
+        return note
+
+    def unanswered(self) -> List[Dict[str, Any]]:
+        """The user's messages at the end of the conversation that a lost turn kept for later."""
+        out = []
+        for m in reversed(self.brain.messages[1:]):
+            if m.get("role") == "assistant" and m.get("kind") == "status":
+                continue
+            if m.get("role") == "user" and m.get("unanswered"):
+                out.append(m)
+                continue
+            break
+        return list(reversed(out))
+
+    def answer_unanswered(self, now: Optional[datetime] = None) -> Optional[str]:
+        """Try a lost turn again once its wait is over (2, 5, 10, 20, then every 30 minutes; not after six hours).
+        Returns the reply when it got through, for the caller to deliver; None otherwise."""
+        with self.turn_lock:
+            self._catch_up()
+            waiting = self.unanswered()
+            if not waiting:
+                return None
+            now = now or get_current_time(self.day_plan.day_start.tzinfo)
+            first = waiting[0]
+            try:
+                if first.get("retry_after") and now < datetime.fromisoformat(first["retry_after"]):
+                    return None
+                if first.get("at") and now - datetime.fromisoformat(first["at"]) > timedelta(hours=LOST_GIVE_UP_HOURS):
+                    for m in waiting:  # too old to answer now; it stays in the conversation as said
+                        for key in ("unanswered", "retry_after"):
+                            m.pop(key, None)
+                    self._save()
+                    return None
+            except (TypeError, ValueError):
+                pass
+            attempts = max(int(m.get("attempts") or 1) for m in waiting)
+            start = self.brain.messages.index(first)
+            kept = [m for m in self.brain.messages[start:] if m.get("kind") == "status"]
+            del self.brain.messages[start:]
+            batch = [Incoming(m["content"], m.get("via", "app"), m.get("at", "")) for m in waiting]
+            reply, answered = self._turn(batch, "retry", attempts)
+            if kept:  # "I've kept your message" stays where it was said: right after the user's messages
+                last = max(i for i, m in enumerate(self.brain.messages) if m.get("role") == "user"
+                           and not str(m.get("content", "")).startswith("[System check"))
+                self.brain.messages[last + 1:last + 1] = kept
+                self._save()
+            return reply if answered else None

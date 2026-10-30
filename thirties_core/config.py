@@ -91,6 +91,7 @@ class TelegramConfig:
     allowed_chat_ids: List[int] = field(default_factory=list)
     notify_block_transitions: bool = True
     poll_interval_seconds: float = 2.0
+    mirror_desktop: bool = True  # the desktop chat is also sent to the phone, marked as from the desktop (T2)
 
 
 @dataclass
