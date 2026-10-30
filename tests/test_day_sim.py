@@ -50,7 +50,9 @@ class TestDaySim(unittest.TestCase):
             {"wait_minutes": 0, "message": None, "end_of_day": True},
         ])
         live_day(run, sim)
-        app = [(t, x) for t, w, x in run.log if w == "app"]
+        asked = [(t, x) for t, w, x in run.log if w == "app" and "For the record" in x]
+        self.assertEqual(asked, [("09:00", "☀️ For the record: when did you wake up?")])  # B6, an hour after 8:00
+        app = [(t, x) for t, w, x in run.log if w == "app" and "For the record" not in x]
         self.assertEqual(app[0][0], "10:00")
         self.assertIn("Walk", app[0][1])
         self.assertIn("Walk", app[1][1])  # the check-in, after the walk's thirty ended

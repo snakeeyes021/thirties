@@ -273,6 +273,7 @@ class SyncEngine:
         from thirties_core.today import TodayLinks
         from thirties_core.memory import (CheckinMutes, ConversationStore, EnergyLog, MemoryStore, ProfileStore,
                                           ReminderStore)
+        from thirties_core.outcome_context import OutcomeContextStore
         return {
             "conversations": ConversationStore(self.state_db),
             "profile": ProfileStore(self.state_db),
@@ -283,6 +284,7 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            "outcome_context": OutcomeContextStore(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

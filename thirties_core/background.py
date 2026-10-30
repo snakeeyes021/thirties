@@ -403,6 +403,9 @@ class BackgroundService:
         gen = self.config.general
         wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
             timedelta(minutes=30 * gen.sleep_end_thirty + 30)
+        from thirties_core.day_times import wake_time
+        history = db.get_spans_between(manager.day_plan.day_start - timedelta(hours=18), manager.day_plan.day_start)
+        wake = wake_time(manager.day_plan, history) or wake  # the night as planned or recorded ("sleeping in")
         if now < wake:
             return
         db.set_sync_meta(key, "1")
@@ -414,6 +417,21 @@ class BackgroundService:
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
             return
         self.send("☀️ Good morning! " + text, "rollover", now=now)
+
+    def day_times(self, now: datetime) -> None:
+        """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),
+        unless the answer is already on the record."""
+        from thirties_core.day_times import ASK_AT_LEVELS, due_question
+        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now):
+            return
+        plan = self.manager().day_plan
+        history = self.scheduler.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        asked = self._remembered("day_times_asked")
+        due = due_question(plan, now, asked, history)
+        if due:
+            asked[due[0]] = now.date().isoformat()
+            self._remember("day_times_asked", asked, now)
+            self.send(due[1], "checkin", now=now)
 
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
@@ -486,7 +504,7 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
         for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
-                     self.starts, self.today_sync):
+                     self.starts, self.day_times, self.today_sync):
             try:
                 duty(now)
             except Exception as e:

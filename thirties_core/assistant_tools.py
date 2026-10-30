@@ -69,6 +69,17 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["event", "status"],
     },
     {
+        "name": "log_day_times",
+        "description": "Record when the user actually woke, went to sleep, started or finished work (\"started work "
+                       "at 9:40\", \"done with work\", an answer to the morning or end-of-work question). Only what "
+                       "they said; Work and Sleep move to the real times.",
+        "parameters": {"woke": "Clock time they woke up.", "slept": "Clock time they went to sleep.",
+                       "work_started": "Clock time work started.",
+                       "work_ended": "Clock time work ended, or 'now' if they're just done.",
+                       "estimated": "true if the times are your best guess rather than what the user said."},
+        "required": [],
+    },
+    {
         "name": "log_energy",
         "description": "Record how energetic the user says they feel, 1 (drained) to 5 (great).",
         "parameters": {"level": "1 to 5.", "note": "Optional note."},
@@ -878,6 +889,7 @@ class AssistantTools:
             raise ToolError(f"Outcomes are tracked for planned activities, not for {span.title}.")
         span.status = st
         if note:
+                self._capture_context(logged)
             span.notes = note
         if st != SpanStatus.SKIPPED:
             planned_minutes = span.duration_minutes
@@ -911,6 +923,7 @@ class AssistantTools:
             same = self._exact_task(span.title)  # scheduled without its link, but worded exactly as a list item
             if same is not None:
                 span.task_id = same.id
+        self._capture_context(span)
                 self.pt._persist(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
@@ -934,6 +947,41 @@ class AssistantTools:
             raise ToolError("level must be a number from 1 (drained) to 5 (great).")
         self.s.energy.record(value, at=self.pt._now(), note=note)
         return f"Noted energy {max(1, min(5, value))}/5."
+    def _capture_context(self, span: EventSpan) -> None:
+        """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
+        if self._db is None:
+            return
+        try:
+            from thirties_core.day_times import night_sleep, wake_time
+            from thirties_core.outcome_context import OutcomeContextStore
+            plan = self.pt.day_plan
+            history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+            bed = night_sleep(plan, history)
+            OutcomeContextStore(self._db).record(plan, span, self.pt._now(), wake_time(plan, history),
+                                                 bed.start_dt if bed else None)
+        except Exception as e:
+            logger.warning("Couldn't capture the outcome's context: %s", e)
+
+    def log_day_times(self, woke: Any = None, slept: Any = None, work_started: Any = None, work_ended: Any = None,
+                      estimated: Any = False, **_: Any) -> str:
+        """B6: actual wake, sleep and work times, on the day's Sleep and Work (thirties_core.day_times)."""
+        from thirties_core.day_times import DayTimesError, record_day_times
+        plan = self.pt.day_plan
+        history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_end) if self._db else None
+        guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        try:
+            changed, said = record_day_times(plan, self.pt._now(), woke=woke, slept=slept, work_started=work_started,
+                                             work_ended=work_ended, source="estimated" if guessed else "reported",
+                                             history=history)
+        except DayTimesError as e:
+            raise ToolError(str(e))
+        for span in changed:
+            self.pt._persist(span)
+            if plan.get_span(span.id) is None and span.overlaps(plan.day_start, plan.day_end):
+                plan.spans.append(span)  # a late wake now reaches into this day: its morning isn't open time
+                plan.spans.sort(key=lambda s: s.start_dt.timestamp())
+        return "Recorded: " + ", ".join(said) + "."
+
 
     def review_day(self, **_: Any) -> str:
         plan = self.pt.day_plan
@@ -1296,6 +1344,8 @@ class AssistantTools:
             return ""
         from thirties_core.stats import daily_capacity_minutes, planned_minutes
         spans, now = self._history(60)
+        from thirties_core.day_times import day_time_facts
+        facts += day_time_facts(spans)
         capacity = daily_capacity_minutes([s for s in spans if s.start_dt.date() < self.pt.day_plan.target_date], now)
         planned = planned_minutes(self.pt.day_plan.active_spans())
         if capacity is None or planned < capacity * 1.25 or planned - capacity < 60:
@@ -1531,6 +1581,7 @@ class AssistantTools:
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
             "put_routine": self.put_routine,
+            "log_day_times": self.log_day_times,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }
