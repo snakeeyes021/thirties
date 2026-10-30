@@ -72,6 +72,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.routines: Optional[Callable[[DayPlan], List[Dict[str, Any]]]] = None
         self.ongoing: Callable[[EventSpan], bool] = lambda span: False
         self.skip_menus: Dict[str, Gtk.MenuButton] = {}  # routine title -> its Skip menu (tests reach it here)
+        self.read_tool: Optional[Tool] = None  # a read-only tool, run without refreshing (set by the window)
         self.page = Adw.PreferencesPage()
         self.set_child(self.page)
         self.groups: dict[str, Adw.PreferencesGroup] = {}
@@ -98,6 +99,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         spans = plan.spans_in_view()
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
+            self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
             self._fill_done(spans)
             return
@@ -119,8 +121,25 @@ class AgendaPage(Gtk.ScrolledWindow):
         upcoming = [s for s in spans if s.start_dt > now and s.status == SpanStatus.PLANNED]
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
+        self._fill_pencilled(None)
         self._fill_routines(plan, now)
         self._fill_done(spans)
+
+    def _fill_pencilled(self, day: Optional[str]) -> None:
+        """On the day's list with no time yet (pencilled in, O3): shown as such, to be given a time or not. Read
+        through ``read_tool``, which only reads: ``run_tool`` refreshes this page, so it would loop."""
+        if self.read_tool is None:
+            return
+        try:
+            out = self.read_tool("pencilled_in", {"day": day} if day else {}) or ""
+        except Exception:
+            return
+        items = [line[2:] for line in out.splitlines() if line.startswith("- ")]
+        if not items:
+            return
+        group = self._group("pencilled", "On the list, no time yet", "Pencilled in: give one a time, or leave it.")
+        for title in items:
+            group.add(Adw.ActionRow(title=title))
 
     def _fill(self, group: Adw.PreferencesGroup, spans: List[EventSpan], now: Optional[datetime],
               current: bool = False, behind: bool = False, ahead: bool = False) -> None:

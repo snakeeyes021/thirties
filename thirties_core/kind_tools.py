@@ -104,6 +104,9 @@ class KindTools:
             return self._complete_backlog_task(task, for_good=False)
         if writer is not None:
             self._tick_twin(task, writer)  # its Today copy, if it has one
+            if writer.allowed and getattr(writer.cfg, "file_done", True) and not task.id.startswith("media:"):
+                from thirties_core.done_log import worked_on_op  # a "worked on" line in the month's Done note
+                writer.submit(worked_on_op(task.title, task.parent_note_title or "", self._today()))
         return f"(worked on it: {task.title} stays open on {task.parent_note_title or 'its list'})"
 
     def _plan_peek(self, day: date):

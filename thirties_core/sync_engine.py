@@ -281,6 +281,9 @@ class SyncEngine:
                                           ReminderStore)
         from thirties_core.memory_audit import MemoryReview
         from thirties_core.outcome_context import OutcomeContextStore
+        from thirties_core.day_lists import AheadLists
+        from thirties_core.done_log import DoneLog
+        from thirties_core.placement_lists import DropBoxScopes
         return {
             "conversations": ConversationStore(self.state_db),
             "profile": ProfileStore(self.state_db),
@@ -291,6 +294,10 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            # lists and items (0.2 block 2): drop box scopes, what was filed as done, lists for days ahead
+            "dropbox_scopes": DropBoxScopes(self.state_db),
+            "done_filed": DoneLog(self.state_db),
+            "day_list_ahead": AheadLists(self.state_db),
             "item_facts": LastingFacts(self.state_db),
             "calendar_outcomes": CalendarOutcomes(self.state_db),
             "sharing_rules": SharingRules(self.state_db),

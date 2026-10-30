@@ -467,6 +467,12 @@ def joplin_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                              active=bool(getattr(cfg.joplin, "reset_routines", True)))
     routines.connect("notify::active", lambda r, _p: ctx.set("joplin.reset_routines", r.get_active()))
     group.add(routines)
+    filing = Adw.SwitchRow(title="File done items",
+                           subtitle="What you finish moves out of its list into a Done note for the month, in a "
+                                    "Thirties notebook, as a dated line naming the list. Untick it there to put it back.",
+                           active=bool(getattr(cfg.joplin, "file_done", True)))
+    filing.connect("notify::active", lambda r, _p: ctx.set("joplin.file_done", r.get_active()))
+    group.add(filing)
     return group
 
 

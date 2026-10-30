@@ -102,6 +102,8 @@ class TestDoneFollowsTheKind(KindsTestCase):
         self.assertIn("- [ ] Fix the sync bug", self.body("n_dev"))  # never ticked: it goes on
         self.assertIn("- [x] Fix the sync bug", self.body("n_today"))  # today's session is done
         self.assertEqual(span.status, SpanStatus.DONE)
+        done = next(n for n in self.api.notes.values() if n.get("title", "").startswith("Done "))
+        self.assertIn("worked on Fix the sync bug (Torquio)", done["body"])  # a "worked on" line in the Done log
 
     def test_finished_for_good_ticks_it(self):
         self.t.execute("add_event", {"title": "Torquio", "start": "1:00 PM", "duration": "1 hour", "task_id": "t_bug"})

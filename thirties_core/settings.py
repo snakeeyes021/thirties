@@ -50,6 +50,7 @@ _ALL = [
     Setting("joplin.whitelist_notes", "shared"),
     Setting("joplin.someday_sections", "shared"),
     Setting("joplin.reset_routines", "shared"),
+    Setting("joplin.file_done", "shared"),
     Setting("assistant.checkins", "shared"),
     Setting("assistant.checkin_after_minutes", "shared"),
     Setting("assistant.message_level", "shared"),

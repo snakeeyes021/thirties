@@ -565,6 +565,12 @@ def joplin_facts(run: DayRun) -> Dict[str, Any]:
                          if w["note_id"] in routine_ids and w["op"].get("op") != "untick_all"],  # a template
         "log": [f"{w['op'].get('op')} {w['note_title']}: -{w['removed']} +{w['added']}" for w in writes][:40],
     }
+    from thirties_core.note_edits import is_someday_heading
+    someday = getattr(run.scheduler.config.joplin, "someday_sections", [])
+    out["into_someday"] = [f"{w['op'].get('title')} → {w['note_title']} '{w['op']['place']}'" for w in writes
+                           if w["op"].get("op") == "add_task" and w["op"].get("place")
+                           and is_someday_heading(w["op"]["place"], someday)]  # B1: allowed only for undated maybes
+    out["filed_done"] = len({w["op"].get("key") for w in writes if w["op"].get("op") == "file_done" and w["ok"]})
     today = next(iter(notes_with_role(roles, notes, "today")), None)
     if today is not None:
         lines = [t.lower() for t, _ in note_items(today)]

@@ -36,6 +36,7 @@ class JoplinConfig:
     write_back: bool = False          # the user allowed Thirties to check off, add and break down tasks
     launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
     reset_routines: bool = True       # with write-back: untick routine notes each morning
+    file_done: bool = True            # with write-back: done items move to the month's Done note (done_log.py)
     # Notebooks to read tasks from (empty: all of them except the excluded ones), and single notes to add.
     allowed_notebooks: List[str] = field(default_factory=list)
     excluded_notebooks: List[str] = field(default_factory=lambda: ["Archive"])

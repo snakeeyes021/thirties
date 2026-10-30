@@ -225,12 +225,14 @@ TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 from thirties_core.day_proposal import PROPOSAL_READ_ONLY, PROPOSAL_TOOL_SPECS  # noqa: E402
+from thirties_core.list_tools import LIST_READ_ONLY, LIST_TOOL_SPECS  # noqa: E402 (after assistant_tools)
 from thirties_core.routines import ROUTINE_TOOL_SPECS  # noqa: E402
 
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
-TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS + MESSAGE_TOOL_SPECS
+TOOL_SPECS = (SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS + MESSAGE_TOOL_SPECS
+              + LIST_TOOL_SPECS)
 READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
-                  | MESSAGE_READ_ONLY)
+                   | MESSAGE_READ_ONLY | LIST_READ_ONLY)
 
 
 def _as_bool(value: Any) -> bool:
@@ -762,6 +764,9 @@ class PlanTools:
         if self.assistant and self.is_current(self.day_plan):
             listed = self.assistant.list_today(span)
             extra += f" {listed}" if listed else ""
+        elif self.assistant and self.day_plan.target_date > self.today():
+            from thirties_core.day_lists import ahead_note
+            extra += f" {ahead_note(self.assistant, self.day_plan)}"
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
     def update_event(
@@ -1282,9 +1287,11 @@ class PlanTools:
         scope = "Free time remaining" if upcoming_from else "Free time"
         now = self._now()
         from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
+        from thirties_core.day_lists import pencilled_text
         behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
+                + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
                    + "\n".join(missed_lines(behind)) if behind else ""))
 

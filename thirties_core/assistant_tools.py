@@ -157,9 +157,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "add_task",
-        "description": "Add a task to one of the user's lists (a Joplin note). Only when the user asks or agrees.",
-        "parameters": {"title": "The task.", "list": "Which list (note title).",
-                       "section": "Optional heading within the note.",
+        "description": "Add a task to one of the user's lists (a Joplin note), on the list and in the section where "
+                       "it belongs; when no list is obvious, the drop box. Choose yourself; don't ask the user where.",
+        "parameters": {"title": "The task.", "list": "Which list (note title, or 'drop box').",
+                       "section": "The heading within the note it belongs under (leave out for the obvious one; "
+                                  "never a someday section for something dated or pressing).",
+                       "reason": "Why that list and section, in a few words.",
+                       "urgency": "If the user said: 'now', 'soon', 'whenever' or 'someday'.",
+                       "due": "A date it must be done by, if they gave one.",
                        "start": "To also schedule it, the clock time it starts, e.g. '7:00 PM'. It's then linked: "
                                 "done on the plan means ticked in the list.",
                        "duration": "How long, when scheduling it, e.g. '30 minutes'.",
@@ -192,14 +197,15 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "set_reminder",
-        "description": "\"Remind me to X\": puts X on the plan at that time (and on today's list if it's today), "
-                       "with a ping when it's time. Almost every reminder is a thing to do, so this is the default. "
-                       "Only for a bare message with nothing to do (\"ping me at 3 that the laundry's done\"), "
+        "description": "\"Remind me to X\": puts X on the plan at that time (and on that day's list), with a ping "
+                       "when it's time. Almost every reminder is a thing to do, so this is the default. Only for a "
+                       "bare message the user asks for as a ping or alarm (\"ping me at 3 that the laundry's done\"), "
                        "set ping_only. If they don't say a time, pick a sensible one and tell them.",
         "parameters": {"text": "The thing to do (or, with ping_only, the message).",
                        "date": "Which day: 'today', 'tomorrow', 'Saturday', 'next week', 'Oct 20' (default today).",
                        "time": "Clock time like '3:00 PM', or 'in 2 hours' (default 9:00 AM).",
-                       "ping_only": "true for just a message, not an item on the plan."},
+                       "task_id": "The list item it is, if it's on a list (it stays linked).",
+                       "ping_only": "true for just a ping (an alarm), not an item on the plan."},
         "required": ["text"],
     },
     {
@@ -252,7 +258,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
                        "item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
-                                "user's words."},
+                                "user's words.",
+                       "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning."},
         "required": ["items"],
     },
     {
@@ -558,6 +565,12 @@ class AssistantTools(KindTools):
 
     def add_to_today(self, items: Any, **_: Any) -> str:
         from thirties_core.today import TodayLinks, note_items
+        if isinstance(items, str):
+            items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
+        if self._db is not None and not self.pt.is_current(self.pt.day_plan) and \
+                self.pt.day_plan.target_date > self._today():  # a later day's list: kept until that morning (O2)
+            from thirties_core.day_lists import add_ahead
+            return add_ahead(self, list(items or []))
         note = self._today_note()
         if note is None:
             raise ToolError("There's no Today note yet: make a note for today's list in Joplin, or mark one as "
@@ -596,12 +609,17 @@ class AssistantTools(KindTools):
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
 
-    def _day_begun(self) -> None:
-        """Before the first write to Today for the day being planned, that day's morning reset (start_the_day)."""
+    def _day_begun(self, adding: Any = ()) -> None:
+        """Before the first write to Today for the day being planned, that day's morning reset (start_the_day).
+        ``adding``: titles the caller is about to put on Today itself (the reset leaves them to it)."""
         plan = self.pt.day_plan
         if self._db is not None and self.pt.is_current(plan) and \
                 self._db.get_sync_meta(f"day_started:{plan.target_date.isoformat()}") != "done":
-            self.start_the_day(plan.target_date)
+            self._adding = {str(t).strip().lower() for t in adding}
+            try:
+                self.start_the_day(plan.target_date)
+            finally:
+                self._adding = set()
         self.routines.set_up_day(plan)  # then the day's routines and anchors, once (planned before sunrise too)
 
     def list_today(self, span: EventSpan) -> str:
@@ -613,7 +631,7 @@ class AssistantTools(KindTools):
         task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
         if task is not None and task.list_role == "today":
             return ""
-        self._day_begun()
+        self._day_begun({span.title})
         try:
             routine = self._routine_of(task.title if task is not None else span.title)
             if routine is not None:
@@ -735,7 +753,7 @@ class AssistantTools(KindTools):
         self.routines.learn(note, parts)  # how the user places it becomes its usual placement (routines.py)
         listed = ""
         if self.pt.is_current(plan):
-            self._day_begun()
+            self._day_begun(placed)
             try:
                 listed = " " + self._routine_on_today(note, placed)
             except ToolError:
@@ -759,6 +777,7 @@ class AssistantTools(KindTools):
         return notes if isinstance(notes, list) else []
 
     def _notes(self) -> Dict[str, str]:
+        """Note titles by id (horizons.py; add_task now goes through placement_lists.Placement)."""
         notes = {n["id"]: n["title"] for n in self._joplin_notes()}  # routine notes too, all ticked or not
         notes.update({t.parent_note_id: t.parent_note_title for t in self.s.tasks if t.parent_note_id and t.parent_note_title})
         notes.update({t.id: t.title for t in self.s.tasks if not t.is_checkbox_item and not t.id.startswith("media:")})
@@ -787,15 +806,24 @@ class AssistantTools(KindTools):
         return hits[0] if hits else None
 
     def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
-                 day: Any = None, schedule_as: str = "", **_: Any) -> str:
-        notes = self._notes()
-        want = {_stem(w) for w in _words(list)}
-        scored = sorted(((len(want & {_stem(w) for w in _words(name)}), name, nid) for nid, name in notes.items()),
-                        reverse=True)
-        if not list or not scored or scored[0][0] == 0 or (len(scored) > 1 and scored[1][0] == scored[0][0]):
-            options = ", ".join(sorted({name for name in notes.values()})[:12])
-            raise ToolError(f"Which list should '{title}' go on? Lists: {options}.")
-        _, note_title, note_id = scored[0]
+                 day: Any = None, schedule_as: str = "", reason: str = "", urgency: str = "", due: Any = None,
+                 **_: Any) -> str:
+        # Which list and section: Python lists and checks, the model picks; never the user's job (placement_lists).
+        from thirties_core.placement_lists import Placement
+        placement = Placement.for_assistant(self)
+        try:
+            note = placement.resolve(list) if str(list or "").strip() else None
+        except ToolError as e:
+            note, why = None, str(e)
+        else:
+            why = "" if note is not None else "No list given."
+        if note is None:
+            raise ToolError(f"{why} Pick the list (and section) '{title}' belongs on and call add_task again with "
+                            f"a short reason; don't ask the user. {placement.candidates_text(title)}")
+        note_id, note_title = note["id"], note["title"]
+        refused = placement.refusal(note) if placement.role(note) != "routine" else None
+        if refused:
+            raise ToolError(f"{refused} Pick another list. {placement.candidates_text(title)}")
         said = (self.pt.user_message or "").lower()
         asked = re.search(r"\b(add|put|include|make)\b[^.?!]*\b(to|in|into|part of)\b[^.?!]*\b(routine|"
                           + re.escape(note_title.lower()) + r")\b", said)  # "add brush teeth to my morning routine"
@@ -811,16 +839,35 @@ class AssistantTools(KindTools):
         if writer is None:
             raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
                             "Connect it in Preferences → Tasks.")
-        status, msg = writer.submit({"op": "add_task", "note_id": note_id, "title": title.strip(),
-                                     "section": section or None})
+        if note.get("body") is None and self._joplin_up():  # known only from its items: read its sections
+            live = self.s.joplin.api_client.get_note(note_id, fields="id,body")
+            note["body"] = live.get("body") if live else None
+        urgency = str(urgency or "").strip().lower()
+        due_day = parse_day(str(due), self._today()) if due not in (None, "") else None
+        dated = start not in (None, "") or day not in (None, "") or due_day is not None or urgency == "now"
+        place, where = placement.choose_section(note, section or None, title, dated)
+        op = {"op": "add_task", "note_id": note_id, "title": title.strip(), "place": place,
+              "reason": str(reason or "")[:200]}
+        if place is None:  # the note's sections weren't known (Joplin closed): the safe one when it's delivered
+            op.update(safe=True, someday=[*placement.someday])  # (``list`` is the argument here)
+        status, msg = writer.submit(op)
         if status in ("not_allowed", "failed"):
             raise ToolError(msg)
-        notebook = next((t.source_notebook for t in self.s.tasks if t.parent_note_id == note_id), "")
+        notebook = note.get("source_notebook") or next((t.source_notebook for t in self.s.tasks
+                                                        if t.parent_note_id == note_id), "")
         new_id = _checkbox_id(note_id, title)
-        self.s.tasks.append(TaskItem(id=new_id, source_notebook=notebook, title=title.strip(),
-                                     is_checkbox_item=True, parent_note_title=note_title, parent_note_id=note_id,
-                                     section=section or ""))
-        added = f"Added '{title.strip()}' to {note_title}" + (" (Joplin will get it when it's open)" if status == "queued" else "")
+        new = TaskItem(id=new_id, source_notebook=notebook, title=title.strip(), is_checkbox_item=True,
+                       parent_note_title=note_title, parent_note_id=note_id, section=place or "",
+                       list_role=placement.role(note))
+        self.s.tasks.append(new)
+        if (urgency or due_day) and self._db is not None:
+            from thirties_core.lists import URGENCIES, ListCatalog
+            urgency = urgency if urgency in URGENCIES else ("now" if due_day and (due_day - self._today()).days <= 1
+                                                            else "soon")
+            ListCatalog(self._db).set_urgency(new_id, urgency, due_day, note_id=note_id, title=new.title, source="user")
+            new.urgency, new.due = urgency, due_day.isoformat() if due_day else ""
+        added = f"Added '{title.strip()}' to {note_title}{where}" + (" (Joplin will get it when it's open)"
+                                                                     if status == "queued" else "")
         if start in (None, ""):
             return added + f". To schedule it, use task_id={new_id}."
         # Added and scheduled in one call, so the plan item is linked: two parallel calls in one reply couldn't
@@ -1224,6 +1271,9 @@ class AssistantTools(KindTools):
         if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
             writer.submit({"op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
             done.append(f"cleared what was done from {today['title']}")
+        if today:  # what was planned ahead for this day reaches Today now, never before (O2)
+            from thirties_core.day_lists import onto_today
+            done += onto_today(self, day)
         return "; ".join(done)
 
     def rollover_proposal(self, **_: Any) -> str:
@@ -1577,7 +1627,9 @@ class AssistantTools(KindTools):
             due += timedelta(days=1)
         return due
 
-    def set_reminder(self, text: str, date: Any = None, time: Any = None, ping_only: Any = False, **_: Any) -> str:
+    def set_reminder(self, text: str, date: Any = None, time: Any = None, ping_only: Any = False,
+                     task_id: str = "", **_: Any) -> str:
+        from thirties_core.day_lists import explicit_ping
         if self.s.reminders is None:
             raise ToolError("Reminders aren't available here.")
         try:
@@ -1587,22 +1639,28 @@ class AssistantTools(KindTools):
         if due <= self.pt._now():
             raise ToolError(f"{format_clock(due)} on {due.strftime('%A')} has already passed.")
         when = f"{due.strftime('%A, %B %d')} at {format_clock(due)}"
-        if str(ping_only).strip().lower() in ("true", "1", "yes"):
+        if str(ping_only).strip().lower() in ("true", "1", "yes") and explicit_ping(self.pt.user_message):
             rem = self.s.reminders.add(due, str(text))
             return f"Ping set for {when}: {rem.text} (id {rem.id})."
-        # A thing to do: it goes on the plan (a short item, alongside whatever's there if the block is taken).
+        # A thing to do (B5; 10-23: "It's a task, one for which completion should be trackable"): it goes on the plan,
+        # linked to its list item if it is one, as a short item alongside whatever's there if the block is taken.
+        # A bare ping is only for one asked for in those words. On a later day it reaches that day's list that morning.
         args = {"title": str(text).strip(), "start": format_clock(due), "duration": "15 min",
                 "day": due.date().isoformat()}
+        task = self._exact_task(str(task_id)) if str(task_id or "").strip() else None
+        if task is not None and not task.id.startswith("media:"):
+            args.update(category="task", task_id=task.id)
         out = self.pt.execute("add_event", args)
         if out.startswith(NOT_DONE_PREFIX):
             out = self.pt.execute("add_event", {**args, "alongside": True})
         if out.startswith(NOT_DONE_PREFIX):
             raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
         span_id = re.search(r"\[id (\w+)\]", out).group(1)
-        listed = ""
-        if due.date() == self._today():
+        listed = " and on today's list" if "also added to today's list" in out else ""
+        if due.date() == self._today() and not listed:
             try:
-                listed = " and on today's list" if self.add_to_today([str(text).strip()]).startswith("Added") else ""
+                listed = " and on today's list" if self.add_to_today(
+                    [task.title if task is not None else str(text).strip()]).startswith("Added") else ""
             except ToolError:
                 pass
         rem = self.s.reminders.add(due, str(text), span_id=span_id)
@@ -1692,7 +1750,13 @@ class AssistantTools(KindTools):
             **self.routines.handlers(),
             **self.proposals.handlers(),
             **horizon_handlers(self),
+            **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
+
+    @property
+    def lists(self):
+        from thirties_core.list_tools import ListTools
+        return ListTools(self)
 
 
 __all__ = ["AssistantTools", "Services", "ASSISTANT_TOOL_SPECS", "ASSISTANT_READ_ONLY", "rank_tasks",

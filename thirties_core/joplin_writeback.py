@@ -284,7 +284,7 @@ class WriteLog:
             conn.executescript(_WRITES_SCHEMA)
 
     def record(self, op: Dict[str, Any], note_title: str, ok: bool, message: str = "", before: str = "",
-               after: str = "") -> None:
+               after: str = "", note_id: Optional[str] = None) -> None:
         old, new = before.splitlines(), after.splitlines()
         removed, added = [], []
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
@@ -296,7 +296,8 @@ class WriteLog:
         with self.db._get_connection() as conn:
             conn.execute("INSERT INTO joplin_writes (at, op, note_id, note_title, ok, message, removed, added, turn) "
                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (datetime.now(timezone.utc).isoformat(), json.dumps(clean), str(op.get("note_id", "")),
+                         (datetime.now(timezone.utc).isoformat(), json.dumps(clean),
+                          str(op.get("note_id", "") if note_id is None else note_id),
                           note_title, int(ok), message, json.dumps(removed), json.dumps(added),
                           str(op.get("_turn") or "")))
 
@@ -310,6 +311,10 @@ class WriteLog:
             d["op"], d["removed"], d["added"] = json.loads(d["op"]), json.loads(d["removed"]), json.loads(d["added"])
             out.append(d)
         return out
+
+
+# Operations that change a note's structure or move items between notes, applied by thirties_core/note_ops.py.
+STRUCTURE_OPS = {"rename", "split", "move", "untick", "file_done", "unfile_done", "worked_on", "move_many"}
 
 
 class JoplinWriter:
@@ -386,15 +391,51 @@ class JoplinWriter:
             return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
         if not self.api.update_note(note_id, {"body": new}):
             return False, "Joplin didn't accept the change."
-        self._last = (note.get("title", ""), note["body"], new)
+        self._edits.append((note_id, note.get("title", ""), note["body"], new))
+        return True, ""
+
+    def _edit_bodies(self, edits: List[Tuple[str, Any]]) -> Tuple[bool, str]:
+        """Several note edits as one change (an item moved from one note to another): every edit is worked out
+        before anything is written, so an item that's gone changes nothing. They're computed in order and written
+        in reverse, the receiving note first, so a failure halfway leaves a copy, never a loss."""
+        notes: Dict[str, Dict[str, Any]] = {}
+        for note_id, _ in edits:
+            if note_id not in notes:
+                note = self.api.get_note(note_id, fields="id,title,body")
+                if not note or "body" not in note:
+                    if self.api.ping():
+                        return False, "gone: the note isn't in Joplin any more."
+                    return False, "Couldn't read the note from Joplin."
+                notes[note_id] = note
+        bodies = {nid: n["body"] for nid, n in notes.items()}
+        for note_id, edit in edits:
+            new = edit(bodies[note_id])
+            if new is None:
+                return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
+            bodies[note_id] = new
+        written: List[str] = []
+        for note_id in dict.fromkeys(nid for nid, _ in reversed(edits)):
+            if bodies[note_id] == notes[note_id]["body"]:
+                continue
+            if not self.api.update_note(note_id, {"body": bodies[note_id]}):
+                # Half done: put back what was written, so a retry can't add the copy twice. If that fails too,
+                # the change is parked (never retried) and the log shows the copy.
+                undone = all(self.api.update_note(nid, {"body": notes[nid]["body"]}) for nid in reversed(written))
+                if undone:
+                    self._edits = [e for e in self._edits if e[0] not in written]
+                    return False, "Joplin didn't accept the change."
+                return False, "gone: half done (the copy was written, the original couldn't be taken out)."
+            written.append(note_id)
+            self._edits.append((note_id, notes[note_id].get("title", ""), notes[note_id]["body"], bodies[note_id]))
         return True, ""
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
-        self._last = ("", "", "")
+        self._edits: List[Tuple[Optional[str], str, str, str]] = []
         ok, msg = self._apply_op(op)
-        title, before, after = self._last
-        try:
-            WriteLog(self.db).record(op, title or str(op.get("title", "")), ok, msg, before, after)
+        try:  # one row per note changed (a move changes two)
+            log = WriteLog(self.db)
+            for note_id, title, before, after in self._edits or [(None, "", "", "")]:
+                log.record(op, title or str(op.get("title", "")), ok, msg, before, after, note_id=note_id)
         except Exception as e:  # the log must never stop a write
             logger.warning("Couldn't log the Joplin write: %s", e)
         return ok, msg
@@ -410,6 +451,15 @@ class JoplinWriter:
             ok = self.api.update_note(op["note_id"], {"todo_completed": now_ms})
             return ok, "" if ok else "Joplin didn't accept the change."
         if kind == "add_task":
+            if "place" in op:  # a section chosen by placement_lists: None (the end), "" (the top) or a heading
+                from thirties_core.note_edits import insert_lines, safe_section
+
+                def place(body: str):  # chosen without seeing the note (Joplin was closed): the safe section now
+                    if op["place"] is None and op.get("safe"):
+                        return safe_section(body, op.get("someday") or [])
+                    return op["place"]
+                return self._edit_body(op["note_id"], lambda b: insert_lines(b, [f"- [ ] {op['title'].strip()}"],
+                                                                             place(b)))
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
         if kind == "remove":
             return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"]))
@@ -421,6 +471,9 @@ class JoplinWriter:
             return self._edit_body(op["note_id"], lambda b: insert_subtasks(b, op.get("parent_title"), op["steps"],
                                                                               op.get("occurrence", 0),
                                                                               op.get("ticked_too", False)))
+        if kind in STRUCTURE_OPS:
+            from thirties_core import note_ops
+            return note_ops.apply(self, op)
         return False, f"gone: unknown operation {kind!r}"
 
 

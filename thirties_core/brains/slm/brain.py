@@ -1462,7 +1462,19 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
     # --- the user's lists in Joplin ---
 
     def _do_task_add(self, a: Action) -> Tuple[str, bool]:
-        ok, out = self._run("add_task", {"title": a.get("title"), "list": a.get("list")})
+        title, lst = a.get("title") or "", a.get("list")
+        if not lst and self.tools.assistant is not None:
+            # No list said: Python takes a clearly best list, else the drop box, rather than asking (B1, J5)
+            from thirties_core.placement_lists import Placement
+            placement = Placement.for_assistant(self.tools.assistant)
+            ranked = placement.candidates(title, limit=2)
+            if ranked and ranked[0][1] > 0 and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+                lst = ranked[0][0]["id"]
+            elif placement.dropbox_for() is not None:
+                lst = "drop box"
+            else:
+                return f"Which list should {title} go on?", False
+        ok, out = self._run("add_task", {"title": title, "list": lst})
         return re.sub(r"\s*To schedule it, use task_id=\S+", "", out), False
 
     def _breakdown_target(self, ref: str) -> Optional[TaskItem]:
