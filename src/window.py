@@ -102,6 +102,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         self._load_day(self.current_date)
         GLib.idle_add(self.chat_panel.focus_input)
+        GLib.idle_add(self._mention_outdated_memory)
 
     # --- setup ---
 
@@ -361,7 +362,22 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     # --- profile & memory ---
 
-    def _show_profile_dialog(self) -> None:
+    def _mention_outdated_memory(self) -> bool:
+        """At startup: memory notes that work around since-fixed bugs are listed for the user (never deleted)."""
+        try:
+            from thirties_core.memory_audit import to_review
+            count = len(to_review(self.scheduler.state_db))
+        except Exception as e:
+            logger.warning("Checking memory notes failed: %s", e)
+            return False
+        if count:
+            toast = Adw.Toast(title=f"{count} memory note{'s look' if count > 1 else ' looks'} outdated",
+                              button_label="Review", timeout=8)
+            toast.connect("button-clicked", lambda *_: self._show_profile_dialog(page="memory"))
+            self.toast_overlay.add_toast(toast)
+        return False
+
+    def _show_profile_dialog(self, page: str = "") -> None:
         services = self.conv_manager.tools.services if self.conv_manager else None
         from thirties_core.lists import ListCatalog
         engine = self.joplin_engine
@@ -372,6 +388,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             lists=ListCatalog(self.scheduler.state_db) if self.scheduler else None,
             load_lists=lambda: (engine.fetch_active_notes(), engine.fetch_tasks()) if engine else ([], []),
         )
+        if page:
+            dialog.stack.set_visible_child_name(page)
         dialog.present(self)
 
     # --- navigation ---

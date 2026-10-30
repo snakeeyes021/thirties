@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.clock import format_clock
+from thirties_core.goals import prompt_lines as goal_check_lines
 from thirties_core.inference import InferenceEngine
 from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.models import TaskItem
@@ -97,6 +98,11 @@ class FrontierBrain:
         services = self.tools.services
         assistant = self.tools.assistant
         profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
+        stale = goal_check_lines(services.profile.sections(), self.tools.today()) if services else []
+        if stale:  # A7: weeks-old goals fed stale suggestions ("did we not finish the Ethernet cable?")
+            profile += ("\n\nGOALS TO CHECK (not checked in a while: before suggesting anything for one, ask the user "
+                        "once whether it's still current, done or dropped, and record it with check_goal)\n"
+                        + "\n".join(stale))
         memory = "\n".join(f"- {n.text} (id {n.id})" for n in services.memory.notes()) if services else ""
         stats = "\n".join(f"- {f}" for f in assistant.statistics_facts()) if assistant else ""
         weather = "\n".join(f"- {f}" for f in assistant.weather_facts()) if assistant else ""

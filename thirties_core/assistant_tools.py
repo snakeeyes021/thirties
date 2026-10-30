@@ -115,6 +115,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["section", "text"],
     },
     {
+        "name": "check_goal",
+        "description": "Record the user's answer about a goal from GOALS TO CHECK: still current, done, or dropped.",
+        "parameters": {"goal": "The goal, as written in the profile.",
+                       "state": "'current' (still a goal), 'done' (finished) or 'dropped' (no longer wanted)."},
+        "required": ["goal", "state"],
+    },
+    {
         "name": "search_history",
         "description": "Search past conversations for a topic. Read-only.",
         "parameters": {"query": "Words to look for."},
@@ -882,6 +889,7 @@ class AssistantTools:
                                    time_source="estimated" if guessed or not (started and finished) else "reported")
                 self.pt.day_plan.spans.append(logged)
                 self.pt._persist(logged)
+                self._capture_context(logged)
                 result += f"; logged it {format_clock(start_dt)} – {format_clock(end_dt)}"
             return result + "."
 
@@ -889,7 +897,6 @@ class AssistantTools:
             raise ToolError(f"Outcomes are tracked for planned activities, not for {span.title}.")
         span.status = st
         if note:
-                self._capture_context(logged)
             span.notes = note
         if st != SpanStatus.SKIPPED:
             planned_minutes = span.duration_minutes
@@ -916,6 +923,7 @@ class AssistantTools:
             else:
                 span.time_source = "planned"
         self.pt._persist(span)
+        self._capture_context(span)
         result = f"Marked {span.title} {st.value}"
         if span.actual_start and st != SpanStatus.SKIPPED:
             result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
@@ -923,7 +931,6 @@ class AssistantTools:
             same = self._exact_task(span.title)  # scheduled without its link, but worded exactly as a list item
             if same is not None:
                 span.task_id = same.id
-        self._capture_context(span)
                 self.pt._persist(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
@@ -940,13 +947,6 @@ class AssistantTools:
                 result += f"; it has now been put off {count} times"
         return result + "."
 
-    def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
-        try:
-            value = int(str(level).strip())
-        except ValueError:
-            raise ToolError("level must be a number from 1 (drained) to 5 (great).")
-        self.s.energy.record(value, at=self.pt._now(), note=note)
-        return f"Noted energy {max(1, min(5, value))}/5."
     def _capture_context(self, span: EventSpan) -> None:
         """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
         if self._db is None:
@@ -982,6 +982,13 @@ class AssistantTools:
                 plan.spans.sort(key=lambda s: s.start_dt.timestamp())
         return "Recorded: " + ", ".join(said) + "."
 
+    def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
+        try:
+            value = int(str(level).strip())
+        except ValueError:
+            raise ToolError("level must be a number from 1 (drained) to 5 (great).")
+        self.s.energy.record(value, at=self.pt._now(), note=note)
+        return f"Noted energy {max(1, min(5, value))}/5."
 
     def review_day(self, **_: Any) -> str:
         plan = self.pt.day_plan
@@ -1272,11 +1279,25 @@ class AssistantTools:
             name = next((s for s in PROFILE_SECTIONS if str(section).strip().lower() in s.lower()), None)
         if name is None:
             raise ToolError(f"Unknown profile section '{section}'. Sections: {', '.join(PROFILE_SECTIONS)}.")
+        from thirties_core.goals import GOAL_SECTIONS, dated, stamp_new_lines
         if str(replace).strip().lower() in ("true", "1", "yes"):
-            self.s.profile.set_section(name, str(text))
+            content = str(text)
+            if name in GOAL_SECTIONS:  # goals carry the day they were last known current (A7)
+                content = stamp_new_lines(self.s.profile.sections().get(name, ""), content, self._today())
+            self.s.profile.set_section(name, content)
             return f"Rewrote the '{name}' section of the profile."
-        self.s.profile.append(name, str(text))
+        self.s.profile.append(name, dated(str(text), self._today()) if name in GOAL_SECTIONS else str(text))
         return f"Added to '{name}' in the profile."
+
+    def check_goal(self, goal: str, state: str = "current", **_: Any) -> str:
+        """A7: the user's answer about a stale goal: still current (dated today), done or dropped (taken out)."""
+        from thirties_core.goals import check_goal
+        try:
+            section, content, said = check_goal(self.s.profile.sections(), str(goal), str(state), self._today())
+        except ValueError as e:
+            raise ToolError(str(e))
+        self.s.profile.set_section(section, content)
+        return said
 
     # --- history ---
 
@@ -1323,6 +1344,8 @@ class AssistantTools:
         deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2),
                           key=lambda x: -x[1])
         facts = fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+        from thirties_core.day_times import day_time_facts
+        facts += day_time_facts(spans)
         note = self.capacity_note()
         return ([note] if note else []) + facts
 
@@ -1344,8 +1367,6 @@ class AssistantTools:
             return ""
         from thirties_core.stats import daily_capacity_minutes, planned_minutes
         spans, now = self._history(60)
-        from thirties_core.day_times import day_time_facts
-        facts += day_time_facts(spans)
         capacity = daily_capacity_minutes([s for s in spans if s.start_dt.date() < self.pt.day_plan.target_date], now)
         planned = planned_minutes(self.pt.day_plan.active_spans())
         if capacity is None or planned < capacity * 1.25 or planned - capacity < 60:
@@ -1560,10 +1581,12 @@ class AssistantTools:
         return {
             "log_outcome": self.log_outcome,
             "log_energy": self.log_energy,
+            "log_day_times": self.log_day_times,
             "review_day": self.review_day,
             "remember": self.remember,
             "forget": self.forget,
             "update_profile": self.update_profile,
+            "check_goal": self.check_goal,
             "search_history": self.search_history,
             "list_conversations": self.list_conversations,
             "read_conversation": self.read_conversation,
@@ -1581,7 +1604,6 @@ class AssistantTools:
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
             "put_routine": self.put_routine,
-            "log_day_times": self.log_day_times,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }
