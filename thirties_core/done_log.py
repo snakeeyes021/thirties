@@ -287,6 +287,8 @@ class DoneLog:
                 ours = any(item_id(note["id"], text, k) in completed for k in range(3))
                 if not (low in pending or ours or (before is not None and low in before)):
                     continue  # ticked before Thirties ever saw it open: history, not news
+                if self._daily(assistant, text):
+                    continue  # done means done today: it stays on its list for tomorrow (B2)
                 seen, day = self.first_seen(note["id"], text, now, today)
                 if now - seen < FILE_AFTER:
                     continue
@@ -299,6 +301,15 @@ class DoneLog:
             self.save_snapshot(note["id"], open_now | self.seen_ticked(note["id"]))
         moved += self._unticked_by_hand(writer)
         return moved
+
+    @staticmethod
+    def _daily(assistant, text: str) -> bool:
+        """A daily item (B2: its kind, from what's known about it) is never filed."""
+        kind_of = getattr(assistant, "kind_of", None)
+        try:
+            return kind_of is not None and kind_of(text) == "daily"
+        except Exception:
+            return False
 
     def _unticked_by_hand(self, writer) -> List[str]:
         """A line unticked in the Done note means "not done after all": the item goes back to its list."""
