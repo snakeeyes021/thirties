@@ -13,8 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
-                                 thirty_ceil, thirty_of)
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id

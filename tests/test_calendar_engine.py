@@ -1,7 +1,7 @@
 """Unit tests for thirties_core.calendar_engine."""
 
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from thirties_core.calendar_engine import (
