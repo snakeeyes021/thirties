@@ -91,35 +91,125 @@ def filed_key(note_id: str, title: str, day: str) -> str:
     return hashlib.sha256(f"{note_id}|{title.strip().lower()}|{day}".encode("utf-8")).hexdigest()[:16]
 
 
+# Two devices can each make the month's Done note before Joplin syncs the other's in. The newer copy's lines go
+# into the older note (date order); the newer one is emptied, renamed with this suffix and left with a pointer,
+# rather than deleted: Joplin's DELETE moves a note to its trash only from 2.15 on (older versions delete it for
+# good), and a device that hasn't synced the merge yet may still write to it. A renamed copy that gains lines
+# that way is merged again on the next look.
+MERGED_SUFFIX = " (merged)"
+_DATED = re.compile(r"^- \[[ xX]\] (\d{4}-\d{2}-\d{2})")
+
+
+def _blocks(body: str) -> tuple:
+    """(lines before the first item, [item blocks: a top-level line and what's nested under it])."""
+    head: List[str] = []
+    blocks: List[List[str]] = []
+    for line in (body or "").splitlines():
+        if (CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)) and not line[:1].isspace():
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+        else:
+            head.append(line)
+    return head, blocks
+
+
+def merge_done_bodies(older: str, newer: str) -> str:
+    """The older note's lines and the newer's together, in date order (an item in both is kept once; an undated
+    line keeps its place after the dated line before it)."""
+    head, mine = _blocks(older)
+    _, theirs = _blocks(newer)
+    seen = {tuple(b) for b in mine}
+    combined = list(mine)
+    for block in theirs:
+        if tuple(block) not in seen:
+            seen.add(tuple(block))
+            combined.append(block)
+    keyed, last = [], ""
+    for n, block in enumerate(combined):
+        m = _DATED.match(block[0])
+        last = m.group(1) if m else last
+        keyed.append((last, n, block))
+    lines = head + [line for _, _, block in sorted(keyed, key=lambda k: (k[0], k[1])) for line in block]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _merge_duplicates(api, db, title: str, notes: List[Dict[str, Any]]) -> Optional[str]:
+    """Several notes for one month (and merged copies that gained lines since): everything goes into the oldest
+    live one. Returns its id, or None if that couldn't be done (and nothing more was changed). Each write is
+    logged like every other Joplin write."""
+    from thirties_core.joplin_writeback import WriteLog
+    full = []
+    for n in notes:
+        got = api.get_note(n["id"], fields="id,title,body,created_time")
+        if got:
+            full.append({**n, **got})
+    live = sorted((n for n in full if n.get("title") == title), key=lambda n: (n.get("created_time") or 0, n["id"]))
+    if not live:
+        return None
+    keep = live[0]
+    extra = live[1:] + [n for n in full if n.get("title") == title + MERGED_SUFFIX and _blocks(n.get("body") or "")[1]]
+    log = WriteLog(db)
+    body = keep.get("body") or ""
+    for other in extra:
+        merged = merge_done_bodies(body, other.get("body") or "")
+        op = {"op": "merge_done_notes", "into": keep["id"], "from": other["id"], "title": title}
+        if merged != body:
+            ok = api.update_note(keep["id"], {"body": merged})
+            log.record(op, title, ok, "the other copy's lines, in date order", body, merged, note_id=keep["id"])
+            if not ok:
+                return None
+            body = merged
+        pointer = (f"Merged into the older \"{title}\" note (two devices each made one before syncing). Nothing is "
+                   f"left here; this note can be deleted.\n")
+        ok = api.update_note(other["id"], {"title": title + MERGED_SUFFIX, "body": pointer})
+        log.record(op, other.get("title") or title, ok, "emptied, pointing at the older note",
+                   other.get("body") or "", pointer, note_id=other["id"])
+        logger.info("Merged the duplicate Done note %s into %s", other["id"], keep["id"])
+    return keep["id"]
+
+
 def done_note_id(api, db, month: str, create: bool = True) -> Optional[str]:
     """The id of the month's Done note, made (with the Thirties notebook) the first time it's needed. Joplin must
-    be up. The note is marked "ignore", so it's never read as a list."""
+    be up. The note is marked "ignore", so it's never read as a list. It's looked for by title before one is made,
+    and when Joplin has synced in a second one (two devices each made it), they're merged into the older one."""
     key = f"done_note:{month}"
     cached = db.get_sync_meta(key)
-    if cached and api.get_note(cached, fields="id"):
-        return cached
-    folder = next((f for f in api.get_folders() if f.get("title") == DONE_NOTEBOOK and not f.get("parent_id")), None)
-    if folder is None:
-        if not create:
-            return None
-        folder = api.create_folder(DONE_NOTEBOOK)
-        if not folder or "id" not in folder:
-            return None
     title = done_note_title(month)
-    note = next((n for n in api.get_folder_notes(folder["id"]) if n.get("title") == title), None)
-    if note is None:
+    cached_note = api.get_note(cached, fields="id,title") if cached else None
+    if cached_note and cached_note.get("title") not in (None, title):
+        cached_note = None  # merged away (renamed) on another device: find the one it went into
+    folders = [f for f in api.get_folders() if f.get("title") == DONE_NOTEBOOK and not f.get("parent_id")]
+    candidates = [n for f in folders for n in api.get_folder_notes(f["id"])
+                  if n.get("title") in (title, title + MERGED_SUFFIX)]
+    note_id = None
+    if len(candidates) > 1:
+        note_id = _merge_duplicates(api, db, title, candidates)
+    elif candidates and candidates[0].get("title") == title:
+        note_id = candidates[0]["id"]
+    if note_id is None and cached_note:
+        note_id = cached  # the folder listing came back short: never make a second note over it
+    if note_id is None:
         if not create:
+            return None
+        folder = folders[0] if folders else api.create_folder(DONE_NOTEBOOK)
+        if not folder or "id" not in folder:
             return None
         note = api.create_note(title, "", parent_id=folder["id"])
         if not note or "id" not in note:
             return None
-    db.set_sync_meta(key, note["id"])
+        note_id = note["id"]
+    if note_id != cached:
+        db.set_sync_meta(key, note_id)
     try:
         from thirties_core.lists import ListCatalog
-        ListCatalog(db).set_role(note["id"], "ignore", title, source="user")
+        catalog = ListCatalog(db)
+        for n in candidates or [{"id": note_id, "title": title}]:
+            if catalog.role(n["id"]) != "ignore":
+                catalog.set_role(n["id"], "ignore", n.get("title") or title, source="user")
     except Exception as e:
         logger.warning("Couldn't mark the Done note as not a list: %s", e)
-    return note["id"]
+    return note_id
 
 
 def file_done_op(note_id: str, title: str, list_title: str, day: date, occurrence: int = 0) -> Dict[str, Any]:
@@ -338,5 +428,6 @@ def clear_completed(db, task_id: str) -> None:
         conn.execute("UPDATE task_history SET completed_date = NULL WHERE task_id = ?", (task_id,))
 
 
-__all__ = ["DoneLog", "DONE_NOTEBOOK", "DONE_NOTE_TITLE", "FILED_ROLES", "FILE_AFTER", "done_note_id", "done_line",
+__all__ = ["DoneLog", "MERGED_SUFFIX", "merge_done_bodies", "DONE_NOTEBOOK", "DONE_NOTE_TITLE", "FILED_ROLES",
+           "FILE_AFTER", "done_note_id", "done_line",
            "file_done_op", "worked_on_op", "ticked_to_file", "clear_completed", "filed_key"]

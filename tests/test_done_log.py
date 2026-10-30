@@ -146,5 +146,62 @@ class TestFiling(ListsTestCase):
         self.assertEqual(done["body"], "")
 
 
+class TestDuplicateDoneNotes(unittest.TestCase):
+    """Two devices each made the month's Done note before syncing: merged into the older one, logged."""
+
+    def setUp(self):
+        from tests.fixtures import FakeJoplinAPI, make_scheduler
+        self.db = make_scheduler().state_db
+        self.api = FakeJoplinAPI({
+            "mine": {"id": "mine", "title": "Done 2026-10", "parent_id": "f1", "created_time": 200,
+                     "body": "- [x] 2026-10-12: Call the bank (Errands)\n- [x] 2026-10-20: Mail it (Errands)\n"},
+            "theirs": {"id": "theirs", "title": "Done 2026-10", "parent_id": "f1", "created_time": 100,
+                       "body": "- [x] 2026-10-15: Buy stamps (Errands)\n    - [x] the forever kind\n"
+                               "- [x] 2026-10-20: Mail it (Errands)\n"}})
+        self.api.folders = {"f1": {"id": "f1", "title": DONE_NOTEBOOK, "parent_id": ""}}
+        self.db.set_sync_meta("done_note:2026-10", "mine")  # this device made its own
+
+    def test_lines_go_into_the_older_note_in_date_order_and_the_newer_points_there(self):
+        from thirties_core.done_log import MERGED_SUFFIX, done_note_id
+        self.assertEqual(done_note_id(self.api, self.db, "2026-10"), "theirs")  # the older one
+        self.assertEqual(self.api.notes["theirs"]["body"],
+                         "- [x] 2026-10-12: Call the bank (Errands)\n- [x] 2026-10-15: Buy stamps (Errands)\n"
+                         "    - [x] the forever kind\n- [x] 2026-10-20: Mail it (Errands)\n")
+        newer = self.api.notes["mine"]
+        self.assertEqual(newer["title"], "Done 2026-10" + MERGED_SUFFIX)
+        self.assertNotIn("- [", newer["body"])
+        self.assertIn("Merged into the older", newer["body"])
+        self.assertEqual(self.db.get_sync_meta("done_note:2026-10"), "theirs")
+        writes = [w for w in WriteLog(self.db).since("") if w["op"]["op"] == "merge_done_notes"]
+        self.assertEqual([w["note_id"] for w in writes], ["theirs", "mine"])
+        self.assertTrue(all(w["ok"] for w in writes))
+        self.assertEqual(ListCatalog(self.db).role("mine"), "ignore")
+        # a second look changes nothing
+        updates = len(self.api.updates)
+        self.assertEqual(done_note_id(self.api, self.db, "2026-10"), "theirs")
+        self.assertEqual(len(self.api.updates), updates)
+
+    def test_a_line_written_to_the_merged_copy_before_its_device_synced_is_merged_again(self):
+        from thirties_core.done_log import done_note_id
+        done_note_id(self.api, self.db, "2026-10")
+        self.api.notes["mine"]["body"] += "- [x] 2026-10-25: Late one (Errands)\n"
+        done_note_id(self.api, self.db, "2026-10")
+        self.assertIn("2026-10-25: Late one", self.api.notes["theirs"]["body"])
+        self.assertNotIn("Late one", self.api.notes["mine"]["body"])
+
+    def test_one_note_is_found_by_title_not_made_again(self):
+        from thirties_core.done_log import done_note_id
+        del self.api.notes["mine"]
+        self.db.set_sync_meta("done_note:2026-10", "")
+        self.assertEqual(done_note_id(self.api, self.db, "2026-10"), "theirs")
+        self.assertEqual(len(self.api.notes), 1)
+
+    def test_a_failed_write_changes_nothing_else(self):
+        from thirties_core.done_log import done_note_id
+        self.api.update_note = lambda note_id, data: False
+        self.assertEqual(done_note_id(self.api, self.db, "2026-10", create=False), "mine")  # its own, as before
+        self.assertEqual(self.api.notes["mine"]["title"], "Done 2026-10")  # not renamed: its lines weren't moved
+
+
 if __name__ == "__main__":
     unittest.main()
