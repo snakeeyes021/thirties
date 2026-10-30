@@ -1,6 +1,6 @@
 """A message at sunrise and/or sunset, every day, when the user wants one (10-30: "I'd use it to turn the indoor
 lights on and off"). It's asked for, so it goes out whatever the message level, asleep or not, to the desktop and
-the phone, and it isn't added to the conversation. The times are the real NOAA ones for the user's place."""
+the phone, and into the conversation like every other message, so the app and Telegram stay one chat. The times are the real NOAA ones for the user's place."""
 
 from __future__ import annotations
 

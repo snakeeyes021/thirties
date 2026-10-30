@@ -541,7 +541,8 @@ class BackgroundService:
         if key:
             sent[key] = now.date().isoformat()
             self._remember("sun_sent", sent, now)
-            self.send(TEXT[key], "sun", to_conversation=False, now=now, expires=now + WINDOW * 6)
+            self.send(TEXT[key], "sun", now=now, expires=now + WINDOW * 6)  # in the chat too: the app and the
+            # phone show one conversation (the user's parity rule, 10-30)
 
     def horizon_session(self, now: datetime) -> None:
         """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short

@@ -39,6 +39,7 @@ class TestSunNotices(unittest.TestCase):
         self.svc.sun(sunset + timedelta(minutes=1))
         self.svc.sun(sunset + timedelta(minutes=2))
         self.assertEqual(self.sent, [("sun", "🌇 Sunset.")])
+        self.assertEqual(self.svc.manager().history()[-1]["content"], "🌇 Sunset.")  # in the chat, as on the phone
         self.svc.sun(self.phases["sunrise"] + timedelta(minutes=1))
         self.assertEqual(len(self.sent), 1)  # sunrise wasn't switched on
 
