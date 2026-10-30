@@ -162,7 +162,9 @@ class LlamaServer:
         dev = next((d for d in devices if d["id"] == self.device), None) if self.device else pick_device(devices)
         cmd = self.ram_limit() + [self.binary, "-m", str(self.model), "-c", str(self.ctx_per_slot * self.slots),
                                   "-np", str(self.slots), "--host", "127.0.0.1", "--port", str(self.port),
-                                  "-rea", "off", "--no-webui"]
+                                  "-rea", "off", "--no-webui", "-cram", "0"]
+        # -cram 0: no host-RAM prompt cache. Sessions are pinned to their own slots, so it only cost time:
+        # on Gemma 12B it copied 1-5 GB of slot state to RAM after every call, ~3 s each (2026-10-30)
         self.info["device"] = dev
         if dev is None or self.vram_gb == 0:
             return cmd + ["-ngl", "0", "-dev", "none"] + self.extra
@@ -353,6 +355,7 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
     brain = make_interpreter()
     by_cat: Dict[str, List[bool]] = defaultdict(list)
     final_cat: Dict[str, List[bool]] = defaultdict(list)
+    brain_cat: Dict[str, List[bool]] = defaultdict(list)  # after Python, with the brain's constrained retry
     failures, times, unparsed = [], [], 0
     for c in cases:
         extra = c["context"]
@@ -366,13 +369,22 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
             text = session.ask(context)
             raw = extract_json(text)
         times.append(time.time() - start)
-        unparsed += raw is None or "actions" not in raw
+        bad = raw is None or "actions" not in raw
+        unparsed += bad
         raw = raw or {}
         ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
         final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"],
                                      c["context"])
+        if bad and not constrained:
+            # what the brain does next (SlmBrain._parse): ask again with JSON-schema decoding
+            retry = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
+            brain_ok, _ = check(interpret(brain, retry, c["message"], c["context"]), c["types"], c["fields"],
+                                c["context"])
+        else:
+            brain_ok = final_ok
         by_cat[c["category"]].append(ok)
         final_cat[c["category"]].append(final_ok)
+        brain_cat[c["category"]].append(brain_ok)
         if not ok or not final_ok:
             failures.append({**c, "why": why, "final_why": final_why, "final_ok": final_ok, "got": text[:600]})
         if not quiet or not final_ok:
@@ -382,9 +394,11 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
     n = len(cases)
     model_alone = sum(sum(v) for v in by_cat.values())
     after = sum(sum(v) for v in final_cat.values())
+    with_retry = sum(sum(v) for v in brain_cat.values())
     return {
-        "cases": n, "model_alone": model_alone, "after_python": after,
+        "cases": n, "model_alone": model_alone, "after_python": after, "with_retry": with_retry,
         "model_alone_pct": round(100 * model_alone / n, 1), "after_python_pct": round(100 * after / n, 1),
+        "with_retry_pct": round(100 * with_retry / n, 1),
         "unparsed": unparsed, "median_seconds": round(statistics.median(times), 2),
         "p90_seconds": round(sorted(times)[int(0.9 * (n - 1))], 2),
         "by_category": {k: f"{sum(v)}/{len(v)}" for k, v in sorted(final_cat.items())},
@@ -408,10 +422,17 @@ def report_name(model: Path, args) -> str:
     return f"{model.stem}_{'litert' if model.suffix == '.litertlm' else ('vram' + format(vram, 'g') if vram is not None else 'all')}{tag}"
 
 
+LICENCES = [("gemma-4", "Apache-2.0"), ("qwen3", "Apache-2.0"), ("phi-4", "MIT")]  # from each repo's card, 2026-10-30
+
+
+def licence(model: str) -> str:
+    return next((lic for prefix, lic in LICENCES if model.lower().startswith(prefix)), "?")
+
+
 def table(paths: List[Path]) -> str:
-    rows = ["| model | runtime | VRAM budget | load s | GPU MiB | on GPU | prompt tok/s (2k / 4k) | output tok/s | "
-            "s per message (parse + voice) | parse s (median) | schema ok | benchmark: model / after Python |",
-            "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| model | GB | licence | runtime | VRAM budget | RAM cap | load s | GPU MiB | on GPU | prompt tok/s (2k / 4k) | output tok/s | "
+            "s per message (parse + voice) | parse s (median) | schema ok | benchmark: model / after Python / with retry |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for path in sorted(paths):
         r = json.loads(path.read_text())
         s, p, b, srv = r.get("speed") or {}, r.get("probe") or {}, r.get("parse") or {}, r.get("server") or {}
@@ -421,8 +442,9 @@ def table(paths: List[Path]) -> str:
         if srv.get("n_cpu_moe"):
             on_gpu += f" (+{srv['n_cpu_moe']} MoE on CPU)"
         prompt = f"{s.get('parse_2k', {}).get('prompt_tps', '')} / {s.get('parse_4k', {}).get('prompt_tps', '')}" if s else ""
-        bench = f"{b['model_alone_pct']}% / {b['after_python_pct']}%" if b else ""
-        rows.append(" | ".join(["", r.get("model", path.stem), r.get("runtime", ""), str(r.get("vram_gb", "")),
+        bench = f"{b['model_alone_pct']}% / {b['after_python_pct']}% / {b.get('with_retry_pct', '?')}%" if b else ""
+        rows.append(" | ".join(["", r.get("model", path.stem), str(r.get("size_gb", "")), licence(r.get("model", "")),
+                                r.get("runtime", ""), str(r.get("vram_gb", "")), str(r.get("ram_gb") or ""),
                                 str(srv.get("load_seconds", p.get("load_seconds", ""))),
                                 str(srv.get("vram_used_mib", r.get("vram_used_mib", ""))), on_gpu, prompt,
                                 str(s.get("generate_200", {}).get("output_tps", "")) if s else "",
