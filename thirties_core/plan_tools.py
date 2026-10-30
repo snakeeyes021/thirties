@@ -268,6 +268,13 @@ class PlanTools:
             return self.day_plan.target_date
         return get_diurnal_date(self._now(), lat=gen.latitude, lon=gen.longitude, tz_name=gen.timezone)
 
+    def is_current(self, plan: DayPlan) -> bool:
+        """The day being lived: today, or the day that starts at the coming sunrise once it's near (planning at 7 on a
+        dark morning is planning that day; Today lists it). The evening before isn't: that's planning ahead."""
+        today = self.today()
+        return plan.target_date == today or (plan.target_date == today + timedelta(days=1)
+                                             and self._now() >= plan.day_start - timedelta(hours=3))
+
     def plan_for(self, day: Any) -> DayPlan:
         """The plan for a day given as text ('tomorrow', 'Oct 20') relative to today."""
         if day in (None, ""):
@@ -590,7 +597,7 @@ class PlanTools:
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
-        if self.assistant and self.day_plan.target_date == self.today():
+        if self.assistant and self.is_current(self.day_plan):
             listed = self.assistant.list_today(span)
             extra += f" {listed}" if listed else ""
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
@@ -702,7 +709,7 @@ class PlanTools:
             target_plan.spans.append(moved)
             target_plan.spans.sort(key=lambda s: s.start_dt)
             self._persist(moved)
-            if self.assistant and target_plan.target_date == self.today():
+            if self.assistant and self.is_current(target_plan):
                 self.assistant.list_today(moved)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
                     f"{format_clock(new_start)} – {format_clock(new_end)} "
@@ -713,7 +720,7 @@ class PlanTools:
         target_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
         listed = ""
-        if self.assistant and target_plan.target_date == self.today():
+        if self.assistant and self.is_current(target_plan):
             listed = self.assistant.list_today(span)
         return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
 

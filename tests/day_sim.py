@@ -515,8 +515,8 @@ def joplin_facts(run: DayRun) -> Dict[str, Any]:
     routine_ids = {n["id"] for n in notes_with_role(roles, notes, "routine")}
     out: Dict[str, Any] = {
         "writes": len(writes), "failed": sum(1 for w in writes if not w["ok"]),
-        "into_routine": [f"{w['note_title']}: +{w['added']}" for w in writes
-                         if w["note_id"] in routine_ids and w["added"] and w["op"].get("op") != "untick_all"],
+        "into_routine": [f"{w['op'].get('op')} {w['note_title']}: +{w['added']}" for w in writes
+                         if w["note_id"] in routine_ids and w["op"].get("op") != "untick_all"],  # a template
         "log": [f"{w['op'].get('op')} {w['note_title']}: -{w['removed']} +{w['added']}" for w in writes][:40],
     }
     today = next(iter(notes_with_role(roles, notes, "today")), None)
@@ -531,7 +531,11 @@ def joplin_facts(run: DayRun) -> Dict[str, Any]:
         top = re.findall(r"^-\s*\[[ xX]\]\s*(.+?)\s*$", today.get("body") or "", re.M)
         out["today_duplicates"] = [t for t, n in Counter(x.lower() for x in top).items() if n > 1]
         open_ids = {t.id for t in (joplin.fetch_tasks() if joplin is not None else [])}
-        out["done_but_open"] = [s.title for s in planned if s.status == SpanStatus.DONE and s.task_id in open_ids]
+        today_open = {t.lower() for t, ticked in note_items(today) if not ticked}
+        out["done_but_open"] = [s.title for s in planned if s.status == SpanStatus.DONE
+                                and (s.task_id in open_ids - {t.id for t in joplin.fetch_tasks()
+                                                              if t.parent_note_id in routine_ids}
+                                     or s.title.lower() in today_open)]
     return out
 
 

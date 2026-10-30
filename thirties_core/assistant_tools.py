@@ -438,7 +438,8 @@ class AssistantTools:
             home = next((t for t in self.s.tasks if link and t.id == link["home_id"]), None)
             if home is not None:
                 self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
-                if not home.id.startswith("media:"):  # a wishlist item has nothing to tick in Joplin
+                if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
+                    # (a wishlist item), or nothing to write (a routine is a template)
                     writer.submit(complete_op(home))
                 self.s.tasks = [t for t in self.s.tasks if t.id != home.id]
             return
@@ -473,13 +474,14 @@ class AssistantTools:
         notes = {n["id"]: n for n in self._joplin_notes()}
         on_today = {text.lower(): ticked for text, ticked in note_items(today)}
         links = TodayLinks(self._db)
+        routine_ids = {n["id"] for n in self._routines()}
         for link in links.all():
             home_items = {text.lower(): (text, ticked) for text, ticked in note_items(notes.get(link["home_note_id"]))}
             home = home_items.get(link["home_title"].lower())
             mine = on_today.get(link["today_title"])
             if home is None or mine is None:
                 continue
-            if mine and not home[1]:
+            if mine and not home[1] and link["home_note_id"] not in routine_ids:  # a routine is never written to
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": link["home_note_id"],
                                "title": home[0]})
             elif home[1] and not mine:
@@ -665,7 +667,7 @@ class AssistantTools:
         if not placed:
             return f"{note['title']} is already on the plan."
         listed = ""
-        if plan.target_date == self._today():
+        if self.pt.is_current(plan):
             try:
                 listed = " " + self._routine_on_today(note, placed)
             except ToolError:
@@ -893,10 +895,14 @@ class AssistantTools:
                 self.pt._persist(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
-            if st == SpanStatus.DONE and task:
+            if st == SpanStatus.DONE and (self._routine_of(span.title) is not None
+                                          or (task is not None and task.list_role == "routine")):
+                # a routine note is a template: the day's ticks go on Today's copy, never into the routine
+                self._tick_on_today(span.title)
+                if self._db:
+                    self._db.record_task_completed(span.task_id, self.pt.day_plan.target_date)
+            elif st == SpanStatus.DONE and task:
                 result += " " + self._complete_backlog_task(task)
-            elif st == SpanStatus.DONE and self._routine_of(span.title) is not None:
-                self._tick_on_today(span.title)  # a routine step already ticked in its note: still tick today's copy
             elif st == SpanStatus.SKIPPED and self._db:
                 count = self._db.record_task_deferred(span.task_id)
                 result += f"; it has now been put off {count} times"

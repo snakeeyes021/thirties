@@ -10,6 +10,7 @@ from thirties_core.lists import ListCatalog
 from thirties_core.models import SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.today import TodayLinks
+from thirties_core.assistant_tools import _checkbox_id
 
 TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Morning Routine"}
 
@@ -242,6 +243,26 @@ class TestRoutinesOnToday(TodayTestCase):
         self.t.execute("add_event", {"title": "Torquio dev", "start": "8:00 PM", "duration": "1 hour",
                                      "day": "tomorrow"})
         self.assertEqual(self.body("n_today"), "- [ ] Dinner\n- [ ] Morning Routine\n    - [ ] Shower\n")
+
+    def test_the_routine_note_is_never_written_however_a_step_is_ticked(self):
+        self.api.notes["n_routine"]["body"] = self.routine.replace("[x]", "[ ]")  # this morning: unticked
+        self.services.tasks += [TaskItem(id=_checkbox_id("n_routine", s), source_notebook="1. Tasks", title=s,
+                                         is_checkbox_item=True, parent_note_title="Morning Routine",
+                                         parent_note_id="n_routine", list_role="routine") for s in self.STEPS]
+        template = self.body("n_routine")
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        caffeinate = next(s for s in self.t.day_plan.spans if s.title == "Caffeinate")
+        self.t.execute("log_outcome", {"event": caffeinate.id, "status": "done"})  # said in chat
+        self.api.notes["n_today"]["body"] = self.body("n_today").replace("- [ ] Shower", "- [x] Shower")  # by hand
+        self.t.assistant.sync_today()
+        self.assertEqual(self.body("n_routine"), template)
+        self.assertIn("    - [x] Caffeinate\n", self.body("n_today"))
+
+    def test_on_a_dark_morning_the_coming_day_is_the_one_on_today(self):
+        set_debug_time(at("06:40"))  # before sunrise: the calendar day is still yesterday's diurnal day
+        self.assertFalse(self.t.today() == DAY)
+        self.t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
+        self.assertIn("- [ ] Lunch", self.body("n_today"))
 
     def test_a_done_step_ticks_todays_copy_and_the_group_leaves_the_next_morning(self):
         self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
