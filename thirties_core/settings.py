@@ -38,6 +38,7 @@ _ALL = [
     Setting("general.work_end_thirty", "shared"),
     Setting("general.sleep_start_thirty", "shared"),
     Setting("general.sleep_end_thirty", "shared"),
+    Setting("general.week", "shared"),  # what's different on some weekdays (week.py)
     Setting("general.temperature_unit", "shared"),
     Setting("media.goodreads_user_id", "shared"),
     Setting("media.letterboxd_username", "shared"),

@@ -335,6 +335,7 @@ class SyncEngine:
         from thirties_core.facts import SpanFacts
         from thirties_core.item_facts import LastingFacts
         from thirties_core.lists import ListCatalog
+        from thirties_core.routines import RoutineBook
         from thirties_core.today import TodayLinks
         from thirties_core.memory import (CheckinMutes, ConversationStore, EnergyLog, MemoryStore, ProfileStore,
                                           ReminderStore)
@@ -351,6 +352,7 @@ class SyncEngine:
             "item_facts": LastingFacts(self.state_db),
             "calendar_outcomes": CalendarOutcomes(self.state_db),
             "sharing_rules": SharingRules(self.state_db),
+            "routines": RoutineBook(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

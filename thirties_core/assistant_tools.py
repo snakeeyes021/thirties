@@ -343,6 +343,24 @@ class AssistantTools(KindTools):
         self._quiet_today = False  # put_routine lists its steps on Today together, as one group
         self._for_good = False  # an ongoing item's home stays open unless it's finished for good (_tick_twin)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
+        self._routine_tools = None
+        self._proposal_tools = None
+
+    @property
+    def routines(self):
+        """Routines, daily anchors, the week, and the morning set-up (routines.py)."""
+        if self._routine_tools is None:
+            from thirties_core.routines import RoutineTools
+            self._routine_tools = RoutineTools(self)
+        return self._routine_tools
+
+    @property
+    def proposals(self):
+        """The day's proposal (day_proposal.py)."""
+        if self._proposal_tools is None:
+            from thirties_core.day_proposal import DayProposal
+            self._proposal_tools = DayProposal(self)
+        return self._proposal_tools
 
     # --- helpers ---
 
@@ -497,6 +515,9 @@ class AssistantTools(KindTools):
                     and self._link_kind(link, ctx) != ONGOING:  # a routine is never written to; ongoing stays open
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": link["home_note_id"],
                                "title": home[0]})
+            elif mine and link["home_note_id"] in routine_ids:  # a routine step ticked by hand: it was done
+                # today (its repeat schedule counts from the last time it was done)
+                self._db.record_task_completed(link["home_id"], self._today())
             elif home[1] and not mine:
                 exact = next(t for t, _ in note_items(today) if t.lower() == link["today_title"])
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
@@ -561,6 +582,7 @@ class AssistantTools(KindTools):
         if self._db is not None and self.pt.is_current(plan) and \
                 self._db.get_sync_meta(f"day_started:{plan.target_date.isoformat()}") != "done":
             self.start_the_day(plan.target_date)
+        self.routines.set_up_day(plan)  # then the day's routines and anchors, once (planned before sunrise too)
 
     def list_today(self, span: EventSpan) -> str:
         """Everything on today's plan is on today's list (10-29: the plan and the Today note had drifted apart): a list
@@ -640,7 +662,9 @@ class AssistantTools(KindTools):
         from thirties_core.today import note_items
         routines = self._routines()
         want = {_stem(w) for w in _words(routine)}
-        found = [n for n in routines if not routine or want & {_stem(w) for w in _words(n["title"])}]
+        found = [n for n in routines if _same_words(n["title"], routine)] or \
+            [n for n in routines if not routine or want & {_stem(w) for w in _words(n["title"])}]  # two routines
+        # share "routine": the exact name wins
         if len(found) != 1:
             names = ", ".join(n["title"] for n in routines) or "none yet (mark a note as a routine in Profile → Lists)"
             raise ToolError(f"Which routine? Routines: {names}.")
@@ -686,6 +710,9 @@ class AssistantTools(KindTools):
             self._quiet_today = False
         if not placed:
             return f"{note['title']} is already on the plan."
+        known = self.routines.known_extras(note)  # extras the user always places with it (Brush teeth): no asking
+        extra = [x for x in extra if x.lower() not in known]
+        self.routines.learn(note, parts)  # how the user places it becomes its usual placement (routines.py)
         listed = ""
         if self.pt.is_current(plan):
             self._day_begun()
@@ -1032,8 +1059,10 @@ class AssistantTools(KindTools):
         return plan
 
     def _carries_over(self, span: EventSpan, ctx: Optional[Dict[str, Any]] = None) -> bool:
-        """Only one-off things carry over: daily things (routine steps, meals) and time on a project ("Torquio dev",
-        a backlog's time) come round again anyway (kinds.rolls_over; 10-18, 10-27, 10-30)."""
+        """Only one-off things carry over: daily things (routine steps, meals, the user's daily anchors) and time on a
+        project ("Torquio dev", a backlog's time) come round again anyway (kinds.rolls_over; 10-18, 10-27, 10-30)."""
+        if span.title.strip().lower() in self.routines.daily_titles():  # anchors happen again by themselves
+            return False
         return rolls_over(self.kind_of(span, ctx))
 
     def _rollover_key(self) -> str:
@@ -1050,6 +1079,7 @@ class AssistantTools(KindTools):
         done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
         routine = {n["title"].strip().lower() for n in self._routines()}
         routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
+        routine |= self.routines.daily_titles()  # anchors and a routine's extra steps don't carry over either
         done_on_plan = {t.lower() for t in self._done_on_plan(note)}
         ctx = self._kind_context()
         recent = [self._plan_peek(self._today() - timedelta(days=1)), self._plan_peek(self._today())]
@@ -1113,10 +1143,22 @@ class AssistantTools(KindTools):
         today = self._today_note()
         if today:
             from thirties_core.today import group_items
+            mine = self.routines.on_today_for(day)  # put on for this day already (Joplin was closed till now)
             for note in notes_with_role(roles, notes, "routine"):  # routines never carry over: yesterday's group goes
-                if group_items(today, note["title"]) is not None:
+                if group_items(today, note["title"]) is not None and note["title"].strip().lower() not in mine:
                     writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
+            from thirties_core.today import note_items
+            daily = self.routines.daily_titles() - mine - {n["title"].strip().lower() for n in
+                                                           notes_with_role(roles, notes, "routine")}
+            # yesterday's anchors (Lunch) and a routine's extra steps happen again: they don't stay
+            done_lines = set(self._done_on_plan(today, day))  # those go below
+            for text, ticked in note_items(today):
+                if not ticked and text.lower() in daily and text not in done_lines and re.search(
+                        r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M):
+                    writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                    self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
+                    done.append(f"took yesterday's {text} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
             for text in self._done_on_plan(today, day):
                 writer.submit({"op": "remove", "note_id": today["id"], "title": text})
@@ -1571,6 +1613,8 @@ class AssistantTools(KindTools):
             "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
+            **self.routines.handlers(),
+            **self.proposals.handlers(),
         }
 
 

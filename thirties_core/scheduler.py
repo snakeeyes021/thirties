@@ -529,27 +529,28 @@ class DeterministicScheduler:
 
         Work runs from work_start_thirty through the end of work_end_thirty, on the
         configured work_days only. Sleep is the night of target_date: from
-        sleep_start_thirty until sleep_end_thirty the following morning.
+        sleep_start_thirty until sleep_end_thirty the following morning. Each weekday can differ (week.py).
         """
+        from thirties_core.week import day_hours
         gen = self.config.general
         tz = self.tz
-        work_start = datetime.combine(target_date, _thirty_to_time(gen.work_start_thirty), tzinfo=tz)
-        work_end = datetime.combine(target_date, _thirty_to_time(gen.work_end_thirty + 1), tzinfo=tz)
+        hours, morning_after = day_hours(gen, target_date), day_hours(gen, target_date + timedelta(days=1))
+        work_start = datetime.combine(target_date, _thirty_to_time(hours.work_start), tzinfo=tz)
+        work_end = datetime.combine(target_date, _thirty_to_time(hours.work_end + 1), tzinfo=tz)
         if work_end <= work_start:
             work_end += timedelta(days=1)
 
-        sleep_start_t = _thirty_to_time(gen.sleep_start_thirty)
+        sleep_start_t = _thirty_to_time(hours.sleep_start)
         sleep_day = target_date if sleep_start_t >= time(12, 0) else target_date + timedelta(days=1)
         sleep_start = datetime.combine(sleep_day, sleep_start_t, tzinfo=tz)
-        sleep_end = datetime.combine(sleep_day, _thirty_to_time(gen.sleep_end_thirty), tzinfo=tz)
+        sleep_end = datetime.combine(sleep_day, _thirty_to_time(morning_after.sleep_end), tzinfo=tz)
         if sleep_end <= sleep_start:
             sleep_end += timedelta(days=1)
 
         # Deterministic ids, so devices that both materialize a day produce the same spans.
         day = target_date.isoformat()
         spans = [EventSpan(f"routine-{day}-sleep", "Sleep", sleep_start, sleep_end, SpanCategory.SLEEP, source="routine")]
-        weekday = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[target_date.weekday()]
-        if weekday in [d.strip().lower()[:3] for d in gen.work_days]:
+        if hours.works:
             spans.insert(0, EventSpan(f"routine-{day}-work", "Work", work_start, work_end, SpanCategory.WORK, source="routine"))
         return spans
 

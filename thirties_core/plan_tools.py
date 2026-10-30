@@ -220,9 +220,12 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
 ]
 
+from thirties_core.day_proposal import PROPOSAL_READ_ONLY, PROPOSAL_TOOL_SPECS  # noqa: E402
+from thirties_core.routines import ROUTINE_TOOL_SPECS  # noqa: E402
+
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
-TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY
+TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS
+READ_ONLY_TOOLS = {"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
 
 
 def _as_bool(value: Any) -> bool:
