@@ -284,10 +284,13 @@ class ConversationManager:
     def send_user_message(self, user_text: str, via: str = "app") -> str:
         """Handle one user turn: developer slash commands here, everything else via the brain. `via` is the
         channel ("app", "telegram"), stored with the turn's messages."""
+        from thirties_core.joplin_writeback import current_turn
         with self.turn_lock:
+            token = current_turn.set(f"[{via}] {user_text}")  # each Joplin write is logged with its cause
             try:
                 return self._send_user_message(user_text, via)
             finally:
+                current_turn.reset(token)
                 self.tools.user_message = None  # a drag in the Day page later isn't judged by this message
 
     def _send_user_message(self, user_text: str, via: str) -> str:

@@ -493,7 +493,46 @@ def measure(run: DayRun) -> Dict[str, Any]:
     facts["not_done_items_recorded_done"] = sum(1 for r in rows if not r["really_done"] and r["recorded"])
     errs = [r[k] for r in rows for k in ("start_error_min", "end_error_min") if k in r]
     facts["mean_time_error_min"] = round(sum(errs) / len(errs), 1) if errs else None
+    try:
+        facts["joplin"] = joplin_facts(run)
+    except ImportError:
+        pass  # a version without the write log
     return facts
+
+
+def joplin_facts(run: DayRun) -> Dict[str, Any]:
+    """Every Joplin write of the day, and what must hold at the end of it (heavy principle 2): nothing written into
+    a routine note, everything on today's plan on the Today note, what's done ticked in its list, no line twice."""
+    from collections import Counter
+    from thirties_core.joplin_writeback import WriteLog
+    from thirties_core.lists import ListCatalog
+    from thirties_core.today import TodayLinks, note_items, notes_with_role
+    db = run.scheduler.state_db
+    writes = WriteLog(db).since("")
+    roles = ListCatalog(db).roles()
+    joplin = run.manager.tools.services.joplin
+    notes = joplin.fetch_active_notes() if joplin is not None else []
+    routine_ids = {n["id"] for n in notes_with_role(roles, notes, "routine")}
+    out: Dict[str, Any] = {
+        "writes": len(writes), "failed": sum(1 for w in writes if not w["ok"]),
+        "into_routine": [f"{w['note_title']}: +{w['added']}" for w in writes
+                         if w["note_id"] in routine_ids and w["added"] and w["op"].get("op") != "untick_all"],
+        "log": [f"{w['op'].get('op')} {w['note_title']}: -{w['removed']} +{w['added']}" for w in writes][:40],
+    }
+    today = next(iter(notes_with_role(roles, notes, "today")), None)
+    if today is not None:
+        lines = [t.lower() for t, _ in note_items(today)]
+        links = TodayLinks(db)
+        plan = run.plan(0)
+        planned = [s for s in plan.spans if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+                   and s.status != SpanStatus.SKIPPED and s.source != "calendar"]
+        out["plan_not_on_today"] = [s.title for s in planned if s.title.lower() not in lines
+                                    and (links.today_title_of(s.task_id) or "") not in lines]
+        top = re.findall(r"^-\s*\[[ xX]\]\s*(.+?)\s*$", today.get("body") or "", re.M)
+        out["today_duplicates"] = [t for t, n in Counter(x.lower() for x in top).items() if n > 1]
+        open_ids = {t.id for t in (joplin.fetch_tasks() if joplin is not None else [])}
+        out["done_but_open"] = [s.title for s in planned if s.status == SpanStatus.DONE and s.task_id in open_ids]
+    return out
 
 
 JUDGE_DIMS = ("accuracy", "understanding", "plan_respect", "message_load", "record_keeping", "clarity", "tone")
@@ -587,7 +626,11 @@ def summarize(results: List[Dict[str, Any]], brains: List[str]) -> None:
               f"waking hour {mean(r['facts'].get('app_messages_per_waking_hour') for r in rs)} | repeated "
               f"{sum(r['facts'].get('app_messages_repeated', 0) for r in rs)} | internal text "
               f"{sum(len(r['facts'].get('internal_text_in_replies', [])) for r in rs)} | joined titles "
-              f"{sum(len(r['facts'].get('joined_titles', [])) for r in rs)} | time error "
+              f"{sum(len(r['facts'].get('joined_titles', [])) for r in rs)} | joplin: writes "
+              f"{sum(r['facts'].get('joplin', {}).get('writes', 0) for r in rs)}, into routines "
+              f"{sum(len(r['facts'].get('joplin', {}).get('into_routine', [])) for r in rs)}, plan not on Today "
+              f"{sum(len(r['facts'].get('joplin', {}).get('plan_not_on_today', [])) for r in rs)}, done but open "
+              f"{sum(len(r['facts'].get('joplin', {}).get('done_but_open', [])) for r in rs)} | time error "
               f"{mean(r['facts'].get('mean_time_error_min') for r in rs)} min | latency {mean(r['mean_latency'] for r in rs)}s")
 
 

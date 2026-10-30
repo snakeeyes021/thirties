@@ -349,13 +349,13 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 
 The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus section B above. The user chose to have all of it in 0.2 rather than split it with 0.3. The full friction list, with quotes, is in `docs/eval_reports/frictions/2026-10-30_oct14-30.md` (gitignored, because it's private chat). Codes like J1 and S3 refer to it. Each block lands on the branch as it's done, so the user's builds get the fixes as they come.
 
-**Block 0: the data is right** (blockers, first)
+**Block 0: the data is right** (blockers, first; all six done 2026-10-30)
 1. **Today matches the plan, and routines are written right** (soak 6, J1, J2, S9). Everything on today's plan is on Today. A routine goes on as one item, named after its note, with its steps nested under it. Nothing is written back into a routine note.
 2. **Completion times** (J8, J9). A "done" in chat with no time is stored at the time it was said, as an estimate (start = that time minus the planned length). A tick in the app is stored at the time of the tick. Notices and replies see ticks.
 3. **Ghost copies and outcomes on the wrong item** (S3, S8). Moving or redrawing an item moves it; it never leaves a copy behind. An outcome is written only to the item the user named, on the day they meant.
 4. **Internal text never reaches the user** (A1). Python strips `CALL …` lines and any tool syntax before a reply is sent. Retry prompts ("[System check…]") are kept out of the visible history.
 5. **Check the possible recurrences** in the database: Work moved on 10-27 (S1), and done items offered again on 10-25 (J3). Fix whichever is real.
-6. **Every Joplin write is recorded and scored** (B1). The write log, a Joplin fake in the day sim, and grading against the script's truth.
+6. **Every Joplin write is recorded and scored** (B1). Every write is logged (`joplin_writes`: the operation, the lines it took out and put in, and the message that caused it), and the day sim's Joplin facts check what must hold: nothing written into a routine, everything on the plan is on Today, what's done is ticked, and no line appears twice.
 
 **Block 1: the day sets itself up**
 7. **What kind of item** (B2): once, ongoing or daily.

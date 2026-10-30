@@ -11,6 +11,8 @@ the user's indentation and touch only the lines they mean to.
 
 from __future__ import annotations
 
+import contextvars
+import difflib
 import json
 import logging
 import os
@@ -253,6 +255,64 @@ def clipper_running(host: str = "127.0.0.1", port: int = 41184) -> bool:
 
 # --- delivering changes ---
 
+# The turn a write came from (a user's message), set by the conversation for the length of a turn; a queued write
+# carries it into the outbox, so the log says why even when Joplin was closed at the time.
+current_turn: contextvars.ContextVar[str] = contextvars.ContextVar("current_turn", default="")
+
+_WRITES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS joplin_writes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    op TEXT NOT NULL,
+    note_id TEXT NOT NULL DEFAULT '',
+    note_title TEXT NOT NULL DEFAULT '',
+    ok INTEGER NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    removed TEXT NOT NULL DEFAULT '[]',
+    added TEXT NOT NULL DEFAULT '[]',
+    turn TEXT NOT NULL DEFAULT ''
+);
+"""
+
+
+class WriteLog:
+    """Every write Thirties makes to Joplin, as it lands: the operation, the lines it took out and put in, and the
+    message that caused it (heavy principle 2: every write is recorded and scored)."""
+
+    def __init__(self, db) -> None:
+        self.db = db
+        with db._get_connection() as conn:
+            conn.executescript(_WRITES_SCHEMA)
+
+    def record(self, op: Dict[str, Any], note_title: str, ok: bool, message: str = "", before: str = "",
+               after: str = "") -> None:
+        old, new = before.splitlines(), after.splitlines()
+        removed, added = [], []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
+            if tag in ("replace", "delete"):
+                removed += old[i1:i2]
+            if tag in ("replace", "insert"):
+                added += new[j1:j2]
+        clean = {k: v for k, v in op.items() if not k.startswith("_")}
+        with self.db._get_connection() as conn:
+            conn.execute("INSERT INTO joplin_writes (at, op, note_id, note_title, ok, message, removed, added, turn) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (datetime.now(timezone.utc).isoformat(), json.dumps(clean), str(op.get("note_id", "")),
+                          note_title, int(ok), message, json.dumps(removed), json.dumps(added),
+                          str(op.get("_turn") or "")))
+
+    def since(self, at_iso: str = "") -> List[Dict[str, Any]]:
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM joplin_writes WHERE at >= ? ORDER BY id", (at_iso,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r) if hasattr(r, "keys") else dict(zip(("id", "at", "op", "note_id", "note_title", "ok", "message",
+                                                               "removed", "added", "turn"), r))
+            d["op"], d["removed"], d["added"] = json.loads(d["op"]), json.loads(d["removed"]), json.loads(d["added"])
+            out.append(d)
+        return out
+
+
 class JoplinWriter:
     """Delivers write-back operations now if Joplin is up, else queues them in the outbox."""
 
@@ -272,6 +332,8 @@ class JoplinWriter:
         """("done" | "queued" | "failed" | "not_allowed", message). Never blocks long."""
         if not self.allowed:
             return "not_allowed", "Thirties isn't allowed to change Joplin (Preferences → Tasks)."
+        if current_turn.get() and "_turn" not in op:
+            op = {**op, "_turn": current_turn.get()[:500]}
         if self.api.ping():
             ok, msg = self._apply(op)
             if ok or msg.startswith("gone:"):
@@ -325,9 +387,20 @@ class JoplinWriter:
             return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
         if not self.api.update_note(note_id, {"body": new}):
             return False, "Joplin didn't accept the change."
+        self._last = (note.get("title", ""), note["body"], new)
         return True, ""
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
+        self._last = ("", "", "")
+        ok, msg = self._apply_op(op)
+        title, before, after = self._last
+        try:
+            WriteLog(self.db).record(op, title or str(op.get("title", "")), ok, msg, before, after)
+        except Exception as e:  # the log must never stop a write
+            logger.warning("Couldn't log the Joplin write: %s", e)
+        return ok, msg
+
+    def _apply_op(self, op: Dict[str, Any]) -> Tuple[bool, str]:
         kind = op.get("op")
         if str(op.get("note_id", "")).startswith("media:"):  # a wishlist item, not a Joplin note
             return False, "gone: not a Joplin item."

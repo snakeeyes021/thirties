@@ -5,7 +5,7 @@ No model: a scripted user and the mock engine stand in for Gemini.
 
 import json
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -91,6 +91,25 @@ class TestDaySim(unittest.TestCase):
                                    "situation": "s", "life": ["morning: wake"], "truth": [{"item": "a"}]}),
                          ["date '2026-13-01' isn't YYYY-MM-DD", "wake '7:00' isn't HH:MM",
                           "life beat without a time first: 'morning: wake'"])
+
+    def test_joplin_writes_are_scored(self):
+        nurse = DayScript(id="nurse", day=date(2026, 10, 10), wake="07:00", bed="22:00", persona="Pat", situation="Off.",
+                          life=["07:00 Wake."], truth=[{"item": "Laundry", "start": "09:00", "end": "10:00"}],
+                          notes=[{"notebook": "Home", "title": "Chores", "role": "list", "body": "- [ ] Laundry\n"},
+                                 {"notebook": "Home", "title": "Morning", "role": "routine", "body": "- [ ] Coffee\n"},
+                                 {"notebook": "Home", "title": "Today", "role": "today", "body": ""}])
+        run = start_day(nurse, "frontier", [], [], MockInferenceEngine())
+        set_debug_time(datetime(2026, 10, 10, 8, 30, tzinfo=run.manager.day_plan.day_start.tzinfo))  # after sunrise
+        tasks = {t.title: t for t in run.manager.tools.services.tasks}
+        run.manager.execute_tool("add_event", {"title": "Laundry", "start": "9:00 AM", "duration": "1 hour",
+                                               "task_id": tasks["Laundry"].id})
+        run.manager.execute_tool("put_routine", {"routine": "Morning", "start": "8:00 AM"})
+        laundry = next(s for s in run.manager.day_plan.spans if s.title == "Laundry")
+        run.manager.execute_tool("log_outcome", {"event": laundry.id, "status": "done"})
+        j = measure(run)["joplin"]
+        self.assertEqual((j["into_routine"], j["plan_not_on_today"], j["done_but_open"], j["today_duplicates"]),
+                         ([], [], [], []))
+        self.assertGreaterEqual(j["writes"], 4)  # Laundry and Morning on Today, the steps, Laundry ticked twice
 
     def test_committed_scripts_load(self):
         scripts = find_scripts([Path(__file__).parent / "day_scripts"])
