@@ -152,6 +152,28 @@ class TestOrderEveryDay(FactsTestCase):
         self.assertEqual(out, "Noted for Grocery run, every day: needs daylight.")
 
 
+class TestThePrompt(unittest.TestCase):
+
+    def test_the_frontier_prompt_shows_what_holds_every_day_and_nothing_moot_is_waiting(self):
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.models import EventSpan, SpanCategory
+        set_debug_time(at("21:00"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        LastingFacts(sched.state_db).set(Lasting(name="Cats' dinner", title="Cats' dinner", fixed_at="17:00"))
+        sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:00"), at("12:30"), SpanCategory.ACTIVITY))
+        sched.state_db.upsert_span(EventSpan("d", "Dinner", at("18:00"), at("19:00"), SpanCategory.ACTIVITY))
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(), active_notes=[])
+        prompt = manager.brain.build_system_prompt()
+        self.assertIn("EVERY DAY (", prompt)
+        self.assertIn("- Cats' dinner: always at 5:00 PM", prompt)
+        waiting = prompt.split("WAITING FOR AN OUTCOME", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("Dinner", waiting)
+        self.assertNotIn("Lunch", waiting)  # moot once dinner began (10-23)
+
+
 class TestSync(unittest.TestCase):
 
     def test_facts_and_their_clearing_sync_last_write_wins(self):

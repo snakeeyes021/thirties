@@ -27,7 +27,8 @@ class TestReadingTheKind(unittest.TestCase):
             self.assertEqual(kind_by_wording(title), DAILY, title)
         for title in ("Torquio dev", "Thirties session", "Work on the album", "Redfox work"):
             self.assertEqual(kind_by_wording(title), ONGOING, title)
-        for title in ("Email back GitHub", "Clean broken glass", "Dinner with Sam", "Work", "Sleep"):
+        for title in ("Email back GitHub", "Clean broken glass", "Dinner with Sam", "Clean the shower", "Buy vitamins",
+                      "Work", "Sleep"):
             self.assertIsNone(kind_by_wording(title), title)
 
     def test_the_list_role_wins_over_wording_and_the_users_word_wins_over_both(self):

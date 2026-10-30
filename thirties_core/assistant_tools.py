@@ -959,6 +959,7 @@ class AssistantTools(KindTools):
     def review_day(self, **_: Any) -> str:
         plan = self.pt.day_plan
         now = self.pt._now()
+        self.settle_moot(plan, now)  # what has gone moot is never asked about (B4)
         pending = unreviewed_spans(plan.spans, now, plan.day_start)
         if not pending:
             return "Everything that has ended so far has an outcome recorded."

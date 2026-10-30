@@ -66,9 +66,15 @@ ONGOING_RE = re.compile(
     r"|(work(ing)?|time)\s+on\s+.+|practi[cs]e\s+.+)$", re.IGNORECASE)
 
 
+# A one-off job about a daily thing ("Clean the shower", "Buy vitamins", "Fix the cat feeder") is still a one-off.
+_CHORE_RE = re.compile(r"^\s*(clean|scrub|fix|repair|replace|buy|order|book|research|return|call|email|shop)\b",
+                       re.IGNORECASE)
+
+
 def is_meal(title: str) -> bool:
     """A meal of the user's own (not "dinner with Sam", which is an appointment)."""
-    return bool(MEAL_RE.search(title or "")) and not _MEAL_WITH_RE.search(title or "") and not \
+    return bool(MEAL_RE.search(title or "")) and not _MEAL_WITH_RE.search(title or "") \
+        and not _CHORE_RE.match(title or "") and not \
         re.search(r"\b(cats?|kitt(y|ies)|dogs?|pets?)'?s?\b", title or "", re.IGNORECASE)
 
 
@@ -77,7 +83,7 @@ def kind_by_wording(title: str) -> Optional[str]:
     t = str(title or "").strip()
     if not t or t.lower() in ("work", "sleep"):
         return None
-    if DAILY_RE.search(t) and not _MEAL_WITH_RE.search(t):
+    if DAILY_RE.search(t) and not _MEAL_WITH_RE.search(t) and not _CHORE_RE.match(t):
         return DAILY
     if ONGOING_RE.match(t):
         return ONGOING
