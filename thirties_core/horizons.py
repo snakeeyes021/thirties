@@ -167,8 +167,8 @@ def parse_period(text: Any, today: date, week_start: int = 0) -> Period:
         return period_of("day", text, week_start)
     raw = re.sub(r"[,.!?]", " ", str(text or "").strip().lower())
     raw = re.sub(r"\s+", " ", raw).strip()
-    raw = re.sub(r"^(?:some ?time |sometime )?(?:in|on|for|during|over|within|by the end of|end of|the end of)\s+",
-                 "", raw)
+    raw = re.sub(r"^some ?time\s+", "", raw)
+    raw = re.sub(r"^(?:in|on|for|during|over|within|by the end of|end of|the end of)\s+", "", raw)
     raw = re.sub(r"^(?:the rest of|rest of)\s+", "", raw)
     if raw in ("", "today", "tonight"):
         return period_of("day", today, week_start)
@@ -550,7 +550,7 @@ class Candidate:
 
     def facts(self) -> str:
         bits = [self.why]
-        if self.due:
+        if self.due and "due" not in self.why:
             bits.append(f"due {_as_date(self.due).strftime('%a %b %-d')}" if _as_date(self.due) else "")
         if self.deferred:
             bits.append(f"put off {self.deferred}x")
@@ -813,10 +813,12 @@ class HorizonPlanner:
                 slot = r["slot"]
                 add(t, "pinned", f"pinned to {self.label(where) if slot else self.label(p)}", slot)
 
-        # 2. due by the end of the period (or overdue)
+        # 2. due by the end of the period (or overdue); for a day, within two days (what today_carryover calls
+        # pressing): due tomorrow means today is when there's still room for it
+        due_by = p.end + timedelta(days=2 if p.level == "day" else 0)
         for t in tasks.values():
             due = _as_date(t.due)
-            if due and due <= p.end and t.id not in placed_elsewhere and self._plannable(t, maps):
+            if due and due <= due_by and t.id not in placed_elsewhere and self._plannable(t, maps):
                 add(t, "due", "overdue" if due < today else f"due {self.label(period_of('day', due))}")
 
         # 3. left over: planned for an earlier period at this level and not done
