@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-24. Releases: 0.0.1 (2026-10-18). In progress: 0.1 on `feature/0.1`. Next: 0.2 (section B below).
+> Last revised: 2026-10-30. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30). In progress: 0.2 on `feature/0.2`.
 
 ---
 
@@ -138,7 +138,7 @@ Done means a generic user can install Thirties fresh and use it daily, with no c
 
 ---
 
-## 0.1: The day list (branch `feature/0.1`, agreed 2026-10-17; not released yet)
+## 0.1: The day list (agreed 2026-10-17; released as 0.1.0 on 2026-10-30)
 
 Real use of the MVP showed the root problem: the schedule does two jobs, the plan and the record. So every drift became a schedule edit, which brought shuffles, confirmations, nagging, and a day view full of things that never happened. 0.1 separates them.
 
