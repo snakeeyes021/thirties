@@ -288,6 +288,8 @@ ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "re
                        "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal",
                        "match_backlog", "get_weather"}
 ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
+from thirties_core.sun_notices import SUN_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += SUN_TOOL_SPECS  # a message at sunrise / sunset: thirties_core/sun_notices.py
 ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
 
 
@@ -504,6 +506,13 @@ class AssistantTools(KindTools):
         if exact:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
             self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
+
+    def set_sun_notices(self, sunrise: Any = None, sunset: Any = None, **_: Any) -> str:
+        from thirties_core.settings import settings_for
+        from thirties_core.sun_notices import set_sun_notices
+        if self.pt.scheduler is None:
+            raise ToolError("There are no settings to change here.")
+        return set_sun_notices(self.pt.scheduler.config, settings_for(self._db) if self._db else None, sunrise, sunset)
 
     def _tick_on_today(self, title: str) -> None:
         from thirties_core.today import note_items
@@ -1750,6 +1759,7 @@ class AssistantTools(KindTools):
             **self.routines.handlers(),
             **self.proposals.handlers(),
             **horizon_handlers(self),
+            "set_sun_notices": self.set_sun_notices,
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
 

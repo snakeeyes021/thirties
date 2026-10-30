@@ -57,6 +57,8 @@ _ALL = [
     Setting("telegram.notify_block_transitions", "shared"),
     Setting("calendar.modes", "shared"),  # per calendar: mine / show only / ignore (by name: uids differ per device)
     Setting("telegram.mirror_desktop", "shared"),
+    Setting("assistant.sunrise_notice", "shared"),
+    Setting("assistant.sunset_notice", "shared"),
     # about this machine
     Setting("assistant.brain", "device"),
     Setting("general.latitude", "device"),

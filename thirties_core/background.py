@@ -533,6 +533,16 @@ class BackgroundService:
             self._remember("day_times_asked", asked, now)
             self.send(due[1], "checkin", now=now)
 
+    def sun(self, now: datetime) -> None:
+        """Sunrise and sunset, if the user switched them on (sun_notices.py): asked for, so always sent."""
+        from thirties_core.sun_notices import TEXT, WINDOW, due
+        sent = self._remembered("sun_sent")
+        key = due(self.config, now, sent)
+        if key:
+            sent[key] = now.date().isoformat()
+            self._remember("sun_sent", sent, now)
+            self.send(TEXT[key], "sun", to_conversation=False, now=now, expires=now + WINDOW * 6)
+
     def horizon_session(self, now: datetime) -> None:
         """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short
         planning session (one proposal, applied on "yes"; horizons.HorizonPlanner.offer_session)."""
@@ -641,7 +651,7 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
         for duty in (self.moot, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
-                     self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.today_sync,
+                     self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox):
             try:
                 duty(now)

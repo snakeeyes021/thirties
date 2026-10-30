@@ -679,9 +679,15 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         if ctx.app is not None:
             ctx.app.run_in_background()
 
+    sunrise = Adw.SwitchRow(title="Tell me at sunrise", subtitle="Every day, at the real time: handy for the lights",
+                            active=bool(ctx.get("assistant.sunrise_notice", False)))
+    sunset = Adw.SwitchRow(title="Tell me at sunset", subtitle="Every day, at the real time",
+                           active=bool(ctx.get("assistant.sunset_notice", False)))
     delay.connect("notify::value", lambda r, _p: ctx.set("assistant.checkin_after_minutes", int(r.get_value())))
     background.connect("notify::active", on_background)
-    for row in (level, delay, background):
+    sunrise.connect("notify::active", lambda r, _p: ctx.set("assistant.sunrise_notice", r.get_active()))
+    sunset.connect("notify::active", lambda r, _p: ctx.set("assistant.sunset_notice", r.get_active()))
+    for row in (level, delay, sunrise, sunset, background):
         group.add(row)
     return group
 
