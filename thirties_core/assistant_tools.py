@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
                                  thirty_ceil, thirty_of)
+from thirties_core.horizons import HORIZON_READ_ONLY, HORIZON_TOOL_SPECS, horizon_handlers
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
@@ -258,6 +259,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
                        "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal",
                        "match_backlog", "get_weather"}
+ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
+ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -1533,6 +1536,7 @@ class AssistantTools:
             "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
+            **horizon_handlers(self),
         }
 
 

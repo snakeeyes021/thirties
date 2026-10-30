@@ -22,6 +22,7 @@ class GeneralConfig:
     sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
     # Days that get default work (mon..sun). Other days start with no work.
     work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    week_start: str = "mon"  # the first day of the user's week: week plans and the week's planning session
 
 
 @dataclass

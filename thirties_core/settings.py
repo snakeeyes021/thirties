@@ -39,6 +39,7 @@ _ALL = [
     Setting("general.sleep_start_thirty", "shared"),
     Setting("general.sleep_end_thirty", "shared"),
     Setting("general.temperature_unit", "shared"),
+    Setting("general.week_start", "shared"),
     Setting("media.goodreads_user_id", "shared"),
     Setting("media.letterboxd_username", "shared"),
     Setting("media.serializd_username", "shared"),

@@ -331,6 +331,7 @@ class SyncEngine:
 
     def _stores(self) -> Dict[str, Any]:
         from thirties_core.facts import SpanFacts
+        from thirties_core.horizons import HorizonCatalog, HorizonPlans
         from thirties_core.lists import ListCatalog
         from thirties_core.today import TodayLinks
         from thirties_core.memory import (CheckinMutes, ConversationStore, EnergyLog, MemoryStore, ProfileStore,
@@ -345,6 +346,8 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            "horizons": HorizonCatalog(self.state_db),
+            "horizon_plans": HorizonPlans(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

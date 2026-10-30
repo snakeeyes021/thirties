@@ -38,6 +38,8 @@ def load_backlog(config: ThirtiesConfig, joplin_engine=None, scheduler=None, med
         ignored = {nid for nid, r in catalog.roles().items() if r["role"] == "ignore"}
         notes = [n for n in notes if n["id"] not in ignored]
         scheduler.attach_history_to_tasks(tasks)
+        from thirties_core.horizons import HorizonCatalog, week_start_index
+        HorizonCatalog(scheduler.state_db).apply(tasks, date.today(), week_start_index(config))
         done = scheduler.state_db.completed_since(date.today() - timedelta(days=DONE_HIDES_DAYS))
         tasks = [t for t in tasks if t.id not in done or t.list_role == "routine"]  # done is done, even if
     return tasks, notes                                                             # Joplin didn't get the tick
