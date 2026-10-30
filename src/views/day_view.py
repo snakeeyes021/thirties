@@ -8,6 +8,7 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gtk
 from thirties_core.astronomy import get_current_time
 from thirties_core.day_layout import (Segment, build_segments, card_rows, segment_context, segment_title,  # noqa: F401
                                       status_label)
+from thirties_core.kinds import ONGOING, kind_by_wording
 from thirties_core.models import _DISPLAY_PRIORITY, DayPlan
 from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget, format_clock
 from thirties.widgets.solar_arc import SolarArcWidget
@@ -24,6 +25,10 @@ class DayView(Gtk.Box):
         self._signature = None
         self._now_idx = -1
         self._expanded: set[tuple] = set()
+        # () -> (span -> bool): which items are ongoing (a done session reads "worked on"); the window gives the
+        # assistant's reading (list roles, the user's word), read once per redraw. Until then, the wording.
+        self.ongoing_provider = None
+        self._ongoing = lambda span: kind_by_wording(span.title) == ONGOING
 
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -77,6 +82,7 @@ class DayView(Gtk.Box):
         self.agenda = AgendaPage(run_tool=lambda name, args: self.run_tool(name, args) if self.run_tool else "",
                                  on_replan=lambda result: self.on_replan(result) if self.on_replan else None)
         self.on_replan = None
+        self.agenda.ongoing = self._ongoing
         self.stack = Adw.ViewStack(vexpand=True)
         self.stack.add_titled_with_icon(self.agenda, "day", "Day", "view-list-symbolic")
         self._build_blocks_list()
@@ -85,9 +91,13 @@ class DayView(Gtk.Box):
         self.append(switcher)
         self.append(self.stack)
 
-    def set_actions(self, run_tool, on_replan=None) -> None:
-        """``run_tool(name, args)`` runs a schedule tool (and refreshes); ``on_replan(result)`` after Replan."""
+    def set_actions(self, run_tool, on_replan=None, on_notice=None, routines=None, ongoing=None) -> None:
+        """``run_tool(name, args)`` runs a schedule tool (and refreshes); ``on_replan(result)`` after Replan;
+        ``on_notice(text)`` shows a short result (a skip); ``routines(plan)`` lists the day's routines with their
+        skip choices (RoutineTools.day_routines); ``ongoing()`` gives a span -> bool for ongoing items."""
         self.run_tool, self.on_replan = run_tool, on_replan
+        self.agenda.on_notice, self.agenda.routines = on_notice, routines
+        self.ongoing_provider = ongoing
 
     def _build_blocks_list(self) -> None:
         self.scrolled = Gtk.ScrolledWindow()
@@ -170,9 +180,19 @@ class DayView(Gtk.Box):
             self.tick()
             return
         self._signature = signature
+        self._read_kinds()
         self._rebuild_list()
         self.agenda.refresh(day_plan, self.live_now())
         self._update_tallies()
+
+    def _read_kinds(self) -> None:
+        if self.ongoing_provider is None:
+            return
+        try:
+            self._ongoing = self.ongoing_provider()
+        except Exception:  # the wording still reads the obvious cases
+            self._ongoing = lambda span: kind_by_wording(span.title) == ONGOING
+        self.agenda.ongoing = self._ongoing
 
     def tick(self) -> None:
         """Advance the live "now": arc marker, gold highlight and remaining-time tallies."""
@@ -226,7 +246,7 @@ class DayView(Gtk.Box):
         first = seg.blocks[0]
         items = [s for s in seg.spans if not s.is_envelope]
         title = segment_title(plan, seg)
-        context = segment_context(seg)
+        context = segment_context(seg, plan)
         if len(seg.blocks) == 1 and len(items) <= 1:
             return BlockWidget(
                 first,
@@ -234,7 +254,7 @@ class DayView(Gtk.Box):
                 is_current=(first.index == self._now_idx),
                 display_index=first.number,
                 title=title,
-                status=status_label(items),
+                status=status_label(items, self._ongoing),
                 context=context,
             )
         lead = min(items, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt)) if items else seg.spans[0]
@@ -247,8 +267,8 @@ class DayView(Gtk.Box):
             start_dt=seg.start_dt,
             end_dt=seg.end_dt,
             context=context,
-            rows=card_rows(plan, seg),
-            status=status_label(items),
+            rows=card_rows(plan, seg, self._ongoing),
+            status=status_label(items, self._ongoing),
             expanded=key in self._expanded,
             on_expanded_changed=lambda _w, expanded, key=key: self._on_expanded_changed(key, expanded),
         )

@@ -71,7 +71,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
-        self.day_view.set_actions(self._run_day_tool, self._on_replanned)
+        self.day_view.set_actions(self._run_day_tool, self._on_replanned, on_notice=self._toast,
+                                  routines=self._day_routines, ongoing=self._ongoing)
         self.content_toolbar.set_content(self.day_view)
 
         self.conv_manager = None
@@ -196,8 +197,32 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
         if not self.chat_panel.is_busy:
+            self._follow_week()
             self._load_day(self.current_date)
         self._sync_brain_action()
+
+    def _follow_week(self) -> None:
+        """Work and Sleep already on the plan follow new hours from Preferences, as they do after set_week (except
+        where they were changed by hand)."""
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        if assistant is not None:
+            try:
+                assistant.routines._refresh_envelopes()
+            except Exception as e:
+                logger.warning("Updating Work and Sleep to the new hours failed: %s", e)
+
+    def _day_routines(self, plan):
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        return assistant.routines.day_routines(plan) if assistant is not None else []
+
+    def _ongoing(self):
+        """span -> bool, from the assistant's reading of kinds (list roles, the user's word), read once."""
+        from thirties_core.kinds import ONGOING
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        if assistant is None:
+            raise LookupError("no assistant yet")
+        ctx = assistant._kind_context()
+        return lambda span: assistant.kind_of(span, ctx) == ONGOING
 
     # --- loading days ---
 

@@ -197,6 +197,71 @@ class DayViewTests(unittest.TestCase):
                          f"☼ Daylight: {counts['daylight_open']}/{counts['daylight_total']} available")
         self.assertFalse(any(r.is_current for r in view._rows))
 
+    @staticmethod
+    def action_rows(group):
+        rows = []
+
+        def walk(w):
+            if isinstance(w, Adw.ActionRow):
+                rows.append((w.get_title(), w.get_subtitle() or ""))
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(group)
+        return rows
+
+    def test_moot_ongoing_and_someone_elses_events_display_sensibly(self) -> None:
+        from thirties_core.models import SpanStatus
+        research = next(s for s in self.plan.spans if s.id == "research")
+        research.title, research.status = "Torquio dev", SpanStatus.DONE  # ongoing by its wording: a session
+        research.actual_start, research.actual_end = at("13:00"), at("14:00")
+        dinner = next(s for s in self.plan.spans if s.id == "dinner")
+        dinner.status = SpanStatus.UNKNOWN  # gone moot with nothing said
+        self.plan.spans.append(EventSpan("cal-r", "Rehearsal", at("19:00"), at("21:00"), SpanCategory.CALENDAR,
+                                         source="calendar", shown_only=True))
+        view = DayView(self.plan)  # the timeline drew no card for a moot item before (KeyError)
+        done = dict(self.action_rows(view.agenda.groups["done"]))
+        self.assertEqual(done["Torquio dev"], "worked on · 1:00 PM – 2:00 PM")
+        self.assertEqual(done["Dinner"], "not reported")
+        now = self.action_rows(view.agenda.groups["now"])
+        self.assertEqual(now[0], ("Free until 8:00 PM", ""))  # someone else's event doesn't make the user busy
+        self.assertEqual(now[1], ("Rehearsal", "7:00 PM – 9:00 PM · not yours (shown only)"))
+        dev = next(r for r in view._rows if r.title_label.get_text() == "Torquio dev")
+        self.assertEqual(dev.status, "Worked on")
+        noted = [r for r in view._rows if "Rehearsal" in (r.context or "")]
+        self.assertEqual(len(noted), 1)
+        self.assertFalse(any("Rehearsal" in r.title_label.get_text() for r in view._rows))
+
+    def test_a_routine_can_be_skipped_three_ways_from_the_day_page(self) -> None:
+        from datetime import date
+        calls, notices = [], []
+        view = DayView()
+        choices = [{"how": "today", "label": "Skip today", "back": date(2026, 10, 16)},
+                   {"how": "this_time", "label": "Skip this time", "back": date(2026, 10, 27)},
+                   {"how": "until", "label": "Skip until…", "back": None}]
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Skipped Deep Clean. Next: Tue Oct 27.",
+                         on_notice=notices.append,
+                         routines=lambda plan: [{"title": "Deep Clean", "state": "On the plan at 6:00 PM",
+                                                 "choices": choices}])
+        view.refresh_plan(self.plan)
+        self.assertIn(("Deep Clean", "On the plan at 6:00 PM"), self.action_rows(view.agenda.groups["routines"]))
+        menu = view.agenda.skip_menus["Deep Clean"]
+        self.assertEqual(menu.choices["today"].get_tooltip_text(), "Skip today: Back tomorrow")
+        self.assertEqual(menu.choices["this_time"].get_tooltip_text(), "Skip this time: Back Tue Oct 27")
+        menu.choices["this_time"].emit("clicked")
+        self.assertEqual(calls[-1], ("skip_routine", {"routine": "Deep Clean", "how": "this_time"}))
+        self.assertEqual(notices, ["Skipped Deep Clean. Next: Tue Oct 27."])
+        menu.choices["until"].emit("clicked")  # shows the calendar, two days on
+        self.assertTrue(menu.confirm.get_parent().get_visible())
+        menu.calendar.set_date(GLib.DateTime.new_local(2026, 10, 19, 0, 0, 0))
+        menu.confirm.emit("clicked")
+        self.assertEqual(calls[-1], ("skip_routine", {"routine": "Deep Clean", "how": "until", "until": "2026-10-19"}))
+        menu.calendar.set_date(GLib.DateTime.new_local(2026, 10, 15, 0, 0, 0))  # not after the day: refused
+        menu.confirm.emit("clicked")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(notices[-1], "Pick a day after this one.")
+
     def test_expanded_cards_stay_open_across_rerenders(self) -> None:
         view = DayView(self.plan)
         movie = next(r for r in view._rows if r.title_label.get_text() == "Movie")

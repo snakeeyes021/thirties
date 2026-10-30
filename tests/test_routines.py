@@ -327,6 +327,17 @@ class TestSkipping(RoutineCase):
         out = self.t.execute("skip_routine", {"routine": "Deep Clean", "how": "until", "until": "Monday"})
         self.assertIn("Next: Mon Oct 19", out)
 
+    def test_the_day_page_lists_what_can_still_be_skipped(self):
+        r = self.t.assistant.routines
+        got = {d["title"]: d for d in r.day_routines()}
+        self.assertEqual(got["Deep Clean"]["state"], "On the plan at 6:00 PM")
+        self.assertEqual([(c["how"], c["back"]) for c in got["Deep Clean"]["choices"]],
+                         [("today", date(2026, 10, 16)), ("this_time", date(2026, 10, 27)), ("until", None)])
+        self.t.execute("skip_routine", {"routine": "Deep Clean", "how": "this time"})  # what the Skip button calls
+        self.assertNotIn("Deep Clean", {d["title"] for d in r.day_routines()})  # skipped: nothing left to skip
+        tomorrow = self.tools_for(TOMORROW)
+        self.assertNotIn("Deep Clean", {d["title"] for d in tomorrow.assistant.routines.day_routines()})  # not due
+
     def test_done_counts_from_when_it_was_really_done(self):
         vacuum = self.spans(self.t, "Vacuum")[0]
         self.t.execute("log_outcome", {"event": vacuum.id, "status": "done"})

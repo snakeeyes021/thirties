@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from thirties_core.clock import format_clock
 from thirties_core.models import _DISPLAY_PRIORITY, DayPlan, EventSpan, SpanStatus, ThirtyBlock
@@ -86,9 +86,9 @@ def segment_title(plan: DayPlan, seg: Segment) -> Optional[str]:
     return " + ".join(titles)
 
 
-def segment_context(seg: Segment) -> Optional[str]:
-    """The quiet line under a card's title: what a piece of a longer item belongs to, and the work or sleep under
-    the items ("during Work")."""
+def segment_context(seg: Segment, plan: Optional[DayPlan] = None) -> Optional[str]:
+    """The quiet line under a card's title: what a piece of a longer item belongs to, the work or sleep under
+    the items ("during Work"), and (given the plan) what's shown alongside without taking the time."""
     parts = []
     if len(seg.spans) == 1:
         span = seg.spans[0]
@@ -97,21 +97,46 @@ def segment_context(seg: Segment) -> Optional[str]:
     if seg.backdrop is not None and not seg.is_envelope:
         inside = seg.backdrop.start_dt <= seg.start_dt and seg.end_dt <= seg.backdrop.end_dt
         parts.append(("during " if inside else "partly during ") + seg.backdrop.title)
+    if plan is not None:
+        parts += alongside(plan, seg)
     return " · ".join(parts) or None
 
 
+def alongside(plan: DayPlan, seg: Segment) -> List[str]:
+    """Calendar events that take no time, as quiet notes on the cards they fall on: someone else's ("show only"
+    calendars, O1: the user's wife's rehearsals) and invites not answered yet. They never become cards of their own
+    or split an open thirty: they aren't the user's time. Each is noted once, on the card where it starts (or the
+    day's first card, if it started before the day)."""
+    start, end = seg.blocks[0].start_dt, seg.blocks[-1].end_dt
+    first = seg.blocks[0].index == plan.blocks[0].index
+    out = []
+    for s in plan.spans_in_view():
+        begins = start.timestamp() <= s.start_dt.timestamp() < end.timestamp() or (first and s.overlaps(start, end))
+        if (s.shown_only or s.tentative) and begins:
+            when = f"{format_clock(s.start_dt)} – {format_clock(s.end_dt)}"
+            out.append(f"{s.title} {when} ({'not yours' if s.shown_only else 'invite, not answered'})")
+    return out
+
+
 _STATUS = {SpanStatus.PLANNED: "Planned", SpanStatus.DONE: "Done", SpanStatus.PARTIAL: "Partly done",
-           SpanStatus.SKIPPED: "Skipped"}
+           SpanStatus.SKIPPED: "Skipped",
+           SpanStatus.UNKNOWN: "Not reported"}  # gone moot with nothing said (B4): not known to have happened
+# A done session on something ongoing (B2: project time): it was worked on, and the thing carries on.
+WORKED_ON = "Worked on"
 
 
-def status_label(spans: List[EventSpan]) -> Optional[str]:
-    """The badge for a card or row: its items' status ("Done"), or how many of them are done ("1 of 2 done")."""
+def status_label(spans: List[EventSpan], ongoing: Optional[Callable[[EventSpan], bool]] = None) -> Optional[str]:
+    """The badge for a card or row: its items' status ("Done"), or how many of them are done ("1 of 2 done").
+    ``ongoing`` says which items are ongoing (kinds.py): a done session on one reads "Worked on"."""
     spans = [s for s in spans if not s.is_envelope]
     if not spans:
         return None
     statuses = {s.status for s in spans}
     if len(statuses) == 1:
-        return _STATUS[statuses.pop()]
+        status = statuses.pop()
+        if status == SpanStatus.DONE and ongoing is not None and all(ongoing(s) for s in spans):
+            return WORKED_ON
+        return _STATUS.get(status, str(status.value).capitalize())
     done = sum(1 for s in spans if s.status in (SpanStatus.DONE, SpanStatus.PARTIAL))
     return f"{done} of {len(spans)} done"
 
@@ -126,7 +151,7 @@ class CardRow:
     status: Optional[str] = None
 
 
-def card_rows(plan: DayPlan, seg: Segment) -> List[CardRow]:
+def card_rows(plan: DayPlan, seg: Segment, ongoing: Optional[Callable[[EventSpan], bool]] = None) -> List[CardRow]:
     """What an expanded card lists. Several items: each item once, with its own title, real times and status. One
     item, or work or sleep: its thirties."""
     items = [s for s in seg.spans if not s.is_envelope]
@@ -135,11 +160,12 @@ def card_rows(plan: DayPlan, seg: Segment) -> List[CardRow]:
         for s in sorted(items, key=lambda s: (s.start_dt, _DISPLAY_PRIORITY[s.category])):
             block = plan.block_at(max(s.start_dt, seg.blocks[0].start_dt)) or seg.blocks[0]
             rows.append(CardRow(block, s.title, s, f"{format_clock(s.start_dt)} – {format_clock(s.end_dt)}",
-                                status_label([s])))
+                                status_label([s], ongoing)))
         return rows
     title = segment_title(plan, seg) or ""
     span = seg.spans[0] if seg.spans else None
-    return [CardRow(b, title, span, None, status_label(items)) for b in seg.blocks]
+    return [CardRow(b, title, span, None, status_label(items, ongoing)) for b in seg.blocks]
 
 
-__all__ = ["CardRow", "Segment", "build_segments", "card_rows", "segment_context", "segment_title", "status_label"]
+__all__ = ["CardRow", "Segment", "WORKED_ON", "alongside", "build_segments", "card_rows", "segment_context",
+           "segment_title", "status_label"]

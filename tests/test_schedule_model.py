@@ -182,6 +182,26 @@ class TestDayLayout(ScheduleCase):
         single = next(s for s in build_segments(plan) if s.is_envelope and s.spans[0].title == "Sleep")
         self.assertEqual({r.status for r in card_rows(plan, single)}, {None})  # sleep has no badge
 
+    def test_moot_ongoing_and_someone_elses_events_read_sensibly(self):
+        from thirties_core.models import EventSpan, SpanCategory
+        t = tools_for(now="20:06")
+        t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
+        t.execute("add_event", {"title": "Torquio dev", "start": "6:00 PM", "duration": "1 hour"})
+        span(t, "Lunch").status = SpanStatus.UNKNOWN  # gone moot with nothing said
+        t.execute("log_outcome", {"event": "Torquio dev", "status": "done"})
+        plan = t.day_plan
+        self.assertEqual(status_label([span(t, "Lunch")]), "Not reported")  # it used to raise
+        dev = [span(t, "Torquio dev")]
+        self.assertEqual(status_label(dev), "Done")
+        self.assertEqual(status_label(dev, lambda s: s.title.endswith("dev")), "Worked on")  # a session, it goes on
+        plan.spans.append(EventSpan("cal-r", "Rehearsal", at("19:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        segs = build_segments(plan)
+        noted = [s for s in segs if "Rehearsal" in (segment_context(s, plan) or "")]
+        self.assertEqual(len(noted), 1)  # once, where it starts: never a card of its own or on every thirty
+        self.assertEqual(segment_context(noted[0], plan), "Rehearsal 7:00 PM – 9:00 PM (not yours)")
+        self.assertFalse(any("Rehearsal" in (segment_title(plan, s) or "") for s in segs))
+
 
 class TestEarlyTicks(ScheduleCase):
 

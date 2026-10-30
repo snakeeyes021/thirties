@@ -774,6 +774,29 @@ class RoutineTools:
                 {"how": "this_time", "label": "Skip this time", "back": back_cycle},
                 {"how": "until", "label": "Skip until…", "back": None}]
 
+    def day_routines(self, plan: Optional["DayPlan"] = None) -> List[Dict[str, Any]]:
+        """The routines a day holds that can still be skipped, for the app's Day page: each due one, and each on the
+        plan (one put on by request too), unless every step of it on the plan is already marked. Each comes with
+        its state in a few words and its three skip choices (skip_choices)."""
+        if self.db is None or self.pt.scheduler is None:
+            return []
+        plan = plan or self.pt.day_plan
+        day, book = plan.target_date, self.book()
+        out = []
+        for note in self.a._routines():
+            r = book.get(note["id"], note["title"])
+            names = {s.lower() for s in self.steps(note)} | {i.lower() for p in r.parts for i in p["items"]}
+            steps = [s for s in plan.spans if not s.is_envelope and s.title.strip().lower() in names]
+            planned = [s for s in steps if s.status == SpanStatus.PLANNED]
+            due = is_due(r, day, self.gen, self.last_done(note, r))
+            if not planned and (steps or not due):
+                continue  # all marked (done or skipped), or not today's
+            state = (f"On the plan at {format_clock(min(s.start_dt for s in planned))}" if planned
+                     else "Due, not on the plan yet")
+            out.append({"title": note["title"], "note_id": note["id"], "state": state,
+                        "choices": self.skip_choices(note, day)})
+        return out
+
     # --- tools ---
 
     def set_routine(self, routine: str = "", repeat: Any = None, last_done: Any = None, parts: Any = None,
