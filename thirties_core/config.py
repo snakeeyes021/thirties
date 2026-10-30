@@ -24,6 +24,7 @@ class GeneralConfig:
     work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
     # What's different on some weekdays, e.g. {"sat": {"sleep_end_thirty": 18}} (thirties_core/week.py).
     week: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    week_start: str = "mon"  # the first day of the user's week: week plans and the week's planning session
 
 
 @dataclass

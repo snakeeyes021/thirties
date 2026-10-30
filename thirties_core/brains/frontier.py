@@ -189,7 +189,7 @@ RULES
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or blocks, so do you ("you have three open chunks at 4:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed cat"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
 12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing PT doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. If they don't say when, estimate and pass estimated=true. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. After the user reports something, don't ask about the rest of the block or other items they didn't mention ("Did you get to X?"): what's not marked yet is shown with the status. If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
 13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
-14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned; it goes on that day's plan and reaches the Today list that morning (say so). Things for a later day with no time: add_to_today with that day. For bigger-picture planning (goals over weeks), look at week_overview, statistics and the profile, and spread work across days. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
+14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned; it goes on that day's plan and reaches the Today list that morning (say so). Things for a later day with no time: add_to_today with that day. Bigger picture: the user's lists are their goals, and each item belongs to a horizon (day, week, month, year, someday; set_horizon when they say so). A week plan is items dropped into the week (or onto a day of it), a month plan into the month, a year plan into the year; pin_to_period and unpin_from_period change one item, show_period answers "what's on this week?", and planning a week, month or year is propose_period (Python lists the candidates and their facts; you pick and say why), applied with apply_period_proposal when the user agrees, also after a planning offer Thirties sent. Plan days from the week's plan. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: just add each at its time. Never join two things into one title.
 16. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
 17. "Remind me to X" is a thing to do: set_reminder puts it on the plan (and today's list) with a ping when it's time; if they give no time, choose a sensible one and say it. Only a bare message the user asks for as a ping or alarm ("ping me at 3 that the laundry's done") is ping_only; call that a ping or an alarm, never a "reminder". If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
@@ -261,6 +261,11 @@ RULES
         day_list = self._day_list_section()
         if day_list:
             sections.append(day_list)
+        if self.tools.scheduler is not None:  # the week's, month's and year's plans (horizons.py)
+            from thirties_core.horizons import HorizonPlanner
+            plans = HorizonPlanner(self.tools, self.tasks).prompt_section()
+            if plans:
+                sections.append(plans)
         if chronic_lines:
             sections.append(
                 "🔥 CHRONICALLY DEFERRED ITEMS (Urgent / Needs Tough Love or Single 30-Min Chunk):\n"
@@ -340,7 +345,8 @@ RULES
                         indent = "  " * (depth[t.id] + 1)
                         def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
                         maybe = " [someday]" if t.someday and not t.section else ""
-                        pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else ""
+                        pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else (
+                            "this month" if t.horizon == "month" else "")  # the horizon urgency can't say
                         pressing = f" [{pressing}]" if pressing and t.list_role not in ("today", "routine") else ""
                         nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}{pressing}")
                 elif is_todo and todo_comp == 0:

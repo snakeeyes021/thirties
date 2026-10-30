@@ -402,6 +402,24 @@ class ConversationManager:
         self._save()
         return reply
 
+    def _fold_in_the_morning(self) -> None:
+        """The morning offer comes at the start of the user's day: half an hour after waking (the background
+        service), or with their first message if that's sooner. Then it's part of this reply, not a ping an hour
+        later about a day they've already planned (10-30 sim: "the 7:30 ping ignored that we planned at 6:30")."""
+        db = self.scheduler.state_db if self.scheduler is not None else None
+        plan = self.day_plan
+        if db is None or self.brain_name != "frontier" or not self.tools.is_current(plan):
+            return
+        key = f"rollover_offered:{plan.target_date.isoformat()}"
+        if db.get_sync_meta(key):
+            return
+        db.set_sync_meta(key, "in_conversation")
+        text = self.tools.execute("rollover_proposal", {})
+        if text and not text.startswith(("Nothing from yesterday", "NOT_DONE")):
+            self.brain.messages.append({"role": "user", "content": (
+                "[System check, not from the user] This is the user's first message of the day. Answer it, and in "
+                "the same reply offer this in a line or two (apply_rollover on yes):\n" + text)})
+
     def _run_turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
         """One turn for everything in ``batch``. Returns (reply, answered); answered is False when the model
         couldn't be reached and the messages were kept for later."""
@@ -422,6 +440,7 @@ class ConversationManager:
                 self.tools.assistant.routines.set_up_current()
             except Exception as e:
                 logger.warning("Setting up the day failed: %s", e)
+            self._fold_in_the_morning()
         before = len(self.brain.messages)
         changes_before = self.tools.successful_changes
         try:

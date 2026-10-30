@@ -397,7 +397,7 @@ class TestProposingTheDay(RoutineCase):
         self.assertEqual([c["title"] for c in cands], ["Buy stamps", "Call the bank", "Clean the garage"])
         self.assertIn("put off 4 times: offer a 30-minute start", cands[2]["why"])
         text = self.t.execute("day_options", {})
-        self.assertIn("- Buy stamps (by Oct 17; Errands/Admin; about 30m) task_id=t_stamps", text)
+        self.assertIn("- Buy stamps (due Saturday; Errands/Admin; about 30m) task_id=t_stamps", text)  # horizons
         self.assertIn("Free time:\n- 4:00 PM – ", text)  # after work, before bed
 
     def test_one_proposal_applied_on_yes(self):

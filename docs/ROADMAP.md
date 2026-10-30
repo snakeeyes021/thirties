@@ -390,6 +390,9 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 28. **Stale goals** (A7), and **memory notes that paper over fixed bugs get deleted** (D).
 29. **The eval counts only minute times Thirties picked itself** (gate write-up, docs/SLM_BRAIN.md).
 
+## Soon, not today (from the user, 2026-10-30)
+- **Benchmark local models on other devices:** the user's 8 GB GPU desktop (a likely home-base machine, not set up yet) and their phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.
+
 ## After 0.1
 
 1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.

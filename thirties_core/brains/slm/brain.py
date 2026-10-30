@@ -766,10 +766,18 @@ class SlmBrain(ParityActions, TiredDay):
         assistant = getattr(self.tools, "assistant", None)
         return bool(assistant is not None and (assistant.rollover_pending() or assistant.proposals.pending()))
 
+    def _horizon_pending(self):
+        """A week, month or year planning offer waiting for an answer (horizons.py), or None."""
+        if getattr(self.tools, "scheduler", None) is None or self._rollover_pending():
+            return None
+        from thirties_core.horizons import HorizonPlanner
+        planner = HorizonPlanner(self.tools)
+        return planner if planner.pending() else None
+
     def _dialog_act(self, message: str) -> Optional[Action]:
         """Answers to our own pending question: yes / no / which option."""
         if not self.state.proposal:
-            if self._rollover_pending():  # the morning offer to roll yesterday into today
+            if self._rollover_pending() or self._horizon_pending():  # the morning offer, or a week's planning offer
                 lowered = message.lower().strip()
                 if self._NO_RE.search(lowered) and len(lowered) < 60:
                     return Action("reject", {})
@@ -1358,18 +1366,20 @@ class SlmBrain(ParityActions, TiredDay):
         target = {_stem(w) for w in _words(a.get("target") or "")}
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         named = [s for s in invites if target & {_stem(w) for w in _words(s.title)}]
-        if not named and not self.state.proposal and self._rollover_pending():
+        horizon = None if self.state.proposal else self._horizon_pending()
+        if not named and not self.state.proposal and (self._rollover_pending() or horizon):
             invites = []  # a plain "yes" answers the morning offer, not an invite nobody mentioned
         if named or (invites and not self.state.proposal):
             invite = (named or invites)[0]
             ok, out = self._run("resolve_calendar_event", {"event": invite.id, "attend": True})
             return (f"Great, {invite.title} is confirmed: {format_clock(invite.start_dt)} – "
                     f"{format_clock(invite.end_dt)}." if ok else out), ok
-        if not self.state.proposal and self._rollover_pending():
+        if not self.state.proposal and (self._rollover_pending() or horizon):
             m = re.search(r"\b(?:except|but not|but skip|skip|without|leave out|not the)\s+(.+)$", getattr(self, "_message", ""), re.I)
             outs, any_ok = [], False
             for name, pending in (("apply_rollover", self.tools.assistant.rollover_pending()),
-                                  ("apply_day_proposal", self.tools.assistant.proposals.pending())):
+                                  ("apply_day_proposal", self.tools.assistant.proposals.pending()),
+                                  ("apply_period_proposal", horizon is not None)):
                 if pending:
                     ok, out = self._run(name, {"skip": m.group(1)} if m else {})
                     outs.append(out)
@@ -1524,6 +1534,10 @@ class SlmBrain(ParityActions, TiredDay):
             self.tools.assistant.proposals.decline()
             return ("Okay, I'll leave yesterday's items where they are." if rolled else
                     "Okay, the free time stays open."), False
+        horizon = None if self.state.proposal else self._horizon_pending()
+        if horizon is not None:
+            horizon.decline()
+            return "Okay, no plan for it then. Ask any time.", False
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         if not self.state.proposal and invites:
             ok, out = self._run("resolve_calendar_event", {"event": invites[0].id, "attend": False})

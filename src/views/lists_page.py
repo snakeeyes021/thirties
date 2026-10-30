@@ -14,12 +14,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from gi.repository import Adw, GLib, Gtk
 
+from thirties_core.horizons import HORIZONS, HorizonCatalog
 from thirties_core.lists import ROLE_URGENCY, ROLES, SORTED_ROLES, URGENCIES, ListCatalog
 from thirties_core.models import TaskItem
 
 ROLE_NAMES = {"routine": "Routine", "today": "Today", "menu": "Menu", "list": "List", "project": "Project",
               "backlog": "Project backlog", "dropbox": "Drop box", "reference": "Reference", "ignore": "Ignore"}
 URGENCY_NAMES = {"now": "Now", "soon": "Soon", "whenever": "Whenever", "someday": "Someday"}
+HORIZON_NAMES = {"day": "Can't wait", "week": "This week", "month": "This month", "year": "This year",
+                 "someday": "Someday"}
 
 Loader = Callable[[], Tuple[List[Dict[str, Any]], List[TaskItem]]]
 
@@ -108,10 +111,35 @@ class ListsPage(Gtk.Stack):
         choice.set_selected(names.index(role) if role else 0)
         choice.connect("notify::selected", self._on_role, row, names, note)
         row.add_row(choice)
+        row.add_row(self._horizon_row(note))
         row.items, row.urgencies, row.item_rows = items, urgencies, []
         row.connect("notify::expanded", lambda r, _p: self._fill_items(r) if r.get_expanded() else None)
         self.note_rows[note["id"]] = row
         return row
+
+    def _horizon_row(self, note) -> Adw.ComboRow:
+        """When the note's items belong (horizons.py), as a default for them: a bulk correction. Choosing one
+        replaces the guesses for its items; what you chose for single items stays."""
+        horizons = HorizonCatalog(self.catalog.db)
+        current = horizons.notes().get(note["id"])
+        names = [""] + list(HORIZONS)
+        combo = Adw.ComboRow(title="When its items belong",
+                             model=Gtk.StringList.new(["Thirties will guess"] + [HORIZON_NAMES[h] for h in HORIZONS]))
+        combo.set_selected(names.index(current["horizon"]) if current and current["source"] == "user" else 0)
+        combo.set_subtitle(f"Guessed: {HORIZON_NAMES[current['horizon']]}" if current and current["source"] == "guess"
+                           else "")
+
+        def chosen(c: Adw.ComboRow, _pspec) -> None:
+            horizon = names[c.get_selected()]
+            if horizon:
+                horizons.set_note(note["id"], horizon, note["title"], source="user")
+                horizons.clear_item_guesses(note["id"])
+            else:
+                horizons.clear_note(note["id"])
+            c.set_subtitle("")
+            self._changed()
+        combo.connect("notify::selected", chosen)
+        return combo
 
     def _describe(self, row: Adw.ExpanderRow, role_row, count: int) -> None:
         if not role_row:

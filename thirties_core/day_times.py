@@ -38,7 +38,7 @@ WORK_START_NEAR_WAKE = timedelta(hours=5)
 ASK_WINDOW = timedelta(hours=2)
 # The message levels that get these questions: they're record-keeping, like the check-ins (light is only heads-ups
 # before calendar events).
-ASK_AT_LEVELS = ("medium", "heavy")
+ASK_AT_LEVELS = ("heavy",)  # at medium they read as nagging (10-30 sim: "pointless pings… I'd already mapped my morning")
 
 RELIABLE = ("reported", "checkin", "tracker")
 

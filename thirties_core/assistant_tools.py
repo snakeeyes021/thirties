@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
+from thirties_core.horizons import HORIZON_READ_ONLY, HORIZON_TOOL_SPECS, horizon_handlers
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
@@ -286,6 +287,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
 ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "read_conversation",
                        "get_statistics", "search_backlog", "week_overview", "list_reminders", "rollover_proposal",
                        "match_backlog", "get_weather"}
+ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
+ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -773,6 +776,13 @@ class AssistantTools(KindTools):
             return []
         return notes if isinstance(notes, list) else []
 
+    def _notes(self) -> Dict[str, str]:
+        """Note titles by id (horizons.py; add_task now goes through placement_lists.Placement)."""
+        notes = {n["id"]: n["title"] for n in self._joplin_notes()}  # routine notes too, all ticked or not
+        notes.update({t.parent_note_id: t.parent_note_title for t in self.s.tasks if t.parent_note_id and t.parent_note_title})
+        notes.update({t.id: t.title for t in self.s.tasks if not t.is_checkbox_item and not t.id.startswith("media:")})
+        return notes
+
     def _note_item(self, ref: str, list_name: str = "") -> Optional[TaskItem]:
         """A checklist line, open or ticked, in any note: routine notes keep their items ticked between days,
         so those aren't backlog tasks, but the user can still have them changed."""
@@ -815,8 +825,9 @@ class AssistantTools(KindTools):
         if refused:
             raise ToolError(f"{refused} Pick another list. {placement.candidates_text(title)}")
         said = (self.pt.user_message or "").lower()
-        if any(n["id"] == note_id for n in self._routines()) and self.pt.user_message is not None and not (
-                "routine" in said or note_title.lower() in said):
+        asked = re.search(r"\b(add|put|include|make)\b[^.?!]*\b(to|in|into|part of)\b[^.?!]*\b(routine|"
+                          + re.escape(note_title.lower()) + r")\b", said)  # "add brush teeth to my morning routine"
+        if any(n["id"] == note_id for n in self._routines()) and self.pt.user_message is not None and not asked:
             raise ToolError(f"{note_title} is a routine, and the user didn't ask to change it. To plan a step with it "
                             "today only, give it to put_routine; ask before adding it to the routine itself.")
         if start not in (None, "") and any(n["id"] == note_id for n in self._routines()):
@@ -1738,6 +1749,7 @@ class AssistantTools(KindTools):
             "week_overview": self.week_overview,
             **self.routines.handlers(),
             **self.proposals.handlers(),
+            **horizon_handlers(self),
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
 
