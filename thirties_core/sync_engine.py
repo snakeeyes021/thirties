@@ -330,6 +330,7 @@ class SyncEngine:
         return True, result_msg
 
     def _stores(self) -> Dict[str, Any]:
+        from thirties_core.contextual import ContextualFlags
         from thirties_core.facts import SpanFacts
         from thirties_core.lists import ListCatalog
         from thirties_core.today import TodayLinks
@@ -345,6 +346,7 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            "contextual_flags": ContextualFlags(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

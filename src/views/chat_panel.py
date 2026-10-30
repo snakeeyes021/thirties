@@ -18,16 +18,36 @@ logger = logging.getLogger(__name__)
 def persist_conversation(manager: ConversationManager) -> None:
     """Store the manager's current conversation after a turn.
 
-    ``ConversationManager.send_user_message`` does not save the transcript itself
-    (only ``add_assistant_message`` does), so without this a desktop turn would be
-    lost on the next day switch or refresh. Remove once the core saves every turn.
+    The core saves every turn itself now; this stays for callers, and never writes over a copy another client
+    (Telegram, through the background service) saved since: it continues from that copy first.
     """
     save = getattr(manager, "_save", None)
-    if callable(save):
-        try:
-            save()
-        except Exception:
-            logger.exception("Could not save the conversation")
+    lock = getattr(manager, "turn_lock", None)
+    if not callable(save) or lock is None:
+        return
+    if not lock.acquire(blocking=False):
+        return  # a turn is under way (another message, or Telegram): it saves when it's done; never block the UI
+    try:
+        catch_up = getattr(manager, "_catch_up", None)
+        if callable(catch_up):
+            catch_up()
+        save()
+    except Exception:
+        logger.exception("Could not save the conversation")
+    finally:
+        lock.release()
+
+
+APP_QUIET = 1.5  # seconds of quiet before a turn starts: quick messages typed one after another get one reply (A8)
+
+
+def message_time(iso: str, tz) -> str:
+    """When a message arrived, for under its bubble ("9:41 AM"); "" for messages stored before times were kept."""
+    try:
+        dt = datetime.fromisoformat(iso)
+        return (dt.astimezone(tz) if tz else dt).strftime("%I:%M %p").lstrip("0")
+    except (TypeError, ValueError):
+        return ""
 
 
 class ChatMessageWidget(Gtk.Box):
@@ -39,10 +59,12 @@ class ChatMessageWidget(Gtk.Box):
         text: str,
         on_action_click: Optional[Callable[[str], None]] = None,
         offer_actions: bool = True,
+        time_text: str = "",
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.role = role
         self.text = text
+        self.time_text = time_text  # soak friction 2: times on chat messages
         self.on_action_click = on_action_click if offer_actions else None
 
         self.set_margin_top(6)
@@ -72,6 +94,7 @@ class ChatMessageWidget(Gtk.Box):
             action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             action_row.set_halign(Gtk.Align.END)
             action_row.set_margin_top(2)
+            self._append_time(action_row)
 
             copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
             copy_btn.add_css_class("flat")
@@ -106,6 +129,7 @@ class ChatMessageWidget(Gtk.Box):
             action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             action_row.set_halign(Gtk.Align.START)
             action_row.set_margin_top(2)
+            self._append_time(action_row)
 
             copy_btn = Gtk.Button(icon_name="edit-copy-symbolic")
             copy_btn.add_css_class("flat")
@@ -141,6 +165,16 @@ class ChatMessageWidget(Gtk.Box):
             bubble_box.append(text_col)
 
         self.append(bubble_box)
+
+    def _append_time(self, row: Gtk.Box) -> None:
+        if not self.time_text:
+            return
+        label = Gtk.Label(label=self.time_text)
+        label.add_css_class("caption")
+        label.add_css_class("dim-label")
+        label.add_css_class("numeric")
+        label.set_valign(Gtk.Align.CENTER)
+        row.append(label)
 
     def _on_copy_clicked(self, btn: Gtk.Button) -> None:
         display = Gdk.Display.get_default()
@@ -183,8 +217,10 @@ class ChatPanel(Gtk.Box):
         self.chat_history: list[tuple[str, str]] = []
         self._rendered: list[dict] | None = None
         self._shown_greeting: str | None = None
-        # The manager whose turn is in flight (None when idle).
-        self._busy_manager: ConversationManager | None = None
+        # Turns in flight, per manager, and the messages sent that aren't in the stored transcript yet: the user can
+        # keep typing while a reply is on its way, and what they send meanwhile is answered together (A8).
+        self._in_flight: dict[int, int] = {}
+        self._pending: list[tuple[ConversationManager, str, str]] = []
         # Conversations the user explicitly switched to, per day; refresh() would
         # otherwise move back to the day's latest one.
         self._pinned: dict[date, str] = {}
@@ -199,7 +235,19 @@ class ChatPanel(Gtk.Box):
 
     @property
     def is_busy(self) -> bool:
-        return self._busy_manager is not None
+        return any(self._in_flight.values())
+
+    @property
+    def _busy_manager(self) -> ConversationManager | None:
+        """The manager on screen if a turn is in flight for it (else any busy one; None when idle)."""
+        if self.conversation_manager is not None and self._in_flight.get(id(self.conversation_manager)):
+            return self.conversation_manager
+        busy = [m for m, _, _ in self._pending if self._in_flight.get(id(m))]
+        return busy[0] if busy else None
+
+    def _tz(self):
+        manager = self.conversation_manager
+        return manager.day_plan.sunrise.tzinfo if manager is not None else None
 
     def set_conversation_manager(
         self,
@@ -512,10 +560,9 @@ class ChatPanel(Gtk.Box):
             self.text_view.grab_focus()
 
     def _update_input_sensitivity(self) -> None:
-        # The input stays usable on other days while a turn is in flight elsewhere.
-        busy_here = self._busy_manager is not None and self._busy_manager is self.conversation_manager
-        self.text_view.set_sensitive(not busy_here)
-        self.send_btn.set_sensitive(not busy_here)
+        # The input stays usable while a reply is on its way: a message sent meanwhile joins the next turn.
+        self.text_view.set_sensitive(True)
+        self.send_btn.set_sensitive(True)
 
     def _greeting(self) -> str:
         manager = self.conversation_manager
@@ -553,11 +600,12 @@ class ChatPanel(Gtk.Box):
         manager = self.conversation_manager
         if manager is None:
             return
-        history = manager.history()
+        history = manager.history(times=True)
         self._update_header()
         if not force and history == self._rendered:
             return
         self._rendered = [dict(m) for m in history]
+        tz = self._tz()
 
         self.chat_history.clear()
         while child := self.messages_box.get_first_child():
@@ -568,12 +616,17 @@ class ChatPanel(Gtk.Box):
             self._shown_greeting = self._greeting()
             self._append_bubble("assistant", self._shown_greeting, offer_actions=True, record=False)
         for i, msg in enumerate(history):
-            self._append_bubble(msg["role"], msg["content"], offer_actions=(i == len(history) - 1))
-        if self._busy_manager is manager:
+            self._append_bubble(msg["role"], msg["content"], offer_actions=(i == len(history) - 1),
+                                time_text=message_time(msg.get("at", ""), tz))
+        for owner, text, at in self._pending:  # sent, not answered yet
+            if owner is manager:
+                self._append_bubble("user", text, time_text=message_time(at, tz))
+        if self._in_flight.get(id(manager)):
             self._append_thinking()
         self._scroll_to_bottom()
 
-    def _append_bubble(self, role: str, text: str, offer_actions: bool = False, record: bool = True) -> None:
+    def _append_bubble(self, role: str, text: str, offer_actions: bool = False, record: bool = True,
+                       time_text: str = "") -> None:
         if record:
             self.chat_history.append((role, text))
         self.messages_box.append(ChatMessageWidget(
@@ -581,6 +634,7 @@ class ChatPanel(Gtk.Box):
             text=text,
             on_action_click=self.send_user_text,
             offer_actions=offer_actions,
+            time_text=time_text,
         ))
 
     def _append_thinking(self) -> None:
@@ -596,9 +650,9 @@ class ChatPanel(Gtk.Box):
         row.append(label)
         self.messages_box.append(row)
 
-    def add_message(self, role: str, text: str) -> None:
+    def add_message(self, role: str, text: str, time_text: str = "") -> None:
         """Show a message that is not (yet) in the stored transcript."""
-        self._append_bubble(role, text)
+        self._append_bubble(role, text, time_text=time_text)
         self._scroll_to_bottom()
 
     def _scroll_to_bottom(self) -> None:
@@ -616,39 +670,48 @@ class ChatPanel(Gtk.Box):
     def _on_send_clicked(self, _widget) -> None:
         start, end = self.text_buffer.get_bounds()
         text = self.text_buffer.get_text(start, end, True).strip()
-        if not text or self.is_busy:
+        if not text:
             return
         self.text_buffer.set_text("")
         self.send_user_text(text)
 
     def send_user_text(self, text: str) -> None:
+        """Send a message. While a reply is on its way, more can be sent: they wait for that turn and are
+        answered together in the next one (ConversationManager's inbox)."""
         manager = self.conversation_manager
-        if manager is None or self.is_busy:
+        if manager is None:
             return
-        if self._shown_greeting and not manager.history():
-            manager.add_assistant_message(self._shown_greeting)  # what the user is answering stays, for both
+        greeting = self._shown_greeting if self._shown_greeting and not manager.history() and not any(
+            owner is manager for owner, _, _ in self._pending) else None  # stored once, by the first message
         self._shown_greeting = None
-        self._busy_manager = manager
+        entry = (manager, text, get_current_time(self._tz()).isoformat(timespec="seconds"))
+        self._pending.append(entry)
+        self._in_flight[id(manager)] = self._in_flight.get(id(manager), 0) + 1
         self._update_input_sensitivity()
-        self._update_header()
-        self.add_message("user", text)
-        self._append_thinking()
-        self._scroll_to_bottom()
+        self.render(force=True)
 
         def worker():
             error = None
             try:
-                manager.send_user_message(text)
+                if greeting:  # what the user is answering stays, for both (off the UI thread: it waits its turn)
+                    manager.add_assistant_message(greeting)
+                manager.send_user_message(text, quiet=APP_QUIET)
             except Exception as e:  # keep the UI alive if the model or a tool fails
                 logger.exception("Assistant turn failed")
                 error = str(e) or e.__class__.__name__
-            GLib.idle_add(self._on_turn_finished, manager, error)
+            GLib.idle_add(self._on_turn_finished, manager, error, entry)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_turn_finished(self, manager: ConversationManager, error: str | None) -> bool:
+    def _on_turn_finished(self, manager: ConversationManager, error: str | None, entry=None) -> bool:
         persist_conversation(manager)
-        self._busy_manager = None
+        if entry in self._pending:
+            self._pending.remove(entry)
+        left = self._in_flight.get(id(manager), 1) - 1
+        if left > 0:
+            self._in_flight[id(manager)] = left
+        else:
+            self._in_flight.pop(id(manager), None)
         current = self.conversation_manager
         if current is not manager and current.day_plan.target_date == manager.day_plan.target_date:
             current.refresh()  # the same day was reopened while the turn ran
