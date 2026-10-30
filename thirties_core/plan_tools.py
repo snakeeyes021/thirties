@@ -38,6 +38,7 @@ from thirties_core.clock import (
     parse_shift_minutes,
     resolve_clock,
 )
+from thirties_core.message_tools import MESSAGE_READ_ONLY, MESSAGE_TOOL_SPECS, MessageTools
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus, new_span_id
 from thirties_core.scheduler import DeterministicScheduler
 
@@ -171,8 +172,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
 ]
 
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
-TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY
+TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + MESSAGE_TOOL_SPECS
+READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY | MESSAGE_READ_ONLY
 
 
 def _as_bool(value: Any) -> bool:
@@ -249,6 +250,7 @@ class PlanTools:
         self._other_days: Dict[Any, DayPlan] = {}
         self.successful_changes = 0  # every tool call that changed something, on any day or store
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
+        self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1084,6 +1086,7 @@ class PlanTools:
         }
         if self.assistant:
             handlers.update(self.assistant.handlers())
+        handlers.update(MessageTools(self).handlers())
         handler = handlers.get(name)
         if handler is None:
             return f"{NOT_DONE}: unknown tool '{name}'. Available: {', '.join(handlers)}."
