@@ -821,6 +821,57 @@ class TestParityWithGemini(ParityTestCase):
         self.assertEqual([p["start"] for p in parts], ["10:30 AM", "3:00 PM"])
 
 
+class TestGemmaLearnsRoutinePlacement(ParityTestCase):
+    """0.2 stream K: a Gemma user's routine placement is learned like a Gemini user's (routines.py), so the next
+    morning is set up the same way."""
+
+    def book(self):
+        from thirties_core.routines import RoutineBook
+        return RoutineBook(self.sched.state_db).get("n_routine")
+
+    def test_placing_it_at_a_time_is_learned(self):
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        r = self.book()
+        self.assertEqual([p["at"] for p in r.parts], ["19:00", "19:30"])
+        self.assertEqual(r.placement_source, "learned")
+
+    def test_the_stored_placement_is_used_and_a_missed_part_isnt_learned_as_usual(self):
+        from thirties_core.routines import RoutineBook
+        book = RoutineBook(self.sched.state_db)
+        r = book.get("n_routine", "Morning Routine")
+        r.parts = [{"items": ["Feed kitties", "Caffeinate"], "at": "09:00", "fallback": ""},
+                   {"items": ["Water bottle", "Breakfast", "Throne", "Shower", "PT", "Brush teeth"], "at": "20:00",
+                    "fallback": ""}]
+        r.placement_source = "learned"
+        book.save(r)
+        set_debug_time(at("10:10"))
+        note = self.brain._routine_note("morning")
+        parts = self.brain._routine_parts(note, self.STEPS, None)
+        self.assertEqual(parts[1], {"start": "8:00 PM", "items": r.parts[1]["items"]})  # its own grouping, its time
+        self.assertTrue(self.brain._routine_shifted)  # 9:00 has passed: today's stand-in
+        self.brain._put_routine(note, None)
+        self.assertEqual([p["at"] for p in self.book().parts], ["09:00", "20:00"])  # still where it usually goes
+
+    def test_moving_a_step_by_itself_is_learned_but_not_inside_a_redraw(self):
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        self.m.tools.user_message = "move the shower to 9"
+        self.m.tools.execute("update_event", {"event": self.span("Shower").id, "start": "9:00 PM"})
+        parts = {p["at"]: p["items"] for p in self.book().parts}
+        self.assertEqual(parts["21:00"], ["Shower"])
+        self.assertNotIn("Shower", parts["19:30"])
+        from thirties_core import plan_log
+        with plan_log.tool_call("redraw"):
+            self.m.tools.execute("update_event", {"event": self.span("PT").id, "start": "10:00 PM"})
+        self.assertNotIn("22:00", {p["at"] for p in self.book().parts})
+
+    def test_a_day_page_drag_is_learned(self):
+        from thirties_core import plan_log
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        with plan_log.caused_by("Day page"):
+            self.m.execute_tool("update_event", {"event": self.span("Feed kitties").id, "start": "6:30 PM"})
+        self.assertEqual({p["at"]: p["items"] for p in self.book().parts}["18:30"], ["Feed kitties"])
+
+
 class TestHelpersForGemma(ParityTestCase):
     """ROADMAP C3 and "After 0.1" 2: separate the requests, parse each, check nothing was lost."""
 

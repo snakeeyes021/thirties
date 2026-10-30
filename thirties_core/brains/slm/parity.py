@@ -58,6 +58,8 @@ AFTER_RE = re.compile(r"\bafter (?:the |my )?([\w' ]{2,30}?)(?:[,.!?]|$| and | s
 class ParityActions:
     """Handlers for the ``today``, ``urgency``, ``fact`` and ``routine`` actions."""
 
+    _routine_shifted = False  # the last _routine_parts moved a missed part to a later free thirty
+
     # --- reading ---
 
     def _parity(self, actions: List[Action], message: str) -> List[Action]:
@@ -265,11 +267,18 @@ class ParityActions:
         return "routine" in (title or "").lower() and self._routine_note(title) is not None
 
     def _routine_pattern(self, note: Dict[str, Any], steps: List[str]) -> List[Tuple[datetime, List[str]]]:
-        """How the routine was last laid out: its steps grouped by thirty, from the most recent of the last few days
-        (not today), as (that day's start time, steps)."""
+        """How the routine usually goes: its stored placement (learned from how the user placed it or moved its
+        steps, or confirmed by them: routines.py, the same as for Gemini), else how it was last laid out, its steps
+        grouped by thirty from the most recent of the last few days (not today), as (start time, steps)."""
         db = self.tools.scheduler.state_db if self.tools.scheduler else None
         if db is None:
             return []
+        routines = getattr(self.tools.assistant, "routines", None)
+        if routines is not None:
+            from thirties_core.routines import _at
+            stored = routines.book().get(note["id"], note["title"]).parts
+            if stored:
+                return [(_at(p["at"], self.tools.day_plan.day_start), list(p["items"])) for p in stored]
         by_text = {s.lower(): s for s in steps}
         today = self.tools.day_plan.target_date
         tz = self.tools.day_plan.day_start.tzinfo
@@ -300,6 +309,7 @@ class ParityActions:
         ROUTINE_STEPS_PER_THIRTY in the note's order. A given start puts the thirties back to back from it. With no
         start, last time's thirties are kept where they're still ahead; the rest go in the next free thirties."""
         plan = self.tools.day_plan
+        self._routine_shifted = False
         pattern = self._routine_pattern(note, steps)
         if pattern:
             groups = [list(g) for _, g in pattern]
@@ -324,6 +334,7 @@ class ParityActions:
                 at = usual
             else:
                 at = self._first_free_thirty(cursor)
+                self._routine_shifted = self._routine_shifted or usual is not None  # a missed part's stand-in
             parts.append({"start": format_clock(at), "items": group})
             cursor = at + timedelta(minutes=30)
         return parts
@@ -340,7 +351,18 @@ class ParityActions:
             parts = self._routine_parts(note, steps, start)
         finally:
             self.tools.day_plan = saved
-        return self._run("put_routine", {"routine": note["title"], "parts": parts, **({"day": day} if day else {})})
+        # put_routine learns the placement, as it does for Gemini, except when Python moved a missed part to a later
+        # free thirty: that's today's stand-in, not where the part usually goes.
+        routines = getattr(self.tools.assistant, "routines", None)
+        stand_in = routines is not None and start is None and self._routine_shifted
+        was = routines.placing if routines is not None else False
+        if stand_in:
+            routines.placing = True
+        try:
+            return self._run("put_routine", {"routine": note["title"], "parts": parts, **({"day": day} if day else {})})
+        finally:
+            if routines is not None:
+                routines.placing = was
 
     @staticmethod
     def _routine_reply(out: str) -> str:

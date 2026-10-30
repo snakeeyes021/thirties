@@ -470,6 +470,25 @@ class RoutineTools:
         r.parts, r.placement_source = self._merge_parts(r.parts, new), "learned"
         book.save(r)
 
+    def learn_move(self, span) -> None:
+        """A routine step the user moved by itself (update_event, from either brain or a Day page drag): its new
+        thirty becomes its usual one, the same way a put_routine is learned, so the next morning sets the day up the
+        way the user last had it. Moves made inside another tool (a redraw, push back, the rollover) aren't the
+        user placing a step, so they teach nothing."""
+        from thirties_core.plan_log import outer_tool
+        if span is None or span.is_envelope or self.placing or self.db is None or outer_tool() != "update_event":
+            return
+        from thirties_core.assistant_tools import _checkbox_id
+        want = span.title.strip().lower()
+        for note in self.a._routines():
+            steps = self.steps(note)
+            name = next((s for s in steps if span.task_id == _checkbox_id(note["id"], s) or s.lower() == want), None)
+            if name is None and want in self.known_extras(note):
+                name = span.title.strip()
+            if name is not None:
+                self.learn(note, [{"start": format_clock(thirty_of(span.start_dt)), "items": [name]}])
+                return
+
     def _normalize_parts(self, note: Dict[str, Any], parts: Any) -> List[Dict[str, Any]]:
         from thirties_core.assistant_tools import ToolError
         by_text = {s.lower(): s for s in self.steps(note)}

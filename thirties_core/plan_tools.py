@@ -1361,6 +1361,8 @@ class PlanTools:
             self.day_plan = self.plan_for(args.pop("day", None))
             with tool_call(name, self.user_message):  # every change it makes is logged with its cause (plan_log)
                 result = handler(**args)
+                if name == "update_event" and self.assistant and not args.get("to_day"):
+                    self._learn_routine_move(args.get("event"))
             if name not in READ_ONLY_TOOLS:
                 self.successful_changes += 1
             if self.day_plan is not saved:
@@ -1372,6 +1374,13 @@ class PlanTools:
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
         finally:
             self.day_plan = saved
+
+    def _learn_routine_move(self, event: Any) -> None:
+        """A routine step moved by itself is where it usually goes now (routines.RoutineTools.learn_move)."""
+        try:
+            self.assistant.routines.learn_move(self._find_span(event))
+        except Exception as e:  # learning never costs the user the move
+            logger.debug("Routine placement not learned from a move: %s", e)
 
     def capture_snapshot(self) -> PlanSnapshot:
         return PlanSnapshot(

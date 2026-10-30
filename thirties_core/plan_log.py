@@ -92,6 +92,12 @@ def tool_call(name: str, message: Optional[str] = None) -> Iterator[None]:
         _cause.reset(token)
 
 
+def outer_tool() -> str:
+    """The tool the current change started from (the first of a nested chain), or "" outside any tool."""
+    cause = _cause.get()
+    return cause.tools[0] if cause and cause.tools else ""
+
+
 def _current() -> Tuple[str, str, str]:
     from thirties_core.joplin_writeback import current_turn
     cause = _cause.get() or _Cause()
@@ -245,5 +251,5 @@ def describe(row: Dict[str, Any], tz=None) -> str:
             + (f" ({'; '.join(detail)})" if detail else "") + f", caused by: {cause_text(row)}")
 
 
-__all__ = ["KEEP_DAYS", "caused_by", "tool_call", "record_span_change", "stored_span", "changes_for", "cause_text",
+__all__ = ["KEEP_DAYS", "caused_by", "tool_call", "outer_tool", "record_span_change", "stored_span", "changes_for", "cause_text",
            "describe"]
