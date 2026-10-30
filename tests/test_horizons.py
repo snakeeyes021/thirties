@@ -268,6 +268,11 @@ class TestBubblingDown(PlannerCase):
         TodayLinks(self.sched.state_db).link("File the taxes", self.tasks[6])
         self.assertEqual(self.ids(candidates_for_day(self.t)), [])
 
+    def test_done_long_ago_and_open_again_is_a_new_round(self):
+        self.hp.pin(self.tasks[0], parse_period("this week", DAY))
+        self.sched.state_db.record_task_completed("door", DAY - timedelta(days=60))
+        self.assertIn("door", self.ids(candidates_for_day(self.t)))
+
     def test_whats_left_from_an_earlier_day_comes_back(self):
         self.hp.pin(self.tasks[0], parse_period("Monday", MON))  # Monday's, not done
         c = self.by_id(candidates_for_day(self.t))
