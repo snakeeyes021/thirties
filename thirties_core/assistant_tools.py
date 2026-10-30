@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
                                  thirty_ceil, thirty_of)
@@ -211,6 +211,20 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["task"],
     },
     {
+        "name": "put_routine",
+        "description": "Put one of the user's routines (a note of daily steps) on the plan as its steps. Each part is "
+                       "one thirty and the steps done in it, in the routine's order. On today's plan it also goes on "
+                       "today's list, as one item with its steps under it. Never add a routine to a list or as a "
+                       "single item.",
+        "parameters": {"routine": "Which routine (its note's name), e.g. 'Morning Routine'.",
+                       "parts": "The thirties, as a list of {start, items}: e.g. [{\"start\": \"9:00 AM\", \"items\": "
+                                "[\"Feed kitties\", \"Caffeinate\"]}, {\"start\": \"3:00 PM\", \"items\": [\"Shower\"]}]. "
+                                "Items are the routine's steps, worded as in the note.",
+                       "start": "Instead of parts: one thirty for every step.",
+                       "day": "The day, if not today."},
+        "required": ["routine"],
+    },
+    {
         "name": "add_to_today",
         "description": "Put things on today's list (the user's Today note), when the user says they mean to do them "
                        "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
@@ -322,6 +336,8 @@ class AssistantTools:
     def __init__(self, plan_tools: "PlanTools", services: Services) -> None:
         self.pt = plan_tools
         self.s = services
+        self._quiet_today = False  # put_routine lists its steps on Today together, as one group
+        self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
 
     # --- helpers ---
 
@@ -432,6 +448,16 @@ class AssistantTools:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
             self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
 
+    def _tick_on_today(self, title: str) -> None:
+        from thirties_core.today import note_items
+        today, writer = self._today_note(), self._writer()
+        if today is None or writer is None:
+            return
+        exact = next((text for text, ticked in note_items(today) if text.lower() == title.strip().lower() and not ticked),
+                     None)
+        if exact:
+            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
+
     def sync_today(self) -> List[str]:
         """Catch up with edits made by hand: an item ticked on the Today note ticks its home item, and the other way
         round; a scheduled item taken off the Today note is mentioned once. Returns messages for the user."""
@@ -514,17 +540,140 @@ class AssistantTools:
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
 
-    def put_on_today(self, task_id: str) -> str:
-        """Quietly: a list item scheduled for today goes on today's list too (if there is a Today note and
-        Thirties may write to it). Returns a short note for the tool result, or ''."""
-        task = next((t for t in self.s.tasks if t.id == task_id), None)
-        if task is None or task.id.startswith("media:") or task.list_role in ("today", "routine"):
+    def list_today(self, span: EventSpan) -> str:
+        """Everything on today's plan is on today's list (10-29: the plan and the Today note had drifted apart): a list
+        item as its linked copy, a routine's step under the routine's name, anything else as it's worded. Work, sleep
+        and calendar events stay off. Quietly: returns a note for the tool result, or ''."""
+        if span.is_envelope or span.source == "calendar" or self._quiet_today:
+            return ""
+        task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
+        if task is not None and task.list_role == "today":
             return ""
         try:
-            out = self.add_to_today([task.title])
+            routine = self._routine_of(task.title if task is not None else span.title)
+            if routine is not None:
+                out = self._routine_on_today(routine[0], [routine[1]])
+            else:
+                out = self.add_to_today([task.title if task is not None else span.title])
         except ToolError:
             return ""
         return "(also added to today's list)" if out.startswith("Added") else ""
+
+    def _routines(self) -> List[Dict[str, Any]]:
+        from thirties_core.lists import ListCatalog
+        from thirties_core.today import notes_with_role
+        if self._db is None:
+            return []
+        return notes_with_role(ListCatalog(self._db).roles(), self._joplin_notes(), "routine")
+
+    def _routine_of(self, title: str) -> Optional[Tuple[Dict[str, Any], str]]:
+        """The routine note a step belongs to, and the step's exact wording; only the same wording counts."""
+        from thirties_core.today import note_items
+        want = str(title).strip().lower()
+        for note in self._routines():
+            for text, _ in note_items(note):
+                if text.lower() == want:
+                    return note, text
+        return None
+
+    def _routine_on_today(self, routine: Dict[str, Any], steps: List[str]) -> str:
+        """A routine goes on today's list as one item named after its note, with its steps nested under it, each
+        linked to its step in the routine note (10-26: it went on as one made-up line, "Morning Routine steps", which
+        was then written into the routine note itself)."""
+        from thirties_core.today import TodayLinks, group_items
+        note = self._today_note()
+        if note is None:
+            raise ToolError("There's no Today note yet.")
+        writer = self._writer()
+        if writer is None:
+            raise ToolError("Thirties isn't connected to Joplin.")
+        name = routine["title"].strip()
+        key = (self._today().isoformat(), name.lower())
+        have = self._today_groups.get(key)
+        if have is None:
+            found = group_items(note, name)
+            have = None if found is None else {t.lower() for t in found}
+        missing = [s for s in steps if have is None or s.lower() not in have]
+        if not missing:
+            return "Already on it."
+        ops = ([] if have is not None else [{"op": "add_task", "note_id": note["id"], "title": name}]) + \
+              [{"op": "break_down", "note_id": note["id"], "parent_title": name, "steps": missing, "ticked_too": True}]
+        for op in ops:
+            status, msg = writer.submit(op)
+            if status in ("not_allowed", "failed"):
+                raise ToolError(msg)
+        self._today_groups[key] = (have or set()) | {s.lower() for s in missing}
+        links = TodayLinks(self._db)
+        for step in missing:
+            links.link(step, TaskItem(id=_checkbox_id(routine["id"], step), source_notebook=routine.get("source_notebook", ""),
+                                      title=step, is_checkbox_item=True, parent_note_title=name,
+                                      parent_note_id=routine["id"], list_role="routine"))
+        return f"Added to today's list: {name} ({', '.join(missing)})."
+
+    def put_routine(self, routine: str = "", parts: Any = None, start: Any = None, day: Any = None, **_: Any) -> str:
+        """Put a routine on the plan as its steps: each part is one thirty holding the steps listed for it, in order.
+        On today's plan the routine also goes on today's list, as one item with its steps nested."""
+        import json
+        from thirties_core.today import note_items
+        routines = self._routines()
+        want = {_stem(w) for w in _words(routine)}
+        found = [n for n in routines if not routine or want & {_stem(w) for w in _words(n["title"])}]
+        if len(found) != 1:
+            names = ", ".join(n["title"] for n in routines) or "none yet (mark a note as a routine in Profile → Lists)"
+            raise ToolError(f"Which routine? Routines: {names}.")
+        note = found[0]
+        steps = [text for text, _ in note_items(note)]
+        if isinstance(parts, str) and parts.strip():
+            try:
+                parts = json.loads(parts)
+            except ValueError:
+                raise ToolError("parts must be a list of {start, items}.")
+        if not parts:
+            if start in (None, ""):
+                raise ToolError("Give start (one thirty for all of it) or parts (a start and the steps for each thirty).")
+            parts = [{"start": start, "items": steps}]
+        by_text = {s.lower(): s for s in steps}
+        placed, already, lines = [], [], []
+        plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan
+        on_plan = {sp.title.lower() for sp in plan.spans if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
+        self._quiet_today = True
+        try:
+            for part in parts:
+                names = part.get("items") or steps
+                unknown = [n for n in names if str(n).strip().lower() not in by_text]
+                if unknown:
+                    raise ToolError(f"{', '.join(map(str, unknown))} isn't in {note['title']}. Its steps: {', '.join(steps)}.")
+                todo = [by_text[str(n).strip().lower()] for n in names]
+                already += [t for t in todo if t.lower() in on_plan]
+                todo = [t for t in todo if t.lower() not in on_plan]
+                if not todo:
+                    continue
+                first = self.pt._start(part.get("start"))
+                at = [first + timedelta(minutes=30 * k // len(todo)) for k in range(len(todo) + 1)]
+                for k, text in enumerate(todo):
+                    args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "category": "task",
+                            "task_id": _checkbox_id(note["id"], text), "alongside": True}
+                    if day not in (None, ""):
+                        args["day"] = day
+                    out = self.pt.execute("add_event", args)
+                    if out.startswith(NOT_DONE_PREFIX):
+                        raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
+                    placed.append(text)
+                lines.append(f"{format_clock(thirty_of(first))}: {', '.join(todo)}")
+        finally:
+            self._quiet_today = False
+        if not placed:
+            return f"{note['title']} is already on the plan."
+        listed = ""
+        if plan.target_date == self._today():
+            try:
+                listed = " " + self._routine_on_today(note, placed)
+            except ToolError:
+                listed = ""
+        out = f"Put {note['title']} on the plan: " + "; ".join(lines) + "."
+        if already:
+            out += f" Already planned: {', '.join(already)}."
+        return out + listed
 
     # --- changing the backlog in Joplin (only when the user asked or agreed) ---
 
@@ -574,6 +723,11 @@ class AssistantTools:
             options = ", ".join(sorted({name for name in notes.values()})[:12])
             raise ToolError(f"Which list should '{title}' go on? Lists: {options}.")
         _, note_title, note_id = scored[0]
+        if start not in (None, "") and any(n["id"] == note_id for n in self._routines()):
+            # A routine is a template: scheduling it is put_routine, never a new line in it (10-26: "Morning Routine
+            # steps" was written into the Morning Routine note).
+            raise ToolError(f"{note_title} is a routine. To put it on the plan, use put_routine; its note only changes "
+                            "when the user asks to change the routine itself.")
         writer = self._writer()
         if writer is None:
             raise ToolError("Thirties isn't connected to Joplin, so it can't change your lists yet. "
@@ -723,6 +877,8 @@ class AssistantTools:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
             if st == SpanStatus.DONE and task:
                 result += " " + self._complete_backlog_task(task)
+            elif st == SpanStatus.DONE and self._routine_of(span.title) is not None:
+                self._tick_on_today(span.title)  # a routine step already ticked in its note: still tick today's copy
             elif st == SpanStatus.SKIPPED and self._db:
                 count = self._db.record_task_deferred(span.task_id)
                 result += f"; it has now been put off {count} times"
@@ -821,12 +977,14 @@ class AssistantTools:
         """For the morning: what's still open on the Today note ("keep"), and pressing list items that aren't on it
         yet ("add": now, or due within two days; at most three)."""
         from thirties_core.backlog import DONE_HIDES_DAYS
-        from thirties_core.today import with_done
+        from thirties_core.today import note_items, with_done
         note = self._today_note()
         if note is None:
             return {"keep": [], "add": []}
         done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
-        keep = [text for text, ticked in with_done(note, done) if not ticked]
+        routine = {n["title"].strip().lower() for n in self._routines()}
+        routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
+        keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine]
         on = {k.lower() for k in keep}
         today = self._today()
 
@@ -866,6 +1024,12 @@ class AssistantTools:
                     writer.submit({"op": "untick_all", "note_id": note["id"], "title": note["title"]})
                     done.append(f"unticked {note['title']}")
         today = self._today_note()
+        if today:
+            from thirties_core.today import group_items
+            for note in notes_with_role(roles, notes, "routine"):  # routines never carry over: yesterday's group goes
+                if group_items(today, note["title"]) is not None:
+                    writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
+                    done.append(f"took yesterday's {note['title']} off {today['title']}")
         if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
             writer.submit({"op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
             done.append(f"cleared what was done from {today['title']}")
@@ -1304,6 +1468,7 @@ class AssistantTools:
             "mute_checkins": self.mute_checkins,
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
+            "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
         }

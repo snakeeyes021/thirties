@@ -574,8 +574,8 @@ class PlanTools:
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
-        if task_id and self.assistant and self.day_plan.target_date == self.today():
-            listed = self.assistant.put_on_today(task_id)
+        if self.assistant and self.day_plan.target_date == self.today():
+            listed = self.assistant.list_today(span)
             extra += f" {listed}" if listed else ""
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
@@ -685,6 +685,8 @@ class PlanTools:
             target_plan.spans.append(moved)
             target_plan.spans.sort(key=lambda s: s.start_dt)
             self._persist(moved)
+            if self.assistant and target_plan.target_date == self.today():
+                self.assistant.list_today(moved)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
                     f"{format_clock(new_start)} – {format_clock(new_end)} "
                     + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays)."))
@@ -693,7 +695,10 @@ class PlanTools:
         target_plan.spans.append(span)
         target_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
-        return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}."
+        listed = ""
+        if self.assistant and target_plan.target_date == self.today():
+            listed = self.assistant.list_today(span)
+        return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:
         a, b = self._find_span(first), self._find_span(second)
