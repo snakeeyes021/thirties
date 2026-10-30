@@ -122,6 +122,19 @@ class TestPlacement(ListsTestCase):
         self.assertTrue(self.body("n_quick").endswith("- [ ] Check the fan noise\n"))
 
 
+class TestSmallModel(ListsTestCase):
+    """The on-device brain doesn't choose: Python takes a clearly best list, else the drop box."""
+
+    def test_clear_best_list_else_the_drop_box(self):
+        from thirties_core.brains.slm.brain import SlmBrain
+        from thirties_core.brains.slm.parse import Action
+        brain = SlmBrain(self.t, tasks=list(self.services.tasks))
+        out, _ = brain._do_task_add(Action("task_add", {"title": "Clean the windows"}))
+        self.assertTrue(out.startswith("Added 'Clean the windows' to Home"), out)
+        out, _ = brain._do_task_add(Action("task_add", {"title": "Ask Zein about the trip"}))
+        self.assertTrue(out.startswith("Added 'Ask Zein about the trip' to Assorted Quickies"), out)
+
+
 class TestDropBox(ListsTestCase):
 
     def test_scope_one_box_covers_everything_several_their_own_notebooks(self):

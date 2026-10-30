@@ -71,6 +71,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
         self.day_view.set_actions(self._run_day_tool, self._on_replanned)
+        self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
+                                                             if self.conv_manager is not None else "")
         self.content_toolbar.set_content(self.day_view)
 
         self.conv_manager = None
