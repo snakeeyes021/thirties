@@ -24,7 +24,7 @@ Gemma 4 E4B is *extremely* weak at this task. It can't hold a schedule in its he
 Lessons:
 - **Keep the instruction in a long-lived conversation.** Each later message pays only for its own tokens. The session restarts before the 4,096-token window fills, and is warmed in the background when a client starts.
 - **Prefer free-text JSON plus validation to constrained decoding.** With good examples, Gemma's free-text JSON parsed 10/10 in testing. Constrained decoding (llguidance) stays as the fallback when the output doesn't parse.
-- **One model call per message.** A separate intent router followed by slot filling would have doubled latency, and one combined parse proved accurate enough.
+- **One model call per request.** A separate intent router followed by slot filling would have doubled latency, and one combined parse proved accurate enough for one request; a message with several requests lost one of them half the time, so since 0.2 Python separates them first (no model call) and each is parsed on its own.
 - **Memory pressure matters.** With browsers open (2 GB free, 11 GB swap in use), turns slowed to 30–45 s.
 
 ---
@@ -34,10 +34,15 @@ Lessons:
 ```
 user message
   │
-  ├─▶ [python] context: time, today's items (compact), last item mentioned, last assistant line,
-  │            pending proposal, 5 backlog items related to the message (keyword match)
-  ├─▶ [gemma]  parse → {"actions": [...]}: add, move, remove, swap, outcome, confirm, reject,
-  │            choose, suggest, question, remember, profile, energy, chat
+  ├─▶ [python] separate the requests (steps.py): "work ran until 4:30, and move budget review to 4:30"
+  │            is two; a self-correction ("no wait") or an alongside ("while I eat") stays one
+  ├─▶ [python] context per request: time, today's items (compact), last item mentioned, last assistant
+  │            line, pending proposal, backlog items related to it (keyword match)
+  ├─▶ [gemma]  parse each request → {"actions": [...]}: add, move, remove, swap, outcome, confirm, reject,
+  │            choose, suggest, question, remember, profile, energy, chat, today, urgency, fact, routine
+  ├─▶ [python] coverage: a part of the message that asks for something and matched no action is parsed
+  │            again on its own; if it still yields nothing, the reply asks about that part
+  ├─▶ [python] "Dinner, cooking and eating, listening to X" → one Dinner, X alongside
   ├─▶ [python] sanity: drop adds unrelated to the message, a "move" of something absent becomes an "add",
   │            "removing" a suggestion becomes "no thanks"
   ├─▶ [python] resolve: "it" / "the second upgrades" / titles → items; "7:30" → AM or PM (future, awake,
@@ -242,4 +247,5 @@ Raw reports go to `docs/eval_reports/sim/` (gitignored).
 - **In the app:** Gemma is the default brain. Setup (or Preferences → Assistant) downloads the model (~3 GB, not gated) to `$XDG_DATA_HOME/thirties/models` with `thirties_core/brains/slm/model_download.py`, resuming and checking its SHA-256.
 - **The Flatpak bundles LiteRT-LM** (the `litert-lm-api` wheel is pure py3 manylinux). It runs Gemma inside the sandbox on the GPU through Vulkan; `--device=dri` is all it needs (measured on an RTX 3080 Ti: 2.2 s to load).
 - **Switching brains:** main menu → Assistant, Preferences, or `/brain gemma` / `/brain gemini` in any chat, including Telegram. The choice belongs to this device, and the conversation carries on.
+- **Other small models (the model spike):** the brain uses only `json_call`, `text_call` and the parser session (`runtime.py`), so `catalog.py` can swap the model: Gemma 4 E4B/E2B through LiteRT-LM, Phi-4 Mini and Qwen3 through llama.cpp (evals only; their files are placed in the models folder by hand). `THIRTIES_SLM_MODEL=<name>` picks one for any eval; `tests/slm_model_compare.py` runs the parse benchmark on each and tabulates accuracy, latency, load time, memory and licence (`--dry-run` says what can run).
 - **Evals and development from source** use a venv with LiteRT: `python3 -m venv --system-site-packages ~/.local/share/thirties/venv`, then `pip install litert-lm-api`, and run everything with `~/.local/share/thirties/venv/bin/python`.
