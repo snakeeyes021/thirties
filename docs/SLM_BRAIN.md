@@ -94,7 +94,8 @@ Dialog state that must survive restarts (the pending proposal, what "it" refers 
 Evals use **at most 66% of agy's quota per 5-hour window**, leaving the rest for real use of the app. To raise it, pass `--budget 0.8` (or change the default in `tests/sim_eval.py`).
 
 - **How it's enforced:** every agy call, from the app, the Telegram bridge or an eval, is logged to `~/.local/share/thirties/agy_calls.log` (agy can't report usage itself). Before each conversation, `sim_eval` counts the calls in the last 5 hours and stops cleanly at the budget, reporting how many conversations finished.
-- **Capacity:** measured at about 1,650 calls on 2026-10-15, when the sim user and judge ran on medium thinking. They now default to `gemini-3.8-flash-low`, which probably costs less per call. Each time a quota stop shows up in the ledger, the capacity estimate recalibrates from it.
+- **Capacity:** about 2,000 calls per window with the sim user and judge on flash-low (1,113 calls showed as 55% used in agy on 2026-10-18); 1,650 on 2026-10-15, when they ran on medium thinking.
+- **Standard run:** 100 conversations, the same set every time: the 16 hand-written scenarios plus the first 34 generated (seed 1), on both brains (`--generated 34 --with-handwritten --seed 1 --brain both`); about 800 agy calls. They now default to `gemini-3.8-flash-low`, which probably costs less per call. Each time a quota stop shows up in the ledger, the capacity estimate recalibrates from it.
 - **What fits in one window** (66% ≈ 1,090 calls; an SLM conversation costs about 6 calls, a Frontier one about 9):
 
 | Run | Conversations per window |
@@ -104,6 +105,13 @@ Evals use **at most 66% of agy's quota per 5-hour window**, leaving the rest for
 | Both brains on the same scenarios | ~70 scenarios |
 
   A 250-scenario run of one brain therefore takes two windows. Use `--skip-from` the first report to finish it in the next window.
+- **The real quota:** `agy -p "/quota" --output-format json` reports each quota group's 5-hour and weekly remaining fraction and reset time, without spending any. Both sims read it (`quota_stop` in `tests/sim_eval.py`) before each day or every five conversations: evals stop at 66% of a 5-hour window and 70% of the week, leaving the rest for real use of the app. Quota is spent by token cost, not by calls, so the call ledger is only a fallback.
+- **agy's overhead:** agy's default agent adds about 12,000 tokens of its own prompt and tools to every call. Since d490059, every call (app and evals) goes to a plain agent with `excludeDefaultComponents`, measured 12,611 → 574 input tokens for the same call. Runs before and after it aren't strictly comparable (the model no longer sees agy's coding-agent prompt); compare runs on the same side of it.
+- **Quota groups:** Gemini models (Flash, Pro) share one 5-hour and one weekly limit; Claude and GPT-OSS models another; Gemini 4 Argon has its own weekly limit. The simulated user and the judge can use any of them (`--sim-model`); only the Frontier brain has to use Gemini. Compare runs only when they used the same simulator model.
+- **The milestone day-sim run** (the user's rule, 2026-10-18): a target of 100 days (50 scripts on both brains), run across weeks within the weekly limit. If a new version is ready before the run finishes, the run ends with what it has. For that to compare fairly:
+  - One run, one version: it's pinned to a commit (its own worktree) for its whole life, however many weeks it takes.
+  - Scripts run in a fixed shuffled order, the same for every version, mixing the user's days and other people's and both brains, so any first N days are a fair sample of the 100.
+  - Versions are compared on the days both have run (paired: the same script and brain), with the uncertainty that comes with N stated. 40 paired days is a real result, just a less certain one.
 - **Comparability:** results from a medium-thinking simulator (the 2026-10-15 baseline) aren't directly comparable with low-thinking runs. Compare runs that used the same `--sim-model`.
 
 ### 4.3 Results (2026-10-15)
@@ -131,6 +139,93 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 | SLM | 90 | 0.88 | 63/90 | 12 | 4.2 / 3.4 / 3.2 / 3.4 / 4.2 | 2.2 s |
 
   Weakest SLM goal kinds: free time (0.71), work ran late (0.74), move (0.75), fill a window (0.76), shift (0.78), outcome done (0.78). The 13 hand-written scenarios had hidden this: they score 0.97. Fixes for most of the failures it found landed after this baseline and need a rerun on the same scenarios (`--only-from` the baseline report).
+
+**Baseline for 0.0.1 (2026-10-18)**, run on branch `eval/0.0.1` (v0.0.1 plus the agy no-tools fix and the day sim), simulator and judge on flash-low. **Caveat:** these runs had a harness bug (fixed in 68d14b3): the simulator's prompt went through the Frontier chat wrapper, and in about 40% of short-sim conversations the simulated user answered as the assistant or thought out loud. The numbers understate both brains; clean reruns of 0.0.1 and 0.1 replace them.
+
+- **Short sim**, 16 hand-written + 37 generated scenarios on both brains (53 each; the standard is now 16 + 34):
+
+| Brain | Goals met | All checks passed | Judge (accuracy / understanding / clarity / efficiency / tone) | Time per reply |
+|---|---|---|---|---|
+| Frontier | 0.99 | 45/53 | 4.8 / 4.8 / 4.4 / 4.7 / 4.9 | 6.5 s |
+| SLM | 0.89 | 43/52 | 3.8 / 3.8 / 3.4 / 3.7 / 4.2 | 1.4 s |
+
+  Weakest SLM goal kinds: profile (0.70), move (0.74), insert_slide (0.74), outcome_skip (0.78), fill (0.79). The short sim still says both brains are mostly fine.
+
+- **Day sim**, three whole days (a synthetic Saturday and the user's real 10-16 and 10-17), the clock running and the app's own messages arriving. It tells a different story:
+
+| Brain | Day | Requests met | User's rating | Messages per waking hour | Done items recorded | Time error | Judge (accuracy / understanding / plan respect / message load / record keeping) |
+|---|---|---|---|---|---|---|---|
+| Frontier | Saturday | 1.00 | 6/10 | 0.95 | 6/7 | 42 min | 4 / 5 / 5 / 2 / 3 |
+| Frontier | 10-16 | 0.90 | 4/10 | 0.67 | 3/5 | 30 min | 3 / 3 / 4 / 2 / 3 |
+| Frontier | 10-17 | 0.84 | 4/10 | 1.86 | 8/12 | 27 min | 3 / 3 / 3 / 2 / 3 |
+| SLM | Saturday | 0.64 | 4/10 | 1.1 | 3/7 | 73 min | 2 / 2 / 3 / 1 / 2 |
+| SLM | 10-16 | 0.53 | 3/10 | 0.73 | 0/5 | – | 1 / 1 / 1 / 2 / 1 |
+| SLM | 10-17 | 0.22 | 2/10 | 1.3 | 3/12 | 301 min | 1 / 1 / 1 / 1 / 1 |
+
+  Message load scores 1–2 on every day: the 0.0.1 check-ins and start messages are what the simulated user minds most, on both brains. The SLM's worst moments: answering "what's left today" with raw backlog lines, "what does tomorrow look like" with today, not dropping a declined invite, marking an item done in Joplin that the user said wasn't, and an evening time recorded as 7 AM. A day costs about 37 agy calls with the SLM and 63 with the Frontier brain.
+
+**Clean comparison, 0.0.1 against 0.1 (2026-10-18)**, with the simulator fixed: the same three days on each version and brain, one run each (so any single cell is noisy; look for differences that hold across all six pairs). 0.1 is `68d14b3` with Gemma's sorted lists.
+
+| Brain | Day | Requests met | User's rating | Messages per waking hour | Message load (judge) | Done items recorded |
+|---|---|---|---|---|---|---|
+| Frontier | Saturday | 1.00 → 0.83 | 4 → 6 | 0.88 → 0.15 | 2 → 5 | 5/7 → 2/7 |
+| Frontier | 10-16 | 0.92 → 0.95 | 6 → 6 | 0.73 → 0.18 | 2 → 5 | 3/5 → 4/5 |
+| Frontier | 10-17 | 0.84 → 0.76 | 3 → 3 | 1.46 → 0.24 | 2 → 4 | 7/12 → 8/12 |
+| SLM | Saturday | 0.61 → 0.58 | 4 → 3 | 0.88 → 0.37 | 2 → 3 | 5/7 → 2/7 |
+| SLM | 10-16 | 0.44 → 0.50 | 2 → 2 | 0.91 → 0.24 | 1 → 4 | 2/5 → 1/5 |
+| SLM | 10-17 | 0.29 → 0.34 | 2 → 2 | 1.14 → 0.16 | 2 → 3 | 1/12 → 3/12 |
+
+  - **Holds everywhere:** the app's own messages fell four- to sixfold, and the judge's message-load score rose on every pair (2 → 4–5 for the Frontier brain). No minute times were shown.
+  - **Mixed:** requests met and the user's rating moved within noise, except the Frontier Saturday (rating 4 → 6).
+  - **A trade-off to fix:** fewer check-ins means fewer reports, so the record can suffer (the Saturday recorded 2 of 7 done items instead of 5). Quiet messaging needs another way to collect what happened, such as one short wrap-up at the end of the day.
+  - **The SLM** is still at 2–3/10: its problems are understanding, not messaging.
+
+**Milestone run of 0.1, first 47 days (2026-10-18)**, commit 9ec6ea5, simulator and judge on flash-low through the plain agy agent: 24 scripts (20 made-up people with their own lists, the user's three real days, the synthetic Saturday) on both brains, in the fixed order (seed 1). The 47 days used about 4% of the weekly Gemini quota.
+
+| Brain | Whose days | Days | Requests met | User's rating | Messages per waking hour | Done items recorded | Judge (accuracy / understanding / plan respect / message load / record keeping) |
+|---|---|---|---|---|---|---|---|
+| Frontier | other people | 20 | 0.93 | 6.8/10 | 0.27 | 63% | 3.7 / 4.1 / 4.2 / 4.5 / 3.5 |
+| Frontier | the user | 2 | 0.90 | 4.5/10 | 0.27 | 53% | 3.5 / 4.0 / 3.5 / 4.0 / 3.0 |
+| SLM | other people | 20 | 0.53 | 3.9/10 | 0.30 | 67% | 2.0 / 2.1 / 2.0 / 3.3 / 2.0 |
+| SLM | the user | 3 | 0.27 | 2.3/10 | 0.23 | 22% | 1.0 / 1.0 / 1.0 / 3.0 / 1.0 |
+
+  No minute times were shown on any day. It found one design error: rounding to the nearest thirty turned a support worker's 10:45 break into 11:00, the wrong thirty. A time is now told by the thirty it's in (the 10:30 thirty), its exact minute only when asked for.
+
+**Gemma fixes from the milestone run, paired check (2026-10-19):** the same 10 scripts (8 made-up people, the user's 10-16 and 10-17), SLM brain, one run each, on the milestone commit (with the phantom-event harness fix) and after the fixes:
+
+| | Baseline | After c762540 | After dbc633b (layout, narrower replan) |
+|---|---|---|---|
+| User's rating | 3.1 | 3.5 (better on 5, worse on 1) | 3.4 (better on 4, worse on 3) |
+| Requests met | 0.52 | 0.53 | 0.48 (better on 4, worse on 5) |
+| Plan respect (judge) | 2.0 | 1.7 (worse on 3) | 1.6 (worse on 4) |
+
+  Single days swing widely between runs (one script went 0.56 → 0.25 of requests met), so 10 paired days can't separate small effects from noise. The next step is to measure that noise: the same version twice on the same days. The one consistent signal is lower plan respect after the fixes. Suspect: sliding later plans automatically instead of asking (c762540), which the judge may read as changing things unasked. Unproven.
+
+**Noise (2026-10-19, run 2026-10-23):** the same version (the milestone commit) twice on the same 9 Gemma days. The user's rating moved about 0.7 per day (+0.2 on average), and requests met about 0.09 per day. The judge's plan-respect score didn't move at all, so plan respect is the steadiest signal, and the 2.0 → 1.6 drop after the Gemma fixes was real (fixed in 9b6ee9a).
+
+**Milestone run of 0.1, all 106 days (2026-10-23)**, commit dde95f7: 53 scripts (31 made-up people, 22 of the user's days: 3 real, 19 variations) on both brains, fixed order, script calendars only. About 11% of a week's Gemini quota.
+
+| Brain | Whose days | Days | Requests met | User's rating | Messages per waking hour | Done items recorded | Plan respect | Message load |
+|---|---|---|---|---|---|---|---|---|
+| Frontier | other people | 31 | 0.91 | 6.9/10 | 0.26 | 72% | 4.2 | 4.4 |
+| Frontier | the user | 22 | 0.90 | 6.8/10 | 0.20 | 62% | 4.2 | 4.6 |
+| SLM | other people | 31 | 0.51 | 3.8/10 | 0.26 | 64% | 1.9 | 3.5 |
+| SLM | the user | 22 | 0.48 | 3.0/10 | 0.22 | 50% | 1.2 | 3.3 |
+
+  Gemma check after 9b6ee9a (the same 10 days): plan respect back to 2.0 (from 1.6), rating 3.6 against 3.1 and 3.3 for the baseline's two runs, requests met 0.55 against 0.52 and 0.54. Small gains, at the edge of the noise; the plan-respect regression is gone.
+
+  No minute times or internal text on any day. The two worst Frontier days were people insisting on a minute-precise time ("3:15, not 3:00"; "leaving at 12:15, don't book for 12:00") while the rounding kept saying the block; a reply now keeps minutes when the user gave them (113737e).
+
+**Release gate for 0.1 (run 2026-10-24/25, compared 2026-10-30)**: commit 747de89 against the milestone run above (dde95f7), the same 106 days, paired.
+
+| Brain | Whose days | Requests met | User's rating | Messages per waking hour | Done items recorded | Plan respect | Message load |
+|---|---|---|---|---|---|---|---|
+| Frontier | other people | 0.91 → 0.94 | 6.9 → 7.3 | 0.26 → 0.36 | 72% → 71% | 4.2 → 4.4 | 4.4 → 4.6 |
+| Frontier | the user | 0.90 → 0.92 | 6.8 → 6.6 | 0.20 → 0.31 | 62% → 64% | 4.2 → 4.0 | 4.6 → 4.4 |
+| SLM | other people | 0.51 → 0.53 | 3.8 → 3.9 | 0.26 → 0.37 | 64% → 62% | 1.9 → 1.8 | 3.5 → 3.4 |
+| SLM | the user | 0.48 → 0.51 | 3.0 → 3.1 | 0.22 → 0.33 | 50% → 42% | 1.2 → 1.4 | 3.3 → 3.2 |
+
+  No worse: every difference is within the measured noise except messages per waking hour, up about 0.1 on every row (about one more message a day), with the judge's message load unchanged. That's the "not reported yet" lines added on 10-24. Internal text: none on either run. Minute times went from 0 to 117 (Frontier) and 177 (SLM). By design, real times are now shown when the user or a calendar gave them (113737e, §7.1), but the metric still counts them; it should count only times Thirties picked itself. SLM done items recorded on the user's days dipped (50% → 42%); watch it in 0.2.
 
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 

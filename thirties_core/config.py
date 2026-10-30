@@ -32,6 +32,7 @@ class JoplinConfig:
     api_host: str = "127.0.0.1"
     write_back: bool = False          # the user allowed Thirties to check off, add and break down tasks
     launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
+    reset_routines: bool = True       # with write-back: untick routine notes each morning
     # Notebooks to read tasks from (empty: all of them except the excluded ones), and single notes to add.
     allowed_notebooks: List[str] = field(default_factory=list)
     excluded_notebooks: List[str] = field(default_factory=lambda: ["Archive"])
@@ -73,6 +74,9 @@ class AssistantConfig:
     slm_voice: bool = True    # SLM: rewrite template replies naturally (facts are verified, else the template is used)
     checkins: bool = True     # ask "did you get to X?" after planned items end (Telegram)
     checkin_after_minutes: int = 10
+    # How often Thirties messages on its own: "off" (only reminders asked for), "light" (a heads-up before
+    # calendar events), "medium" (plus the start and end of each stretch of the day), "heavy" (every item).
+    message_level: str = "medium"
 
 
 @dataclass

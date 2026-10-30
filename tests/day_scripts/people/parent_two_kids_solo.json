@@ -1,0 +1,154 @@
+{
+  "id": "parent_two_kids_solo",
+  "date": "2026-10-13",
+  "source": "made up: solo parent of two young kids with school runs and part-time remote work",
+  "wake": "06:30",
+  "bed": "22:30",
+  "work": [
+    "09:00",
+    "14:30"
+  ],
+  "persona": "Elena, parent of a 7-year-old (Leo) and 4-year-old (Maya), working part-time from home as a bookkeeping consultant while her partner is away in Chicago until Thursday. Texts hurriedly with occasional voice-to-text phrasing, pragmatic and slightly frazzled. Needs hard stops around school drop-off and pick-up.",
+  "situation": "Tuesday morning at 06:30. Partner is on a business trip, so Elena is solo on morning drop-off (08:15–08:50) and afternoon pick-up (14:45–15:30), with client work in between.",
+  "life": [
+    "06:35 Text the app while making coffee: partner is out of town, so need to get kids fed and dressed, drop them off 08:15–08:50, work 09:00–14:30 (with a quick break to throw chicken in the slow cooker and eat lunch), and pick kids up at 14:45.",
+    "06:40 Ask the app to also slot in reconciling the Henderson accounts, sending the Q3 payroll summary, and ordering Maya's rain boots during the workday.",
+    "06:45 Wake kids up, make pancakes, pack lunches, and hunt for Leo's missing library book until 08:15.",
+    "08:15 Drive to elementary school and preschool for drop-off; get stuck behind a garbage truck and return home at 09:05.",
+    "09:08 Report kids are dropped off (ran a few minutes late) and you're starting on the Henderson accounts now.",
+    "09:10 Work on Henderson reconciliation until 11:00.",
+    "11:00 Preschool calls: Maya spilled water all over her spare clothes and needs a dry pair dropped off if possible, or at least brought at pick-up. Decide to run dry clothes over during lunch since it's 10 minutes away.",
+    "11:05 Tell the app Henderson is done, start Q3 payroll summary, and ask to combine lunch with a 30-minute run to the preschool at 12:00 to drop off dry pants for Maya.",
+    "11:10 Work on Q3 payroll summary until 12:00.",
+    "12:00 Throw chicken and salsa into the slow cooker (10 mins), grab a sandwich for the car, and drive dry clothes to Maya's preschool, getting back at 12:45.",
+    "12:48 Report slow cooker started, lunch eaten, and preschool run done. Finish Q3 payroll summary.",
+    "13:35 Finish and send Q3 payroll summary. Tell the app payroll is done.",
+    "13:40 Order Maya's rain boots online (takes 15 minutes) and reply to two client emails until 14:30.",
+    "14:32 Report rain boots ordered and workday wrapped up. Pack snacks for the car and head out at 14:45 for school pick-up.",
+    "15:35 Return home with both kids. Ask the app what the evening looks like: need playground time before dark, dinner at 18:00, bath/bedtime for kids 19:00–20:15, and folding two baskets of kid laundry after.",
+    "15:45 Take kids to the neighborhood park until 16:50.",
+    "17:00 Back from the park; help Leo with his reading worksheet while Maya plays with blocks until 17:45.",
+    "17:50 Shred the slow-cooker chicken and serve tacos for dinner until 18:45.",
+    "18:50 Report park, homework, and dinner done. Start kids' bath and bedtime routine.",
+    "20:25 Maya needed three extra stories; finally out of the kids' rooms. Tell the app bedtime ran 10 minutes over.",
+    "20:30 Fold the two baskets of laundry while talking to partner on speakerphone until 21:15.",
+    "21:20 Report laundry folded. Ask the app to move loading the dishwasher to right now and leave 21:30 onward to crash on the couch.",
+    "21:20 Load dishwasher and wipe counters (15 mins), then read on the couch until 22:30."
+  ],
+  "constraints": [
+    "School drop-off (08:15–08:50) and pick-up (14:45–15:30) are immovable hard windows.",
+    "Slow cooker chicken must be started by 12:30 so dinner is ready by 18:00.",
+    "Client bookkeeping work can only happen while kids are at school (09:00–14:30).",
+    "No loud chores (like vacuuming) after 20:00 once the kids are asleep."
+  ],
+  "truth": [
+    {
+      "item": "Kids morning routine & breakfast",
+      "match": "kids|breakfast|morning|pack",
+      "start": "06:45",
+      "end": "08:15"
+    },
+    {
+      "item": "School drop-off",
+      "match": "drop-off|drop off|school",
+      "start": "08:15",
+      "end": "09:05"
+    },
+    {
+      "item": "Reconcile Henderson accounts",
+      "match": "henderson|reconcil",
+      "start": "09:10",
+      "end": "11:00"
+    },
+    {
+      "item": "Q3 payroll summary",
+      "match": "payroll|q3",
+      "start": "11:10",
+      "end": "13:35"
+    },
+    {
+      "item": "Start slow cooker, lunch & preschool drop-off",
+      "match": "slow cooker|chicken|lunch|preschool|clothes",
+      "start": "12:00",
+      "end": "12:45"
+    },
+    {
+      "item": "Order Maya's rain boots & emails",
+      "match": "boots|rain|email",
+      "start": "13:40",
+      "end": "14:30"
+    },
+    {
+      "item": "School pick-up",
+      "match": "pick-up|pick up|school",
+      "start": "14:45",
+      "end": "15:35"
+    },
+    {
+      "item": "Playground / park with kids",
+      "match": "park|playground|outside",
+      "start": "15:45",
+      "end": "16:50"
+    },
+    {
+      "item": "Dinner",
+      "match": "dinner|tacos|eat",
+      "start": "17:50",
+      "end": "18:45"
+    },
+    {
+      "item": "Kids bath and bedtime",
+      "match": "bath|bedtime|kids bed",
+      "start": "18:50",
+      "end": "20:25"
+    },
+    {
+      "item": "Fold laundry",
+      "match": "fold|laundry",
+      "start": "20:30",
+      "end": "21:15"
+    },
+    {
+      "item": "Load dishwasher & wipe counters",
+      "match": "dishwasher|counters|kitchen",
+      "start": "21:20",
+      "end": "21:35"
+    }
+  ],
+  "events": [
+    {
+      "summary": "School Drop-off",
+      "start": "08:15",
+      "end": "08:50"
+    },
+    {
+      "summary": "School Pick-up",
+      "start": "14:45",
+      "end": "15:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Family": "Kids Leo (7) and Maya (4); partner traveling Tue-Thu this week."
+  },
+  "notes": [
+    {
+      "notebook": "Work",
+      "title": "Client Bookkeeping",
+      "role": "list",
+      "body": "- [ ] Reconcile Henderson Sept accounts\n- [ ] Send Q3 payroll summary to Apex\n- [ ] Follow up on Miller missing receipts\n- [ ] Update Q4 estimated tax spreadsheet\n- [x] Invoice Northside Dental"
+    },
+    {
+      "notebook": "Home",
+      "title": "Kids & House",
+      "role": "list",
+      "body": "- [ ] Order Maya yellow rain boots (size 10)\n- [ ] Start slow cooker chicken for tacos\n- [ ] Fold 2 baskets of kids laundry\n- [ ] Load dishwasher & wipe counters\n- [ ] Sign Leo's field trip permission slip\n- [ ] Vacuum living room rug"
+    },
+    {
+      "notebook": "Home",
+      "title": "Solo Parent Routines",
+      "role": "routine",
+      "body": "- [ ] 06:45 Kids breakfast & pack lunches\n- [ ] 08:15 School & preschool drop-off\n- [ ] 14:45 School & preschool pick-up\n- [ ] 18:00 Family dinner\n- [ ] 19:00 Kids bath & bedtime stories"
+    }
+  ]
+}

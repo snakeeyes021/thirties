@@ -253,3 +253,47 @@ python3 -m tests.interactive_eval repl --no-gpu
 The desktop app is built with meson and installs `src/` as the `thirties` package (build it with GNOME Builder or `flatpak-builder` using `tech.redfoxlabs.Thirties.json`). `python3 src/main.py` does not work directly because of the package-relative imports.
 
 Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commit only curated summaries, never raw transcripts or SQLite files.
+
+---
+
+### 6.3. Versions, Branches and Releases
+- **One branch per version** (`feature/0.1`, `feature/0.2`, …), holding a bundle of features. Fixes are commits on it. Merging it into `main` (by PR, which the user merges) *is* the release. `main` holds released code only.
+- **One version in flight at a time.** Everything goes on the current version's branch until it's merged. The next version's branch starts from `main` after that merge. Never label work as belonging to a version whose branch doesn't exist yet.
+- **The version number is bumped at the start of a version's branch** (`meson.build` and a `<release>` entry in `data/tech.redfoxlabs.Thirties.metainfo.xml.in`, which serves as the release notes). Builds say what they are: version plus commit (About, logs, and each stored message).
+- **The branch is pushed as work lands**, with a draft PR to `main`, so "what's in 0.x" is always that PR's commit list. Commit freely; push when the user has seen the work (or says so).
+- **Releasing:** the user says the version is good after real use; the PR is marked ready and the user merges it. Then the merge commit on `main` is tagged `vX.Y.Z` and the tag pushed; CI publishes the GitHub pre-release with the Flatpak bundle.
+- **A release is a ratchet, not "done":** safe, better than the last release, no worse anywhere. Every friction the user reports gets a tag, proposed by the agent and overruled by the user if they disagree:
+  - **Blocker:** it harms the user's data (wrong Joplin writes, lost items, wrong stored times), it's worse than the last release, or it breaks the version's headline feature. Fixed before release.
+  - **Polish:** in scope and small (hours). Fixed on the branch if cheap, else the next version.
+  - **Next:** new capability, a design question, or out of scope. Goes into ROADMAP.md for a later version.
+- **A version merges when:** there are no open blockers; the user has used it for 3 real days with no new blocker (polish and next items don't reset the clock); and the paired day sim is no worse than the last release (requests met, user rating, zero internal text, unit tests green). Time box: about a week, after which what's there ships if those hold. A blocker found after a release gets a patch release (`0.x.1`) off `main`, carried into the current branch.
+- **The agent runs this process:** it tags frictions, tracks the 3-day clock, says when a version meets the bar, proposes the release, and tells the user what's theirs to do next.
+- **ROADMAP.md** names what each version contains; finished items are checked off there.
+- **Eval copies** (worktrees, `eval/*` branches) are local only and never pushed.
+- **Every reply that changes git ends with a status line:** the branch, the commits, whether they're pushed, and whether anything is running or scheduled.
+
+## 7. Guiding Principles from Real Use (2026-10-24)
+
+The **heavy** ones settle design questions. The **light** ones are a direction of travel.
+
+### Heavy
+1. **Natural units, natural scales, natural orientation.**
+   - Thirties works across five domains: tasks, schedule, calendar, tracking and planning.
+   - Everything should be presented so the user *feels* how big things are and where they sit, rather than reading clocks. Clocks are a blight.
+   - The one big concession is that blocks align to the clock rather than to sunrise. Keep it the only one.
+   - **Events keep their real times; blocks are a view.** A schedule is shown in blocks. Asking about one item gives its real time plus its block.
+   - Times are rounded only when Thirties picks a time itself.
+2. **Thirties keeps the task backend clean and current.** If the user has to manage both Thirties and Joplin, Thirties adds friction instead of removing it.
+   - Thirties adds items to the right lists, and records and files done items.
+   - Every write goes through an exact link, never a fuzzy match. It is recorded, and it is scored in evals.
+3. **The model brings judgement; Python brings everything else.**
+   - Python works out the facts and the options: the kinds of items, what has gone moot, candidate slots, and conflicts.
+   - The model chooses among them and explains its choice: where something fits, what matters today, what to drop.
+   - If the model is spending effort on bookkeeping, or apologising for it, the core has a gap. Fix the core.
+4. **Obvious cases get defaults; unclear cases get judgement.** Fixed or flexible, the kind of item, whether something has gone moot: Python defaults the obvious cases, the model judges the rest, and the item stores the answer.
+5. **Memories never paper over bugs.** A memory note that makes the assistant behave around a bug hides the bug from tests. Fix the bug and delete the note. Evals run with no memory notes unless a scenario provides them.
+
+### Light
+- **Small models get helpers.** Don't ask the on-device model to understand a whole turn and produce every tool call at once. Break the work into small steps (separate the requests, then act on each) with Python, or smaller helpers, in between.
+- **Record context for learning later.** Statistics should capture what surrounded an outcome (how full the day was, nearby events, time since waking) as well as durations, so later analysis has something to work with.
+- **The bar for the Frontier brain** is a frontier model handed the raw backlog and asked to plan the day. Our harness should beat that.

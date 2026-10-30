@@ -1,0 +1,132 @@
+{
+  "id": "delivery_driver_irregular_route",
+  "date": "2026-10-16",
+  "source": "made up: regional courier driver with an irregular route day fitting personal errands between commercial drops",
+  "wake": "06:45",
+  "bed": "22:30",
+  "work": [
+    "08:00",
+    "17:30"
+  ],
+  "persona": "Tariq, an independent medical and commercial courier driving his own cargo van around the metro area. Texts hands-free via Siri or quickly from parking lots, pragmatic about traffic bottlenecks and geographic batching, and looks for 30–60 minute dead zones between scheduled pickups to knock out personal errands.",
+  "situation": "Friday morning at 06:45. Has a morning dental-lab route 08:00–11:30, a mid-day gap until his 13:30–17:00 suburban clinic pickups, and wants to fit in an oil change, depositing a check at the credit union, picking up birthday flowers for his sister, and getting a haircut.",
+  "life": [
+    "06:55 Wake up and text the app: on the road today! Morning route is 08:00–11:30, then I have a gap until my afternoon clinic route 13:30–17:00. Help me fit in breakfast before 07:45, an express oil change + lunch during my 11:30–13:30 gap, depositing a paper check at the credit union, a 17:30 barbershop haircut after my last drop, and picking up flowers for my sister's birthday dinner at 19:00.",
+    "07:00 Remind the app that the express oil change has to happen before the afternoon suburban highway route because I'm already 200 miles past the sticker.",
+    "07:05 Eat scrambled eggs and pita, make a thermos of coffee, and inspect van tire pressure before pulling out at 07:50.",
+    "08:00 Run the morning dental-lab pickup and delivery route across 6 stops; downtown bridge construction adds 25 minutes, finishing the last drop at 11:55 instead of 11:30.",
+    "11:58 Text the app from the parking lot: bridge construction backed me up, just finished my morning route at 11:55. Pulling into Valvoline Express right now for the oil change, and going to walk next door to grab a gyro for lunch while they work on the van.",
+    "12:00 Wait at Valvoline and eat a gyro next door until 12:55.",
+    "12:58 Text the app: oil change and lunch done! Only have 30 minutes before my 13:30 pickup in Oakton, so skip the credit union drive-thru for now—I'll hit the branch near my last afternoon stop before 17:00.",
+    "13:00 Drive out to Oakton to start the afternoon medical clinic route at 13:30.",
+    "13:30 Complete the afternoon clinic specimen pickups; the 15:00 clinic is ready 15 minutes early, so you finish the final drop-off at the central lab at 16:35 instead of 17:00!",
+    "16:38 Text the app: finished my afternoon route 25 minutes early! Driving 5 minutes down the street to the credit union branch right now to deposit that check before they close at 17:00.",
+    "16:42 Deposit the paper check and update mileage log in the credit union parking lot until 17:05.",
+    "17:08 Report check deposited and mileage logged! Driving over to the barbershop for my 17:30 haircut.",
+    "17:25 Get a fade and beard trim at the barbershop until 18:10.",
+    "18:12 Report haircut done. Stop at the florist two blocks away to pick up a bouquet for sister's birthday, then drive home to shower and change by 18:50.",
+    "18:52 Text the app: flowers picked up, showered, and heading out the door to meet my sister's family at the restaurant at 19:00!",
+    "19:00 Celebrate sister's birthday dinner at the restaurant until 21:30, then drive home and unwind before bed at 22:30."
+  ],
+  "constraints": [
+    "Van express oil change must be completed during the midday break before driving the afternoon highway route.",
+    "Credit union branch lobby and drive-thru close at 17:00.",
+    "Needs to shower and change clothes after a full day driving the cargo van before the 19:00 birthday dinner."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast, thermos coffee & van check",
+      "match": "breakfast|coffee|pita|van",
+      "start": "07:05",
+      "end": "07:50"
+    },
+    {
+      "item": "Morning dental-lab courier route",
+      "match": "morning.*route|dental|courier",
+      "start": "08:00",
+      "end": "11:55"
+    },
+    {
+      "item": "Valvoline oil change & gyro lunch",
+      "match": "oil change|valvoline|lunch|gyro",
+      "start": "12:00",
+      "end": "12:55"
+    },
+    {
+      "item": "Afternoon clinic courier route",
+      "match": "afternoon.*route|clinic",
+      "start": "13:00",
+      "end": "16:35"
+    },
+    {
+      "item": "Deposit check at credit union & log mileage",
+      "match": "credit union|check|deposit|mileage",
+      "start": "16:40",
+      "end": "17:05"
+    },
+    {
+      "item": "Barbershop haircut",
+      "match": "haircut|barber",
+      "start": "17:25",
+      "end": "18:10"
+    },
+    {
+      "item": "Pick up birthday flowers & shower",
+      "match": "flower|florist|shower",
+      "start": "18:12",
+      "end": "18:50"
+    },
+    {
+      "item": "Sister's birthday dinner",
+      "match": "dinner|birthday|sister",
+      "start": "19:00",
+      "end": "21:30"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Morning Courier Route (Dental Labs)",
+      "start": "08:00",
+      "end": "11:30"
+    },
+    {
+      "summary": "Afternoon Courier Route (Suburban Clinics)",
+      "start": "13:30",
+      "end": "17:00"
+    },
+    {
+      "summary": "Haircut @ Classic Fade",
+      "start": "17:30",
+      "end": "18:15"
+    },
+    {
+      "summary": "Layla's Birthday Dinner",
+      "start": "19:00",
+      "end": "21:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Independent courier driver; fits errands into midday route gaps and along delivery corridors."
+  },
+  "notes": [
+    {
+      "notebook": "Van & Work",
+      "title": "Vehicle & Route Admin",
+      "role": "list",
+      "body": "- [ ] Express oil change at Valvoline (save receipt for Schedule C)\n- [ ] Log daily odometer mileage in spreadsheet\n- [ ] Deposit client paper check at credit union (before 5 PM)\n- [ ] Vacuum cargo bay mat this weekend"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Friday Errands",
+      "role": "today",
+      "body": "- [ ] Pick up bouquet for Layla's birthday dinner\n- [ ] 5:30 PM barbershop appointment\n- [ ] Quick shower & change before 7 PM dinner"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home List",
+      "role": "list",
+      "body": "- [ ] Renew commercial auto insurance policy next week\n- [ ] Fix closet sliding door track\n- [x] Order magnetic phone mount"
+    }
+  ]
+}

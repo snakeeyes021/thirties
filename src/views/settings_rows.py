@@ -396,6 +396,11 @@ def joplin_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                            active=bool(cfg.joplin.launch_when_needed))
     launch.connect("notify::active", lambda r, _p: ctx.set("joplin.launch_when_needed", r.get_active()))
     group.add(launch)
+    routines = Adw.SwitchRow(title="Untick routines each morning",
+                             subtitle="Your routine notes start each day with every item open again.",
+                             active=bool(getattr(cfg.joplin, "reset_routines", True)))
+    routines.connect("notify::active", lambda r, _p: ctx.set("joplin.reset_routines", r.get_active()))
+    group.add(routines)
     return group
 
 
@@ -562,16 +567,29 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
 def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     group = Adw.PreferencesGroup(title="Messages",
-                                 description="Sent to your desktop and, if paired, your phone. Desktop notifications "
-                                             "can be switched off in GNOME Settings → Apps → Thirties.")
+                                 description="Sent to your desktop and, if paired, your phone, never while you're "
+                                             "asleep or in a calendar event. Desktop notifications can be switched off "
+                                             "in GNOME Settings → Apps → Thirties.")
     cfg = ctx.config()
-    checkins = Adw.SwitchRow(title="Check in after things end",
-                             subtitle="“Did you get to it, or are you still on it?”, once per item",
-                             active=bool(cfg.assistant.checkins))
+    levels = [("light", "Light: before calendar events", "A heads-up shortly before each calendar event"),
+              ("medium", "Medium: a few times a day", "What's planned at the start of each stretch of the day, and "
+                                                      "one check-in at its end (plus heads-ups before calendar events)"),
+              ("heavy", "High: for every item", "When each thing starts, and a check-in after each one"),
+              ("off", "Off: never", "Only the pings you ask for")]
+    level = Adw.ComboRow(title="How often Thirties messages you",
+                         model=Gtk.StringList.new([name for _, name, _ in levels]))
+    current = getattr(cfg.assistant, "message_level", "medium")
+    level.set_selected(next((i for i, (k, _, _) in enumerate(levels) if k == current), 1))
+    level.set_subtitle(levels[level.get_selected()][2])
+
+    def on_level(row, _p):
+        key, _, note = levels[row.get_selected()]
+        row.set_subtitle(note)
+        ctx.set("assistant.message_level", key)
+    level.connect("notify::selected", on_level)
     delay = Adw.SpinRow.new_with_range(0, 120, 5)
-    delay.set_title("Minutes after it ends")
+    delay.set_title("Check in this many minutes after")
     delay.set_value(cfg.assistant.checkin_after_minutes)
-    starts = Adw.SwitchRow(title="Tell me when things start", active=bool(cfg.telegram.notify_block_transitions))
     background = Adw.SwitchRow(title="Keep running in the background",
                                subtitle="So reminders, check-ins and your phone keep working when Thirties is closed. "
                                         "Quit (Ctrl+Q) stops it until you open Thirties again.",
@@ -584,10 +602,8 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         if ctx.app is not None:
             ctx.app.run_in_background()
 
-    checkins.connect("notify::active", lambda r, _p: ctx.set("assistant.checkins", r.get_active()))
     delay.connect("notify::value", lambda r, _p: ctx.set("assistant.checkin_after_minutes", int(r.get_value())))
-    starts.connect("notify::active", lambda r, _p: ctx.set("telegram.notify_block_transitions", r.get_active()))
     background.connect("notify::active", on_background)
-    for row in (checkins, delay, starts, background):
+    for row in (level, delay, background):
         group.add(row)
     return group

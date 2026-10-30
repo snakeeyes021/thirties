@@ -41,6 +41,22 @@
   </branding>
 
   <releases>
+    <release version="0.1.0" date="2026-10-30" type="development">
+      <description>
+        <p>The day list, and an assistant you can trust with your lists:</p>
+        <ul>
+          <li>Each Joplin note has a role (routine, today, list, project, reference) and each item an urgency</li>
+          <li>A Today note: the day's list, linked to the lists its items came from</li>
+          <li>The plan and the record kept apart: replan on request, nothing assumed done</li>
+          <li>How often Thirties messages you: off, light, medium or high</li>
+          <li>A Day page (now, next, not reported, done today) beside the timeline</li>
+          <li>Items keep their real times; the day is shown in half-hour blocks; fixed things never move</li>
+          <li>Only the exact item is ever changed in Joplin, and what's done is never offered again</li>
+          <li>"Remind me to…" puts the thing on your plan, with a ping when it's time</li>
+          <li>Telegram replies are retried, and start-of-block notices are kept in the chat</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.0.1" date="2026-10-17" type="development">
       <description>
         <p>First alpha of Thirties:</p>

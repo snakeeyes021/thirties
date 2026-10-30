@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta
-from typing import List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 
 class ClockError(ValueError):
@@ -126,48 +126,149 @@ def thirty_ceil(dt: datetime) -> datetime:
     return dt if start == dt else start + SHORT
 
 
-def group_short_items(items: Sequence[Tuple[datetime, datetime, str, str]]) -> List[Tuple[datetime, datetime, str, str]]:
-    """Items under 30 minutes belong to their thirty: consecutive ones in the same thirty become one
-    row at the thirty's start ("5:00 – Feed cats, Message Brad"), ending when the thirty ends."""
-    out: List[Tuple[datetime, datetime, str, str]] = []
-    grouped: List[bool] = []  # parallel to out: is this row a thirty of short items?
-    for start, end, title, note in items:
-        if end - start < SHORT and thirty_of(start) == thirty_of(end - timedelta(seconds=1)):
-            block = thirty_of(start)
-            label = f"{title} ({note})" if note else title
-            if out and grouped[-1] and out[-1][0] == block:
-                out[-1] = (block, block + SHORT, f"{out[-1][2]}, {label}", "")
-                continue
-            out.append((block, block + SHORT, label, ""))
-            grouped.append(True)
+def slice_lines(events: Sequence[Tuple[datetime, datetime, str]]) -> List[str]:
+    """What's sounding in a thirty, read like a piano roll: things at the same time joined with +, and when one
+    thing ends and the next begins, the next on a new line. Something spanning the slice joins only the first
+    line it overlaps ("note1 + note3" then "note2", not note3 on both)."""
+    lines: List[List[Tuple[datetime, datetime, str]]] = []
+    for e in sorted(events, key=lambda e: (e[0], -(e[1] - e[0]).total_seconds())):
+        if lines and e[0] < min(end for _, end, _ in lines[-1]):
+            lines[-1].append(e)
         else:
-            out.append((start, end, title, note))
-            grouped.append(False)
-    return out
+            lines.append([e])
+    return [" + ".join(title for _, _, title in line) for line in lines]
 
 
 def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered: bool = False) -> List[str]:
-    """A plan as a reader expects it: '- 4:00 PM – Feed cat', one line per item, in order.
+    """A plan as a reader expects it, by thirties: each row is a thirty and what's sounding in it (consecutive
+    thirties with the same things are one row); an end time only before a gap. Items are (start, end, title,
+    note). Numbered lists (options to choose from) keep one line per item."""
+    if numbered:
+        out = []
+        for i, (start, end, title, note) in enumerate(items):
+            next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)
+            extras = [note] if note else []
+            if next_start is not None and next_start != end:
+                extras.append(f"until {format_clock(thirty_ceil(end))}")
+            out.append(f"{i + 1}. {format_clock(thirty_of(start))} – {title}" + (f" ({', '.join(extras)})" if extras else ""))
+        return out
+    events = [(start, end, f"{title} ({note})" if note else title) for start, end, title, note in items if end > start]
+    if not events:
+        return []
+    rows: List[Tuple[datetime, datetime, Tuple[int, ...]]] = []
+    t, last = thirty_of(min(e[0] for e in events)), max(e[1] for e in events)
+    while t < last:
+        sounding = tuple(i for i, (s, e, _) in enumerate(events) if s < t + SHORT and e > t)
+        if rows and rows[-1][2] == sounding and rows[-1][1] == t:
+            rows[-1] = (rows[-1][0], t + SHORT, sounding)
+        elif sounding:
+            rows.append((t, t + SHORT, sounding))
+        t += SHORT
+    out = []
+    for n, (start, end, sounding) in enumerate(rows):
+        lines = slice_lines([events[i] for i in sounding])
+        until = f" (until {format_clock(end)})" if n + 1 < len(rows) and rows[n + 1][0] != end else ""
+        if len(lines) == 1:
+            out.append(f"- {format_clock(start)} – {lines[0]}{until}")
+        else:  # one thing after another in this thirty: the thirty, then each line
+            out.append(f"- {format_clock(start)} –{until}")
+            out += [f"  {line}" for line in lines]
+    return out
 
-    Items are (start, end, title, note). Each item ends when the next one starts, so an end
-    time is added only where it isn't implied: before a gap or under an overlap (the last
-    item's end isn't worth the noise). Items under 30 minutes are shown by their thirty.
-    """
-    items = group_short_items(items)
-    lines = []
-    for i, (start, end, title, note) in enumerate(items):
-        next_start = next((s for s, _, _, _ in items[i + 1:] if s > start), None)
-        extras = [note] if note else []
-        if next_start is not None and next_start != end:
-            extras.append(f"until {format_clock(end)}")
-        prefix = f"{i + 1}. " if numbered else "- "
-        lines.append(f"{prefix}{format_clock(start)} – {title}" + (f" ({', '.join(extras)})" if extras else ""))
-    return lines
+
+def unmarked_lines(spans) -> List[str]:
+    """Items past their time with nothing said, for the bottom of a list on the phone: one line per block, in
+    order, with no times (they're behind; the block's time would only say how far)."""
+    rows: List[Tuple[datetime, List[str]]] = []
+    for s in sorted(spans, key=lambda s: s.start_dt):
+        block = thirty_of(s.start_dt)
+        if rows and rows[-1][0] == block:
+            rows[-1][1].append(s.title)
+        else:
+            rows.append((block, [s.title]))
+    return [f"- {', '.join(titles)}" for _, titles in rows]
 
 
 _TIME_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\s?(AM|PM)\b")
 _DAY_HINT_RE = re.compile(r"\b(?:tomorrow|yesterday|tonight|today|mon|tue|wed|thu|fri|sat|sun)[a-z]*\b|"
                           r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d", re.IGNORECASE)
+
+
+EXACT_ASKED_RE = re.compile(r"\b(exact(ly)?|precise(ly)?|to the minute|what minute|minutes? past)\b", re.I)
+_CLOCK_MINUTES_RE = re.compile(r"(?<![\d:])(1[0-2]|0?[1-9]):([0-5]\d)(?![\d:])(\s?(?:AM|PM|am|pm|a\.m\.|p\.m\.))?")
+
+
+def real_times(*texts: str, spans=()) -> frozenset:
+    """Minute times that are facts, not arithmetic: the real start and end of items on the plan, and times the
+    user said. A reply may say these as they are; any other time is said by its block."""
+    texts = list(texts) + [s.title for s in spans]  # "Flight (boards 2:25)": a time in a title is a fact too
+    out = set()
+    for t in texts:
+        for m in _ANY_CLOCK_RE.finditer(t or ""):  # 12-hour or 24-hour ("boarding at 14:25")
+            h = int(m.group(1))
+            out.add(((h % 12) or 12, int(m.group(2))))
+    for s in spans:
+        for dt in (s.start_dt, s.end_dt):
+            out.add(((dt.hour % 12) or 12, dt.minute))
+    return frozenset(out)
+
+
+_ANY_CLOCK_RE = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
+
+
+_RANGE_RE = re.compile(_CLOCK_MINUTES_RE.pattern + r"\s*(–|-|to)\s*" +
+                       _CLOCK_MINUTES_RE.pattern.replace("(1[0-2]|0?[1-9])", "(?:1[0-2]|0?[1-9])", 1)
+                       .replace("([0-5]\\d)", "(?:[0-5]\\d)", 1).replace("(\\s?(?:AM", "(?:\\s?(?:AM", 1))
+_UNTIL_RE = re.compile(r"\b((?:until|till|til|by)\s+)(" + _CLOCK_MINUTES_RE.pattern.replace("(1[0-2]", "(1[0-2]", 1) + ")")
+_AT_RE = re.compile(r"\b(at|around|about)\s+" + _CLOCK_MINUTES_RE.pattern + r"(?!\s*(?:\(|,)?\s*(?:in the|block|chunk))")
+
+
+def to_thirties(text: str, keep: frozenset = frozenset()) -> str:
+    """Only :00 and :30 are said, unless the minute time is real (`keep`: an item's real time, or the user's).
+    "at 10:45" becomes "in the 10:30 block", never a different clock time ("at 10:30" would be false); a range
+    becomes the blocks it covers; any other stray time becomes the block it falls in (never the next one)."""
+    def odd(h: str, mm: str) -> bool:
+        return int(mm) not in (0, 30) and (int(h), int(mm)) not in keep
+
+    def span(m: re.Match) -> str:
+        whole = m.group(0)
+        first = _CLOCK_MINUTES_RE.match(whole)
+        second = list(_CLOCK_MINUTES_RE.finditer(whole))[-1]
+        if not (odd(first.group(1), first.group(2)) or odd(second.group(1), second.group(2))):
+            return whole
+        h1, m1, s1 = int(first.group(1)), int(first.group(2)), first.group(3) or ""
+        start = f"{h1}:{0 if m1 < 30 else 30:02d}{s1}"
+        return whole[:first.start()] + start + whole[first.end():second.start()] + ceil(second)
+
+    def ceil(m: re.Match) -> str:  # the end of the block it falls in
+        h, mm, suffix = int(m.group(1)), int(m.group(2)), m.group(3) or ""
+        if mm in (0, 30):
+            return m.group(0)
+        if mm < 30:
+            return f"{h}:30{suffix}"
+        if h == 11 and suffix:  # 11:45 AM ends in the block that ends at 12:00 PM
+            flip = {"am": "pm", "pm": "am", "a.m.": "p.m.", "p.m.": "a.m."}
+            word = suffix.strip()
+            suffix = suffix.replace(word, flip[word.lower()].upper() if word.isupper() else flip[word.lower()])
+        return f"{h % 12 + 1}:00{suffix}"
+
+    def until(m: re.Match) -> str:
+        return m.group(1) + (ceil(_CLOCK_MINUTES_RE.match(m.group(2))) if odd(m.group(3), m.group(4)) else m.group(2))
+
+    def at(m: re.Match) -> str:
+        word, h, mm, suffix = m.group(1), m.group(2), m.group(3), m.group(4) or ""
+        if not odd(h, mm):
+            return m.group(0)
+        return f"in the {int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix} block"
+
+    def floor(m: re.Match) -> str:
+        h, mm, suffix = m.group(1), m.group(2), m.group(3) or ""
+        return f"{int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix}" if odd(h, mm) else m.group(0)
+
+    text = _RANGE_RE.sub(span, text)
+    text = _AT_RE.sub(at, text)
+    text = _UNTIL_RE.sub(until, text)
+    return _CLOCK_MINUTES_RE.sub(floor, text)
 
 
 def trim_meridiems(text: str, now: Optional[datetime] = None) -> str:

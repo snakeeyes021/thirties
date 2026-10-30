@@ -72,7 +72,9 @@ class TestClock(unittest.TestCase):
     def test_short_items_are_listed_by_their_thirty(self) -> None:
         items = [(at("17:00"), at("17:15"), "Message Brad", ""), (at("17:15"), at("17:30"), "Feed cats", ""),
                  (at("17:30"), at("18:30"), "Dinner", "")]
-        self.assertEqual(agenda_lines(items), ["- 5:00 PM – Message Brad, Feed cats", "- 5:30 PM – Dinner"])
+        self.assertEqual(agenda_lines(items), ["- 5:00 PM –", "  Message Brad", "  Feed cats", "- 5:30 PM – Dinner"])
+        together = [(at("10:35"), at("10:50"), "Personal call", ""), (at("10:45"), at("11:00"), "Break", "")]
+        self.assertEqual(agenda_lines(together), ["- 10:30 AM – Personal call + Break"])
 
     def test_agenda_lines_show_end_times_only_where_not_implied(self) -> None:
         items = [(at("16:00"), at("17:00"), "Feed cat", ""),
@@ -83,14 +85,41 @@ class TestClock(unittest.TestCase):
         self.assertEqual(agenda_lines(items), [
             "- 4:00 PM – Feed cat",
             "- 5:00 PM – Wash car (until 5:30 PM)",
-            "- 6:00 PM – Dinner",
-            "- 6:00 PM – Audiobook",
+            "- 6:00 PM – Dinner + Audiobook",          # sounding together
             "- 7:00 PM – Team dinner (unconfirmed)",  # the last item's end isn't worth the noise
         ])
+        # the piano roll: note1 ends and note2 begins in the 10:30 thirty, note3 spans it: note3 joins the first line
+        notes = [(at("10:00"), at("10:40"), "note1", ""), (at("10:40"), at("11:30"), "note2", ""),
+                 (at("10:30"), at("11:00"), "note3", "")]
+        self.assertEqual(agenda_lines(notes), ["- 10:00 AM – note1", "- 10:30 AM –", "  note1 + note3", "  note2",
+                                               "- 11:00 AM – note2"])
         nested = [(at("08:30"), at("16:00"), "Work", ""), (at("10:00"), at("11:00"), "Meeting", "")]
         self.assertEqual(agenda_lines(nested, numbered=True),
                          ["1. 8:30 AM – Work (until 4:00 PM)", "2. 10:00 AM – Meeting"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+class TestToThirties(unittest.TestCase):
+
+    def test_only_00_and_30_are_said(self):
+        from thirties_core.clock import to_thirties
+        # a time becomes the thirty it falls in: a break at 10:45 is in the 10:30 thirty, never "11:00"
+        self.assertEqual(to_thirties("Sunset at 6:28, then dinner 7:00 PM – 8:00 PM"),
+                         "Sunset in the 6:00 block, then dinner 7:00 PM – 8:00 PM")  # never a false "at 6:00"
+        self.assertEqual(to_thirties("break at 10:45, back by 11:00"), "break in the 10:30 block, back by 11:00")
+        self.assertEqual(to_thirties("since 1:14 and until 2:29 PM"), "since 1:00 and until 2:30 PM")
+        self.assertEqual(to_thirties("at 11:50 PM"), "in the 11:30 PM block")
+        self.assertEqual(to_thirties("Uber 12:15 PM – 12:45 PM"), "Uber 12:00 PM – 1:00 PM")  # the blocks it covers
+        self.assertEqual(to_thirties("work 8:30 AM – 11:45 AM"), "work 8:30 AM – 12:00 PM")
+        real = frozenset({(12, 15)})  # the Uber's real time: said as it is
+        self.assertEqual(to_thirties("Your Uber is at 12:15, in the 12:00 block.", real),
+                         "Your Uber is at 12:15, in the 12:00 block.")
+        self.assertEqual(to_thirties("11:00 sharp, then the Uber at 12:15", real), "11:00 sharp, then the Uber at 12:15")
+        from thirties_core.clock import real_times
+        from types import SimpleNamespace as NS
+        from tests.fixtures import at
+        flight = NS(title="Flight UA 1482 (boards 2:25)", start_dt=at("15:00"), end_dt=at("16:00"))
+        keep = real_times("boarding at 14:25", spans=[flight])  # a 24-hour time, and a time in a title
+        self.assertEqual(to_thirties("⏰ Flight UA 1482 (boards 2:25) at 3:00. Boarding at 2:25.", keep),
+                         "⏰ Flight UA 1482 (boards 2:25) at 3:00. Boarding at 2:25.")
+        self.assertEqual(to_thirties("score 3:2, ratio 10:45:12"), "score 3:2, ratio 10:45:12")

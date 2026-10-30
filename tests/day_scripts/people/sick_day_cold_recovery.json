@@ -1,0 +1,118 @@
+{
+  "id": "sick_day_cold_recovery",
+  "date": "2026-10-19",
+  "source": "made up: person recovering from a head cold taking a sick day off work and trying to do a few small things",
+  "wake": "09:15",
+  "bed": "21:30",
+  "work": null,
+  "persona": "Noah, a marketing analyst taking a Monday sick day to recover from a nasty head cold. Texts with low energy, lowercase, and occasional complaints about sinus pressure; starts the morning overly ambitious about catching up on small chores around the house, then realizes he needs to cancel half of them and rest.",
+  "situation": "Monday morning waking at 09:15 with a congested head cold after calling out sick from work at 08:00. Has a 11:00 work Zoom he hasn't declined yet and thinks he can do three or four household tasks between resting.",
+  "life": [
+    "09:20 Wake up congested and text the app: called out sick today with a head cold. Decline the 11:00 Q4 Campaign Sync on my calendar and message the team on Slack. Then help me plan a super light day: make tea and oatmeal, take a hot steamy shower, change the bedsheets, sort the mail pile, Instacart soup and tissues, and water the plants.",
+    "09:25 If the app schedules things back-to-back without rest blocks, ask it to put at least an hour of couch rest between anything that requires standing up.",
+    "09:30 Send the sick-day Slack message, boil water for lemon ginger tea, and eat oatmeal until 10:15.",
+    "10:18 Report Slack sent and tea/oatmeal done. Placing the Instacart order for pho broth, tissues, and DayQuil from the couch now.",
+    "10:20 Order Instacart delivery (15 mins), then lie back down on the sofa with a podcast until 11:20.",
+    "11:25 Take a long, hot steamy shower to clear sinuses, finishing at 12:00.",
+    "12:02 Text the app: shower helped a bit. Stripped the bedsheets and started the washer, going to lie on the couch until the grocery delivery gets here.",
+    "12:35 Instacart shopper arrives downstairs; put on a hoodie, bring the bags up, and heat up chicken pho broth for lunch until 13:15.",
+    "13:20 Report Instacart unpacked and soup eaten. Move the clean sheets to the dryer (5 mins), then crash for an unplanned two-hour DayQuil nap on the couch from 13:30 to 15:40.",
+    "15:45 Wake up groggy from the nap and text the app: accidentally slept for two hours on the couch. Still need to put the dry sheets back on the bed so I have somewhere to sleep tonight, and water the plants, but drop sorting the mail pile and cleaning the bathroom mirror—I have zero energy.",
+    "16:00 Put the clean sheets and pillowcases back on the bed (takes 25 minutes because you have to sit down halfway through) and water the living room plants until 16:40.",
+    "16:45 Report bed made and plants watered. Ask the app what else is on the schedule—confirm the rest of the evening is just tea, heating up the rest of the soup for dinner at 18:30, and watching comfort movies.",
+    "18:30 Heat up the second container of pho and eat dinner on the couch until 19:15.",
+    "19:20 Report dinner done. Take NightQuil at 21:00 and go to sleep early at 21:30."
+  ],
+  "constraints": [
+    "Sick day off work: cannot attend work meetings and needs at least 60 minutes of couch rest between physical chores.",
+    "If sheets are stripped off the bed to wash, they must be dried and put back on the bed before evening.",
+    "Cannot leave the apartment; groceries/medicine must be ordered via delivery."
+  ],
+  "truth": [
+    {
+      "item": "Send sick-day Slack, tea & oatmeal",
+      "match": "slack|tea|oatmeal|breakfast",
+      "start": "09:30",
+      "end": "10:15"
+    },
+    {
+      "item": "Order Instacart soup & meds",
+      "match": "instacart|order|grocery",
+      "start": "10:20",
+      "end": "10:35"
+    },
+    {
+      "item": "Hot steamy shower",
+      "match": "shower",
+      "start": "11:25",
+      "end": "12:00"
+    },
+    {
+      "item": "Strip bed & start washing sheets",
+      "match": "strip|sheet|wash|laundry",
+      "start": "12:00",
+      "end": "12:15"
+    },
+    {
+      "item": "Unpack Instacart & eat soup lunch",
+      "match": "lunch|soup|pho|instacart",
+      "start": "12:35",
+      "end": "13:15"
+    },
+    {
+      "item": "Afternoon sick nap",
+      "match": "nap|rest|sleep",
+      "start": "13:30",
+      "end": "15:40"
+    },
+    {
+      "item": "Put clean sheets on bed & water plants",
+      "match": "sheet|bed|plant|water",
+      "start": "16:00",
+      "end": "16:40"
+    },
+    {
+      "item": "Dinner (heated soup)",
+      "match": "dinner|soup|eat",
+      "start": "18:30",
+      "end": "19:15"
+    },
+    {
+      "item": "Sort mail pile",
+      "match": "mail|sort",
+      "start": "14:30",
+      "end": "15:00",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Q4 Campaign Sync",
+      "start": "11:00",
+      "end": "12:00",
+      "invite": true
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Home",
+      "title": "Sick Day Today",
+      "role": "today",
+      "body": "- [ ] Message team on Slack that I'm taking a sick day\n- [ ] Order Instacart (pho broth, tissues, DayQuil, ginger ale)\n- [ ] Wash and change bedsheets\n- [ ] Water living room plants\n- [ ] Sort kitchen counter mail pile"
+    },
+    {
+      "notebook": "Home",
+      "title": "Apartment Chores",
+      "role": "list",
+      "body": "- [ ] Clean bathroom mirror & sink\n- [ ] Take cardboard boxes to recycling room\n- [ ] Replace Brita filter\n- [x] Pay internet bill"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Comfort Watchlist",
+      "role": "reference",
+      "body": "- Spirited Away\n- Fantastic Mr. Fox\n- Great British Bake Off season 8"
+    }
+  ]
+}

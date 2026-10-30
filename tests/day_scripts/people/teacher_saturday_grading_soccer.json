@@ -1,0 +1,124 @@
+{
+  "id": "teacher_saturday_grading_soccer",
+  "date": "2026-10-17",
+  "source": "made up: high school teacher grading essays on a Saturday around a kid's 10 AM soccer game",
+  "wake": "07:00",
+  "bed": "22:30",
+  "work": null,
+  "persona": "Greg, a high school AP English teacher with a 9-year-old son (Sam) who has a 10:00 Saturday soccer game. Texts warmly with occasional dad-humor, tries to be realistic about how exhausting grading 55 rhetorical analysis essays is, and refuses to grade for more than 90 minutes at a stretch without a break.",
+  "situation": "Saturday morning at 07:00. Sam's soccer game is at 10:00 (have to leave by 09:30 and bring team orange slices), and 55 AP Lang essays need to be graded this weekend—aiming to get 30 done today alongside mowing the lawn before it rains tonight.",
+  "life": [
+    "07:10 Wake up and text the app: big Saturday! Need to slice oranges for Sam's soccer team and have breakfast, get 1 hour of grading AP essays in before leaving at 09:30 for the 10:00–11:15 soccer game, then come home for lunch, mow the front and back lawn, do two more 90-minute grading blocks (not back-to-back!), and make homemade pizza tonight.",
+    "07:15 If the app puts two grading blocks right next to each other, remind it that my brain melts after 90 minutes of teenage handwriting and I need at least an hour doing something physical in between.",
+    "07:20 Make coffee, fry eggs for Sam and yourself, and slice three bags of oranges into zip bags until 08:15.",
+    "08:18 Report breakfast and orange slices done. Sitting at the dining table to grade the first batch of 10 AP essays before soccer.",
+    "08:20 Grade 9 essays until 09:20, then help Sam find his shin guards.",
+    "09:25 Tell the app you got 9 essays graded and are heading to the soccer fields now.",
+    "09:30 Drive to the park, watch Sam's game (they win 3-2), and end up going out for celebratory post-game bagels with two other soccer families until 12:15.",
+    "12:20 Text the app: just got back! Went for bagels with the other parents after the game so we're running 45 mins behind, and we already ate lunch. Ask to drop lunch from the plan, start Pizza dough right now (takes 20 mins so it can rise all afternoon), and then do Grading Block 2 from 13:00 to 14:30.",
+    "12:25 Mix and knead the pizza dough and set it in a covered bowl to proof until 12:50.",
+    "12:52 Report pizza dough rising. Starting the second grading block now.",
+    "12:55 Grade 12 more AP essays until 14:30.",
+    "14:32 Report second grading block done (21 total down!). Heading outside to mow the lawn and edge the driveway before the clouds roll in.",
+    "14:35 Mow the front and back lawn, rake up leaves around the oak tree, and sweep the porch until 16:05.",
+    "16:10 Report lawn mowed and leaves raked. Grab a quick shower to wash off grass clippings before the last grading block.",
+    "16:10 Shower and grab an iced tea until 16:35.",
+    "16:38 Tell the app you rinsed off and only have energy for 60 minutes of grading instead of 90; ask to schedule 16:40–17:40 for the final 9 essays and then start preheating the pizza stone.",
+    "16:40 Grade 9 more essays (hitting the 30-essay Saturday goal!) until 17:45.",
+    "17:48 Celebrate to the app: 30 essays graded! Preheating the oven to 500°F and rolling out pizza dough with Sam.",
+    "18:00 Make and bake two pepperoni and mushroom pizzas, eat with the family, and clean up the kitchen until 19:45.",
+    "19:50 Report dinner done. Spend the rest of the evening watching a college football game on the couch."
+  ],
+  "constraints": [
+    "Must leave the house by 09:30 with sliced oranges to be at warmups for the 10:00 soccer game.",
+    "Cannot grade essays for more than 90 minutes at a time; requires at least an hour of non-screen physical activity between grading blocks.",
+    "Pizza dough must be mixed at least 4 hours before dinner so it has time to rise."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast & slice team oranges",
+      "match": "breakfast|orange|coffee",
+      "start": "07:20",
+      "end": "08:15"
+    },
+    {
+      "item": "Grade AP essays (Block 1)",
+      "match": "grade|essay|ap lang",
+      "start": "08:20",
+      "end": "09:20"
+    },
+    {
+      "item": "Sam's soccer game & post-game bagels",
+      "match": "soccer|game|bagel",
+      "start": "09:30",
+      "end": "12:15"
+    },
+    {
+      "item": "Make pizza dough",
+      "match": "dough|pizza",
+      "start": "12:25",
+      "end": "12:50"
+    },
+    {
+      "item": "Grade AP essays (Block 2)",
+      "match": "grade|essay|ap lang",
+      "start": "12:55",
+      "end": "14:30"
+    },
+    {
+      "item": "Mow lawn & rake leaves",
+      "match": "mow|lawn|yard|rake",
+      "start": "14:35",
+      "end": "16:05"
+    },
+    {
+      "item": "Quick shower",
+      "match": "shower|rinse",
+      "start": "16:10",
+      "end": "16:35"
+    },
+    {
+      "item": "Grade AP essays (Block 3)",
+      "match": "grade|essay|ap lang",
+      "start": "16:40",
+      "end": "17:45"
+    },
+    {
+      "item": "Bake and eat homemade pizza",
+      "match": "pizza|dinner|bake",
+      "start": "18:00",
+      "end": "19:45"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Sam's U10 Soccer Game (bring snack)",
+      "start": "10:00",
+      "end": "11:15"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Preferences": "Never schedule more than 90 minutes of grading in one block; separate grading blocks with physical chores or errands."
+  },
+  "notes": [
+    {
+      "notebook": "School",
+      "title": "Weekend Grading & Prep",
+      "role": "list",
+      "body": "- [ ] Grade Period 2 AP Lang rhetorical analysis essays (28 essays)\n- [ ] Grade Period 4 AP Lang rhetorical analysis essays (27 essays)\n- [ ] Enter rubric scores into PowerSchool\n- [ ] Print Crucible Act II reading guide for Monday"
+    },
+    {
+      "notebook": "Home",
+      "title": "Saturday House List",
+      "role": "today",
+      "body": "- [ ] Slice 3 bags of oranges for Sam's team snack\n- [ ] Make pizza dough early afternoon\n- [ ] Mow front and back lawn before evening rain\n- [ ] Family pizza night"
+    },
+    {
+      "notebook": "Home",
+      "title": "Yard & Garage Someday",
+      "role": "list",
+      "body": "- [ ] Clean out gutters after oak leaves drop\n- [ ] Replace porch light bulb\n- [ ] Organize camping bins in basement"
+    }
+  ]
+}

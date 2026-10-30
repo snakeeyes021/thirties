@@ -1,0 +1,160 @@
+{
+  "id": "startup_founder_missed_lunch",
+  "date": "2026-10-19",
+  "source": "made up: startup founder juggling an investor call, hiring interviews, gym, and a missed lunch",
+  "wake": "06:15",
+  "bed": "23:30",
+  "work": [
+    "08:30",
+    "19:30"
+  ],
+  "persona": "Rohan, co-founder and CEO of a seed-stage B2B SaaS startup. Texts in ultra-brief, bulleted fragments ('deck done. push lunch. moving to calls'), constantly over-optimistic about how much he can fit between back-to-back Zooms, and protects his morning gym lift as his only sanity anchor.",
+  "situation": "Monday morning at 06:15. Has a morning gym lift before work, an 11:00 Series A partner pitch call, two afternoon founding-engineer interviews (14:00 and 15:30), a customer escalation, and investor metrics to finalize.",
+  "life": [
+    "06:20 Wake up and text the app: big Monday. gym 06:45–07:45, shower & protein shake by 08:30. work 08:30–19:30: finalize ARR cohort slide before 11:00 Sequoia pitch, lunch at 12:30, review 2 eng candidate repos before 14:00 & 15:30 interviews, send monthly investor update email, and do co-founder roadmap sync at 17:00. dinner with wife at 20:00.",
+    "06:25 Remind the app that the ARR cohort slide deck MUST be locked 30 minutes before the 11:00 investor call so my co-founder can review it.",
+    "06:35 Walk to the gym, do heavy deadlifts and bench press, walk back, shower, and blend a protein shake until 08:30.",
+    "08:32 Report gym, shower, and shake done. Diving into Stripe export data and the ARR cohort slide.",
+    "08:35 Pull Net Dollar Retention numbers and finish the pitch deck slides, sending them to co-founder at 10:25.",
+    "10:28 Report deck locked and sent! Reviewing pitch talking points for 30 minutes before the 11:00 Sequoia call.",
+    "11:00 Pitch call with Sequoia partner; partner asks deep follow-up questions on enterprise security compliance, running until 12:10.",
+    "12:12 Right as you hang up, head of sales Slacks: largest pilot customer (Acme Corp) is threatening to pause rollout over an SSO login bug and wants a call at 12:30. Text the app: Sequoia call ran to 12:10, went well! Now jumping on an emergency customer call with Acme Corp 12:30–13:15—push lunch and eng candidate repo review to 13:15.",
+    "12:25 Jump on the emergency Zoom with Acme Corp VP of IT and walk through the hotfix timeline until 13:20.",
+    "13:22 Text the app: Acme fire put out, they're staying on! Only have 35 mins before the 14:00 founding eng interview and haven't looked at either candidate's GitHub repo yet. Skip lunch—I'll grab a handful of almonds and review the repos right now.",
+    "13:25 Skim both engineering candidates' GitHub take-home repos and jot down technical questions while eating almonds at the desk until 13:58.",
+    "14:00 Conduct Founding Engineer Interview #1 until 15:00, then spend 25 minutes writing hiring scorecard notes and answering urgent investor follow-up emails until 15:25.",
+    "15:30 Conduct Founding Engineer Interview #2 until 16:30.",
+    "16:32 Text the app: both eng interviews and scorecards done! Starving because I completely missed lunch—going to heat up a chicken burrito bowl right now for 25 minutes before my 17:00 co-founder sync.",
+    "16:35 Heat up and wolf down a chicken burrito bowl until 16:58.",
+    "17:00 Co-founder roadmap and hiring debrief sync until 18:05.",
+    "18:08 Report late lunch/snack and co-founder sync done. Drafting and sending the October monthly investor update email and Sequoia data-room link before logging off at 19:30.",
+    "18:10 Write the monthly investor update email and upload the cohort CSV to the data room, hitting send at 19:25.",
+    "19:28 Report investor update sent and workday done! Drop clearing out the garage recycling for tonight—walking to the neighborhood trattoria to meet wife for 20:00 dinner.",
+    "20:00 Eat pasta dinner with wife at the restaurant and walk home by 21:45, then read until 23:30."
+  ],
+  "constraints": [
+    "Morning gym session (06:45–07:45) is non-negotiable before starting the workday at 08:30.",
+    "Pitch deck cohort slides must be finished by 10:30 (30 minutes before the 11:00 investor pitch).",
+    "Must review engineering candidates' GitHub take-home repos before the 14:00 interview starts."
+  ],
+  "truth": [
+    {
+      "item": "Morning gym lift, shower & protein shake",
+      "match": "gym|lift|shower|shake",
+      "start": "06:35",
+      "end": "08:30"
+    },
+    {
+      "item": "Finalize ARR cohort slide deck & pitch prep",
+      "match": "arr|cohort|slide|deck|prep",
+      "start": "08:35",
+      "end": "11:00"
+    },
+    {
+      "item": "Sequoia Partner Pitch Call",
+      "match": "sequoia|investor.*call|pitch",
+      "start": "11:00",
+      "end": "12:10"
+    },
+    {
+      "item": "Emergency Acme Corp customer escalation call",
+      "match": "acme|customer|escalation",
+      "start": "12:25",
+      "end": "13:20"
+    },
+    {
+      "item": "Review engineering candidate GitHub repos",
+      "match": "repo|github|review.*candidate",
+      "start": "13:25",
+      "end": "13:58"
+    },
+    {
+      "item": "Founding Engineer Interviews #1 & #2",
+      "match": "interview|engineer",
+      "start": "14:00",
+      "end": "16:30"
+    },
+    {
+      "item": "Late burrito bowl meal",
+      "match": "lunch|burrito|eat|food",
+      "start": "16:35",
+      "end": "16:58"
+    },
+    {
+      "item": "Co-founder Roadmap Sync",
+      "match": "co-founder|roadmap|sync",
+      "start": "17:00",
+      "end": "18:05"
+    },
+    {
+      "item": "Send monthly investor update & data-room link",
+      "match": "investor update|data-room|data room|email",
+      "start": "18:10",
+      "end": "19:25"
+    },
+    {
+      "item": "Trattoria dinner with wife",
+      "match": "dinner|trattoria|wife",
+      "start": "20:00",
+      "end": "21:45"
+    },
+    {
+      "item": "Break down garage recycling boxes",
+      "match": "garage|recycling",
+      "start": "19:30",
+      "end": "20:00",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Sequoia Partner Pitch (Zoom)",
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "summary": "Interview: Founding Engineer #1 (Alex)",
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "summary": "Interview: Founding Engineer #2 (Samira)",
+      "start": "15:30",
+      "end": "16:30"
+    },
+    {
+      "summary": "Co-founder Roadmap & Hiring Sync",
+      "start": "17:00",
+      "end": "18:00"
+    },
+    {
+      "summary": "Dinner w/ Nina @ Osteria",
+      "start": "20:00",
+      "end": "21:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Seed startup CEO; morning workout before 08:30 start."
+  },
+  "notes": [
+    {
+      "notebook": "Startup",
+      "title": "Monday Fundraising & Hiring",
+      "role": "today",
+      "body": "- [ ] Lock Q3 ARR & NDR cohort slide by 10:30 AM\n- [ ] Review GitHub take-home repos for Alex & Samira before 2 PM\n- [ ] Send October monthly investor update + Sequoia data-room CSV\n- [ ] Write hiring scorecards after afternoon interviews"
+    },
+    {
+      "notebook": "Startup",
+      "title": "CEO Backlog",
+      "role": "backlog",
+      "body": "- [ ] Approve SOC-2 penetration test vendor quote\n- [ ] Review Delaware franchise tax filing\n- [ ] Draft founding account executive JD"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Home & Routine",
+      "role": "list",
+      "body": "- [ ] 06:45 Heavy lift at gym + protein shake\n- [ ] Break down garage recycling boxes\n- [x] Book flights for SF customer week"
+    }
+  ]
+}

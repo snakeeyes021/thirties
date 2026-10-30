@@ -1,0 +1,122 @@
+{
+  "id": "gardener_rain_reshuffle",
+  "date": "2026-10-14",
+  "source": "made up: landscape gardener whose outdoor jobs get reshuffled when afternoon rain rolls in early",
+  "wake": "06:00",
+  "bed": "21:45",
+  "work": [
+    "07:30",
+    "17:00"
+  ],
+  "persona": "Ben, a self-employed residential landscape gardener and arborist. Texts plainly from his truck with weather radar updates, practical about soil moisture and power equipment rules, and ready to swap outdoor planting/mulching for covered shed maintenance and client quotes when rain hits.",
+  "situation": "Wednesday morning at 06:00. Clear skies this morning, but a heavy rain front is forecast for mid-afternoon. Has two client properties today (Mrs. Vance's perennial bed mulching & hedge pruning in the morning, and the Miller lawn aeration & fall overseeding after lunch), plus mower blade sharpening and October client invoicing.",
+  "life": [
+    "06:10 Wake up and text the app: up! Radar shows rain coming in around 15:30 today. Let's plan: breakfast & hitching the trailer by 07:15, Mrs. Vance's property (hedge pruning & mulching) 07:30–11:30, lunch at 11:30, pick up 10 bags of fescue seed at the supply yard at 12:15, Miller property (core aeration & overseeding) 13:00–15:30 before the rain hits, then sharpen mower blades in the shed and send 4 client invoices.",
+    "06:15 Remind the app that core aeration and grass seeding at the Millers' CANNOT be done once heavy rain starts because the aerator plugs turn to mud.",
+    "06:20 Eat eggs and sausage, pack a cooler with water and sandwiches, and hitch the equipment trailer to the truck until 07:15.",
+    "07:18 Report breakfast and trailer hitching done. Driving to Mrs. Vance's property now.",
+    "07:30 Prune boxwood hedges, edge beds, and spread two yards of bark mulch at Mrs. Vance's until 11:45 (she came out to ask about wrapping her fig tree for winter, adding 15 minutes).",
+    "11:48 Text the app from the truck: Vance property finished (took an extra 15 mins talking about her fig tree). Eating my packed sandwiches in the truck right now, then heading to the landscape supply yard for the fescue seed.",
+    "11:50 Eat packed lunch in the truck cab until 12:15, then drive to the landscape supply yard.",
+    "12:25 At the supply yard, check the weather radar on your phone: the storm front sped up and heavy rain is going to hit by 13:15—way too early to aerate the Millers' two-acre lawn! Call Mr. Miller to reschedule aeration to Friday morning, skip buying the seed bags so they don't get wet in the truck bed, and buy two replacement trimmer spools instead.",
+    "12:45 Text the app: storm front moved up to 13:15! Just called Mr. Miller and moved his lawn aeration/seeding to Friday morning. Heading back to my home workshop shed now before the downpour starts—swap my afternoon to sharpening the mower blades & oiling hedge shears in the shed (13:15–15:00), then going inside to write the 4 client invoices and the fig-tree winterizing quote (15:00–16:30).",
+    "13:10 Pull the truck and trailer under the carport just as the sky opens up. Go into the workshop shed to grind and balance two sets of mower blades, clean the trimmer heads, and oil the hedge shears until 15:05.",
+    "15:08 Report mower blades sharpened and tools oiled in the shed while listening to the rain! Going inside to wash my hands, make coffee, and knock out QuickBooks invoices and quotes.",
+    "15:15 Send 4 October maintenance invoices in QuickBooks, email Mrs. Vance the quote for burlap winter tree wrapping, and log truck fuel receipts until 16:40.",
+    "16:45 Report all invoices, receipts, and the winterizing quote sent! Ask what's left on my Home list—decide to spend 30 minutes stacking a rack of dry firewood on the covered back porch before taking a hot shower at 17:30.",
+    "16:50 Stack firewood on the covered porch rack until 17:25, then take a long hot shower until 18:00.",
+    "18:05 Report firewood stacked and shower done. Make beef stew in the Dutch oven and eat dinner until 19:30, then relax until 21:45."
+  ],
+  "constraints": [
+    "Lawn core aeration, mowing, and grass seeding cannot be done in the rain or on mud.",
+    "Covered workshop shed tasks (mower blade sharpening, tool maintenance) and indoor QuickBooks admin can be done during rain.",
+    "Trailer must be hitched and loaded before departing at 07:15."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast, pack cooler & hitch trailer",
+      "match": "breakfast|trailer|hitch",
+      "start": "06:20",
+      "end": "07:15"
+    },
+    {
+      "item": "Mrs. Vance property: hedge pruning & mulching",
+      "match": "vance|hedge|mulch|prun",
+      "start": "07:30",
+      "end": "11:45"
+    },
+    {
+      "item": "Truck lunch & supply yard run",
+      "match": "lunch|supply|trimmer",
+      "start": "11:50",
+      "end": "13:05"
+    },
+    {
+      "item": "Sharpen mower blades & oil shears in shed",
+      "match": "sharpen|blade|mower|shed|shear",
+      "start": "13:10",
+      "end": "15:05"
+    },
+    {
+      "item": "Send QuickBooks invoices & winterizing quote",
+      "match": "invoice|quickbooks|quote|receipt",
+      "start": "15:15",
+      "end": "16:40"
+    },
+    {
+      "item": "Stack firewood on covered porch & shower",
+      "match": "firewood|porch|shower",
+      "start": "16:50",
+      "end": "18:00"
+    },
+    {
+      "item": "Beef stew dinner",
+      "match": "dinner|stew|eat",
+      "start": "18:05",
+      "end": "19:30"
+    },
+    {
+      "item": "Miller property core aeration & overseeding",
+      "match": "miller|aerat|overseed",
+      "start": "13:00",
+      "end": "15:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Job: Vance Property (Pruning & Mulch)",
+      "start": "07:30",
+      "end": "11:30"
+    },
+    {
+      "summary": "Job: Miller Property (Aeration & Overseeding)",
+      "start": "13:00",
+      "end": "15:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Landscape gardener; outdoor turf/soil work is strictly weather-dependent; shed maintenance and billing are rainy-day fallback tasks."
+  },
+  "notes": [
+    {
+      "notebook": "Landscaping",
+      "title": "Field Jobs & Supply Yard",
+      "role": "today",
+      "body": "- [ ] Hitch trailer & check tie-downs before 7:15 AM\n- [ ] Vance property: boxwood pruning & 2 yds bark mulch\n- [ ] Supply yard: 10 bags tall fescue seed & trimmer line\n- [ ] Miller property: core aeration & fall overseeding (requires dry ground)"
+    },
+    {
+      "notebook": "Landscaping",
+      "title": "Rainy Day Shed & Office List",
+      "role": "list",
+      "body": "- [ ] Grind & balance 2 sets of Exmark mower blades\n- [ ] Clean & oil Japanese hedge shears\n- [ ] Send 4 October maintenance invoices in QuickBooks\n- [ ] Log truck diesel receipts"
+    },
+    {
+      "notebook": "Home",
+      "title": "House Chores",
+      "role": "list",
+      "body": "- [ ] Fill covered back-porch firewood rack\n- [ ] Simmer beef stew for dinner\n- [x] Hose out truck bed"
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "id": "adhd_sunday_chores_derailed",
+  "date": "2026-10-18",
+  "source": "made up: person with ADHD using the app to get through a Sunday chore list while getting easily derailed",
+  "wake": "09:30",
+  "bed": "23:30",
+  "work": null,
+  "persona": "Riley, a 29-year-old video editor with ADHD trying to conquer a Sunday apartment reset. Texts candidly, self-deprecatingly, and in bursts of enthusiasm followed by confessions of side-quests ('went to get the Windex and ended up reorganizing the entire under-sink cabinet'). Needs the app to keep tasks broken into 30-minute sprints and gently re-center when derailed.",
+  "situation": "Sunday morning at 09:30. Wants to take morning meds with breakfast, tackle the Mount Everest of clean laundry on the bedroom chair, clean the bathroom, meal-prep roasted veggies, take out the recycling, and return an Amazon package at Whole Foods.",
+  "life": [
+    "09:40 Wake up and text the app: Sunday reset day! Just took my Vyvanse, need to eat breakfast now before it kicks in. Help me plan the day in 30-minute sprints with breathing room: fold the laundry mountain on the chair, clean the bathroom, take cardboard recycling down, return the Amazon package at Whole Foods + grab groceries, and roast sheet-pan veggies for the week.",
+    "09:45 Remind the app that if you put more than two chores back-to-back without a 30-minute break or reward, my brain will rebel and I'll scroll TikTok for three hours.",
+    "09:50 Make a bagel with cream cheese and iced coffee, eating until 10:30.",
+    "10:32 Report breakfast done! Starting the 30-minute sprint to fold the clean laundry mountain on the bedroom chair.",
+    "10:35 Fold half the laundry pile, then find an old college hoodie in the bottom of the basket, which reminds you of a box of old Polaroids in the closet—spend 45 minutes sitting on the closet floor sorting Polaroids by year.",
+    "11:35 Realize you got completely sidetracked! Text the app: okay confession, I folded half the laundry and then spent 45 minutes organizing 2019 Polaroids on the closet floor. Need 15 more minutes right now to actually finish putting the rest of the clothes away, then move cleaning the bathroom to 12:00.",
+    "11:38 Finish folding and hanging the remaining clothes from the chair by 11:55!",
+    "11:58 Text the app: the chair is officially visible for the first time in two weeks!! Starting the bathroom clean now.",
+    "12:00 Spray down the shower and sink, then go under the bathroom cabinet for paper towels and get derailed throwing out expired sunscreen bottles and wiping the cabinet shelves until 12:55.",
+    "12:58 Text the app: bathroom sink and shower are clean AND I accidentally deep-cleaned the under-sink cabinet. Starving now—eating a quesadilla and taking a 45-minute break before heading out for recycling and Whole Foods.",
+    "13:00 Make and eat a cheese quesadilla and play two rounds of Balatro until 14:00.",
+    "14:05 Report lunch and break done. Carrying the flattened cardboard boxes down to the basement recycling bins on the way out to Whole Foods.",
+    "14:10 Drop recycling in the basement, walk to Whole Foods, scan the Amazon QR code at the return counter, and buy broccoli, sweet potatoes, chickpeas, and tahini, getting back at 15:25.",
+    "15:28 Text the app: Amazon return and Whole Foods grocery run done! Wait—I forgot to buy parchment paper and olive oil spray while I was out, and I don't want to go back out. Can we swap sheet-pan veggie prep to right after a 30-min rest, and I'll just oil the baking sheets directly?",
+    "15:30 Rest on the couch with iced water until 16:00.",
+    "16:05 Chop sweet potatoes, broccoli, and red onion, toss with chickpeas and spices, and roast two big sheet pans in the oven while washing the cutting board until 17:15.",
+    "17:18 Report meal prep done—four glass containers of roasted veggies and chickpeas are in the fridge! Ask what's left: decide to skip dusting the blinds and just vacuum the bedroom floor for 15 minutes right now so you can have the whole evening off.",
+    "17:20 Vacuum the bedroom and living room rug until 17:40.",
+    "17:42 Report vacuuming done! Eat a bowl of the freshly roasted veggies with rice and tahini for dinner at 18:30, then watch a movie until bed."
+  ],
+  "constraints": [
+    "Cannot have more than two 30-minute chore blocks scheduled back-to-back without a 30-minute break.",
+    "Must eat breakfast right after taking morning ADHD medication.",
+    "Cardboard recycling goes down to the basement on the way out the door for errands so it doesn't require an extra trip."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast & morning meds",
+      "match": "breakfast|bagel|med",
+      "start": "09:50",
+      "end": "10:30"
+    },
+    {
+      "item": "Fold laundry mountain (plus closet Polaroid side-quest)",
+      "match": "fold|laundry|chair",
+      "start": "10:35",
+      "end": "11:55"
+    },
+    {
+      "item": "Clean bathroom & under-sink cabinet",
+      "match": "bathroom|clean|sink|shower",
+      "start": "12:00",
+      "end": "12:55"
+    },
+    {
+      "item": "Quesadilla lunch & break",
+      "match": "lunch|quesadilla|break",
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "item": "Take down recycling, Amazon return & Whole Foods groceries",
+      "match": "recycling|amazon|whole foods|grocer",
+      "start": "14:10",
+      "end": "15:25"
+    },
+    {
+      "item": "Afternoon couch rest",
+      "match": "rest|break",
+      "start": "15:30",
+      "end": "16:00"
+    },
+    {
+      "item": "Roast sheet-pan veggies & chickpeas",
+      "match": "roast|veggie|meal prep|sheet",
+      "start": "16:05",
+      "end": "17:15"
+    },
+    {
+      "item": "Vacuum bedroom & rug",
+      "match": "vacuum",
+      "start": "17:20",
+      "end": "17:40"
+    },
+    {
+      "item": "Dinner",
+      "match": "dinner|eat",
+      "start": "18:30",
+      "end": "19:15"
+    },
+    {
+      "item": "Dust living room blinds",
+      "match": "dust|blind",
+      "start": "17:30",
+      "end": "18:00",
+      "done": false
+    }
+  ],
+  "events": [],
+  "setup": [],
+  "profile": {
+    "Preferences": "ADHD-friendly scheduling: 30-minute chore sprints, maximum two chores in a row before a 30-minute break."
+  },
+  "notes": [
+    {
+      "notebook": "Home",
+      "title": "Sunday Reset Sprints",
+      "role": "today",
+      "body": "- [ ] Conquer the clean laundry chair mountain\n- [ ] Clean bathroom sink, mirror & shower\n- [ ] Take flattened cardboard boxes to basement recycling\n- [ ] Return Amazon HDMI adapter at Whole Foods counter\n- [ ] Buy broccoli, sweet potatoes & chickpeas at Whole Foods\n- [ ] Meal-prep 2 sheet pans of roasted veggies\n- [ ] Vacuum bedroom & living room\n- [ ] Dust living room blinds"
+    },
+    {
+      "notebook": "Home",
+      "title": "Someday / Dopamine Projects",
+      "role": "list",
+      "body": "- [ ] Put old Polaroids into photo album\n- [ ] Hang gallery wall frames in hallway\n- [ ] Cable-manage editing desk"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Reward Break Menu",
+      "role": "menu",
+      "body": "- [ ] Play 2 runs of Balatro\n- [ ] Make iced matcha\n- [ ] Watch YouTube video essays"
+    }
+  ]
+}

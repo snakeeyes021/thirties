@@ -442,6 +442,7 @@ class Reminder:
     due: datetime
     text: str
     state: str = "pending"  # pending, sent, cancelled
+    span_id: str = ""       # the planned item it pings about ("remind me to..." puts the thing on the plan)
 
 
 class ReminderStore:
@@ -450,19 +451,24 @@ class ReminderStore:
     def __init__(self, db: StateDatabase) -> None:
         self.db = db
         ensure_schema(db)
+        with db._get_connection() as conn:
+            if "span_id" not in {r[1] for r in conn.execute("PRAGMA table_info(reminders)")}:
+                conn.execute("ALTER TABLE reminders ADD COLUMN span_id TEXT NOT NULL DEFAULT ''")
 
-    def add(self, due: datetime, text: str) -> Reminder:
+    def add(self, due: datetime, text: str, span_id: str = "") -> Reminder:
         now = utc_now_iso()
-        rem = Reminder(uuid.uuid4().hex[:12], due, text.strip())
+        rem = Reminder(uuid.uuid4().hex[:12], due, text.strip(), span_id=span_id)
         with self.db._get_connection() as conn:
-            conn.execute("INSERT INTO reminders (id, due_utc, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                         (rem.id, due.astimezone(timezone.utc).isoformat(), rem.text, now, now))
+            conn.execute("INSERT INTO reminders (id, due_utc, text, created_at, updated_at, span_id) "
+                         "VALUES (?, ?, ?, ?, ?, ?)",
+                         (rem.id, due.astimezone(timezone.utc).isoformat(), rem.text, now, now, span_id))
         return rem
 
     def _rows(self, where: str = "", args: tuple = ()) -> List[Reminder]:
         with self.db._get_connection() as conn:
             rows = conn.execute(f"SELECT * FROM reminders {where} ORDER BY due_utc", args).fetchall()
-        return [Reminder(r["id"], datetime.fromisoformat(r["due_utc"]), r["text"], r["state"]) for r in rows]
+        return [Reminder(r["id"], datetime.fromisoformat(r["due_utc"]), r["text"], r["state"], r["span_id"] or "")
+                for r in rows]
 
     def pending(self) -> List[Reminder]:
         return self._rows("WHERE state = 'pending'")
@@ -483,8 +489,9 @@ class ReminderStore:
             row = conn.execute("SELECT updated_at FROM reminders WHERE id = ?", (record["id"],)).fetchone()
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
-            conn.execute("INSERT OR REPLACE INTO reminders (id, due_utc, text, created_at, updated_at, state) "
-                         "VALUES (:id, :due_utc, :text, :created_at, :updated_at, :state)", record)
+            conn.execute("INSERT OR REPLACE INTO reminders (id, due_utc, text, created_at, updated_at, state, span_id) "
+                         "VALUES (:id, :due_utc, :text, :created_at, :updated_at, :state, :span_id)",
+                         {"span_id": "", **record})
             return True
 
 

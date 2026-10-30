@@ -32,6 +32,11 @@ def _indent_width(prefix: str) -> int:
     return len(prefix.replace("\t", "    "))
 
 
+def item_id(note_id: str, text: str, occurrence: int = 0) -> str:
+    """A checklist item's id: its note, its text, and which open copy of that text it is."""
+    return hashlib.sha256(f"{note_id}|{text}|{occurrence}".encode("utf-8")).hexdigest()[:16]
+
+
 def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
                     someday_sections: List[str]) -> List[TaskItem]:
     """Open checklist items in a note body, with heading, nesting and someday context.
@@ -66,9 +71,10 @@ def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
         text = open_match.group(2).strip()
         n = seen.get(text, 0)
         seen[text] = n + 1
-        task_id = hashlib.sha256(f"{note_id}|{text}|{n}".encode("utf-8")).hexdigest()[:16]
+        task_id = item_id(note_id, text, n)
         tasks.append(TaskItem(
             id=task_id,
+            occurrence=n,
             source_notebook=notebook,
             title=text,
             is_checkbox_item=True,

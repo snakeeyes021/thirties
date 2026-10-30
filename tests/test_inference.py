@@ -184,7 +184,35 @@ class TestTransports(unittest.TestCase):
         self.assertEqual(sent["event"], "user")
         self.assertIn("(Result of list_schedule, for the assistant only: Scheduled: Work)", sent["message"]["content"])
         self.assertIn("--sandbox", cmd)
-        self.assertTrue(str(run.call_args.kwargs["cwd"]).endswith("thirties/agy-workspace"))
+        self.assertEqual(cmd[cmd.index("--agent") + 1], "thirties-plain")  # agy's own agent costs ~12k tokens a call
+        workspace = run.call_args.kwargs["cwd"]
+        self.assertTrue(str(workspace).endswith("thirties/agy-workspace"))
+        self.assertIn("excludeDefaultComponents: true",
+                      (workspace / ".agents" / "agents" / "thirties-plain.md").read_text())
+
+    def test_antigravity_asked_again_when_it_tries_a_tool_instead_of_answering(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        empty = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": ""}}),
+                          stderr='no output produced — a tool required the "command" permission … auto-denied.')
+        answer = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": "Sure."}}),
+                           stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", side_effect=[empty, answer]) as run:
+            res = engine.chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(res["content"], "Sure.")
+        first, second = (json.loads(c.kwargs["input"])["message"]["content"] for c in run.call_args_list)
+        self.assertTrue(first.startswith("(You are answering as a text model: you have no tools here"))
+        self.assertTrue(second.endswith("Answer now, in text only.)"))
+
+    def test_antigravity_complete_sends_the_prompt_as_written(self) -> None:
+        engine = AntigravityInferenceEngine(ThirtiesConfig())
+        answer = MagicMock(returncode=0, stdout=json.dumps({"event": "result", "result": {"response": "hey"}}), stderr="")
+        with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
+                patch("subprocess.run", return_value=answer) as run:
+            self.assertEqual(engine.complete("You are role-playing a user. Your next message:"), "hey")
+        sent = json.loads(run.call_args.kwargs["input"])["message"]["content"]
+        self.assertTrue(sent.endswith("You are role-playing a user. Your next message:"))
+        self.assertNotIn("Write the assistant's next message", sent)
 
     def test_antigravity_timeout(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())

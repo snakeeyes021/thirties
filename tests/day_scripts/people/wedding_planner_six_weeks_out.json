@@ -1,0 +1,162 @@
+{
+  "id": "wedding_planner_six_weeks_out",
+  "date": "2026-10-23",
+  "source": "made up: person planning their own wedding six weeks out alongside a full workday and lunch vendor calls",
+  "wake": "07:00",
+  "bed": "23:00",
+  "work": [
+    "09:00",
+    "17:30"
+  ],
+  "persona": "Hannah, a product marketing manager getting married on December 5 (six weeks away). Texts rapidly with high energy and occasional exclamation points or mild panic about RSVP stragglers; squeezes vendor calls into her lunch hour and relies on the app to keep wedding admin from swallowing her day job.",
+  "situation": "Friday morning at 07:00. Working her remote marketing job 09:00–17:30 with a 10:00 product launch sync and 15:00 design review, a 12:30 floral & linen final walkthrough call over lunch, and a 18:30 dance lesson with her fiancé Ben.",
+  "life": [
+    "07:10 Wake up and text the app: 6 weeks until the wedding!! Help me plan today: morning run & shower before 09:00 work, finish Q4 launch messaging doc and review email copy during work, do the 12:30 florist call and eat lunch, call the hotel room-block manager before 17:00, leave at 18:00 for our 18:30 first-dance lesson, and spend an hour with Ben after dinner chasing down 12 RSVP stragglers.",
+    "07:15 Remind the app that vendor phone calls (florist at 12:30 and hotel block manager) have to happen during business hours before 17:00, and the RSVP texts wait until tonight with Ben.",
+    "07:20 Go for a 3-mile morning run, shower, and eat a smoothie bowl before logging in at 08:55.",
+    "08:58 Report run, shower, and breakfast done. Starting on the Q4 launch messaging doc before my 10:00 sync.",
+    "09:00 Draft the Q4 launch messaging doc until 10:00, then join the Product Launch Sync from 10:00 to 11:00.",
+    "11:02 Report sync done and continuing the Q4 messaging doc.",
+    "11:05 Finish the Q4 launch messaging doc and share it with the director at 12:15.",
+    "12:18 Tell the app the Q4 doc is done! Heating up a grain bowl now so I can eat during the 12:30 florist call.",
+    "12:30 Zoom call with the wedding florist about table centerpieces and bouquet ribbons while eating lunch; call runs 15 minutes over until 13:15 because of a candelabra rental question.",
+    "13:18 Text the app: florist call ran until 13:15, centerpieces are locked in! Now I need to call the hotel room-block manager (takes ~20 mins) before diving into the lifecycle email copy review.",
+    "13:20 Call the Marriott room-block coordinator to add 5 more king rooms to the courtesy block, finishing at 13:45.",
+    "13:48 Report hotel block extended! Reviewing the 4 lifecycle marketing email drafts before the 15:00 design review.",
+    "13:50 Edit and leave comments on the lifecycle email drafts until 14:55.",
+    "15:00 Attend the Marketing Design Review meeting until 16:00.",
+    "16:05 Sister (maid of honor) calls in a minor panic because her bridesmaid dress hem came back an inch too short from the tailor. Spend 25 minutes on FaceTime looking at shoes with lower heels until 16:30.",
+    "16:32 Text the app: maid of honor emergency FaceTime took 30 mins (dress hem drama, solved with lower heels!). Need to finish wrapping up work emails until 17:30, then change clothes before leaving at 18:00 for the dance studio.",
+    "16:35 Clear out Friday afternoon Slack messages and finish the email copy sign-off until 17:30.",
+    "17:32 Report workday done! Change clothes and touch up makeup before driving with Ben at 18:00 to the ballroom studio.",
+    "18:30 Practice the first-dance choreography at the dance lesson until 19:30, then pick up Thai takeout on the way home, arriving at 20:00.",
+    "20:05 Report dance lesson done (we didn't step on each other's toes!) and eating Thai takeout with Ben now. Push the RSVP straggler texts to 20:45–21:45.",
+    "20:45 Sit on the couch with Ben and the Zola spreadsheet, texting 12 aunts and college friends for their meal choices and updating the seating chart draft until 21:50.",
+    "21:55 Report all 12 RSVP stragglers messaged and 7 already replied! Winding down until 23:00."
+  ],
+  "constraints": [
+    "Wedding vendor phone calls (florist, hotel room block) must happen during weekday business hours before 17:00.",
+    "Must leave the apartment by 18:00 to reach the 18:30 dance lesson on time.",
+    "Chasing down RSVP stragglers and working on the seating chart only happens in the evening with her fiancé Ben."
+  ],
+  "truth": [
+    {
+      "item": "Morning run, shower & breakfast",
+      "match": "run|shower|breakfast|smoothie",
+      "start": "07:20",
+      "end": "08:55"
+    },
+    {
+      "item": "Draft Q4 launch messaging doc (Part 1)",
+      "match": "q4|messaging|launch doc",
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "item": "Product Launch Sync",
+      "match": "launch sync|product sync",
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "item": "Finish Q4 launch messaging doc (Part 2)",
+      "match": "q4|messaging|launch doc",
+      "start": "11:05",
+      "end": "12:15"
+    },
+    {
+      "item": "Lunch & wedding florist walkthrough call",
+      "match": "florist|floral|lunch",
+      "start": "12:20",
+      "end": "13:15"
+    },
+    {
+      "item": "Call hotel room-block manager",
+      "match": "hotel|room-block|room block|marriott",
+      "start": "13:20",
+      "end": "13:45"
+    },
+    {
+      "item": "Review lifecycle marketing email copy",
+      "match": "email|copy|lifecycle",
+      "start": "13:50",
+      "end": "14:55"
+    },
+    {
+      "item": "Marketing Design Review",
+      "match": "design review",
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "item": "Maid of honor dress FaceTime & Friday work wrap-up",
+      "match": "slack|wrap|email|work",
+      "start": "16:05",
+      "end": "17:30"
+    },
+    {
+      "item": "First-dance lesson (with drive)",
+      "match": "dance|lesson",
+      "start": "18:00",
+      "end": "19:45"
+    },
+    {
+      "item": "Thai takeout dinner",
+      "match": "dinner|thai|takeout|eat",
+      "start": "20:00",
+      "end": "20:45"
+    },
+    {
+      "item": "Text 12 RSVP stragglers & update Zola",
+      "match": "rsvp|straggler|zola|seating",
+      "start": "20:45",
+      "end": "21:50"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Product Launch Sync",
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "summary": "Wedding Florist Final Walkthrough (Zoom)",
+      "start": "12:30",
+      "end": "13:00"
+    },
+    {
+      "summary": "Marketing Design Review",
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "summary": "First Dance Lesson @ Encore Studio",
+      "start": "18:30",
+      "end": "19:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Wedding": "Getting married Dec 5 (6 weeks out). Vendor calls during lunch/business hours; joint tasks with fiancé Ben after 18:00."
+  },
+  "notes": [
+    {
+      "notebook": "Work",
+      "title": "Marketing Sprint",
+      "role": "today",
+      "body": "- [ ] Finish Q4 launch messaging positioning doc\n- [ ] Review & comment on 4 lifecycle email copy drafts\n- [ ] Clear Friday Slack & sign off on campaign assets"
+    },
+    {
+      "notebook": "Wedding",
+      "title": "6 Weeks Out Countdown",
+      "role": "project",
+      "body": "## Vendor Calls (Business Hours)\n- [ ] Florist Zoom walkthrough at 12:30 PM\n- [ ] Call Marriott room-block manager to add 5 king rooms\n- [ ] Confirm DJ arrival time for ceremony mic setup\n\n## With Ben (Evenings)\n- [ ] Text 12 RSVP stragglers for entrée counts\n- [ ] Update Zola seating chart draft\n- [ ] Pick ceremony processional music\n- [x] Order brass table number holders"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Daily Routine",
+      "role": "routine",
+      "body": "- [ ] 3-mile morning run\n- [ ] Shower & smoothie bowl\n- [ ] Evening unwind at 10 PM"
+    }
+  ]
+}
