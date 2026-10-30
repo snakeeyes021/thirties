@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 ACTION_TYPES = ["add", "move", "remove", "swap", "outcome", "confirm", "reject", "choose", "suggest", "question",
-                "remember", "profile", "energy", "chat"]
+                "remember", "profile", "energy", "chat", "today", "urgency", "fact", "routine"]
+URGENCIES = ["now", "soon", "whenever", "someday"]
 
 ACTION_SCHEMA: Dict[str, Any] = {
     "type": "object",
@@ -45,6 +46,9 @@ ACTION_SCHEMA: Dict[str, Any] = {
                     "text": {"type": "string"},
                     "level": {"type": "integer"},
                     "alongside": {"type": "boolean"},
+                    "urgency": {"type": "string", "enum": URGENCIES},
+                    "fixed": {"type": "boolean"},
+                    "daylight": {"type": "boolean"},
                 },
                 "required": ["type"],
             },
@@ -66,6 +70,10 @@ question: asks about their schedule, free time, tasks or past. topic.
 remember: explains how something works for them. text.
 profile: states a goal, habit or preference about their life. text.
 energy: says how energetic or tired they are. level 1 (drained) to 5 (great).
+today: put something on today's list, with no time. title.
+urgency: says how pressing something on their lists is. target; urgency now|soon|whenever|someday; day if it's due by a day.
+fact: a rule an item must keep. target; after (an item it must come after); start (it can't start before); fixed=true if it can't move; daylight=true if it needs daylight.
+routine: put one of their routines on the plan. title (e.g. "Morning routine"); start if given.
 chat: anything else (thanks, greetings, small talk).
 Rules: copy times and durations exactly as written ("7:30", "2 hours"); never calculate new times. "Push back/later/after" is shift "+..."; "earlier/sooner" is shift "-...". One message can hold several actions, in order.
 Examples:
@@ -97,6 +105,12 @@ I'm wiped => {"actions":[{"type":"energy","level":1}]}
 when am I free this afternoon? => {"actions":[{"type":"question","topic":"free time this afternoon"}]}
 show me the whole day as a clean list => {"actions":[{"type":"question","topic":"schedule"}]}
 what's on tomorrow? => {"actions":[{"type":"question","topic":"schedule","day":"tomorrow"}]}
+put my morning routine on => {"actions":[{"type":"routine","title":"Morning routine"}]}
+add the bank call to today's list => {"actions":[{"type":"today","title":"Bank call"}]}
+that's not urgent => {"actions":[{"type":"urgency","target":"that","urgency":"whenever"}]}
+the passport renewal has to happen by friday => {"actions":[{"type":"urgency","target":"passport renewal","day":"friday"}]}
+the walk has to wait until after the shower => {"actions":[{"type":"fact","target":"walk","after":"shower"}]}
+the cats' dinner is at 5 and can't move => {"actions":[{"type":"fact","target":"cats' dinner","fixed":true}]}
 thanks! => {"actions":[{"type":"chat"}]}
 Reply with the JSON object only."""
 

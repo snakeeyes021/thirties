@@ -1,9 +1,12 @@
 """The SLM brain: Gemma turns each message into actions; Python does everything else.
 
 Per user turn:
-1. Python builds a small context (time, today's items, the last assistant line,
-   anything pending, a few backlog items related to the message).
-2. Gemma returns actions as schema-constrained JSON (one model call).
+1. Python separates the requests in the message (steps.py) and builds a small
+   context for each (time, today's items, the last assistant line, anything
+   pending, a few backlog items related to it).
+2. The model returns actions as JSON for each request on its own (one call per
+   request). Python checks every part that asks for something got an action;
+   a part that didn't is parsed again alone, else the reply asks about it.
 3. Python resolves references ("it", "the second one", "taxes"), reads times
    (adding AM/PM when the user left it out), plans suggestions from the scored
    backlog and free time, executes through the shared ``PlanTools``, and writes
@@ -26,6 +29,9 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.brains.slm.runtime import SlmUnavailable
 from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BREAKDOWN_SCHEMA, PICKER_PROMPT, SYSTEM_PROMPT, VOICE_PROMPT, Action,
                                             build_context, extract_json, parse_actions)
+from thirties_core.brains.slm import steps
+from thirties_core.brains.slm.fatigue import TIRED_MAX_ITEMS, TiredDay
+from thirties_core.brains.slm.parity import ParityActions
 from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes,
                                  thirty_ceil, thirty_of)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
@@ -81,6 +87,8 @@ class DialogState:
                    dict(data.get("awaiting_time", {})))
 
 
+PUSH_BY_RE = re.compile(r"\b(?:back|later)\s+(?:by\s+)?((?:an?|one|two|three|four|five|half an?|\d+(?:\.\d+)?)\s*"
+                        r"(?:hours?|hrs?|minutes?|mins?|chunks?|blocks?)(?:\s+and\s+a\s+half)?)\b", re.I)
 REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
                        r"( else)? (back|later)|just figure it out|undo the (re-?plan|redraw))\b", re.I)
 NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\w.!?]+\w+){0,3}[^\w.!?]+"
@@ -106,7 +114,7 @@ DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursd
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
 
-class SlmBrain:
+class SlmBrain(ParityActions, TiredDay):
     """Pipeline brain for a small on-device model."""
 
     def __init__(self, tools: PlanTools, tasks: Optional[List[TaskItem]] = None, config: Any = None,
@@ -197,10 +205,11 @@ class SlmBrain:
 
     @property
     def runtime(self):
+        """The model, through the model-neutral runtime interface (json_call, text_call, parser): Gemma unless the
+        model spike picks another (catalog.py)."""
         if self._runtime is None:
-            from thirties_core.brains.slm.runtime import GemmaRuntime
-            path = getattr(getattr(self.config, "assistant", None), "slm_model_path", "") or ""
-            self._runtime = GemmaRuntime.shared(path)
+            from thirties_core.brains.slm.catalog import load_runtime
+            self._runtime = load_runtime(self.config)
         return self._runtime
 
     def respond(self, user_text: str) -> str:
@@ -209,6 +218,7 @@ class SlmBrain:
         self.messages.append({"role": "user", "content": user_text})
         user_text = user_text[:MAX_MESSAGE_CHARS]  # a huge paste can't fit Gemma's context: read the start of it
         self._message = user_text
+        self._unclear = []
         shortcut = self._list_shortcut(user_text)
         if shortcut is not None:  # today's list and urgency: plain enough for Python, no parse needed
             self.messages.append({"role": "assistant", "content": shortcut, "slm_state": self.state.to_dict(),
@@ -217,10 +227,16 @@ class SlmBrain:
         if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text) and not BUILD_PLAN_RE.search(user_text):
             # rearrange what's planned: Python does it, no parse. Asking to lay out a day goes to the parse instead
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
-            ok, reply = self._run("undo_redraw" if undo else "redraw", {})
-            if undo or (ok and not reply.startswith("Nothing to redraw")):
+            by = PUSH_BY_RE.search(user_text) if not undo else None
+            if by:  # "push everything back two hours": the rest moves by that much, past unmarked items too (S4)
+                ok, reply = self._run("push_back", {"by": by.group(1)})
+                action = "push_back"
+            else:
+                ok, reply = self._run("undo_redraw" if undo else "redraw", {})
+                action = "undo_redraw" if undo else "redraw"
+            if undo or by or (ok and not reply.startswith("Nothing to redraw")):
                 self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
-                                      "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
+                                      "slm_actions": [{"type": action}]})
                 return reply
         try:
             actions = self._parse(user_text)
@@ -254,6 +270,8 @@ class SlmBrain:
         for s in self.tools.day_plan.spans_in_view():
             if self._is_today() and s.end_dt <= now - timedelta(hours=1) and not s.is_envelope:
                 continue
+            if s.shown_only:  # someone else's calendar event: never brought up (O1)
+                continue
             note = " (unconfirmed invite)" if s.tentative else ""
             lines.append(f"{s.title} {format_clock(s.start_dt)}-{format_clock(s.end_dt)}{note}")
         return lines[:10]
@@ -271,11 +289,34 @@ class SlmBrain:
             return None
         if self.state.proposal_kind == "breakdown":
             return f"whether to add these steps to Joplin under {self.state.proposal[0]['title']}"
+        if self.state.proposal_kind == "lighten":
+            return "whether to move these to tomorrow: " + "; ".join(p["title"] for p in self.state.proposal)
+        if self.state.proposal_kind == "urgency":
+            return f"whether they mean {self.state.proposal[0]['title']}"
         items = "; ".join(f"{p['title']} at {p['start']}" if p.get("start") else p["title"] for p in self.state.proposal)
         kind = "pick one of" if self.state.proposal_kind == "options" else "whether to add"
         return f"{kind}: {items}"
 
+    # Separate the requests in a message and parse each on its own (steps.py). Off: one parse of the whole message,
+    # as before 0.2; kept switchable so the parse benchmark can compare the two.
+    SPLIT_REQUESTS = True
+
     def _parse(self, message: str) -> List[Action]:
+        """The model never reads a whole turn at once: Python separates the requests, the model parses each, and
+        Python checks every part that asks for something got an action (retrying that part alone, else asking)."""
+        actions, self._unclear, requests = steps.parse_in_steps(message, self._parse_one, self._python_handles,
+                                                                split=self.SPLIT_REQUESTS)
+        if len(requests) > 1 or self._unclear:
+            logger.info("[SlmBrain] requests %s; not understood: %s", requests, self._unclear)
+        return actions
+
+    def _python_handles(self, clause: str) -> bool:
+        """Parts of a message Python acts on by itself, which no parsed action needs to cover."""
+        return any(r.search(clause) for r in (self._REMIND_RE, self._MUTE_RE, self._ADD_TO_LIST_RE, self._ON_LIST_RE,
+                                              TODAY_LIST_RE, URGENCY_RE, REDRAW_RE, self._BREAKDOWN_RE, self._PICK_RE,
+                                              self._FILL_RE, self._PLACE_RE, self._SHOW_DAY_RE, self._WEATHER_RE))
+
+    def _parse_one(self, message: str) -> List[Action]:
         now = self._now()
         related = [t.title for t in rank_tasks([t for t in self.tasks if not t.someday], message, limit=3)]
         last = self.tools.day_plan.get_span(self.state.last_ids[0]) if self.state.last_ids else None
@@ -515,7 +556,7 @@ class SlmBrain:
             m = re.match(r"^(?:from\s+)?(.+?)\s*(?:-|–|to|until)\s*(.+)$", str(a.get("start") or ""), re.IGNORECASE)
             if m and re.search(r"\d", m.group(2)) and not a.get("end"):
                 a.fields["start"], a.fields["end"] = m.group(1), m.group(2)
-            if a.type == "add" and not refers_back:
+            if a.type in ("add", "today") and not refers_back:
                 title_words = {_stem(w) for w in _words(a.get("title") or "")}
                 if title_words and not (title_words & said) and not _fuzzy_overlap(a.get("title") or "", message):
                     logger.info("[SlmBrain] dropping invented add: %s", a.fields)
@@ -654,12 +695,24 @@ class SlmBrain:
         swap = self._proposal_swap(message)
         if swap is not None:
             return [swap]
-        reminder = self._reminder_from(message)
+        pieces = steps.split_requests(message, max_requests=99)
+        reminder = self._reminder_from(next((p for p in pieces if self._REMIND_RE.search(p)), message))
         if reminder is not None:
-            return [reminder]
+            # "remind me to call mom, and push dinner to 7": the other requests stay (anything about the reminded
+            # thing is the model reading the reminder as an add, so it goes)
+            about = steps.content_stems(reminder.get("text") or "")
+            others = [a for a in actions if a.type in ("move", "remove", "swap", "outcome", "add")
+                      and not (steps.action_stems([a]) & about)]
+            return [reminder] + others
         if self._MUTE_RE.search(message):
             return [a for a in actions if a.type == "outcome"] + [Action("mute", {})]
         m = self._ADD_TO_LIST_RE.search(message) or self._ON_LIST_RE.search(message)
+        if m and (m.group("list").strip().lower() in ("today", "today's", "todays") or
+                  m.group("list").strip().lower() in ("my", "the") and re.match(r"\s*(?:for|of)\s+today\b",
+                                                                                  message[m.end():], re.I)):
+            # "stick it on my list for today": today's list, not a list called "my"
+            parsed = [a for a in actions if a.type == "today"]
+            return parsed or [Action("today", {"title": m.group("task").strip(" '\"")})]
         if m and not re.search(r"\b(calendar|schedule|plan)\b", m.group("list"), re.IGNORECASE):
             task = re.sub(r"^(?:a|an|the)\s+", "", m.group("task").strip(" '\""), flags=re.IGNORECASE)
             if task.lower() in PRONOUNS:  # "put it on my errands list": the item just talked about
@@ -709,8 +762,9 @@ class SlmBrain:
         return [Action("accept", {"items": chosen})] + rest
 
     def _rollover_pending(self) -> bool:
+        """The morning offer is waiting: yesterday's items, or the proposal for the free time (one yes takes both)."""
         assistant = getattr(self.tools, "assistant", None)
-        return bool(assistant is not None and assistant.rollover_pending())
+        return bool(assistant is not None and (assistant.rollover_pending() or assistant.proposals.pending()))
 
     def _dialog_act(self, message: str) -> Optional[Action]:
         """Answers to our own pending question: yes / no / which option."""
@@ -741,13 +795,23 @@ class SlmBrain:
 
     def _execute(self, actions: List[Action], message: str) -> str:
         actions = self._interpret(actions, message)
+        unclear = self._unclear_note()
         if not actions:
-            return self._chat(message)
+            return unclear or self._chat(message)
         changes = self.tools.successful_changes
         reply = self._run_actions(actions, message)
         if self.tools.successful_changes > changes:
             reply = self._with_capacity_note(reply)
+        if unclear and not reply.rstrip().endswith("?"):
+            reply = f"{reply}\n{unclear}"  # a part of the message nothing covered: ask, rather than drop it
         return reply
+
+    def _unclear_note(self) -> str:
+        parts = [p for p in getattr(self, "_unclear", []) if p]
+        if not parts:
+            return ""
+        quoted = " and ".join(f'"{p[:80]}"' for p in parts[:2])
+        return f"I didn't catch what to do about {quoted}. Could you say that part again?"
 
     def _with_capacity_note(self, reply: str) -> str:
         """Once a day, say so when the plan holds well beyond what the user usually gets through."""
@@ -773,6 +837,8 @@ class SlmBrain:
             actions = [act] + [a for a in actions if not (a.type == "add" and (a.get("title") or "").lower() in proposed)
                                and a.type != "chat"]
         actions = self._sanity(actions, message)
+        actions = steps.merge_alongside(actions, message)
+        actions = self._parity(actions, message)
         actions = self._route(actions, message)
         actions = self._accept_readds(actions)
         if any(a.type in ("confirm", "accept", "choose") for a in actions) and self.state.proposal:
@@ -818,7 +884,9 @@ class SlmBrain:
             "profile": self._do_profile, "energy": self._do_energy,
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
             "remind": self._do_remind, "mute": self._do_mute, "proposal_swap": self._do_proposal_swap,
+            "today": self._do_today, "urgency": self._do_urgency, "fact": self._do_fact, "routine": self._do_routine,
         }
+        self._action_types = {a.type for a in actions}
         untimed = [a for a in actions if a.type == "add" and not any(a.get(k) for k in ("start", "end", "after", "before"))]
         if len(untimed) >= 2 or (untimed and FIGURE_IT_OUT_RE.search(message)):
             # several things and no times ("put down Brad, Torquio, the walk, lunch and dinner"): Python lays them
@@ -826,6 +894,9 @@ class SlmBrain:
             lines.append(self._lay_out(untimed))
             changed = True
             actions = [a for a in actions if a not in untimed]
+        # "put my morning routine on" parsed as an add: a routine goes on as its steps, never as one item (R2)
+        actions = [Action("routine", {k: v for k, v in a.fields.items() if k in ("title", "start", "day")})
+                   if a.type == "add" and self._names_a_routine(a.get("title") or "") else a for a in actions]
         retry: List[Action] = []
         for action in actions:
             if action.type == "chat":
@@ -1296,12 +1367,22 @@ class SlmBrain:
                     f"{format_clock(invite.end_dt)}." if ok else out), ok
         if not self.state.proposal and self._rollover_pending():
             m = re.search(r"\b(?:except|but not|but skip|skip|without|leave out|not the)\s+(.+)$", getattr(self, "_message", ""), re.I)
-            ok, out = self._run("apply_rollover", {"skip": m.group(1)} if m else {})
-            return out, ok
+            outs, any_ok = [], False
+            for name, pending in (("apply_rollover", self.tools.assistant.rollover_pending()),
+                                  ("apply_day_proposal", self.tools.assistant.proposals.pending())):
+                if pending:
+                    ok, out = self._run(name, {"skip": m.group(1)} if m else {})
+                    outs.append(out)
+                    any_ok = any_ok or ok
+            return "\n".join(outs), any_ok
         if not self.state.proposal:
             return "", False
         if self.state.proposal_kind == "breakdown":
             return self._write_breakdown(self.state.proposal[0])
+        if self.state.proposal_kind == "lighten":
+            return self._apply_lighter_day(self.state.proposal)
+        if self.state.proposal_kind == "urgency":
+            return self._apply_urgency(self.state.proposal[0])
         if self.state.proposal_kind == "options":
             return self._apply_proposals(self.state.proposal[:1])
         return self._apply_proposals(self.state.proposal)
@@ -1438,8 +1519,11 @@ class SlmBrain:
 
     def _do_reject(self, a: Action) -> Tuple[str, bool]:
         if not self.state.proposal and self._rollover_pending():
+            rolled = self.tools.assistant.rollover_pending()
             self.tools.assistant.decline_rollover()
-            return "Okay, I'll leave yesterday's items where they are.", False
+            self.tools.assistant.proposals.decline()
+            return ("Okay, I'll leave yesterday's items where they are." if rolled else
+                    "Okay, the free time stays open."), False
         invites = [s for s in self.tools.day_plan.spans_in_view() if s.tentative]
         if not self.state.proposal and invites:
             ok, out = self._run("resolve_calendar_event", {"event": invites[0].id, "attend": False})
@@ -1451,6 +1535,8 @@ class SlmBrain:
         n = a.get("option")
         if not self.state.proposal or not isinstance(n, int) or not 1 <= n <= len(self.state.proposal):
             return "Which option did you mean?", False
+        if self.state.proposal_kind == "lighten":  # "just the first one": move only that one
+            return self._apply_lighter_day([self.state.proposal[n - 1]])
         return self._apply_proposals([self.state.proposal[n - 1]])
 
     # --- suggestions ---
@@ -1548,13 +1634,15 @@ class SlmBrain:
         except Exception:
             rainy = False
         from thirties_core.weather import OUTDOOR_RE
+        tired = self._tired()  # decision fatigue: easy things only, fewer of them, and one plan to say yes to
         scored = sorted(((self._score_task(t, topic_words, goal_words, scheduled)
-                          - (6.0 if rainy and OUTDOOR_RE.search(t.title) else 0.0), i, t)  # nothing outdoors in the rain
+                          - (6.0 if rainy and OUTDOOR_RE.search(t.title) else 0.0)  # nothing outdoors in the rain
+                          - (1.5 * (steps.task_effort(t) - 1) if tired else 0.0), i, t)
                          for i, t in enumerate(self.tasks + self._project_blocks())),
                         key=lambda x: (-x[0], x[1]))
         ranked, seen_notes = [], set()
         for score, _, t in scored:
-            if score <= 0 or t.parent_task_id:
+            if score <= 0 or (t.parent_task_id and not tired) or (tired and steps.task_effort(t) >= 3):
                 continue
             note = t.parent_note_id or t.source_notebook
             if note in seen_notes:
@@ -1569,11 +1657,11 @@ class SlmBrain:
             total = parse_duration_minutes(a.get("duration")) if a.get("duration") else None
         except ClockError:
             total = None
-        want = None
+        want = 30 if tired else None  # easy things are short
         proposal: List[Dict[str, Any]] = []
         cursor_windows = list(windows)
         budget = total
-        for task in ranked:
+        for task in ranked[:TIRED_MAX_ITEMS] if tired else ranked:
             minutes = want or max(60 if fill else 30, 30 * (task.estimated_thirties or 1))
             if budget is not None:
                 if budget < 30:
@@ -1583,7 +1671,7 @@ class SlmBrain:
             for i, (ws, we) in enumerate(cursor_windows):
                 slot_start = ws if ws.minute in (0, 30) and ws.second == 0 else \
                     ws.replace(minute=0 if ws.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
-                if fill and timedelta(minutes=30) <= we - slot_start < timedelta(minutes=minutes):
+                if fill and not tired and timedelta(minutes=30) <= we - slot_start < timedelta(minutes=minutes):
                     minutes = int((we - slot_start).total_seconds() // 1800) * 30  # use up the end of a window
                 if we - slot_start >= timedelta(minutes=minutes):
                     proposal.append({"title": task.title, "start": format_clock(slot_start),
@@ -1605,6 +1693,8 @@ class SlmBrain:
             task = next((t for t in self.tasks if t.id == p["task_id"]), None)
             why = f"put off {task.deferred_count}x" if task and task.deferred_count >= 2 else ""
             items.append((p_start, p_end, p["title"], why))
+        if tired:  # one easy plan and one yes/no: no menu to choose from
+            return "\n".join(["Here's an easy plan:"] + agenda_lines(items) + ["Want it?"]), False
         lines = ["How about:"] + agenda_lines(items, numbered=True)
         lines.append("Want all of these, just one (say the number), or something else?")
         stuck = next((t for t in self.tasks if t.deferred_count >= 3 and any(p["task_id"] == t.id for p in proposal)), None)
@@ -1715,15 +1805,16 @@ class SlmBrain:
                     "dinner": (time(17, 30), time(20, 30), 60), "supper": (time(17, 30), time(20, 30), 60)}
 
     def _lay_out(self, adds: List[Action]) -> str:
-        """Place several things with no times, in Python: meals in their usual windows, a routine as its own items
-        in order, everything else from now in the order given, with a free block after anything an hour or
-        longer (breathing room). Says what didn't fit."""
+        """Place several things with no times, in Python: a routine first, as its steps (put_routine, never one
+        item), meals in their usual windows, everything else from now in the order given, with a free block after
+        anything an hour or longer (breathing room). Says what didn't fit."""
         plan = self.tools.day_plan
         tz = plan.day_start.tzinfo
         now = self._now()
         cursor = thirty_ceil(now) if self._is_today() and now > plan.day_start else plan.day_start
         assistant = getattr(self.tools, "assistant", None)
         items: List[Tuple[str, int, Optional[Tuple[time, time]]]] = []  # title, minutes, meal window
+        placed, missed = [], []
         for a in adds:
             title = (a.get("title") or "").strip()
             if not title:
@@ -1735,16 +1826,25 @@ class SlmBrain:
             except ClockError:
                 minutes = 0
             meal = next((w for k, w in self.MEAL_WINDOWS.items() if k in title.lower()), None)
-            routine = self._routine_items(title) if "routine" in title.lower() else []
-            if routine:
-                each = max(5, (minutes or 60) // len(routine))
-                items += [(step, each, None) for step in routine]
+            routine = self._routine_note(title) if "routine" in title.lower() else None
+            if routine is not None:
+                start = self._first_free_thirty(cursor)
+                before = {s.id for s in plan.spans}
+                ok, out = self._put_routine(routine, start)
+                if not ok:
+                    missed.append(routine["title"])
+                    continue
+                steps_now = [s for s in plan.spans if s.id not in before]
+                for span in steps_now:
+                    placed.append((span.start_dt, span.end_dt, span.title, ""))
+                if steps_now:
+                    self._remember(steps_now[0])
+                    cursor = max(cursor, thirty_ceil(max(s.end_dt for s in steps_now)))
                 continue
             if not minutes and assistant:
                 learned = assistant.typical_duration(title)
                 minutes = learned or 0
             items.append((title, minutes or (meal[2] if meal else 60), (meal[0], meal[1]) if meal else None))
-        placed, missed = [], []
         for title, minutes, window in sorted(items, key=lambda i: i[2] is None):  # meals first: they're anchored
             length = timedelta(minutes=minutes)
             lo = max(cursor, datetime.combine(plan.day_start.date(), window[0], tzinfo=tz)) if window else cursor
@@ -1774,20 +1874,6 @@ class SlmBrain:
         if missed:
             lines.append("Didn't fit: " + ", ".join(missed) + ". Tomorrow, or let them go?")
         return "\n".join(lines) or "I couldn't find room for those today."
-
-    def _routine_items(self, title: str) -> List[str]:
-        """The open items of the routine note a title names ("morning routine"), in order."""
-        assistant = getattr(self.tools, "assistant", None)
-        if assistant is None or self.tools.scheduler is None:
-            return []
-        from thirties_core.lists import ListCatalog
-        from thirties_core.today import note_items, notes_with_role
-        roles = ListCatalog(self.tools.scheduler.state_db).roles()
-        words = {_stem(w) for w in _words(title)} - {"routin"}
-        for note in notes_with_role(roles, assistant._joplin_notes(), "routine"):
-            if not words or words & {_stem(w) for w in _words(note["title"])}:
-                return [text for text, ticked in note_items(note) if not ticked]
-        return []
 
     def _list_shortcut(self, text: str) -> Optional[str]:
         """"Add X to today's list" and "X isn't urgent" / "X is urgent" / "X has to happen by Friday", handled in
@@ -1902,7 +1988,9 @@ class SlmBrain:
             return "", False
         self._run("log_energy", {"level": level})
         if level <= 2:
-            return "Noted that you're low on energy. Want me to lighten the rest of today?", False
+            if getattr(self, "_action_types", set()) & {"suggest", "add", "move", "remove"}:
+                return "Noted that you're low on energy.", False  # they've said what they want: do that instead
+            return self._offer_lighter_day()  # one lighter plan, applied on "sure"
         return "Noted.", False
 
     def _chat(self, message: str) -> str:

@@ -6,7 +6,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -22,6 +22,8 @@ class GeneralConfig:
     sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
     # Days that get default work (mon..sun). Other days start with no work.
     work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    # What's different on some weekdays, e.g. {"sat": {"sleep_end_thirty": 18}} (thirties_core/week.py).
+    week: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +55,8 @@ class CalendarConfig:
     exclude_calendars: List[str] = field(default_factory=lambda: ["Birthdays & Anniversaries"])
     # Your addresses, used to read your RSVP on invites; found automatically from GNOME Online Accounts.
     my_emails: List[str] = field(default_factory=list)
+    # Per calendar, by display name (lowercased): "mine", "show" (show only) or "ignore" (calendar_engine).
+    modes: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

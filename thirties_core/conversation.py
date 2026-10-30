@@ -257,6 +257,18 @@ class ConversationManager:
             self._stamp(via="background")
             self._save()
 
+    def assistant_turn(self, instruction: str) -> str:
+        """A turn the assistant starts itself (the morning proposal, day_proposal.py): the instruction is for the
+        model only and stays out of the visible history; the reply is stored as the assistant's message."""
+        with self.turn_lock:
+            reply = self.brain.respond(instruction)
+            for m in self.brain.messages:
+                if m.get("role") == "user" and m.get("content") == instruction:
+                    m["hidden"] = True
+            self._stamp(via="background")
+            self._save()
+            return reply
+
     @property
     def day_plan(self) -> DayPlan:
         return self.tools.day_plan
@@ -347,10 +359,16 @@ class ConversationManager:
             return reply
 
 
+        if self.tools.assistant is not None:  # the day's routines and anchors are on before the model looks (R1)
+            try:
+                self.tools.assistant.routines.set_up_current()
+            except Exception as e:
+                logger.warning("Setting up the day failed: %s", e)
         reply = self.brain.respond(user_text)
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
         said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
-        keep = real_times(*said, user_text, spans=self.day_plan.spans)  # real item times, and the user's, as said
+        keep = real_times(*said, user_text, spans=self.day_plan.spans,  # real item times, the user's, and now
+                          now=get_current_time(self.day_plan.day_start.tzinfo))
         shown = reply if EXACT_ASKED_RE.search(user_text) else to_thirties(reply, keep)  # else blocks
         trimmed = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
                                  if self.day_plan.target_date == self.tools.today() else None)

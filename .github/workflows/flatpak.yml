@@ -25,13 +25,44 @@ jobs:
         with:
           python-version: "3.13"  # the GNOME 50 runtime's Python
 
-      # The core is pure Python with no dependencies to install; the GTK tests skip without a display.
+      # The core is pure Python with no dependencies to install; the GTK tests skip here (no GTK, no display)
+      # and run in gui-test below.
       - name: Run Test Suite
         run: python3 -m unittest discover tests
 
+  gui-test:
+    name: Run Unit Tests with GTK (virtual display)
+    runs-on: ubuntu-latest
+    # Fedora: Ubuntu's libadwaita is too old for the widgets the app uses (Adw.Spinner needs 1.6).
+    container:
+      image: fedora:44
+    steps:
+      - name: Install GTK 4, libadwaita, PyGObject and Xvfb
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            python3 python3-gobject gobject-introspection gtk4 libadwaita xorg-x11-server-Xvfb dejavu-sans-fonts git
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Every test, the GTK ones included: Xvfb gives them a display; cairo rendering needs no GPU.
+      - name: Run Test Suite under Xvfb
+        env:
+          DISPLAY: ":99"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          NO_AT_BRIDGE: "1"
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+          for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.1; done
+          # The GTK tests skip quietly when GTK can't start; here that's a failure, not a pass.
+          python3 -c "import sys, tests.test_gui as t; sys.exit(0 if t.GTK else 'GTK did not start under Xvfb')"
+          python3 -m unittest discover tests
+        shell: bash
+
   flatpak-builder:
     name: Build Flatpak Bundle
-    needs: test
+    needs: [test, gui-test]
     runs-on: ubuntu-latest
     container:
       image: bilelmoussaoui/flatpak-github-actions:gnome-nightly

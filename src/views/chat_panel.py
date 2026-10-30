@@ -177,6 +177,9 @@ class ChatPanel(Gtk.Box):
         self._external_header = external_header
         self.conversation_manager = conversation_manager
         self.on_plan_updated = on_plan_updated
+        # Held while a turn runs; the window shares it so its background refresh never reloads the manager
+        # under a turn (or a turn starts mid-reload: it waits, off the UI thread).
+        self.store_lock = threading.Lock()
 
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -638,7 +641,8 @@ class ChatPanel(Gtk.Box):
         def worker():
             error = None
             try:
-                manager.send_user_message(text)
+                with self.store_lock:
+                    manager.send_user_message(text)
             except Exception as e:  # keep the UI alive if the model or a tool fails
                 logger.exception("Assistant turn failed")
                 error = str(e) or e.__class__.__name__

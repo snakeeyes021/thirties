@@ -13,12 +13,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
-                                 thirty_ceil, thirty_of)
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
-from thirties_core.stats import fact_lines, unreviewed_spans
+from thirties_core.kind_tools import KindTools, rollover_question
+from thirties_core.kinds import ONGOING, put_off_counts, rolls_over
+from thirties_core.stats import fact_lines, session_lines, unreviewed_spans
 
 if TYPE_CHECKING:
     from thirties_core.joplin_engine import JoplinEngine
@@ -64,9 +65,22 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
             "finished": "Clock time it actually finished, if known.",
             "duration": "How long it actually took, if known, e.g. '45 minutes'.",
             "estimated": "true if the times are your best guess rather than what the user said.",
+            "finished_for_good": "true only when the user says an ongoing thing (project time, something worked on "
+                                 "over many sessions) is finished for good; plain done on it means a session.",
             "note": "Optional note.",
         },
         "required": ["event", "status"],
+    },
+    {
+        "name": "log_day_times",
+        "description": "Record when the user actually woke, went to sleep, started or finished work (\"started work "
+                       "at 9:40\", \"done with work\", an answer to the morning or end-of-work question). Only what "
+                       "they said; Work and Sleep move to the real times.",
+        "parameters": {"woke": "Clock time they woke up.", "slept": "Clock time they went to sleep.",
+                       "work_started": "Clock time work started.",
+                       "work_ended": "Clock time work ended, or 'now' if they're just done.",
+                       "estimated": "true if the times are your best guess rather than what the user said."},
+        "required": [],
     },
     {
         "name": "log_energy",
@@ -102,6 +116,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
             "replace": "true to replace the whole section instead of adding a line.",
         },
         "required": ["section", "text"],
+    },
+    {
+        "name": "check_goal",
+        "description": "Record the user's answer about a goal from GOALS TO CHECK: still current, done, or dropped.",
+        "parameters": {"goal": "The goal, as written in the profile.",
+                       "state": "'current' (still a goal), 'done' (finished) or 'dropped' (no longer wanted)."},
+        "required": ["goal", "state"],
     },
     {
         "name": "search_history",
@@ -337,14 +358,33 @@ def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
     return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
 
 
-class AssistantTools:
+class AssistantTools(KindTools):
     """Outcome, review, memory, profile, history and statistics tools."""
 
     def __init__(self, plan_tools: "PlanTools", services: Services) -> None:
         self.pt = plan_tools
         self.s = services
         self._quiet_today = False  # put_routine lists its steps on Today together, as one group
+        self._for_good = False  # an ongoing item's home stays open unless it's finished for good (_tick_twin)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
+        self._routine_tools = None
+        self._proposal_tools = None
+
+    @property
+    def routines(self):
+        """Routines, daily anchors, the week, and the morning set-up (routines.py)."""
+        if self._routine_tools is None:
+            from thirties_core.routines import RoutineTools
+            self._routine_tools = RoutineTools(self)
+        return self._routine_tools
+
+    @property
+    def proposals(self):
+        """The day's proposal (day_proposal.py)."""
+        if self._proposal_tools is None:
+            from thirties_core.day_proposal import DayProposal
+            self._proposal_tools = DayProposal(self)
+        return self._proposal_tools
 
     # --- helpers ---
 
@@ -394,7 +434,8 @@ class AssistantTools:
         from thirties_core.joplin_writeback import JoplinWriter
         return JoplinWriter(self.pt.scheduler.config, self._db, self.s.joplin.api_client)
 
-    def _complete_backlog_task(self, task: TaskItem) -> str:
+    def _complete_backlog_task(self, task: TaskItem, for_good: bool = False) -> str:
+        self._for_good = for_good  # _tick_twin: an ongoing home item stays open unless it's finished for good
         if self._db:
             self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
         if task.id.startswith("media:"):
@@ -446,6 +487,8 @@ class AssistantTools:
         if task.parent_note_id == today["id"]:
             link = links.home_of(task.title)
             home = next((t for t in self.s.tasks if link and t.id == link["home_id"]), None)
+            if home is not None and self.kind_of(home) == ONGOING and not getattr(self, "_for_good", False):
+                return  # today's session is done; the thing itself goes on (B2)
             if home is not None:
                 self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
@@ -485,15 +528,20 @@ class AssistantTools:
         on_today = {text.lower(): ticked for text, ticked in note_items(today)}
         links = TodayLinks(self._db)
         routine_ids = {n["id"] for n in self._routines()}
+        ctx = self._kind_context()
         for link in links.all():
             home_items = {text.lower(): (text, ticked) for text, ticked in note_items(notes.get(link["home_note_id"]))}
             home = home_items.get(link["home_title"].lower())
             mine = on_today.get(link["today_title"])
             if home is None or mine is None:
                 continue
-            if mine and not home[1] and link["home_note_id"] not in routine_ids:  # a routine is never written to
+            if mine and not home[1] and link["home_note_id"] not in routine_ids \
+                    and self._link_kind(link, ctx) != ONGOING:  # a routine is never written to; ongoing stays open
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": link["home_note_id"],
                                "title": home[0]})
+            elif mine and link["home_note_id"] in routine_ids:  # a routine step ticked by hand: it was done
+                # today (its repeat schedule counts from the last time it was done)
+                self._db.record_task_completed(link["home_id"], self._today())
             elif home[1] and not mine:
                 exact = next(t for t, _ in note_items(today) if t.lower() == link["today_title"])
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
@@ -569,6 +617,7 @@ class AssistantTools:
                 self.start_the_day(plan.target_date)
             finally:
                 self._adding = set()
+        self.routines.set_up_day(plan)  # then the day's routines and anchors, once (planned before sunrise too)
 
     def list_today(self, span: EventSpan) -> str:
         """Everything on today's plan is on today's list (10-29: the plan and the Today note had drifted apart): a list
@@ -648,7 +697,9 @@ class AssistantTools:
         from thirties_core.today import note_items
         routines = self._routines()
         want = {_stem(w) for w in _words(routine)}
-        found = [n for n in routines if not routine or want & {_stem(w) for w in _words(n["title"])}]
+        found = [n for n in routines if _same_words(n["title"], routine)] or \
+            [n for n in routines if not routine or want & {_stem(w) for w in _words(n["title"])}]  # two routines
+        # share "routine": the exact name wins
         if len(found) != 1:
             names = ", ".join(n["title"] for n in routines) or "none yet (mark a note as a routine in Profile → Lists)"
             raise ToolError(f"Which routine? Routines: {names}.")
@@ -694,6 +745,9 @@ class AssistantTools:
             self._quiet_today = False
         if not placed:
             return f"{note['title']} is already on the plan."
+        known = self.routines.known_extras(note)  # extras the user always places with it (Brush teeth): no asking
+        extra = [x for x in extra if x.lower() not in known]
+        self.routines.learn(note, parts)  # how the user places it becomes its usual placement (routines.py)
         listed = ""
         if self.pt.is_current(plan):
             self._day_begun(placed)
@@ -848,12 +902,13 @@ class AssistantTools:
     # --- outcomes ---
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
-                    estimated: Any = False, note: str = "", **_: Any) -> str:
+                    estimated: Any = False, note: str = "", finished_for_good: Any = False, **_: Any) -> str:
         try:
             st = SpanStatus(str(status).strip().lower())
         except ValueError:
             raise ToolError("status must be 'done', 'partial' or 'skipped'.")
-        if st == SpanStatus.PLANNED:
+        for_good = str(finished_for_good).strip().lower() in ("true", "1", "yes")
+        if st in (SpanStatus.PLANNED, SpanStatus.UNKNOWN):
             raise ToolError("status must be 'done', 'partial' or 'skipped'.")
 
         span = None
@@ -884,30 +939,44 @@ class AssistantTools:
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        if span is not None and span.source == "calendar" and not span.tentative:
+            # An event is something you'd mark done (soak 1): the outcome is Thirties', the calendar is untouched.
+            from thirties_core.calendar_outcomes import log_calendar_outcome
+            return log_calendar_outcome(self.pt, span, st, start_dt, end_dt, note, guessed)
         if (span is not None and st != SpanStatus.SKIPPED and start_dt is None and end_dt is None
                 and duration in (None, "")):
             # Said with no time ("kitties are fed", a tick in the Day page): it finished when it was said, as an
             # estimate (10-25: fed at 10:44, stored at the planned 10:00). Long after its time, nobody knows when:
-            # the planned times stay, marked as planned.
+            # the planned times stay, marked as planned. Ticked before its time, Thirties picks the times: on
+            # blocks, and back to back with other early ticks (soak 3).
             now = self.pt._now()
-            if span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
+            if now < span.start_dt and now >= span.start_dt - timedelta(hours=3) and not span.is_envelope:
+                from thirties_core.placement import early_tick_times
+                start_dt, end_dt = early_tick_times(self.pt.day_plan, span, now)
+            elif span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
                 end_dt = now
 
         if span is None:
             # A backlog task done outside the plan: record it on the schedule if we know when.
             result = f"Marked '{task.title}' {st.value}"
-            if st == SpanStatus.DONE:
-                result += " " + self._complete_backlog_task(task)
-            elif st == SpanStatus.SKIPPED and self._db:
+            kind = self.kind_of(task)
+            if st == SpanStatus.DONE and kind == ONGOING and not for_good:
+                result += " " + self._worked_on(task)
+                end_dt = end_dt or (None if start_dt else self.pt._now())  # the session is recorded, as said
+            elif st == SpanStatus.DONE:
+                result += " " + self._complete_backlog_task(task, for_good)
+            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):
                 self._db.record_task_deferred(task.id)
             if start_dt or end_dt:
-                end_dt = end_dt or start_dt + timedelta(minutes=30)
-                start_dt = start_dt or end_dt - timedelta(minutes=30)
+                usual = self.pt._lasting().for_item(task.title).minutes if self._db else 0
+                end_dt = end_dt or start_dt + timedelta(minutes=usual or 30)
+                start_dt = start_dt or end_dt - timedelta(minutes=usual or 30)
                 logged = EventSpan(new_span_id(), task.title, start_dt, end_dt, SpanCategory.TASK, task_id=task.id,
                                    status=st, actual_start=start_dt, actual_end=end_dt, notes=note,
                                    time_source="estimated" if guessed or not (started and finished) else "reported")
                 self.pt.day_plan.spans.append(logged)
                 self.pt._persist(logged)
+                self._capture_context(logged)
                 result += f"; logged it {format_clock(start_dt)} – {format_clock(end_dt)}"
             return result + "."
 
@@ -941,6 +1010,7 @@ class AssistantTools:
             else:
                 span.time_source = "planned"
         self.pt._persist(span)
+        self._capture_context(span)
         result = f"Marked {span.title} {st.value}"
         if span.actual_start and st != SpanStatus.SKIPPED:
             result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
@@ -949,6 +1019,7 @@ class AssistantTools:
             if same is not None:
                 span.task_id = same.id
                 self.pt._persist(span)
+        kind = self.kind_of(span)
         if span.task_id:
             task = next((t for t in self.s.tasks if t.id == span.task_id), None)
             if st == SpanStatus.DONE and (self._routine_of(span.title) is not None
@@ -957,12 +1028,51 @@ class AssistantTools:
                 self._tick_on_today(span.title)
                 if self._db:
                     self._db.record_task_completed(span.task_id, self.pt.day_plan.target_date)
+            elif st == SpanStatus.DONE and task and kind == ONGOING and not for_good:
+                result += " " + self._worked_on(task)  # a session: the list item stays open (B2)
             elif st == SpanStatus.DONE and task:
-                result += " " + self._complete_backlog_task(task)
-            elif st == SpanStatus.SKIPPED and self._db:
+                result += " " + self._complete_backlog_task(task, for_good)
+            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):  # a skipped daily isn't put off
                 count = self._db.record_task_deferred(span.task_id)
                 result += f"; it has now been put off {count} times"
+        elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
+            result += " (a session on it; it carries on)"
         return result + "."
+
+    def _capture_context(self, span: EventSpan) -> None:
+        """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
+        if self._db is None:
+            return
+        try:
+            from thirties_core.day_times import night_sleep, wake_time
+            from thirties_core.outcome_context import OutcomeContextStore
+            plan = self.pt.day_plan
+            history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+            bed = night_sleep(plan, history)
+            OutcomeContextStore(self._db).record(plan, span, self.pt._now(), wake_time(plan, history),
+                                                 bed.start_dt if bed else None)
+        except Exception as e:
+            logger.warning("Couldn't capture the outcome's context: %s", e)
+
+    def log_day_times(self, woke: Any = None, slept: Any = None, work_started: Any = None, work_ended: Any = None,
+                      estimated: Any = False, **_: Any) -> str:
+        """B6: actual wake, sleep and work times, on the day's Sleep and Work (thirties_core.day_times)."""
+        from thirties_core.day_times import DayTimesError, record_day_times
+        plan = self.pt.day_plan
+        history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_end) if self._db else None
+        guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        try:
+            changed, said = record_day_times(plan, self.pt._now(), woke=woke, slept=slept, work_started=work_started,
+                                             work_ended=work_ended, source="estimated" if guessed else "reported",
+                                             history=history)
+        except DayTimesError as e:
+            raise ToolError(str(e))
+        for span in changed:
+            self.pt._persist(span)
+            if plan.get_span(span.id) is None and span.overlaps(plan.day_start, plan.day_end):
+                plan.spans.append(span)  # a late wake now reaches into this day: its morning isn't open time
+                plan.spans.sort(key=lambda s: s.start_dt.timestamp())
+        return "Recorded: " + ", ".join(said) + "."
 
     def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
         try:
@@ -975,12 +1085,14 @@ class AssistantTools:
     def review_day(self, **_: Any) -> str:
         plan = self.pt.day_plan
         now = self.pt._now()
+        self.settle_moot(plan, now)  # what has gone moot is never asked about (B4)
         pending = unreviewed_spans(plan.spans, now, plan.day_start)
         if not pending:
             return "Everything that has ended so far has an outcome recorded."
         lines = [f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title} id={s.id}" for s in pending]
         out = "No outcome recorded yet for:\n" + "\n".join(lines)
-        tasks = [s for s in pending if s.task_id]
+        ctx = self._kind_context()
+        tasks = [s for s in pending if s.task_id and rolls_over(self.kind_of(s, ctx))]
         if tasks and self.pt.scheduler:
             tomorrow = plan.target_date + timedelta(days=1)
             next_plan, _ = self.pt.scheduler.build_day_plan(tomorrow)
@@ -1000,18 +1112,21 @@ class AssistantTools:
     # --- rollover: yesterday's unfinished items, as one proposal ---
 
     def rollover_plan(self) -> List[Dict[str, Any]]:
-        """Yesterday's planned items that ended with no outcome, each placed today: at the same time if that's
-        open and still ahead, else in the first open stretch long enough; no start if nothing fits."""
+        """Yesterday's one-off items that ended with no outcome and haven't gone moot, each placed today: at the
+        same time if that's open and still ahead, else in the first open stretch after that time long enough, else
+        the first one at all (10-27: a 9 PM item was offered at 3); no start if nothing fits."""
         from datetime import datetime as _dt
         today = self._today()
         if self.pt.day_plan.target_date != today:
             return []
         yesterday = self.pt.plan_for(today - timedelta(days=1))
         now = self.pt._now()
+        ctx = self._kind_context()
+        self.settle_moot(yesterday, now, ctx)  # yesterday's breakfast isn't eaten today (10-29)
         done_ids = self._db.completed_since(today - timedelta(days=1)) if self._db else set()
         done_titles = {s.title.strip().lower() for p in (yesterday, self.pt.day_plan) for s in p.spans
                        if s.status == SpanStatus.DONE}
-        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s)
+        pending = [s for s in unreviewed_spans(yesterday.spans, now, yesterday.day_start) if self._carries_over(s, ctx)
                    and s.task_id not in done_ids and s.title.strip().lower() not in done_titles]  # done another way
         floor = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
         windows = [(max(a, floor), b) for a, b in self.pt.open_windows() if b > floor]
@@ -1022,6 +1137,9 @@ class AssistantTools:
             slot = next(((a, b) for a, b in windows if a <= same and same + need <= b), None)
             start = same if slot else None
             if slot is None:
+                slot = next(((a, b) for a, b in windows if b > same and b - max(a, thirty_ceil(same)) >= need), None)
+                start = max(slot[0], thirty_ceil(same)) if slot else None
+            if slot is None:
                 slot = next(((a, b) for a, b in windows if b - a >= need), None)
                 start = slot[0] if slot else None
             if slot:
@@ -1031,24 +1149,12 @@ class AssistantTools:
                          "start": start.isoformat() if start else None})
         return plan
 
-    def _carries_over(self, span: EventSpan) -> bool:
-        """Daily things (items of a routine note) and time on a project ("Redfox dev", a backlog's time) happen
-        again anyway: they don't carry over to the next day as unfinished."""
-        from thirties_core.lists import ListCatalog
-        from thirties_core.today import note_items, notes_with_role
-        title = span.title.strip().lower()
-        task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
-        if task is not None and task.list_role in ("routine", "backlog"):
+    def _carries_over(self, span: EventSpan, ctx: Optional[Dict[str, Any]] = None) -> bool:
+        """Only one-off things carry over: daily things (routine steps, meals, the user's daily anchors) and time on a
+        project ("Torquio dev", a backlog's time) come round again anyway (kinds.rolls_over; 10-18, 10-27, 10-30)."""
+        if span.title.strip().lower() in self.routines.daily_titles():  # anchors happen again by themselves
             return False
-        if self._db is None:
-            return True
-        roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
-        routine = {text.lower() for n in notes_with_role(roles, notes, "routine") for text, _ in note_items(n)}
-        projects = {n["title"].strip().lower() for n in notes_with_role(roles, notes, "backlog")}
-        if title in routine:
-            return False
-        project = re.sub(r"\s+(dev|work|time|session|block)$", "", title)
-        return not (project != title and project in projects)
+        return rolls_over(self.kind_of(span, ctx))
 
     def _rollover_key(self) -> str:
         return f"rollover:{self._today().isoformat()}"
@@ -1064,14 +1170,21 @@ class AssistantTools:
         done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
         routine = {n["title"].strip().lower() for n in self._routines()}
         routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
+        routine |= self.routines.daily_titles()  # anchors and a routine's extra steps don't carry over either
         done_on_plan = {t.lower() for t in self._done_on_plan(note)}
+        ctx = self._kind_context()
+        recent = [self._plan_peek(self._today() - timedelta(days=1)), self._plan_peek(self._today())]
+        self.settle_moot(recent[0], ctx=ctx)
+        moot = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.UNKNOWN}
         keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
-                and text.lower() not in done_on_plan]
+                and text.lower() not in done_on_plan and text.lower() not in moot
+                and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
         on = {k.lower() for k in keep}
         today = self._today()
 
         def pressing(t: TaskItem) -> bool:
-            if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference"):
+            if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference") \
+                    or not rolls_over(self.kind_of(t, ctx)):
                 return False
             if t.due:
                 try:
@@ -1121,10 +1234,22 @@ class AssistantTools:
         today = self._today_note()
         if today:
             from thirties_core.today import group_items
+            mine = self.routines.on_today_for(day)  # put on for this day already (Joplin was closed till now)
             for note in notes_with_role(roles, notes, "routine"):  # routines never carry over: yesterday's group goes
-                if group_items(today, note["title"]) is not None:
+                if group_items(today, note["title"]) is not None and note["title"].strip().lower() not in mine:
                     writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
+            from thirties_core.today import note_items
+            daily = self.routines.daily_titles() - mine - {n["title"].strip().lower() for n in
+                                                           notes_with_role(roles, notes, "routine")}
+            # yesterday's anchors (Lunch) and a routine's extra steps happen again: they don't stay
+            done_lines = set(self._done_on_plan(today, day))  # those go below
+            for text, ticked in note_items(today):
+                if not ticked and text.lower() in daily and text not in done_lines and re.search(
+                        r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M):
+                    writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                    self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
+                    done.append(f"took yesterday's {text} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
             for text in self._done_on_plan(today, day):
                 writer.submit({"op": "remove", "note_id": today["id"], "title": text})
@@ -1164,7 +1289,7 @@ class AssistantTools:
         if carry["add"]:
             lines.append("Also pressing: " + ", ".join(
                 f"{tasks[t].title} ({urgency_label(tasks[t])})" for t in carry["add"]) + ".")
-        lines.append("Want today like that?" if carry["keep"] or carry["add"] else "Want me to put them in today like that?")
+        lines.append(rollover_question(plan, carry))
         return "\n".join(lines)
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
@@ -1264,11 +1389,25 @@ class AssistantTools:
             name = next((s for s in PROFILE_SECTIONS if str(section).strip().lower() in s.lower()), None)
         if name is None:
             raise ToolError(f"Unknown profile section '{section}'. Sections: {', '.join(PROFILE_SECTIONS)}.")
+        from thirties_core.goals import GOAL_SECTIONS, dated, stamp_new_lines
         if str(replace).strip().lower() in ("true", "1", "yes"):
-            self.s.profile.set_section(name, str(text))
+            content = str(text)
+            if name in GOAL_SECTIONS:  # goals carry the day they were last known current (A7)
+                content = stamp_new_lines(self.s.profile.sections().get(name, ""), content, self._today())
+            self.s.profile.set_section(name, content)
             return f"Rewrote the '{name}' section of the profile."
-        self.s.profile.append(name, str(text))
+        self.s.profile.append(name, dated(str(text), self._today()) if name in GOAL_SECTIONS else str(text))
         return f"Added to '{name}' in the profile."
+
+    def check_goal(self, goal: str, state: str = "current", **_: Any) -> str:
+        """A7: the user's answer about a stale goal: still current (dated today), done or dropped (taken out)."""
+        from thirties_core.goals import check_goal
+        try:
+            section, content, said = check_goal(self.s.profile.sections(), str(goal), str(state), self._today())
+        except ValueError as e:
+            raise ToolError(str(e))
+        self.s.profile.set_section(section, content)
+        return said
 
     # --- history ---
 
@@ -1312,9 +1451,20 @@ class AssistantTools:
         now = self.pt._now()
         db = self.pt.scheduler.state_db
         spans = db.get_spans_between(now - timedelta(days=days), now + timedelta(days=1))
-        deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2),
-                          key=lambda x: -x[1])
+        ctx = self._kind_context()
+        deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2
+                           and put_off_counts(self.kind_of(t, ctx))), key=lambda x: -x[1])
         facts = fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
+        kinds: Dict[tuple, str] = {}  # one reading per item, not per session (this runs for every prompt)
+
+        def ongoing(s: EventSpan) -> bool:
+            key = (s.title.strip().lower(), s.task_id)
+            if key not in kinds:
+                kinds[key] = self.kind_of(s, ctx)
+            return kinds[key] == ONGOING
+        facts += session_lines(spans, ongoing)
+        from thirties_core.day_times import day_time_facts
+        facts += day_time_facts(spans)
         note = self.capacity_note()
         return ([note] if note else []) + facts
 
@@ -1558,10 +1708,12 @@ class AssistantTools:
         return {
             "log_outcome": self.log_outcome,
             "log_energy": self.log_energy,
+            "log_day_times": self.log_day_times,
             "review_day": self.review_day,
             "remember": self.remember,
             "forget": self.forget,
             "update_profile": self.update_profile,
+            "check_goal": self.check_goal,
             "search_history": self.search_history,
             "list_conversations": self.list_conversations,
             "read_conversation": self.read_conversation,
@@ -1581,6 +1733,8 @@ class AssistantTools:
             "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
+            **self.routines.handlers(),
+            **self.proposals.handlers(),
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
 

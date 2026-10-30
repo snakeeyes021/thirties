@@ -320,6 +320,7 @@ class TestRollover(unittest.TestCase):
                                 joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         svc.today = lambda: DAY
         svc.rollover(at("07:10"))  # before waking (7:00) + 30 minutes
+        self.assertEqual(sent, [])
         svc.rollover(at("08:00"))
         svc.rollover(at("08:15"))
         self.assertEqual([k for k, _ in sent], ["rollover"])

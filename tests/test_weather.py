@@ -2,7 +2,6 @@
 
 import json
 import unittest
-from datetime import timedelta
 from unittest.mock import patch
 
 from tests.fixtures import DAY, at, make_scheduler
