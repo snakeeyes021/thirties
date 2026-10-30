@@ -1126,6 +1126,7 @@ class AssistantTools:
                 if not ticked and text.lower() in daily and text not in done_lines and re.search(
                         r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M):
                     writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                    self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
                     done.append(f"took yesterday's {text} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
             for text in self._done_on_plan(today, day):

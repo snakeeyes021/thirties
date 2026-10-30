@@ -149,7 +149,7 @@ class DayProposal:
         out = []
         busy = [s for s in plan.active_spans() if s.status != SpanStatus.SKIPPED and not s.tentative]
         for a, b in windows:
-            a = max(a, thirty_ceil(now))
+            a = max(a, thirty_ceil(now + timedelta(minutes=1)))  # from the next thirty: not "start this minute"
             if b - a < timedelta(minutes=30):
                 continue
             before = max((s for s in busy if s.end_dt <= a + timedelta(minutes=1) and s.end_dt > a - timedelta(minutes=30)),
@@ -162,12 +162,14 @@ class DayProposal:
         return out
 
     def candidates(self, plan: Optional["DayPlan"] = None) -> List[Dict[str, Any]]:
-        """What's worth proposing, most pressing first: due within a week, 'now', on the Today note, 'soon'; then
-        a free-time pick or two and time on a project. Never routines, someday or reference items, anything done,
-        or what's already on the plan."""
+        """What's worth proposing for the day, most pressing first (see _proposal_candidates)."""
+        return _proposal_candidates(self, plan or self.pt.day_plan)
+
+    def own_candidates(self, plan: "DayPlan") -> List[Dict[str, Any]]:
+        """Due within a week, 'now', on the Today note, 'soon'; then a free-time pick or two and time on a project.
+        Never routines, anchors, someday or reference items, anything done, or what's already on the plan."""
         from thirties_core.backlog import DONE_HIDES_DAYS
         from thirties_core.lists import urgency_label
-        plan = plan or self.pt.day_plan
         day = plan.target_date
         daily = self.a.routines.daily_titles()
         on_plan = {s.title.strip().lower() for s in plan.spans if s.status != SpanStatus.SKIPPED}
@@ -384,6 +386,14 @@ class DayProposal:
     def handlers(self) -> Dict[str, Any]:
         return {"day_options": self.day_options, "propose_day": self.propose_day,
                 "apply_day_proposal": self.apply_day_proposal}
+
+
+def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any]]:
+    """The pressing candidates for a day: one swap point. TODO(merge, G): when thirties_core/horizons.py lands, its
+    candidates_for_day(day) (items pinned to this week / month / year, bubbled down into days) should feed this;
+    each candidate here is {"rank", "task" (TaskItem or None), "title", "why", "where", "minutes"}. Until then,
+    DayProposal.own_candidates."""
+    return dp.own_candidates(plan)
 
 
 def morning_proposal(manager) -> Tuple[str, bool]:

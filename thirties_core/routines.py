@@ -713,7 +713,8 @@ class RoutineTools:
             parts, source = self.parts_for(note, r, plan.target_date)
             line = f"- {note['title']}: {describe_repeat(r.schedule)}"
             if r.schedule.get("every") == "days":
-                upcoming = next_due(r, plan.target_date - timedelta(days=1), self.gen, done)
+                upcoming = next_due(r, plan.target_date - timedelta(days=0 if done == plan.target_date else 1),
+                                    self.gen, done)  # done today: the next one
                 line += f"; last done {done.strftime('%b %-d') if done else 'unknown'}" + (
                     f"; next due {upcoming.strftime('%a %b %-d')}" if upcoming and upcoming != plan.target_date else "")
             if parts:
