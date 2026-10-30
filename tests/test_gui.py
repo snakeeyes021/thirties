@@ -18,6 +18,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from tests.fixtures import DAY, at, event, make_scheduler
+from thirties_core.clock import format_clock
 from thirties_core.astronomy import set_debug_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import MockInferenceEngine
@@ -54,7 +55,7 @@ if GTK:
     from thirties.views import settings_rows
     from thirties.views.preferences import PreferencesDialog
     from thirties.views.setup import SetupWindow
-    from thirties.widgets.block_widget import GroupedBlockWidget
+    from thirties.views.timeline import DayCanvas, PlanHerePopover, TimelinePage
 
 
 def _span(sched, sid, title, start, end, category=SpanCategory.ACTIVITY):
@@ -85,10 +86,6 @@ class DayViewTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         set_debug_time(None)
-
-    def rows(self, view):
-        return [(r.title_label.get_text(), isinstance(r, GroupedBlockWidget), len(getattr(r, "blocks", [None])))
-                for r in view._rows]
 
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
@@ -157,46 +154,6 @@ class DayViewTests(unittest.TestCase):
         buttons[0].emit("clicked")
         self.assertEqual(calls, [("log_outcome", {"event": "movie", "status": "done"})])
 
-    def test_multi_thirty_items_collapse_into_cards(self) -> None:
-        view = DayView(self.plan)
-        rows = self.rows(view)
-        self.assertIn(("Dinner + Audiobook", True, 2), rows)
-        self.assertIn(("Movie", True, 3), rows)
-        self.assertIn(("Research", True, 2), rows)
-        self.assertIn(("Lunch with Sam", False, 1), rows)
-        self.assertIn(("Sleep", True, 16), rows)
-        # Work is split around lunch and research, each part saying what it belongs to
-        work = [r for r in view._rows if r.title_label.get_text() == "Work"]
-        self.assertGreaterEqual(len(work), 3)
-        grouped_work = [r for r in work if isinstance(r, GroupedBlockWidget)]
-        self.assertTrue(all(r.context and r.context.startswith("Part of Work") for r in grouped_work))
-        # Open thirties stay individual
-        self.assertTrue(all(not g for t, g, _ in rows if t.startswith("Open")))
-
-    def test_now_highlight_and_tallies_follow_the_clock(self) -> None:
-        view = DayView(self.plan)
-        current = [r for r in view._rows if r.is_current]
-        self.assertEqual([r.title_label.get_text() for r in current], ["Open Dark Thirty"])
-        self.assertTrue(current[0].has_css_class("block-current"))
-        before = view.dark_pill.get_text()
-
-        set_debug_time(at("20:40"))
-        view.tick()
-        current = [r for r in view._rows if r.is_current]
-        self.assertEqual([r.title_label.get_text() for r in current], ["Movie"])
-        self.assertTrue(current[0].now_badge.get_visible())
-        self.assertNotEqual(view.dark_pill.get_text(), before)
-        counts = self.plan.availability(at("20:40"))
-        self.assertEqual(view.dark_pill.get_text(), f"☾ Dark: {counts['dark_open']}/{counts['dark_total']} available")
-
-    def test_other_days_count_every_thirty(self) -> None:
-        set_debug_time(at("12:00") + timedelta(days=3))
-        view = DayView(self.plan)
-        counts = self.plan.availability()
-        self.assertEqual(view.daylight_pill.get_text(),
-                         f"☼ Daylight: {counts['daylight_open']}/{counts['daylight_total']} available")
-        self.assertFalse(any(r.is_current for r in view._rows))
-
     @staticmethod
     def action_rows(group):
         rows = []
@@ -227,11 +184,12 @@ class DayViewTests(unittest.TestCase):
         now = self.action_rows(view.agenda.groups["now"])
         self.assertEqual(now[0], ("Free until 8:00 PM", ""))  # someone else's event doesn't make the user busy
         self.assertEqual(now[1], ("Rehearsal", "7:00 PM – 9:00 PM · not yours (shown only)"))
-        dev = next(r for r in view._rows if r.title_label.get_text() == "Torquio dev")
-        self.assertEqual(dev.status, "Worked on")
-        noted = [r for r in view._rows if "Rehearsal" in (r.context or "")]
-        self.assertEqual(len(noted), 1)
-        self.assertFalse(any("Rehearsal" in r.title_label.get_text() for r in view._rows))
+        cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
+        self.assertEqual(cards["Torquio dev"].card.status, "Worked on")
+        self.assertNotIn("<s>", cards["Torquio dev"].title_label.get_label())  # a session isn't struck through
+        self.assertEqual(cards["Dinner"].card.status, "Not reported")
+        self.assertNotIn("Rehearsal", cards)  # a quiet note where it starts, never a card
+        self.assertEqual([lbl.get_text() for lbl, _ in view.timeline.canvas.notes], ["Rehearsal (not yours)"])
 
     def test_a_routine_can_be_skipped_three_ways_from_the_day_page(self) -> None:
         from datetime import date
@@ -262,14 +220,199 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(notices[-1], "Pick a day after this one.")
 
-    def test_expanded_cards_stay_open_across_rerenders(self) -> None:
-        view = DayView(self.plan)
-        movie = next(r for r in view._rows if r.title_label.get_text() == "Movie")
-        movie._on_toggle(None)
-        view.refresh_plan(self.plan, force=True)
-        movie = next(r for r in view._rows if r.title_label.get_text() == "Movie")
-        self.assertTrue(movie.expanded)
 
+@unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+class TimelineTests(unittest.TestCase):
+    """The Timeline page (views/timeline.py): Day and Week tabs over thirties_core/timeline_layout.py."""
+
+    def setUp(self) -> None:
+        self.sched = make_scheduler([event("lunch", "12:00", "12:30", "Lunch with Sam")])
+        _span(self.sched, "dinner", "Dinner", "18:00", "19:00")
+        _span(self.sched, "audio", "Audiobook", "18:00", "19:00")
+        _span(self.sched, "movie", "Movie", "20:00", "21:30")
+        _span(self.sched, "research", "Research", "13:00", "14:00", SpanCategory.TASK)
+        self.plan, _ = self.sched.build_day_plan(DAY)
+        set_debug_time(at("19:10"))
+        self.calls = []
+        self.view = DayView()
+        self.view.set_actions(lambda name, args: self.calls.append((name, args)) or "", None)
+        self.view.refresh_plan(self.plan)
+        self.page = self.view.timeline
+
+    def tearDown(self) -> None:
+        set_debug_time(None)
+
+    def cards(self):
+        return {w.card.span.title: w for w in self.page.canvas.cards}
+
+    def test_it_builds_a_slot_per_thirty_of_the_waking_day(self) -> None:
+        from thirties.views import timeline
+        self.assertEqual(self.view.stack.get_visible_child_name(), "day")  # the Day page stays the first page
+        self.assertIsNotNone(self.view.stack.get_child_by_name("timeline"))
+        self.assertEqual(len(self.page.layout.slots), 32)  # 7 AM to 11 PM, no clock times anywhere
+        height = self.page.canvas.measure(Gtk.Orientation.VERTICAL, -1)[0]
+        self.assertEqual(height, timeline.TOP * 2 + 32 * timeline.PITCH)
+        self.assertEqual(set(self.cards()), {"Lunch with Sam", "Research", "Dinner", "Audiobook", "Movie"})
+        self.assertIn("8:00 PM – 9:30 PM", self.cards()["Movie"].get_tooltip_text())  # real times on hover
+        win = Gtk.Window(child=self.view, default_width=800, default_height=700)
+        self.view.stack.set_visible_child_name("timeline")
+        win.present()
+        self.assertTrue(_iterate_until(lambda: self.page.canvas.get_width() > 0))
+        movie = self.cards()["Movie"]
+        self.assertEqual(movie.get_allocated_height(), 3 * timeline.PITCH - timeline.GAP)  # three thirties
+        dinner, audio = self.cards()["Dinner"], self.cards()["Audiobook"]
+        self.assertAlmostEqual(dinner.get_allocated_width(), audio.get_allocated_width(), delta=1)  # side by side
+        win.destroy()
+
+    def test_free_stretches_are_from_now_and_never_inside_work(self) -> None:
+        free = [(f.start, f.end) for _b, f in self.page.canvas.frees]
+        self.assertEqual(free, [(at("19:00"), at("20:00")), (at("21:30"), at("23:00"))])
+        set_debug_time(at("06:00"))  # before the day starts: all of it
+        view = DayView(self.plan)
+        frees = [f for _b, f in view.timeline.canvas.frees]
+        self.assertTrue(frees)
+        self.assertFalse(any(f.start < at("16:00") and f.end > at("08:30") for f in frees))
+        self.assertTrue(all(s.work for s in view.timeline.layout.slots[3:18]))  # Work is hatched slots
+
+    def test_the_tick_logs_the_outcome_like_the_day_page(self) -> None:
+        set_debug_time(at("20:10"))
+        self.view.refresh_plan(self.plan, force=True)
+        cards = self.cards()
+        cards["Movie"].tick.emit("clicked")
+        self.assertEqual(self.calls[-1], ("log_outcome", {"event": "movie", "status": "done", "finished": "8:10 PM"}))
+        cards["Lunch with Sam"].tick.emit("clicked")  # the user's own event, past: it happened at its time
+        self.assertEqual(self.calls[-1], ("log_outcome", {"event": "cal:lunch", "status": "done"}))
+
+    def test_a_done_item_is_struck_through_and_its_tick_filled(self) -> None:
+        from thirties_core.models import SpanStatus
+        movie = next(s for s in self.plan.spans if s.id == "movie")
+        movie.status = SpanStatus.DONE
+        view = DayView(self.plan)
+        card = {w.card.span.title: w for w in view.timeline.canvas.cards}["Movie"]
+        self.assertIn("<s>Movie</s>", card.title_label.get_label())
+        self.assertTrue(card.tick.has_css_class("checked"))
+        self.assertFalse(card.tick.get_sensitive())
+        self.assertTrue(card.has_css_class("done"))
+
+    def test_the_hand_moves_with_the_clock(self) -> None:
+        before = self.page.layout.now_row
+        set_debug_time(at("19:40"))
+        self.view.tick()
+        self.assertAlmostEqual(self.page.layout.now_row - before, 1.0)
+        self.assertFalse(self.page.layout.now_daylight)  # after sunset: the moon
+
+    def test_plan_something_in_a_free_stretch(self) -> None:
+        from thirties_core.plan_tools import PlanTools
+        from thirties_core.timeline_layout import stretch_options
+        tools = PlanTools(self.plan, [], self.sched)
+        self.page.stretch_options = lambda stretch, minutes: stretch_options(tools, self.plan, stretch, minutes,
+                                                                             at("19:10"))
+        self.page.suggestions = lambda: [{"task_id": "t1", "title": "Call the bank", "why": "due today"}]
+        button, evening = self.page.canvas.frees[1]
+        win = Gtk.Window(child=self.view, default_width=800, default_height=700)
+        self.view.stack.set_visible_child_name("timeline")
+        win.present()
+        self.assertTrue(_iterate_until(button.get_mapped))
+        pop = self.page._plan_here(button, evening)
+        self.assertIsInstance(pop, PlanHerePopover)
+        self.assertIn("Right after Movie", [c.get_label() for c, _ in pop.choices])
+        pop._pick({"task_id": "t1", "title": "Call the bank"})
+        pop.blocks.set_value(2)
+        pop.choices[-1][0].set_active(True)
+        pop.add_btn.emit("clicked")
+        name, args = self.calls[-1]
+        self.assertEqual(name, "add_event")
+        self.assertEqual(args, {"title": "Call the bank", "start": format_clock(pop.choices[-1][1].start),
+                                "duration": "60 minutes", "category": "task", "task_id": "t1"})
+        win.destroy()
+
+    def test_the_week_shows_seven_days_their_free_time_and_the_weeks_chips(self) -> None:
+        from thirties_core.timeline_layout import week_days
+        stored = {"units": "blocks"}
+        self.page.get_units = lambda: stored["units"]
+        self.page.set_units = lambda units: stored.update(units=units)
+        self.page.threaded_week = False
+        self.page.load_week = lambda anchor, days: ([self.sched.build_day_plan(d)[0] for d in days],
+                                                    [{"item_id": "door", "title": "Fix the door", "list": "Home"}])
+        self.page.stack.set_visible_child_name("week")
+        week = self.page.week
+        self.assertEqual([c.day for c in week.layout.columns], week_days(DAY))
+        self.assertEqual(week.title.get_text(), "This week")
+        self.assertTrue(week.total.get_text().endswith("blocks free"))
+        self.assertEqual(week.frees[3].get_text(), "5 blocks free")  # today, from now on
+        self.assertEqual(week.frees[0].get_text(), "")  # Monday is over
+        self.assertTrue(week.heads[3].has_css_class("accent"))
+        chip = week.chip_box.get_first_child()
+        self.assertEqual(chip.chip["title"], "Fix the door")
+        week.on_pin("door", DAY + timedelta(days=1))  # dropped onto Friday
+        self.assertEqual(self.calls[-1], ("pin_to_period", {"task": "door", "when": "2026-10-16"}))
+        self.assertTrue(self.page.units_toggle.get_visible())  # the units toggle is on the Week tab
+        self.page.units_toggle.set_active_name("hours")
+        self.assertEqual(stored["units"], "hours")
+        self.assertEqual(week.frees[3].get_text(), "2½ h free")
+        self.page.stack.set_visible_child_name("day")
+        self.assertFalse(self.page.units_toggle.get_visible())
+
+    def test_work_is_one_hatched_card_under_the_items(self) -> None:
+        work = [(lbl.get_text(), c.row, c.rows) for lbl, c in self.page.canvas.work]
+        self.assertEqual(work, [("Work", 3, 15)])
+        self.assertNotIn("Work", self.cards())  # no tick, not draggable: a card of its own kind
+
+    def present_timeline(self):
+        win = Gtk.Window(child=self.view, default_width=800, default_height=700)
+        self.view.stack.set_visible_child_name("timeline")
+        win.present()
+        self.assertTrue(_iterate_until(lambda: self.page.canvas.get_width() > 0 and self.cards()["Movie"].get_mapped()))
+        self.addCleanup(win.destroy)
+        return win
+
+    def test_drag_moves_and_edges_resize_through_update_event(self) -> None:
+        from thirties.views import timeline
+        self.present_timeline()
+        canvas = self.page.canvas
+        movie = self.cards()["Movie"]
+        x, y, w, h = canvas.lane_rect(canvas.get_width(), movie.card)
+        body = canvas.begin_gesture(x + w / 2, y + timeline.PITCH + 10)  # grabbed by its second thirty
+        self.assertEqual((body["mode"], body["grab"]), ("move", 1))
+        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),
+                         ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        self.assertEqual(canvas.gesture_call(body, -4 * timeline.PITCH, push=True)[1],
+                         {"event": "movie", "start": "6:00 PM", "push_later": True})  # Shift: push what follows
+        bottom = canvas.begin_gesture(x + w / 2, y + h - 2)
+        self.assertEqual(bottom["mode"], "bottom")
+        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH), ("update_event", {"event": "movie",
+                                                                                         "end": "10:00 PM"}))
+        top = canvas.begin_gesture(x + w / 2, y + 2)
+        self.assertEqual(canvas.gesture_call(top, timeline.PITCH)[1],
+                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM"})
+        from gi.repository import Graphene
+        _ok, point = movie.tick.compute_point(canvas, Graphene.Point().init(5, 5))
+        self.assertIsNone(canvas.begin_gesture(point.x, point.y))  # pressing the tick doesn't drag
+        lunch = self.cards()["Lunch with Sam"]
+        lx, ly, lw, _lh = canvas.lane_rect(canvas.get_width(), lunch.card)
+        self.assertIsNone(canvas.begin_gesture(lx + lw / 2, ly + 10))  # calendar events are fixed
+        self.assertTrue(lunch.has_css_class("fixed"))
+
+    def test_delete_removes_it_with_undo(self) -> None:
+        toasts = []
+        self.page.toast = lambda title, undo: toasts.append((title, undo))
+        self.present_timeline()
+        movie = self.cards()["Movie"]
+        pop = self.page.canvas._open_card(movie)  # a tap: its real times, and Remove
+        pop.remove_button.emit("clicked")
+        self.assertEqual(self.calls[-1], ("remove_event", {"event": "movie"}))
+        self.assertEqual(toasts[0][0], "Removed Movie")
+        toasts[0][1]()  # Undo
+        self.assertEqual(self.calls[-1], ("add_event", {"title": "Movie", "start": "8:00 PM", "end": "9:30 PM",
+                                                         "alongside": True}))
+        lunch = self.cards()["Lunch with Sam"]
+        self.page.canvas.on_delete(lunch.card)
+        self.assertEqual(self.calls[-1][0], "add_event")  # a calendar event can't be removed here
+
+    def test_units_follow_the_setting(self) -> None:
+        self.page.get_units = lambda: "hours"
+        self.view.refresh_plan(self.plan)  # nothing changed in the plan: the units are still read
+        self.assertEqual(self.page.units_toggle.get_active_name(), "hours")
 
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
 class ChatPanelTests(unittest.TestCase):
@@ -500,6 +643,12 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertEqual(self.core.settings.get("general.week_start"), "sun")
         ctx.flush()
         self.assertEqual(self.core.config.general.week, {"sat": {"sleep_end_thirty": 18}})  # applied live
+
+    def test_free_time_units_in_preferences(self):
+        group = settings_rows.timeline_group(settings_rows.SettingsContext(self.core))
+        self.assertEqual(group.units_row.get_selected(), 0)  # blocks by default
+        group.units_row.set_selected(1)
+        self.assertEqual(self.core.settings.get("timeline.free_units"), "hours")
 
     def test_each_calendar_is_mine_show_only_or_ignored(self):
         from unittest import mock

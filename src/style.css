@@ -114,3 +114,61 @@
     background-color: @accent_bg_color;
     color: @accent_fg_color;
 }
+
+/* The Timeline page (views/timeline.py). Colours by kind from the GNOME palette; translucent, so they sit on the
+   slot bands in light and dark alike. The canvas draws the slots, the sky, pips and notches. */
+.tl-card {
+    --tl-edge: var(--blue-3);
+    border-radius: 9px;
+    border-left: 3px solid var(--tl-edge);
+    background-color: color-mix(in srgb, var(--tl-edge) 20%, var(--window-bg-color));
+    padding: 0 4px 0 6px;
+}
+.tl-card.daily { --tl-edge: var(--green-4); }
+.tl-card.ongoing { --tl-edge: var(--purple-2); }
+.tl-card.calendar { --tl-edge: var(--orange-3); }
+.tl-card.done,
+.tl-card.skipped,
+.tl-card.moot { opacity: 0.6; }
+.tl-card.current { background-color: color-mix(in srgb, var(--tl-edge) 30%, var(--window-bg-color)); }
+
+.tl-tick {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    border-radius: 999px;
+    border: 2px solid var(--tl-edge);
+    background: none;
+    box-shadow: none;
+}
+.tl-tick:hover { background-color: color-mix(in srgb, var(--tl-edge) 25%, transparent); }
+.tl-tick.checked { background-color: var(--tl-edge); color: white; }
+.tl-tick.crossed { border-style: solid; color: var(--tl-edge); }
+.tl-tick:disabled { filter: none; opacity: 1; }
+.tl-card.moot .tl-tick { border-style: dashed; }
+
+.tl-free {
+    border: 1.5px dashed color-mix(in srgb, var(--success-color) 70%, transparent);
+    border-radius: 9px;
+    background: none;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
+}
+.tl-free:hover { background-color: color-mix(in srgb, var(--success-color) 8%, transparent); }
+
+.tl-note { opacity: 0.6; font-style: italic; }
+
+.tl-chip,
+.tl-chip > button {
+    border-radius: 999px;
+    padding: 2px 12px;
+    min-height: 24px;
+}
+.tl-chips { padding: 10px 12px; }
+
+.timeline .accent { color: var(--accent-color); }
+.tl-card:focus-visible,
+.tl-card:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.tl-card.fixed .tl-title { font-weight: 600; }
+.tl-work-label { font-weight: 600; opacity: 0.55; }

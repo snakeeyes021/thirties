@@ -57,6 +57,7 @@ _ALL = [
     Setting("telegram.notify_block_transitions", "shared"),
     Setting("calendar.modes", "shared"),  # per calendar: mine / show only / ignore (by name: uids differ per device)
     Setting("telegram.mirror_desktop", "shared"),
+    Setting("timeline.free_units", "shared"),  # free time in "blocks" or "hours" (timeline_layout.py)
     Setting("assistant.sunrise_notice", "shared"),
     Setting("assistant.sunset_notice", "shared"),
     # about this machine

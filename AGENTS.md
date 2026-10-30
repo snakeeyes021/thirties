@@ -192,8 +192,7 @@ Thirties/
 │   ├── main.py                        # GUI entrypoint: setup on first run, background mode, notifications
 │   ├── portal.py                      # The Background portal (run in background, autostart) over D-Bus
 │   ├── window.py                      # Main application window (schedule and chat panes)
-│   ├── views/                         # DayView, ChatPanel, setup, Preferences (shared settings rows)
-│   └── widgets/                       # BlockWidget, SolarArc
+│   └── views/                         # DayView (Day page + Timeline), ChatPanel, setup, Preferences (shared settings rows)
 ├── thirties_core/                     # Pure Python core: zero GUI imports
 │   ├── app_core.py                    # What a running app shares: config + settings, engines, background service
 │   ├── assistant_tools.py             # Outcomes, rollover, memory, profile, history, statistics, reminders, Joplin edits

@@ -283,6 +283,20 @@ def week_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     return group
 
 
+def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Free time in blocks (thirties) or hours: shared with the Timeline's own toggle (timeline_layout.py)."""
+    from thirties_core.timeline_layout import DEFAULT_UNITS, UNITS, UNITS_SETTING, normalise_units
+    group = Adw.PreferencesGroup(title="Timeline")
+    names = {"blocks": "Blocks (thirties)", "hours": "Hours"}
+    row = Adw.ComboRow(title="Show free time in", subtitle="\"7 blocks free\" or \"3½ h free\"",
+                       model=Gtk.StringList.new([names[u] for u in UNITS]))
+    row.set_selected(UNITS.index(normalise_units(ctx.get(UNITS_SETTING, DEFAULT_UNITS))))
+    row.connect("notify::selected", lambda r, _p: ctx.set(UNITS_SETTING, UNITS[r.get_selected()]))
+    group.add(row)
+    group.units_row = row
+    return group
+
+
 # --- the assistant ---
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
