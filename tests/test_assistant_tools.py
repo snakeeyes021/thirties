@@ -171,8 +171,8 @@ class TestAnyDay(ToolsTestCase):
 
     def test_alongside_allows_concurrent_activities(self) -> None:
         self.t.execute("add_event", {"title": "Dinner", "start": "6:30 PM", "duration": "1 hour"})
-        self.assertTrue(self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour"}).startswith(NOT_DONE))
-        self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour", "alongside": True})
+        out = self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour"})
+        self.assertIn("alongside Dinner", out)  # items share time without being told (10-26)
         self.assertEqual(self.t.day_plan.display_title(self.t.day_plan.block_at(at("18:45"))), "Dinner + Audiobook")
 
 

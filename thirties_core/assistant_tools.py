@@ -875,13 +875,21 @@ class AssistantTools(KindTools):
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        if span is not None and span.source == "calendar" and not span.tentative:
+            # An event is something you'd mark done (soak 1): the outcome is Thirties', the calendar is untouched.
+            from thirties_core.calendar_outcomes import log_calendar_outcome
+            return log_calendar_outcome(self.pt, span, st, start_dt, end_dt, note, guessed)
         if (span is not None and st != SpanStatus.SKIPPED and start_dt is None and end_dt is None
                 and duration in (None, "")):
             # Said with no time ("kitties are fed", a tick in the Day page): it finished when it was said, as an
             # estimate (10-25: fed at 10:44, stored at the planned 10:00). Long after its time, nobody knows when:
-            # the planned times stay, marked as planned.
+            # the planned times stay, marked as planned. Ticked before its time, Thirties picks the times: on
+            # blocks, and back to back with other early ticks (soak 3).
             now = self.pt._now()
-            if span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
+            if now < span.start_dt and now >= span.start_dt - timedelta(hours=3) and not span.is_envelope:
+                from thirties_core.placement import early_tick_times
+                start_dt, end_dt = early_tick_times(self.pt.day_plan, span, now)
+            elif span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
                 end_dt = now
 
         if span is None:

@@ -132,11 +132,11 @@ class DayViewTests(unittest.TestCase):
         early[0].emit("clicked")  # done early, from Next
         self.assertEqual(calls[-1][1]["event"], "movie")
         self.assertEqual((calls[-1][0], calls[-1][1]["status"]), ("log_outcome", "done"))
-        self.assertIn("finished", calls[-1][1])
+        self.assertNotIn("finished", calls[-1][1])  # done early: Thirties picks the times, on blocks (soak 3)
         view.agenda.replan_btn.emit("clicked")
         self.assertEqual(calls[-1], ("redraw", {}))
         self.assertTrue(view.move_to("movie", at("21:00")))
-        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM", "push_later": True}))
+        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM"}))  # nothing else moves
 
     def test_items_past_their_time_are_not_assumed_done(self) -> None:
         set_debug_time(at("21:40"))

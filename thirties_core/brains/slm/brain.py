@@ -81,6 +81,8 @@ class DialogState:
                    dict(data.get("awaiting_time", {})))
 
 
+PUSH_BY_RE = re.compile(r"\b(?:back|later)\s+(?:by\s+)?((?:an?|one|two|three|four|five|half an?|\d+(?:\.\d+)?)\s*"
+                        r"(?:hours?|hrs?|minutes?|mins?|chunks?|blocks?)(?:\s+and\s+a\s+half)?)\b", re.I)
 REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
                        r"( else)? (back|later)|just figure it out|undo the (re-?plan|redraw))\b", re.I)
 NOT_RE = re.compile(r"\b(don'?t|do not|no need to|not|never|can'?t|won'?t)\b([^\w.!?]+\w+){0,3}[^\w.!?]+"
@@ -217,10 +219,16 @@ class SlmBrain:
         if REDRAW_RE.search(user_text) and not NOT_RE.search(user_text) and not BUILD_PLAN_RE.search(user_text):
             # rearrange what's planned: Python does it, no parse. Asking to lay out a day goes to the parse instead
             undo = bool(re.search(r"\bundo\b|\bput (it|everything) back\b", user_text, re.I))
-            ok, reply = self._run("undo_redraw" if undo else "redraw", {})
-            if undo or (ok and not reply.startswith("Nothing to redraw")):
+            by = PUSH_BY_RE.search(user_text) if not undo else None
+            if by:  # "push everything back two hours": the rest moves by that much, past unmarked items too (S4)
+                ok, reply = self._run("push_back", {"by": by.group(1)})
+                action = "push_back"
+            else:
+                ok, reply = self._run("undo_redraw" if undo else "redraw", {})
+                action = "undo_redraw" if undo else "redraw"
+            if undo or by or (ok and not reply.startswith("Nothing to redraw")):
                 self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
-                                      "slm_actions": [{"type": "undo_redraw" if undo else "redraw"}]})
+                                      "slm_actions": [{"type": action}]})
                 return reply
         try:
             actions = self._parse(user_text)

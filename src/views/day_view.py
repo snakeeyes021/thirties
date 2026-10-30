@@ -2,57 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk
 
 from thirties_core.astronomy import get_current_time
-from thirties_core.models import DayPlan, EventSpan, ThirtyBlock
+from thirties_core.day_layout import (Segment, build_segments, card_rows, segment_context, segment_title,  # noqa: F401
+                                      status_label)
+from thirties_core.models import _DISPLAY_PRIORITY, DayPlan
 from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget, format_clock
 from thirties.widgets.solar_arc import SolarArcWidget
-
-
-@dataclass
-class Segment:
-    """Consecutive thirties that show the same thing (or one open thirty)."""
-    blocks: list[ThirtyBlock]
-    spans: list[EventSpan] = field(default_factory=list)  # what fills it; empty when open
-    is_envelope: bool = False
-
-    @property
-    def key(self) -> tuple:
-        return (tuple(s.id for s in self.spans), self.blocks[0].index)
-
-
-def _occupancy(plan: DayPlan, block: ThirtyBlock) -> tuple[bool, list[EventSpan]]:
-    """What a thirty shows: its non-envelope spans if any, otherwise the envelope under it."""
-    occupants = plan.spans_overlapping(block.start_dt, block.end_dt)
-    foreground = [s for s in occupants if not s.is_envelope]
-    if foreground:
-        return False, foreground
-    span = plan.display_span(block)
-    return True, [span] if span else []
-
-
-def build_segments(plan: DayPlan) -> list[Segment]:
-    """Group the day's thirties into cards.
-
-    Consecutive thirties with exactly the same occupants become one segment, so
-    a two-thirty dinner is one card, and "Dinner + Audiobook" is its own card for
-    the thirties where both happen. Anything planned on top of work or sleep
-    splits the envelope around it, keeping the list in clock order. Open thirties
-    stay individual: each is a slot to plan.
-    """
-    segments: list[Segment] = []
-    for block in plan.blocks:
-        is_envelope, spans = _occupancy(plan, block)
-        prev = segments[-1] if segments else None
-        if (spans and prev is not None and prev.spans
-                and [s.id for s in prev.spans] == [s.id for s in spans]):
-            prev.blocks.append(block)
-        else:
-            segments.append(Segment([block], spans, is_envelope))
-    return segments
 
 
 class DayView(Gtk.Box):
@@ -257,39 +215,40 @@ class DayView(Gtk.Box):
         row.add_controller(target)
 
     def move_to(self, span_id: str, start: datetime) -> bool:
-        """Move an item to a thirty; what's there slides later, in order."""
+        """Move an item to a thirty. What's there stays and shares the time: moving one item never moves another
+        (item 17)."""
         if self.run_tool is None:
             return False
-        self.run_tool("update_event", {"event": span_id, "start": format_clock(start), "push_later": True})
+        self.run_tool("update_event", {"event": span_id, "start": format_clock(start)})
         return True
 
     def _build_row(self, plan: DayPlan, seg: Segment) -> Gtk.Widget:
         first = seg.blocks[0]
-        if len(seg.blocks) == 1:
+        items = [s for s in seg.spans if not s.is_envelope]
+        title = segment_title(plan, seg)
+        context = segment_context(seg)
+        if len(seg.blocks) == 1 and len(items) <= 1:
             return BlockWidget(
                 first,
                 span=plan.display_span(first),
                 is_current=(first.index == self._now_idx),
                 display_index=first.number,
-                title=plan.display_title(first),
+                title=title,
+                status=status_label(items),
+                context=context,
             )
-
-        start = max(first.start_dt, min(s.start_dt for s in seg.spans))
-        end = min(seg.blocks[-1].end_dt, max(s.end_dt for s in seg.spans))
-        context = None
-        if len(seg.spans) == 1:
-            span = seg.spans[0]
-            if span.start_dt < start or span.end_dt > end:
-                context = f"Part of {span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)}"
+        lead = min(items, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt)) if items else seg.spans[0]
         key = seg.key
         return GroupedBlockWidget(
-            plan.display_span(first),
+            lead,
             [(b, b.number) for b in seg.blocks],
             now_block_idx=self._now_idx,
-            title=plan.display_title(first),
-            start_dt=start,
-            end_dt=end,
+            title=title,
+            start_dt=seg.start_dt,
+            end_dt=seg.end_dt,
             context=context,
+            rows=card_rows(plan, seg),
+            status=status_label(items),
             expanded=key in self._expanded,
             on_expanded_changed=lambda _w, expanded, key=key: self._on_expanded_changed(key, expanded),
         )
