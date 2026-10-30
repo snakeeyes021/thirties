@@ -193,7 +193,7 @@ class BackgroundService:
     def _quiet(self, now: datetime) -> bool:
         """Asleep, or in a calendar event: no messages (except reminders the user asked for)."""
         plan = self.manager().day_plan
-        return any(s.start_dt <= now < s.end_dt for s in plan.active_spans() if not s.tentative
+        return any(s.covers(now) for s in plan.active_spans() if not s.tentative  # covers: the instant (DST)
                    and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm)))
 
     def _talking(self, now: datetime) -> bool:

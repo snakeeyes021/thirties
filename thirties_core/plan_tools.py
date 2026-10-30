@@ -186,9 +186,9 @@ _JOINER = re.compile(r"\s+(?:/|&|\+|and|with)\s+|\s*/\s*", re.IGNORECASE)
 
 def _merge_intervals(intervals: List[Tuple[datetime, datetime]]) -> List[Tuple[datetime, datetime]]:
     merged: List[Tuple[datetime, datetime]] = []
-    for start, end in sorted(intervals):
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    for start, end in sorted(intervals, key=lambda iv: (iv[0].timestamp(), iv[1].timestamp())):  # instants (DST)
+        if merged and start.timestamp() <= merged[-1][1].timestamp():
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end, key=lambda t: t.timestamp()))
         else:
             merged.append((start, end))
     return merged
@@ -330,7 +330,7 @@ class PlanTools:
         shorts = [s for s in self.day_plan.spans_overlapping(block, block + timedelta(minutes=30))
                   if s.id != ignore and not s.is_envelope and s.duration_minutes < 30
                   and s.start_dt >= block and s.end_dt <= block + timedelta(minutes=30)]
-        if not any(s.start_dt < end and start < s.end_dt for s in shorts):
+        if not any(s.overlaps(start, end) for s in shorts):
             return start, end
         after = max(s.end_dt for s in shorts)
         if after + length <= block + timedelta(minutes=30):
@@ -425,10 +425,11 @@ class PlanTools:
     def _carve(self, span: EventSpan, start: datetime, end: datetime) -> str:
         """Remove [start, end) from a span: delete, trim, or split it. Returns a description."""
         before = self.describe(span)
-        if start <= span.start_dt and span.end_dt <= end:
+        start_t, end_t, s_t, e_t = start.timestamp(), end.timestamp(), span.start_dt.timestamp(), span.end_dt.timestamp()
+        if start_t <= s_t and e_t <= end_t:  # instants: wall times repeat on the DST fall-back night
             self._drop(span)
             return f"removed {before}"
-        if span.start_dt < start and end < span.end_dt:
+        if s_t < start_t and end_t < e_t:
             tail = EventSpan(
                 new_span_id(), span.title, end, span.end_dt, span.category, source=span.source,
                 task_id=span.task_id, status=span.status,
@@ -438,7 +439,7 @@ class PlanTools:
             self._persist(span)
             self._persist(tail)
             return f"split {before} around the cleared time"
-        if span.start_dt < start:
+        if s_t < start_t:
             span.end_dt = start
         else:
             span.start_dt = end
@@ -484,7 +485,7 @@ class PlanTools:
                             if s.id != anchor.id and self._movable(s) and not self._is_fixed(s)
                             and s.end_dt > anchor.start_dt
                             and s.start_dt >= anchor.start_dt - timedelta(minutes=1)
-                            and s.status == SpanStatus.PLANNED and not (s.start_dt <= now < s.end_dt)),
+                            and s.status == SpanStatus.PLANNED and not s.covers(now)),
                            key=lambda s: s.start_dt)  # what's done, or happening right now, stays where it is
         for span in followers:
             if span.start_dt >= cursor:
@@ -885,13 +886,13 @@ class PlanTools:
     def _behind(self, now: datetime) -> List[EventSpan]:
         """Planned items whose time has passed with nothing reported (not assumed done)."""
         return [s for s in self.day_plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
-                and s.status == SpanStatus.PLANNED and not s.tentative and s.end_dt <= now]
+                and s.status == SpanStatus.PLANNED and not s.tentative and s.end_dt.timestamp() <= now.timestamp()]
 
     def redraw(self, **_: Any) -> str:
         import json
         plan = self.day_plan
         now = self._now()
-        if not (plan.day_start <= now < plan.day_end):
+        if not (plan.day_start.timestamp() <= now.timestamp() < plan.day_end.timestamp()):
             raise ToolError("Redrawing works on today, from now; for another day, move items directly.")
         store = self._facts()
         start_from = thirty_ceil(now)
