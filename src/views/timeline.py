@@ -142,25 +142,37 @@ HAND_SCROLLS = ("M4 16 C4 7 13 5.5 14 10.5 C14.6 13.4 11.6 14.2 10.8 12.4",
 HAND_SPADE = "M16 16 C19 8 26 6.5 29 10 C26 11.5 25 13.5 35.5 16 C25 18.5 26 20.5 29 22 C26 25.5 19 24 16 16 Z"
 
 
-def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: bool = False) -> None:
+HAND_OUTLINE = 3.0  # px of extra stroke, in the background colour, on every part: the hand shows over any card
+
+
+def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: bool = False,
+              outline: Optional[tuple] = None) -> None:
     """The hour hand with its tail at x and its axis at y, pointing right (left when ``mirrored``: then x is its
-    right end). ``scale`` shrinks it (the Week tab's pair, inside today's column)."""
+    right end). ``scale`` resizes it (the Week tab's pair). With ``outline`` (the panel's colour), the hand is drawn
+    first in that colour HAND_OUTLINE px wider on every part (stem, scrolls, the spade's edge), then on top."""
     cr.save()
     cr.translate(x, y)
     cr.scale(-scale if mirrored else scale, scale)
     cr.translate(0, -HAND_H / 2)
-    cr.set_source_rgb(*rgb)
     cr.set_line_cap(1)  # round
     cr.set_line_join(1)
-    cr.set_line_width(2.4)
-    _svg_path(cr, HAND_STEM)
-    cr.stroke()
-    cr.set_line_width(1.8)
-    for d in HAND_SCROLLS:
-        _svg_path(cr, d)
+    extra = HAND_OUTLINE / scale  # in px on screen, whatever the scale
+    for colour, grow in (((outline, extra),) if outline is not None else ()) + ((rgb, 0.0),):
+        cr.set_source_rgba(*colour) if len(colour) == 4 else cr.set_source_rgb(*colour)
+        cr.set_line_width(2.4 + grow)
+        _svg_path(cr, HAND_STEM)
         cr.stroke()
-    _svg_path(cr, HAND_SPADE)
-    cr.fill()
+        cr.set_line_width(1.8 + grow)
+        for d in HAND_SCROLLS:
+            _svg_path(cr, d)
+            cr.stroke()
+        _svg_path(cr, HAND_SPADE)
+        if grow:
+            cr.set_line_width(grow)
+            cr.fill_preserve()
+            cr.stroke()
+        else:
+            cr.fill()
     cr.restore()
 
 
@@ -623,7 +635,7 @@ class DayCanvas(Gtk.Widget):
             cy = self.y_of(layout.now_row)
             cx = SKY_X + SKY_W / 2
             draw_badge(cr, cx, cy, layout.now_daylight, bg)
-            draw_hand(cr, cx + BADGE / 2 - 2, cy, GOLDENROD if layout.now_daylight else PALE_INDIGO)
+            draw_hand(cr, cx + BADGE / 2 - 2, cy, GOLDENROD if layout.now_daylight else PALE_INDIGO, outline=bg)
 
 
 def _legend_swatch(kind: str) -> Gtk.DrawingArea:
@@ -680,7 +692,11 @@ def _legend(kinds_only: bool = False) -> Gtk.Widget:
 
 COL_PAD = 2                     # the waking day's band inside a column
 WORK_INSET = 6                  # items during Work sit this far inside its container, on each side
-WEEK_HAND_SCALE = 20 / HAND_W   # today's two hands, ~20x18 px, inside the column
+WEEK_HAND_SCALE = 31 / HAND_W   # today's two hands, ~31x28 px, inside the column
+TODAY_FRAME = 4                 # today's 2 px inner edge ends here; the hands start just inside it
+# Today's 2 px inner edge, just inside its accent outline (the user, 10-30): black in the dark theme; in the light
+# theme solid black read as harsh on the screenshots, so it's the dark theme's window colour there.
+TODAY_INNER_EDGE = {"dark": (0.0, 0.0, 0.0, 1.0), "light": (0x22 / 255, 0x22 / 255, 0x26 / 255, 1.0)}
 
 
 class WeekColumnArea(Gtk.DrawingArea):
@@ -766,11 +782,17 @@ class WeekColumnArea(Gtk.DrawingArea):
             cr.set_line_width(2)
             _rounded(cr, 1, top - 1, w - 2, bottom - top + 2, 9)
             cr.stroke()
-            if c.now is not None:  # two small hands inside the column's edges, pointing in at now
+            if c.now is not None:  # two hands inside the column's edges, pointing in at now
                 y = 4 + c.now * (h - 8)
                 rgb = GOLDENROD if c.now_daylight else PALE_INDIGO
-                draw_hand(cr, 2, y, rgb, scale=WEEK_HAND_SCALE)
-                draw_hand(cr, w - 2, y, rgb, scale=WEEK_HAND_SCALE, mirrored=True)
+                bg = _lookup(widget, "window_bg_color", (0.13, 0.13, 0.15, 1) if _dark() else (0.98, 0.98, 0.98, 1))
+                draw_hand(cr, TODAY_FRAME, y, rgb, scale=WEEK_HAND_SCALE, outline=bg)
+                draw_hand(cr, w - TODAY_FRAME, y, rgb, scale=WEEK_HAND_SCALE, mirrored=True, outline=bg)
+            # a frame just inside the accent outline, over the contents and the hands
+            cr.set_source_rgba(*TODAY_INNER_EDGE["dark" if _dark() else "light"])
+            cr.set_line_width(2)
+            _rounded(cr, 3, top + 1, w - 6, bottom - top - 2, 7)
+            cr.stroke()
         if self.axis_hint:
             accent = Adw.StyleManager.get_default().get_accent_color().to_standalone_rgba(_dark())
             cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.15)
