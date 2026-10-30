@@ -320,10 +320,15 @@ class ListTools:
         except ToolError:
             span = None
         title = span.title if span is not None else ref
-        task = next((t for t in self.a.s.tasks if span is not None and span.task_id and t.id == span.task_id), None)
+        linked = span.task_id if span is not None else (ref if re.fullmatch(r"[0-9a-f]{16}", ref) else "")
+        task = next((t for t in self.a.s.tasks if linked and t.id == linked), None)
         names = [x for x in {title, task.title if task else ""} if x]
         log = DoneLog(self.a._db)
-        rec = next((r for r in (log.latest(n) for n in names) if r), None)  # by the list item's own wording
+        rec = (next((r for r in log.filed() if linked and _checkbox_id(r["source_note_id"], r["title"]) == linked), None)
+               or next((r for r in (log.latest(n) for n in names) if r), None))  # by its link, else its wording
+        if linked and rec is None:  # done but not filed yet: the linked line, by its id
+            hit = self._ticked_line([], by_id=linked)
+            names += [hit[1]] if hit else []
         parts = []
         if rec is not None:
             queued = self._submit({"op": "unfile_done", "key": rec["key"], "title": rec["title"],
@@ -337,18 +342,18 @@ class ListTools:
                                                parent_note_id=rec["source_note_id"], section=rec["section"] or "",
                                                list_role=role))
             parts.append(f"put '{rec['title']}' back on {rec['source_title']}{queued}")
-        else:
-            ticked = self._ticked_line(names)
-            if ticked is not None:
-                note, text = ticked
-                queued = self._submit({"op": "untick", "note_id": note["id"], "title": text})
-                clear_completed(self.a._db, _checkbox_id(note["id"], text))
-                parts.append(f"unticked '{text}' in {note['title']}{queued}")
-                today = self.a._today_note()
-                if today is not None and today["id"] != note["id"]:
-                    on_today = self._ticked_line(names, only=today)
-                    if on_today is not None:
-                        self._submit({"op": "untick", "note_id": today["id"], "title": on_today[1]})
+            names.append(rec["title"])
+        today = self.a._today_note()
+        ticked = None if rec is not None else self._ticked_line(names)
+        if ticked is not None:
+            note, text = ticked
+            queued = self._submit({"op": "untick", "note_id": note["id"], "title": text})
+            clear_completed(self.a._db, _checkbox_id(note["id"], text))
+            parts.append(f"unticked '{text}' in {note['title']}{queued}")
+        if today is not None and (rec is not None or (ticked is not None and ticked[0]["id"] != today["id"])):
+            on_today = self._ticked_line(names, only=today)  # its copy on today's list, too
+            if on_today is not None:
+                self._submit({"op": "untick", "note_id": today["id"], "title": on_today[1]})
         if span is not None and span.status != SpanStatus.PLANNED:
             span.status = SpanStatus.PLANNED
             if span.planned_start is not None:
@@ -362,13 +367,15 @@ class ListTools:
             raise ToolError(f"Nothing called '{ref}' is marked done on the plan or in the lists.")
         return "Undone: " + "; ".join(parts) + "."
 
-    def _ticked_line(self, names: List[str], only: Optional[Dict[str, Any]] = None):
+    def _ticked_line(self, names: List[str], only: Optional[Dict[str, Any]] = None, by_id: str = ""):
+        """A ticked line worded as one of ``names`` (or whose item id is ``by_id``): (note, its text)."""
         from thirties_core.joplin_engine import DONE_CHECKBOX_REGEX
         want = {n.strip().lower() for n in names}
         for note in [only] if only else self.a._joplin_notes():
             for line in (note.get("body") or "").splitlines():
                 m = DONE_CHECKBOX_REGEX.match(line)
-                if m and m.group(2).strip().lower() in want:
+                if m and (m.group(2).strip().lower() in want
+                          or (by_id and _checkbox_id(note["id"], m.group(2).strip()) == by_id)):
                     return note, m.group(2).strip()
         return None
 

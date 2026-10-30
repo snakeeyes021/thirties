@@ -411,9 +411,15 @@ class BackgroundService:
             if started:
                 logger.info("Morning: %s.", started)
         text = manager.execute_tool("rollover_proposal", {})
+        ahead = ""
+        if manager.tools.assistant is not None:  # what was planned for today beforehand (O2: make it visible)
+            from thirties_core.day_lists import planned_ahead_text
+            ahead = planned_ahead_text(manager.tools.assistant)
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
+            if ahead:
+                self.send("☀️ Good morning! " + ahead, "rollover", now=now)
             return
-        self.send("☀️ Good morning! " + text, "rollover", now=now)
+        self.send("☀️ Good morning! " + (ahead + "\n\n" if ahead else "") + text, "rollover", now=now)
 
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
@@ -425,6 +431,25 @@ class BackgroundService:
             assistant.start_the_day()  # Joplin was closed at wake-up; it may be open now
         for message in assistant.sync_today() if assistant is not None else []:
             self.send("📝 " + message, "today", now=now)
+        if assistant is not None:  # done items move to the month's Done note (done_log.py)
+            from thirties_core.done_log import DoneLog
+            filed = DoneLog(self.scheduler.state_db).sweep(assistant)
+            if filed:
+                logger.info("Done log: %s.", "; ".join(filed))
+
+    def dropbox(self, now: datetime) -> None:
+        """Now and then, in the afternoon: offer to empty the drop box, a home proposed for each item (soak 5)."""
+        from thirties_core.placement_lists import DROPBOX_OFFER_HOURS
+        if not DROPBOX_OFFER_HOURS[0] <= now.hour < DROPBOX_OFFER_HOURS[1] or \
+                time.time() - getattr(self, "_last_dropbox", 0.0) < self.LISTS_EVERY:
+            return  # looked at twice an hour at most: it reads the notes
+        self._last_dropbox = time.time()
+        if self.level() == "off" or self._quiet(now) or self._talking(now):
+            return
+        assistant = self.manager().tools.assistant
+        offer = assistant.lists.dropbox_offer(now) if assistant is not None else ""
+        if offer:
+            self.send(offer, "dropbox", now=now)
 
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
@@ -486,7 +511,7 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
         for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
-                     self.starts, self.today_sync):
+                     self.starts, self.today_sync, self.dropbox):
             try:
                 duty(now)
             except Exception as e:

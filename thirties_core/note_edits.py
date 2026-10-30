@@ -128,7 +128,7 @@ def _rebase(block: List[str]) -> List[str]:
 
 
 def _join(lines: List[str], ended: bool) -> str:
-    return "\n".join(lines) + ("\n" if ended or lines else "")
+    return "\n".join(lines) + ("\n" if ended and lines else "")
 
 
 def take_item(body: str, text: str, occurrence: int = 0, ticked_too: bool = True,

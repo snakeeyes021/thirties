@@ -24,7 +24,6 @@ than by area, for the one-time triage conversation (After 0.1, item 8).
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Tuple
