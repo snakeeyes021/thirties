@@ -203,6 +203,16 @@ class TestMessageLevels(unittest.TestCase):
         self.assertIn("did you get to Shower and Food?", checkins[0])
         self.assertLessEqual(len(self.sent), 4)
 
+    def test_ticks_made_elsewhere_are_seen_before_any_message(self):
+        # 10-25: items ticked in the app's Day page at 10:53 were listed as "not marked yet" at 11:00
+        self.svc.manager()  # the service's own copy of the day, loaded before the tick
+        from thirties_core.plan_tools import PlanTools
+        plan, pending = self.sched.build_day_plan(DAY)
+        set_debug_time(at("14:40"))
+        PlanTools(plan, pending, self.sched).execute("log_outcome", {"event": "lu", "status": "done"})  # the app
+        self.svc.tick(at("14:45"))
+        self.assertNotIn("Lunch", " ".join(b for _, b in self.sent))
+
     def test_light_is_only_the_heads_up(self):
         self.sched.config.assistant.message_level = "light"
         self.run_day("14:45", "20:30")

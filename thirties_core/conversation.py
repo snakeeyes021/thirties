@@ -193,6 +193,15 @@ class ConversationManager:
         self._followed_latest = conv.id if latest and latest.id == conv.id else None
         return True
 
+    def reload_plan(self) -> None:
+        """Reload only the day from storage: another client may have changed it (a tick in the app's Day page)."""
+        if self.scheduler is None:
+            return
+        plan, pending = self.scheduler.build_day_plan(self.day_plan.target_date)
+        self.tools.day_plan = plan
+        self.tools.ambiguous_events = list(pending)
+        self.tools._other_days.clear()
+
     def refresh(self) -> None:
         """Reload the day and the current conversation from storage.
 

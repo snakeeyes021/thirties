@@ -816,6 +816,14 @@ class AssistantTools:
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        if (span is not None and st != SpanStatus.SKIPPED and start_dt is None and end_dt is None
+                and duration in (None, "")):
+            # Said with no time ("kitties are fed", a tick in the Day page): it finished when it was said, as an
+            # estimate (10-25: fed at 10:44, stored at the planned 10:00). Long after its time, nobody knows when:
+            # the planned times stay, marked as planned.
+            now = self.pt._now()
+            if span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
+                end_dt = now
 
         if span is None:
             # A backlog task done outside the plan: record it on the schedule if we know when.

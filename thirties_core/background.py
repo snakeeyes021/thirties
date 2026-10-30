@@ -479,6 +479,12 @@ class BackgroundService:
 
     def tick(self, now: Optional[datetime] = None) -> None:
         now = now or self.now()
+        try:
+            manager = self.manager()
+            with manager.turn_lock:  # each duty sees the day as stored: 10-25, ticks made in the app's Day page at
+                manager.reload_plan()  # 10:53 were listed as "not marked yet" at 11:00
+        except Exception as e:
+            logger.warning("Reloading the day failed: %s", e)
         for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
                      self.starts, self.today_sync):
             try:

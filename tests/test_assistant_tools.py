@@ -61,6 +61,16 @@ class TestOutcomes(ToolsTestCase):
         out = self.t.execute("log_outcome", {"event": "Shower", "status": "done", "finished": "5:50 PM"})
         self.assertIn("5:20 PM – 5:50 PM, estimated", out)  # not a 2h50m shower (10-20): it started late
 
+    def test_done_with_no_time_is_when_it_was_said(self) -> None:
+        # 10-25: "kitties are fed" at 10:44 was stored at the planned 10:00, and so was every tick in the Day page
+        self.t.execute("add_event", {"title": "Feed kitties", "start": "5:00 PM", "duration": "5 min"})
+        set_debug_time(at("17:44"))
+        out = self.t.execute("log_outcome", {"event": "Feed kitties", "status": "done"})
+        self.assertIn("5:39 PM – 5:44 PM, estimated", out)
+        self.t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
+        out = self.t.execute("log_outcome", {"event": "Lunch", "status": "done"})  # hours later: nobody knows when
+        self.assertIn("12:00 PM – 12:30 PM, planned", out)
+
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
