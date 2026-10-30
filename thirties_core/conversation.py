@@ -285,9 +285,13 @@ class ConversationManager:
         """Handle one user turn: developer slash commands here, everything else via the brain. `via` is the
         channel ("app", "telegram"), stored with the turn's messages."""
         with self.turn_lock:
-            return self._send_user_message(user_text, via)
+            try:
+                return self._send_user_message(user_text, via)
+            finally:
+                self.tools.user_message = None  # a drag in the Day page later isn't judged by this message
 
     def _send_user_message(self, user_text: str, via: str) -> str:
+        self.tools.user_message = user_text
         self._stamp()
         self.reload_backlog()  # anything older is from before this turn
         if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant

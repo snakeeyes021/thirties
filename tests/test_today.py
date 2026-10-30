@@ -7,7 +7,7 @@ from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.lists import ListCatalog
-from thirties_core.models import TaskItem
+from thirties_core.models import SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.today import TodayLinks
 
@@ -250,6 +250,13 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertIn("    - [x] Shower\n", self.body("n_today"))
         self.api.notes["n_today"]["body"] += "- [ ] Call the bank\n"
         self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])  # routines never carry over
+        self.api.notes["n_today"]["body"] += "- [ ] Charge watch\n"  # done on the plan, its line never ticked (10-25)
+        self.t.execute("add_event", {"title": "Charge watch", "start": "8:00 AM", "duration": "30 min"})
+        self.sched.state_db.upsert_span(next(s for s in self.t.day_plan.spans if s.title == "Charge watch"))
+        span = next(s for s in self.t.day_plan.spans if s.title == "Charge watch")
+        span.status = SpanStatus.DONE
+        self.sched.state_db.upsert_span(span)
+        self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
         self.t.assistant.start_the_day()
         self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n")

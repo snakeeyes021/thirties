@@ -1002,7 +1002,9 @@ class AssistantTools:
         done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
         routine = {n["title"].strip().lower() for n in self._routines()}
         routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
-        keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine]
+        done_on_plan = {t.lower() for t in self._done_on_plan(note)}
+        keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
+                and text.lower() not in done_on_plan]
         on = {k.lower() for k in keep}
         today = self._today()
 
@@ -1017,6 +1019,15 @@ class AssistantTools:
             return t.urgency == "now"
         add = [t.id for t in self.s.tasks if pressing(t) and t.title.lower() not in on][:3]
         return {"keep": keep, "add": add}
+
+    def _done_on_plan(self, today: Dict[str, Any]) -> List[str]:
+        """Open top-level lines on the Today note whose item is done on yesterday's or today's plan (10-25: "Charge
+        watch", done the evening before, was offered again because its line was never ticked)."""
+        from thirties_core.today import note_items
+        recent = [self.pt.plan_for(self._today() - timedelta(days=1)), self.pt.plan_for(self._today())]
+        titles = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.DONE}
+        return [text for text, ticked in note_items(today) if not ticked and text.lower() in titles
+                and re.search(r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M)]
 
     def start_the_day(self) -> str:
         """Each morning, before the proposal: routine notes start unticked (if the user allows it) and the Today
@@ -1048,6 +1059,10 @@ class AssistantTools:
                 if group_items(today, note["title"]) is not None:
                     writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
+        if today:  # done on the plan is done, even where its line was never ticked
+            for text in self._done_on_plan(today):
+                writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                done.append(f"took {text} (done) off {today['title']}")
         if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
             writer.submit({"op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
             done.append(f"cleared what was done from {today['title']}")

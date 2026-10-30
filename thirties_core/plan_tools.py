@@ -226,6 +226,9 @@ class StateDelta:
                 + len(self.resolved_events) + (1 if self.finalized_changed else 0))
 
 
+ENVELOPE_WORDS_RE = re.compile(r"\b(work\w*|job|shift|office|sleep\w*|slept|bed\w*|wak\w*|woke|awake|nap\w*|"
+                               r"alarm|night|tired|late|day off|off (?:today|tomorrow)|holiday|vacation|pto|sick)\b", re.IGNORECASE)
+
 class PlanTools:
     """Executes schedule tool calls against a DayPlan and persists the result."""
 
@@ -245,6 +248,7 @@ class PlanTools:
         self.assistant = AssistantTools(self, services) if services else None
         self._other_days: Dict[Any, DayPlan] = {}
         self.successful_changes = 0  # every tool call that changed something, on any day or store
+        self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -606,6 +610,7 @@ class PlanTools:
         **_: Any,
     ) -> str:
         span = self._find_span(event)
+        self._envelope_ok(span)
         if fixed not in (None, ""):
             self._set_fixed(span, _as_bool(fixed))
         if span.source == "calendar":
@@ -745,8 +750,16 @@ class PlanTools:
         return f"Swapped: {self.describe(b)}; {self.describe(a)}." if b.start_dt < a.start_dt else \
             f"Swapped: {self.describe(a)}; {self.describe(b)}."
 
+    def _envelope_ok(self, span: EventSpan) -> None:
+        """Work and sleep change only when the user talks about them (10-27: placing the morning routine moved Work
+        to 10:30, and the user had to say "Work starts at 7am")."""
+        if span.is_envelope and self.user_message is not None and not ENVELOPE_WORDS_RE.search(self.user_message):
+            raise ToolError(f"{span.title} only changes when the user talks about it; leave it as it is and fit the "
+                            "rest around it (items can sit alongside work).")
+
     def remove_event(self, event: Any, **_: Any) -> str:
         span = self._find_span(event)
+        self._envelope_ok(span)
         if span.source == "calendar":
             if span.tentative:
                 raise ToolError(f"{span.title} is an unconfirmed invite; use resolve_calendar_event with attend=false.")

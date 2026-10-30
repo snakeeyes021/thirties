@@ -146,6 +146,22 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(out, "Done.")  # never raw tool output, never "Understood."
         self.assertIsNone(occupant(self.manager.day_plan, "10:00"))
 
+    def test_work_only_changes_when_the_user_talks_about_it(self) -> None:
+        # 10-27: placing the morning routine moved Work to 10:30; "Work starts at 7am"
+        self.engine.set_next_response(reply('CALL update_event {"event": "Work", "start": "10:30 AM"}'))
+        self.engine.set_next_response(reply("Your routine is on at 9:30."))
+        self.manager.send_user_message("put my morning routine on at 9:30")
+        work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
+        self.assertEqual(work.start_dt.strftime("%H:%M"), "08:30")
+        tool = next(m for m in self.manager.messages if m.get("role") == "tool")
+        self.assertIn("only changes when the user talks about it", tool["content"])
+        self.engine.set_next_response(reply('CALL update_event {"event": "Work", "end": "3:55 PM"}'))
+        self.engine.set_next_response(reply("Noted."))
+        self.manager.send_user_message("Just finished work")  # 10-28: that one is right
+        work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
+        self.assertEqual(work.end_dt.strftime("%H:%M"), "15:55")
+        self.assertIsNone(self.manager.tools.user_message)  # a drag in the Day page later isn't judged by it
+
     def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
         self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
         self.engine.set_next_response(reply("You're free all afternoon."))
