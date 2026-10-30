@@ -331,6 +331,7 @@ class SyncEngine:
 
     def _stores(self) -> Dict[str, Any]:
         from thirties_core.calendar_outcomes import CalendarOutcomes
+        from thirties_core.sharing import SharingRules
         from thirties_core.facts import SpanFacts
         from thirties_core.lists import ListCatalog
         from thirties_core.today import TodayLinks
@@ -347,6 +348,7 @@ class SyncEngine:
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
             "calendar_outcomes": CalendarOutcomes(self.state_db),
+            "sharing_rules": SharingRules(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

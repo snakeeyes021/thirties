@@ -83,6 +83,68 @@ class TestSharedTime(ScheduleCase):
         self.assertEqual(times(t, "Reading"), ("5:00 PM", "6:00 PM"))
 
 
+class TestOverlapOrPush(ScheduleCase):
+    """10-30, the user: "Anything can overlap anything, but the assistant will need to know when the user is asking
+    ... to OVERLAP with the thing already there or to push it and everything else behind it back." """
+
+    def day(self):
+        t = tools_for()
+        for title, start, minutes in (("Laundry", "3:00 PM", 30), ("Shower", "5:00 PM", 30), ("Glass", "5:30 PM", 30),
+                                      ("Redfox dev", "7:00 PM", 120)):
+            t.execute("add_event", {"title": title, "start": start, "duration": f"{minutes} min"})
+        return t
+
+    def test_push_words_move_what_is_there_and_what_follows(self):
+        t = self.day()
+        t.user_message = "throw my call with Brad to 5pm and push everything to make room"
+        out = t.execute("add_event", {"title": "Call Brad", "start": "5:00 PM", "duration": "30 min", "fixed": False})
+        self.assertIn("Shower now 5:30 PM", out)  # no push_later from the model: the user's words were enough
+        self.assertEqual(times(t, "Glass"), ("6:00 PM", "6:30 PM"))
+        t.user_message = "throw my shower to 3pm and push everything to make room"
+        out = t.execute("update_event", {"event": "Shower", "start": "3:00 PM"})
+        self.assertIn("Laundry now 3:30 PM", out)
+
+    def test_unclear_landings_are_flagged_not_refused(self):
+        t = self.day()
+        t.user_message = "message mom at 5"
+        out = t.execute("add_event", {"title": "Message mom", "start": "5:00 PM", "duration": "30 min"})
+        self.assertTrue(out.startswith("Added"), out)  # never a failure
+        self.assertIn("alongside Shower", out)
+        self.assertIn("push_later=true moves Shower and what follows", out)
+        self.assertEqual(times(t, "Shower"), ("5:00 PM", "5:30 PM"))  # nothing moved on a guess
+
+    def test_together_words_background_items_and_kept_answers_need_no_question(self):
+        t = self.day()
+        t.user_message = "podcast while I shower"
+        out = t.execute("add_event", {"title": "Plan the week", "start": "5:00 PM", "duration": "30 min"})
+        self.assertNotIn("push_later", out)  # said together
+        t.user_message = "message brad at 7"
+        out = t.execute("add_event", {"title": "Message Brad", "start": "7:00 PM", "duration": "15 min"})
+        self.assertIn("alongside Redfox dev", out)
+        self.assertNotIn("push_later", out)  # a dev session is a backdrop the user stacks things on
+        t.user_message = "taxes at 5:30"
+        self.assertIn("push_later", t.execute("add_event", {"title": "Taxes", "start": "5:30 PM", "duration": "30 min"}))
+        out = t.execute("set_sharing", {"first": "Glass", "second": "anything", "together": True})
+        self.assertEqual(out, "Noted: glass and anything can share time.")
+        t.execute("remove_event", {"event": "Taxes"})
+        self.assertNotIn("push_later", t.execute("add_event", {"title": "Taxes", "start": "5:30 PM",
+                                                               "duration": "30 min"}))
+        t.execute("set_sharing", {"first": "Redfox dev", "second": "Thirties dev", "together": False})
+        out = t.execute("add_event", {"title": "Thirties dev", "start": "7:00 PM", "duration": "1 hour"})
+        self.assertIn("push_later=true moves Redfox dev", out)  # "dev" and "dev" can't, as the user said
+        from thirties_core.sync_engine import SyncEngine
+        self.assertIn("sharing_rules", SyncEngine._stores(type("E", (), {"state_db": t.scheduler.state_db})()))
+
+    def test_kinds(self):
+        from thirties_core.sharing import kind_of, wants_push
+        self.assertEqual(kind_of("Redfox dev"), "dev")
+        self.assertEqual(kind_of("Shower"), "shower")
+        self.assertEqual(kind_of("anything"), "*")
+        self.assertTrue(wants_push("lunch with Sam at 1, push the rest back"))
+        self.assertFalse(wants_push("push my shower to 3"))  # moving one item, not making room
+        self.assertFalse(wants_push("audiobook during dinner, push everything"))
+
+
 class TestDayLayout(ScheduleCase):
 
     def test_shared_time_is_one_card_with_work_shown_under_it(self):

@@ -182,6 +182,18 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["by"],
     },
     {
+        "name": "set_sharing",
+        "description": "Record what the user said about two kinds of items sharing time, when it holds generally "
+                       "('dev sessions can go alongside anything', 'never a call during the shower'), so Python stops "
+                       "or keeps flagging them.",
+        "parameters": {
+            "first": "One kind of item, e.g. 'dev' or 'Shower'.",
+            "second": "The other kind, or 'anything'.",
+            "together": "true if they can share time, false if one has to move.",
+        },
+        "required": ["first", "second", "together"],
+    },
+    {
         "name": "list_schedule",
         "description": "Show a day's schedule (any day). Read-only; you will see the result before replying.",
         "parameters": {"day": "Which day, e.g. 'tomorrow' or 'Oct 20' (default: the day being planned).",
@@ -472,6 +484,22 @@ class PlanTools:
         return [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
                 and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._is_fixed(s)]
 
+    def _sharing_rules(self):
+        if self._state_db is None:
+            return None
+        from thirties_core.sharing import SharingRules
+        return SharingRules(self._state_db)
+
+    def _push_wanted(self, span: EventSpan, push_later: Any, alongside: Any) -> bool:
+        """push_later, or the user's own words asking for it ("throw my shower to 3pm and push everything to make
+        room") when the item lands on something planned: Python does the moving, the model needn't remember to."""
+        if _as_bool(push_later):
+            return True
+        if _as_bool(alongside) or span.is_envelope:
+            return False
+        from thirties_core.sharing import wants_push
+        return wants_push(self.user_message) and any(s.status == SpanStatus.PLANNED for s in self._sharing(span))
+
     def _push_asked(self) -> None:
         """Sliding other items later happens only when the user asks for it ("push the rest back")."""
         if self.user_message is not None and not PUSH_WORDS_RE.search(self.user_message):
@@ -538,7 +566,13 @@ class PlanTools:
                 + " Pick another time, or add it with alongside=true if it really happens during it.")
         sharing = self._sharing(span)
         if not replace_overlaps:
-            return [f"alongside {self.describe(s)} [id {s.id}], both kept" for s in sharing]
+            from thirties_core.sharing import needs_a_word, said_together
+            ask = not alongside and not said_together(self.user_message)
+            rules = self._sharing_rules()
+            return [f"alongside {self.describe(s)} [id {s.id}], both kept"
+                    + (f"; if they can't happen together, push_later=true moves {s.title} and what follows (ask the "
+                       f"user if it isn't clear)" if ask and needs_a_word(span, s, rules) else "")
+                    for s in sharing]
         if self.user_message is not None and not REPLACE_WORDS_RE.search(self.user_message):
             raise ToolError("Items can share time, so nothing needs replacing: add it without replace_overlaps and "
                             "the other items keep their times. Replace only when the user says so ('instead').")
@@ -657,7 +691,7 @@ class PlanTools:
         if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
-        if _as_bool(push_later) and not span.is_envelope and not _as_bool(alongside):
+        if self._push_wanted(span, push_later, alongside) and not span.is_envelope and not _as_bool(alongside):
             self._push_asked()
             firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
                     if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
@@ -731,7 +765,7 @@ class PlanTools:
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
-        if _as_bool(push_later) and not span.is_envelope:
+        if not span.is_envelope and self._push_wanted(moved, push_later, False):
             self._push_asked()
             notes = []
             span_backup = (span.start_dt, span.end_dt)
@@ -948,6 +982,17 @@ class PlanTools:
             after=self._start(after) if after not in (None, "") else None,
             before=self._end(before, self.day_plan.day_start) if before not in (None, "") else None,
             daylight=_as_bool(daylight) if daylight not in (None, "") else None, later=_as_bool(later))
+
+    def set_sharing(self, first: Any = "", second: Any = "", together: Any = True, **_: Any) -> str:
+        """A lasting answer to "alongside, or push it back?" for two kinds of items."""
+        rules = self._sharing_rules()
+        if rules is None:
+            raise ToolError("Preferences can't be saved here.")
+        try:
+            pair = rules.set(str(first), str(second), _as_bool(together))
+        except ValueError as e:
+            raise ToolError(str(e))
+        return f"Noted: {pair} " + ("can share time." if _as_bool(together) else "can't share time; one moves.")
 
     def push_back(self, by: Any = None, since: Any = None, **_: Any) -> str:
         """"Push everything back two hours" (S4): the rest of the day moves, past unmarked items included."""
@@ -1216,6 +1261,7 @@ class PlanTools:
             "redraw": self.redraw,
             "undo_redraw": self.undo_redraw,
             "slot_options": self.slot_options,
+            "set_sharing": self.set_sharing,
             "push_back": self.push_back,
         }
         if self.assistant:
