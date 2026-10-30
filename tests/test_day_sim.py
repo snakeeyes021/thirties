@@ -76,6 +76,22 @@ class TestDaySim(unittest.TestCase):
         self.assertEqual(facts["done_items_recorded"], "1/1")
         self.assertEqual(facts["mean_time_error_min"], 5.0)  # started 10:15 against 10:05; ended right on 10:35
 
+    def test_only_minute_times_thirties_picked_are_counted(self):
+        script = DayScript(id="t2", day=date(2026, 10, 10), wake="09:00", bed="22:00", persona="Tester",
+                           situation="A Saturday.", life=["09:00 Wake."], truth=[], work=["08:45", "16:00"],
+                           events=[{"summary": "Dentist", "start": "14:15", "end": "15:00"}],
+                           notes=[{"title": "Cats", "role": "routine", "body": "- [ ] Dinner at 5:15"}])
+        run = start_day(script, "frontier", [], [], MockInferenceEngine())
+        run.log += [("09:47", "user", "I'm leaving at 12:15, don't book me for 12:00"),
+                    ("09:47", "assistant", "Got it: leaving at 12:15. The dentist is at 2:15 PM, cats' dinner at 5:15, "
+                                           "work from 8:45."),
+                    ("09:50", "user", "fed the cats"), ("09:50", "assistant", "Marked them fed at 9:50."),
+                    ("09:55", "user", "what's next?"), ("09:55", "assistant", "Laundry at 10:20.")]
+        facts = measure(run)
+        self.assertEqual(facts["minute_times_shown"], 1)  # 10:20 is the only time Thirties picked itself
+        self.assertEqual(facts["minute_time_examples"], ["[09:55] 10:20"])
+        self.assertEqual(facts["minute_times_given"], 5)  # 12:15, 2:15 (calendar), 5:15 (lists), 8:45 (work), 9:50
+
     def test_someone_else_with_their_own_lists(self):
         from tests.day_sim import validate
         nurse = DayScript(id="nurse", day=date(2026, 10, 10), wake="07:00", bed="22:00", persona="Pat", situation="Off.",
