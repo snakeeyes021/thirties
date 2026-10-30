@@ -1045,11 +1045,12 @@ class PlanTools:
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
         scope = "Free time remaining" if upcoming_from else "Free time"
         now = self._now()
-        behind = self._behind(now) if plan.day_start <= now < plan.day_end else []
+        from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
+        behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
-                + ("\nNot marked yet (past their time, not assumed done; by block):\n"
-                   + "\n".join(unmarked_lines(behind)) if behind else ""))
+                + ("\nNot marked yet (past their time, not assumed done):\n"
+                   + "\n".join(missed_lines(behind)) if behind else ""))
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, **_: Any) -> str:
         span = self._find_span(event)

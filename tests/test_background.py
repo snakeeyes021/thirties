@@ -268,6 +268,68 @@ class TestMessageLevels(unittest.TestCase):
         self.assertEqual(len(self.sent), before)
 
 
+class TestTurnsInTheBackground(unittest.TestCase):
+    """T1: a lost turn is answered later and the reply delivered; T2: desktop turns go to the phone; C3: notices
+    carry when they go stale."""
+
+    def setUp(self):
+        from thirties_core import turns
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        waits = turns.RETRY_WAITS
+        turns.RETRY_WAITS = (0.0, 0.0)
+        self.addCleanup(setattr, turns, "RETRY_WAITS", waits)
+        self.sched = make_scheduler()
+        self.sched.config.assistant.message_level = "heavy"
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        self.engine = MockInferenceEngine()
+        self.desktop = []
+        self.svc = BackgroundService(self.sched.config, lambda t, b, k: self.desktop.append((k, b)),
+                                     scheduler=self.sched, joplin_engine=joplin, inference_engine=self.engine,
+                                     sync_engine=MagicMock())
+        self.svc.today = lambda: DAY
+        self.svc.bridge = MagicMock()
+        self.svc.run_in_threads = False
+
+    def test_a_lost_turn_is_answered_and_sent_once_the_model_is_back(self):
+        from tests.test_conversation import reply
+        timeout = {"role": "assistant", "content": "The Antigravity assistant timed out waiting.", "tool_calls": []}
+        self.engine.responses = [timeout] * 3
+        self.svc.manager().send_user_message("cats are fed", via="telegram")
+        self.engine.responses = [reply("Logged: cats fed.")]
+        self.svc._fixed_now = True
+        self.svc.answer_lost_turns(at("09:01"))  # not yet: the first retry waits two minutes
+        self.assertEqual(self.desktop, [])
+        self.svc.answer_lost_turns(at("09:03"))
+        self.assertEqual(self.desktop, [("reply", "Logged: cats fed.")])
+        self.svc.bridge.broadcast.assert_called_once_with("Logged: cats fed.")
+        self.svc.answer_lost_turns(at("09:10"))
+        self.assertEqual(len(self.desktop), 1)
+
+    def test_the_desktop_chat_is_mirrored_to_the_phone(self):
+        self.svc._mirror(["plan my evening"], "Sure: dinner at 7.", False)
+        sent = [c.args[0] for c in self.svc.bridge.broadcast.call_args_list]
+        self.assertEqual(sent, ["🖥 You, on the desktop:\nplan my evening", "Sure: dinner at 7."])
+        self.svc.bridge.broadcast.reset_mock()
+        self.sched.config.telegram.mirror_desktop = False
+        self.svc._mirror(["x"], "y", False)
+        self.svc.bridge.broadcast.assert_not_called()
+
+    def test_a_start_notice_goes_stale_at_the_end_of_its_block(self):
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
+        self.svc._manager = None
+        self.svc.starts(at("17:00"))
+        self.assertEqual(self.svc.bridge.broadcast.call_args.kwargs["expires"], at("17:30"))
+
+    def test_a_check_in_counts_as_asked_so_replies_dont_ask_again(self):
+        from thirties_core.messages import MissedTracker
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
+        self.svc._manager = None
+        self.svc.check_ins(at("18:45"))
+        self.assertIn("taxes", MissedTracker(self.sched.state_db).titles_shown(at("18:45")))
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -93,7 +93,7 @@ class Moment:
 
 
 def _is_travel(span: EventSpan) -> bool:
-    return bool(TRAVEL_RE.search(span.title))
+    return bool(TRAVEL_RE.search(LEAVE_BY_RE.sub("", span.title)))  # "Vet (leave by 4:40)" is the vet, not travel
 
 
 def _leave_by(span: EventSpan, plan: DayPlan) -> Optional[datetime]:
