@@ -10,7 +10,9 @@ from thirties_core.horizons import HorizonPlanner, parse_period
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import PlanTools
 from thirties_core.settings import SETTINGS
-from thirties_core.timeline_layout import (amount_text, day_layout, free_text, normalise_units, stretch_options,
+from thirties_core.timeline_layout import (amount_text, day_layout, delete_call, free_text, move_call, normalise_units,
+                                           resize_call, resize_extent, restore_call, snap_boundary, snap_row,
+                                           stretch_options,
                                            unplaced_in_week, week_days, week_layout, what_to_plan)
 
 
@@ -57,10 +59,11 @@ class TestTheDay(DayCase):
         self.assertAlmostEqual(d.sky[1].bottom, (plan.sunset - at("07:00")).total_seconds() / 1800)
         self.assertEqual(d.sky[-1].bottom, 32)
 
-    def test_work_is_a_bar_on_the_rail_not_a_card(self):
+    def test_work_is_one_card_under_the_items(self):
         d = day_layout(self.plan(), at("19:10"))
-        self.assertEqual([(b.top, b.bottom) for b in d.work], [(3.0, 18.0)])  # 8:30 AM - 4 PM
-        self.assertNotIn("Work", [c.span.title for c in d.cards])
+        self.assertEqual([(c.span.title, c.row, c.rows, c.look, c.tickable) for c in d.work],
+                         [("Work", 3, 15, "work", False)])  # 8:30 AM - 4 PM, a monolith
+        self.assertNotIn("Work", [c.span.title for c in d.cards])  # not in the lanes: items sit on top of it
         self.assertTrue(d.slots[3].work and not d.slots[2].work)
 
     def test_cards_sit_on_their_slots_with_a_pip_per_thirty_and_share_time_in_lanes(self):
@@ -151,6 +154,65 @@ class TestTheDay(DayCase):
         plan = sched.build_day_plan(DAY)[0]
         plan.spans = [s for s in plan.spans if s.category != SpanCategory.SLEEP]
         self.assertEqual(len(day_layout(plan, at("12:00")).slots), 48)
+
+
+class TestChangingThePlanByHand(DayCase):
+    """Drag to move, resize from an edge, remove: each gesture is one tool call (the assistant's own tools)."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = day_layout(self.plan(), at("19:10"))
+        self.cards = {c.span.title: c for c in self.d.cards}
+
+    def test_thirties_snap(self):
+        self.assertEqual(snap_row(26.9, 32), 26)
+        self.assertEqual(snap_row(-3, 32), 0)
+        self.assertEqual(snap_row(40, 32), 31)
+        self.assertEqual(snap_boundary(26.4, 32), 26)
+        self.assertEqual(snap_boundary(26.6, 32), 27)
+        self.assertEqual(snap_boundary(99, 32), 32)
+
+    def test_a_drag_moves_it_to_the_thirty_it_lands_on_keeping_its_length(self):
+        movie = self.cards["Movie"]  # rows 26-28, 8 PM
+        self.assertEqual(move_call(self.d, movie, 0, 28.3), ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        # grabbed by its second thirty: the card keeps its place under the pointer
+        self.assertEqual(move_call(self.d, movie, 1, 28.3), ("update_event", {"event": "movie", "start": "8:30 PM"}))
+        self.assertIsNone(move_call(self.d, movie, 0, 26.7))  # same thirty: nothing to do
+        self.assertEqual(move_call(self.d, movie, 0, 22.5, push=True),  # onto dinner, Shift held: push what follows
+                         ("update_event", {"event": "movie", "start": "6:00 PM", "push_later": True}))
+        self.assertEqual(move_call(self.d, movie, 0, 22.5)[1], {"event": "movie", "start": "6:00 PM"})  # shares it
+
+    def test_a_resize_changes_one_edge_on_thirties(self):
+        movie = self.cards["Movie"]
+        self.assertEqual(resize_extent(self.d, movie, "bottom", 30.2), (26, 4))
+        self.assertEqual(resize_call(self.d, movie, "bottom", 30.2), ("update_event", {"event": "movie",
+                                                                                         "end": "10:00 PM"}))
+        self.assertEqual(resize_call(self.d, movie, "top", 25.1),
+                         ("update_event", {"event": "movie", "start": "7:30 PM", "end": "9:30 PM"}))
+        self.assertEqual(resize_extent(self.d, movie, "top", 31), (28, 1))  # never less than one thirty
+        self.assertEqual(resize_extent(self.d, movie, "bottom", 2), (26, 1))
+        self.assertIsNone(resize_call(self.d, movie, "bottom", 29.1))  # unchanged
+
+    def test_work_calendar_events_and_free_time_stay_put(self):
+        lunch = self.cards["Lunch with Sam"]
+        self.assertIsNone(move_call(self.d, lunch, 0, 14))  # a calendar event is fixed
+        self.assertIsNone(resize_call(self.d, lunch, "bottom", 14))
+        self.assertIsNone(delete_call(lunch.span))
+        work = self.d.work[0]
+        self.assertIsNone(move_call(self.d, work, 0, 5))
+        self.assertIsNone(delete_call(work.span))
+
+    def test_remove_and_undo(self):
+        movie = self.cards["Movie"].span
+        self.assertEqual(delete_call(movie), ("remove_event", {"event": "movie"}))
+        self.assertEqual(restore_call(movie), ("add_event", {"title": "Movie", "start": "8:00 PM", "end": "9:30 PM",
+                                                             "alongside": True}))
+        tools = PlanTools(self.plan(), [], self.sched)
+        tools.execute(*delete_call(movie))
+        out = tools.execute(*restore_call(movie))
+        self.assertNotIn("NOT_DONE", out)
+        back = [s for s in tools.day_plan.spans if s.title == "Movie"]
+        self.assertEqual([(s.start_dt, s.end_dt) for s in back], [(at("20:00"), at("21:30"))])
 
 
 class TestPlanningAFreeStretch(DayCase):

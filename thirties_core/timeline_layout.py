@@ -6,9 +6,11 @@ not very GNOME HIG"):
 - **Day**: the waking day as a stack of slots, one per thirty, top = waking up, bottom = bedtime. No clock times
   anywhere ("try it with none"); an item's real times are shown on hover or tap (AGENTS.md §7.1: events keep their
   real times; blocks are a view). A left rail has the sky (daylight or dark, to the minute, from the plan's sunrise
-  and sunset) and a work bar; Work is never drawn as a block across the day. Items are cards on their slots, side by
+  and sunset). Work is one hatched card under whatever is placed during it. Items are cards on their slots, side by
   side in lanes when they share time (item 17: nothing hides another), each with "pips", one per thirty it spans.
-  Free time is what has nothing in it and isn't Work or Sleep, from now on: "N blocks free".
+  Free time is what has nothing in it and isn't Work or Sleep, from now on, shown with pips and no words.
+  Items can be dragged to another thirty, resized from either edge, or removed; each gesture becomes one tool call
+  (``move_call``, ``resize_call``, ``delete_call``), the same tools the assistant uses.
 - **Week**: seven shrunken waking days on one axis, with each day's free time, and the items pinned to the week but
   not to a day yet (horizons.py) as chips to drop onto a day.
 
@@ -136,7 +138,7 @@ class DayLayout:
     plan: DayPlan
     slots: List[Slot]
     sky: List[Band]
-    work: List[Band]
+    work: List[Card]       # Work, one card each, drawn under the items
     cards: List[Card]
     free: List[FreeStretch]
     notes: List[SlotNote]
@@ -319,17 +321,6 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
         elif bottom > top:
             sky.append(Band(top, bottom, daylight))
 
-    work: List[Band] = []
-    for s in sorted((s for s in busy if s.category == SpanCategory.WORK), key=lambda s: s.start_dt.timestamp()):
-        a, b = max(s.start_dt, start, key=lambda t: t.timestamp()), min(s.end_dt, end, key=lambda t: t.timestamp())
-        if a.timestamp() >= b.timestamp():
-            continue
-        top, bottom = _row_at(slots, a), _row_at(slots, b)
-        if work and top <= work[-1].bottom:
-            work[-1].bottom = max(work[-1].bottom, bottom)
-        else:
-            work.append(Band(top, bottom, False))
-
     by_index = {s.index: s for s in slots}
     cards: List[Card] = []
     for s in items:
@@ -346,6 +337,17 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
             tickable=tickable(s),
             finishes_now=current and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)))
     _assign_lanes(cards)
+
+    # Work: one card for its whole time, under what's placed during it (10-30: "a monolith", not a block per thirty)
+    work: List[Card] = []
+    for s in sorted((s for s in busy if s.category == SpanCategory.WORK), key=lambda s: s.start_dt.timestamp()):
+        first = plan.block_at(max(s.start_dt, start, key=lambda t: t.timestamp()))
+        last = plan.block_at(min(s.end_dt, end, key=lambda t: t.timestamp()) - timedelta(microseconds=1))
+        if first is None or last is None or first.index not in by_index or last.index not in by_index:
+            continue
+        row = by_index[first.index].row
+        work.append(Card(span=s, row=row, rows=by_index[last.index].row - row + 1, pips=last.index - first.index + 1,
+                         look="work"))
 
     # someone else's events and invites: a note on the card where they start, else on the slot
     notes: List[SlotNote] = []
@@ -478,7 +480,91 @@ def what_to_plan(tools, day: date, limit: int = 5) -> List[Dict[str, str]]:
         return []
 
 
-__all__ = ["UNITS", "UNITS_SETTING", "DEFAULT_UNITS", "amount_text", "free_text", "normalise_units", "Slot", "Band",
+# --- changing the plan by hand: each gesture is one tool call ----------------------------------------------------------
+
+def movable(span: EventSpan) -> bool:
+    """What can be dragged, resized or removed: the user's own planned things. Not Work or Sleep (the tools change
+    those only when the user talks about them), not calendar events (fixed: their time is the calendar's)."""
+    return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and span.source != "calendar" \
+        and not span.tentative and not span.shown_only
+
+
+def snap_row(rows: float, count: int) -> int:
+    """The slot a point falls in (rows from the top of the page), on the page."""
+    return max(0, min(count - 1, int(rows // 1)))
+
+
+def snap_boundary(rows: float, count: int) -> int:
+    """The nearest boundary between slots (0 = the top of the first, count = the bottom of the last)."""
+    return max(0, min(count, int(round(rows))))
+
+
+def move_target(layout: DayLayout, card: Card, grab_row: int, drop_rows: float) -> int:
+    """Where a card dragged by its ``grab_row``-th thirty lands: its first slot, snapped to a thirty."""
+    n = len(layout.slots)
+    return max(0, min(n - 1, snap_row(drop_rows, n) - grab_row))
+
+
+def move_call(layout: DayLayout, card: Card, grab_row: int, drop_rows: float, push: bool = False
+              ) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """A drag: update_event to the thirty it was dropped on, keeping its length. Dropped onto another item, the two
+    share the time (item 17); only with ``push`` (a modifier held) does what follows slide later (push_later)."""
+    if not movable(card.span):
+        return None
+    row = move_target(layout, card, grab_row, drop_rows)
+    if row == card.row:
+        return None
+    args: Dict[str, Any] = {"event": card.span.id, "start": format_clock(layout.slots[row].start)}
+    if push:
+        args["push_later"] = True
+    return "update_event", args
+
+
+def resize_extent(layout: DayLayout, card: Card, edge: str, rows: float) -> Tuple[int, int]:
+    """The card's slots (first, count) while its top or bottom edge is dragged to ``rows``, snapped to thirties; at
+    least one thirty."""
+    n = len(layout.slots)
+    b = snap_boundary(rows, n)
+    end_row = card.row + card.rows
+    if edge == "top":
+        b = min(b, end_row - 1)
+        return b, end_row - b
+    b = max(b, card.row + 1)
+    return card.row, b - card.row
+
+
+def resize_call(layout: DayLayout, card: Card, edge: str, rows: float) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """A resize from the top (a new start, the end kept) or the bottom (a new end, the start kept): update_event."""
+    if not movable(card.span):
+        return None
+    first, count = resize_extent(layout, card, edge, rows)
+    span = card.span
+    if edge == "top":
+        if first == card.row:
+            return None
+        return "update_event", {"event": span.id, "start": format_clock(layout.slots[first].start),
+                                "end": format_clock(span.end_dt)}
+    if count == card.rows:
+        return None
+    return "update_event", {"event": span.id, "end": format_clock(layout.slots[first + count - 1].end)}
+
+
+def delete_call(span: EventSpan) -> Optional[Tuple[str, Dict[str, Any]]]:
+    return ("remove_event", {"event": span.id}) if movable(span) else None
+
+
+def restore_call(span: EventSpan) -> Tuple[str, Dict[str, Any]]:
+    """Undo for a removal: the same item back at its own times (a new id; alongside, so nothing is pushed)."""
+    args: Dict[str, Any] = {"title": span.title, "start": format_clock(span.start_dt),
+                            "end": format_clock(span.end_dt), "alongside": True}
+    if span.task_id:
+        args.update(category="task", task_id=span.task_id)
+    return "add_event", args
+
+
+__all__ = ["movable", "snap_row", "snap_boundary", "move_target", "move_call", "resize_extent", "resize_call",
+           "delete_call", "restore_call",
+           "UNITS", "UNITS_SETTING", "DEFAULT_UNITS", "amount_text", "free_text", "normalise_units", "Slot", "Band",
            "FreeStretch", "Card", "SlotNote", "DayLayout", "day_layout", "look_of", "tickable", "WeekBar",
            "WeekColumn", "WeekLayout", "week_days", "week_layout", "unplaced_in_week", "stretch_options",
            "what_to_plan"]

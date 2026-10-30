@@ -353,6 +353,62 @@ class TimelineTests(unittest.TestCase):
         self.page.stack.set_visible_child_name("day")
         self.assertFalse(self.page.units_toggle.get_visible())
 
+    def test_work_is_one_hatched_card_under_the_items(self) -> None:
+        work = [(lbl.get_text(), c.row, c.rows) for lbl, c in self.page.canvas.work]
+        self.assertEqual(work, [("Work", 3, 15)])
+        self.assertNotIn("Work", self.cards())  # no tick, not draggable: a card of its own kind
+
+    def present_timeline(self):
+        win = Gtk.Window(child=self.view, default_width=800, default_height=700)
+        self.view.stack.set_visible_child_name("timeline")
+        win.present()
+        self.assertTrue(_iterate_until(lambda: self.page.canvas.get_width() > 0 and self.cards()["Movie"].get_mapped()))
+        self.addCleanup(win.destroy)
+        return win
+
+    def test_drag_moves_and_edges_resize_through_update_event(self) -> None:
+        from thirties.views import timeline
+        self.present_timeline()
+        canvas = self.page.canvas
+        movie = self.cards()["Movie"]
+        x, y, w, h = canvas.lane_rect(canvas.get_width(), movie.card)
+        body = canvas.begin_gesture(x + w / 2, y + timeline.PITCH + 10)  # grabbed by its second thirty
+        self.assertEqual((body["mode"], body["grab"]), ("move", 1))
+        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),
+                         ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        self.assertEqual(canvas.gesture_call(body, -4 * timeline.PITCH, push=True)[1],
+                         {"event": "movie", "start": "6:00 PM", "push_later": True})  # Shift: push what follows
+        bottom = canvas.begin_gesture(x + w / 2, y + h - 2)
+        self.assertEqual(bottom["mode"], "bottom")
+        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH), ("update_event", {"event": "movie",
+                                                                                         "end": "10:00 PM"}))
+        top = canvas.begin_gesture(x + w / 2, y + 2)
+        self.assertEqual(canvas.gesture_call(top, timeline.PITCH)[1],
+                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM"})
+        from gi.repository import Graphene
+        _ok, point = movie.tick.compute_point(canvas, Graphene.Point().init(5, 5))
+        self.assertIsNone(canvas.begin_gesture(point.x, point.y))  # pressing the tick doesn't drag
+        lunch = self.cards()["Lunch with Sam"]
+        lx, ly, lw, _lh = canvas.lane_rect(canvas.get_width(), lunch.card)
+        self.assertIsNone(canvas.begin_gesture(lx + lw / 2, ly + 10))  # calendar events are fixed
+        self.assertTrue(lunch.has_css_class("fixed"))
+
+    def test_delete_removes_it_with_undo(self) -> None:
+        toasts = []
+        self.page.toast = lambda title, undo: toasts.append((title, undo))
+        self.present_timeline()
+        movie = self.cards()["Movie"]
+        pop = self.page.canvas._open_card(movie)  # a tap: its real times, and Remove
+        pop.remove_button.emit("clicked")
+        self.assertEqual(self.calls[-1], ("remove_event", {"event": "movie"}))
+        self.assertEqual(toasts[0][0], "Removed Movie")
+        toasts[0][1]()  # Undo
+        self.assertEqual(self.calls[-1], ("add_event", {"title": "Movie", "start": "8:00 PM", "end": "9:30 PM",
+                                                         "alongside": True}))
+        lunch = self.cards()["Lunch with Sam"]
+        self.page.canvas.on_delete(lunch.card)
+        self.assertEqual(self.calls[-1][0], "add_event")  # a calendar event can't be removed here
+
     def test_units_follow_the_setting(self) -> None:
         self.page.get_units = lambda: "hours"
         self.view.refresh_plan(self.plan)  # nothing changed in the plan: the units are still read

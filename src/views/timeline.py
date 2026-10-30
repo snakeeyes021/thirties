@@ -6,11 +6,12 @@ came from four mockup rounds with the user, then a refinement of the Day tab:
 - **Day**: one rounded slot per thirty, top = waking up, bottom = bedtime, with no clock times anywhere ("try it with
   none"); an item's real times are in its tooltip and its popover. The left rail is the sky, to the minute (goldenrod
   daylight, indigo dark), with the now badge on it (the sun or the moon) and a short Breguet hour hand pointing into
-  the day. Work is drawn as hatched slots (not free), never as a block or a bar. Items are cards on their slots, side
-  by side when they share time, each with a round tick, a column of pips at the right edge (one per thirty, centred
-  in its thirty) and a small notch in the left edge where each of its thirties rolls over. Free time (nothing
-  planned, not Work, not Sleep, from now on) is a dashed outline with green pips and no words; clicking it offers
-  "Plan something here".
+  the day. Work is one hatched card (a monolith) under what's placed during it. Items are cards on their slots, side
+  by side when they share time, each with a round tick, a column of pips at its right edge (one per thirty, centred
+  in its thirty) and notches in both edges where its thirties roll over. Free time (nothing planned, not Work, not
+  Sleep, from now on) is a dashed green outline with green pips and no words; clicking it offers "Plan something
+  here". Cards can be dragged to another thirty (Shift pushes what follows), resized from the top or bottom edge,
+  and removed (Delete, or Remove in its popover) with Undo; calendar events are fixed.
 - **Week**: "This week, no day yet" chips (items pinned to the week but not to a day) to drag onto a day, and seven
   columns on one time-of-day axis with each day's free time in the chosen units.
 
@@ -28,8 +29,11 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango
 
 from thirties_core.astronomy import get_current_time
 from thirties_core.clock import format_clock
+from thirties_core.plan_tools import NOT_DONE
 from thirties_core.timeline_layout import (DEFAULT_UNITS, Card, DayLayout, FreeStretch, WeekLayout, amount_text,
-                                           day_layout, free_text, normalise_units, week_days, week_layout)
+                                           day_layout, delete_call, free_text, movable, move_call, move_target,
+                                           normalise_units, resize_call, resize_extent, restore_call, week_days,
+                                           week_layout)
 
 Tool = Callable[[str, dict], str]
 
@@ -42,13 +46,15 @@ PALE_INDIGO = (0x8f / 255, 0x9b / 255, 0xd6 / 255)
 PITCH = 44        # one thirty
 GAP = 4           # between two slots
 TOP = 10          # above the first slot
-RAIL = 62         # the left rail: the sky bar at SKY_X, the badge on it, the hand to its right
+RAIL = 66         # the left rail: the sky bar at SKY_X, the badge on it, the hand to its right
 SKY_X, SKY_W = 10, 8
 BADGE = 28
 LANE_GAP = 4
 PAD_RIGHT = 8
 PIP = 8
-NOTCH = 10        # the dimple at a thirty boundary inside a card
+PIP_INSET = 11    # pips are right-justified: their centres this far from a card's right edge
+NOTCH = 10        # the dimples at a thirty boundary inside a card
+GRIP = 7          # a card's top and bottom edges, for resizing
 
 # GNOME palette colours for the week's bars (drawn, so CSS variables can't reach them): (light, dark).
 LOOK_RGB = {
@@ -124,13 +130,13 @@ def _svg_path(cr, d: str) -> None:
             i += 1
 
 
-# The compact Breguet hour hand the user approved (10-30, refined): viewBox 0 0 34 24, drawn at 34x24.
-HAND_W, HAND_H = 34, 24
-HAND_STEM = "M1 12 H11"
-HAND_SCROLLS = ("M4 12 C4 6.5 10 6 10.5 9 C10.8 10.6 9 11 8.6 10",
-                "M4 12 C4 17.5 10 18 10.5 15 C10.8 13.4 9 13 8.6 14")
-HAND_RING = (15, 12, 3.6)
-HAND_SPADE = "M18.4 12 C21 7.5 25 7 27 9 C25 10 24.5 11 33 12 C24.5 13 25 14 27 15 C25 17 21 16.5 18.4 12 Z"
+# The Breguet hour hand the user approved (10-30, last refinement: no ring, using its height): viewBox 0 0 36 32,
+# drawn at 36x32, so it fits between the badge and the item column.
+HAND_W, HAND_H = 36, 32
+HAND_STEM = "M1 16 H18"
+HAND_SCROLLS = ("M4 16 C4 7 13 5.5 14 10.5 C14.6 13.4 11.6 14.2 10.8 12.4",
+                "M4 16 C4 25 13 26.5 14 21.5 C14.6 18.6 11.6 17.8 10.8 19.6")
+HAND_SPADE = "M16 16 C19 8 26 6.5 29 10 C26 11.5 25 13.5 35.5 16 C25 18.5 26 20.5 29 22 C26 25.5 19 24 16 16 Z"
 
 
 def draw_hand(cr, x: float, y: float, rgb: tuple) -> None:
@@ -140,18 +146,13 @@ def draw_hand(cr, x: float, y: float, rgb: tuple) -> None:
     cr.set_source_rgb(*rgb)
     cr.set_line_cap(1)  # round
     cr.set_line_join(1)
-    cr.set_line_width(2)
+    cr.set_line_width(2.4)
     _svg_path(cr, HAND_STEM)
     cr.stroke()
-    cr.set_line_width(1.3)
+    cr.set_line_width(1.8)
     for d in HAND_SCROLLS:
         _svg_path(cr, d)
         cr.stroke()
-    cx, cy, r = HAND_RING
-    cr.set_line_width(1.6)
-    cr.new_sub_path()
-    cr.arc(cx, cy, r, 0, 2 * math.pi)
-    cr.stroke()
     _svg_path(cr, HAND_SPADE)
     cr.fill()
     cr.restore()
@@ -187,26 +188,59 @@ def draw_badge(cr, cx: float, cy: float, daylight: bool, bg: tuple) -> None:
         cr.fill()
 
 
+def draw_pips(cr, x: float, y_of: Callable[[float], float], row: int, rows: int, rgba: tuple) -> None:
+    """One pip per thirty, right-justified (centred PIP_INSET from the right edge ``x``), each centred in its thirty."""
+    cr.set_source_rgba(*rgba)
+    for i in range(rows):
+        cy = y_of(row + i) + PITCH / 2
+        _rounded(cr, x - PIP_INSET - PIP / 2, cy - PIP / 2, PIP, PIP, 2)
+        cr.fill()
+
+
+def draw_notches(cr, x: float, w: float, y_of: Callable[[float], float], row: int, rows: int, bg: tuple,
+                 outline: Optional[tuple] = None, size: float = NOTCH) -> None:
+    """Dimples on both edges at each thirty boundary inside a card, so its thirties can be counted. Drawn on top, so
+    they cut the accent strip too. A free stretch's notches carry its dotted outline round them."""
+    for i in range(1, rows):
+        cy = y_of(row + i)
+        for cx, a0, a1 in ((x, -math.pi / 2, math.pi / 2), (x + w, math.pi / 2, 3 * math.pi / 2)):
+            cr.new_path()
+            cr.arc(cx, cy, size / 2, a0, a1)
+            cr.close_path()
+            cr.set_source_rgba(*bg)
+            cr.fill()
+            if outline is not None:
+                cr.new_path()
+                cr.arc(cx, cy, size / 2, a0, a1)
+                cr.set_source_rgba(*outline)
+                cr.set_line_width(1.5)
+                cr.set_dash([1.2, 1.6])
+                cr.stroke()
+                cr.set_dash([])
+
+
 # --- the Day tab -------------------------------------------------------------------------------------------------
 
 class CardWidget(Gtk.Box):
-    """An item on its slots: tick, title (and a quiet line when there's room); the canvas draws its pips and
-    notches."""
+    """An item on its slots: tick and title (and a quiet line when there's room); the canvas draws its pips and
+    notches, and handles dragging and resizing it."""
 
-    def __init__(self, card: Card, on_tick: Callable[[Card], None], on_open: Callable[["CardWidget"], None]) -> None:
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    def __init__(self, card: Card, on_tick: Callable[[Card], None], on_open: Callable[["CardWidget"], None],
+                 on_delete: Callable[[Card], None]) -> None:
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, focusable=True)
         self.card = card
         span = card.span
         self.add_css_class("tl-card")
         self.add_css_class(card.look)
         self.add_css_class(card.state)
-        if span.shown_only or span.tentative:
-            self.add_css_class("not-yours")
+        if not movable(span):
+            self.add_css_class("fixed")
         if card.current:
             self.add_css_class("current")
         multi = card.rows > 1
 
-        self.tick = Gtk.Button(valign=Gtk.Align.START if multi else Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        self.tick = Gtk.Button(valign=Gtk.Align.START if multi else Gtk.Align.CENTER, halign=Gtk.Align.CENTER,
+                               margin_top=11 if multi else 0)
         self.tick.add_css_class("tl-tick")
         icon = {"done": "object-select-symbolic", "partial": "object-select-symbolic",
                 "skipped": "window-close-symbolic"}.get(card.state)
@@ -220,7 +254,7 @@ class CardWidget(Gtk.Box):
         self.append(self.tick)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True,
-                       valign=Gtk.Align.START if multi else Gtk.Align.CENTER)
+                       valign=Gtk.Align.START if multi else Gtk.Align.CENTER, margin_top=10 if multi else 0)
         self.title_label = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
         self.title_label.add_css_class("tl-title")
         title = GLib.markup_escape_text(span.title)
@@ -240,23 +274,52 @@ class CardWidget(Gtk.Box):
             self.caption.add_css_class("dim-label")
             text.append(self.caption)
         self.append(text)
-        self.append(Gtk.Box(width_request=PIP + 6))  # room for the pip column the canvas draws
+        self.append(Gtk.Box(width_request=PIP_INSET + PIP))  # room for the pip column the canvas draws
 
         tip = [span.title, card.times]
         if card.status:
             tip.append(card.status)
         tip += card.notes
-        if span.shown_only:
-            tip.append("Not yours: shown only")
+        if span.category.value == "calendar":
+            tip.append("From your calendar: fixed")
         self.set_tooltip_text("\n".join(tip))
-        click = Gtk.GestureClick()
-        click.connect("released", lambda *_: on_open(self))
+        self.update_property([Gtk.AccessibleProperty.LABEL], [f"{span.title}, {card.times}"])
+
+        # a tap (or right-click) selects it and shows its real times; Delete removes it
+        click = Gtk.GestureClick(button=0)
+        click.connect("pressed", self._pressed)
+        click.connect("released", self._released, on_open)
         self.add_controller(click)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", lambda _c, keyval, _code, _state: (
+            on_delete(card) or True) if keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete, Gdk.KEY_BackSpace) else False)
+        self.add_controller(keys)
+        motion = Gtk.EventControllerMotion()
+        motion.connect("motion", self._hover)
+        self.add_controller(motion)
+        self._press = (0.0, 0.0)
+
+    def _pressed(self, _gesture, _n, x, y) -> None:
+        self._press = (x, y)
+
+    def _released(self, gesture, _n, x, y, on_open) -> None:
+        if abs(x - self._press[0]) > 4 or abs(y - self._press[1]) > 4:
+            return  # that was a drag
+        self.grab_focus()
+        on_open(self)
+
+    def _hover(self, _motion, _x, y) -> None:
+        if not movable(self.card.span):
+            self.set_cursor_from_name(None)
+            return
+        edge = y <= GRIP or y >= self.get_height() - GRIP
+        self.set_cursor_from_name("ns-resize" if edge else "grab")
 
 
 class DayCanvas(Gtk.Widget):
-    """The waking day: slots, the sky rail, the now badge and hand, cards, free stretches. Children are real widgets
-    (ticks are buttons); the rest is drawn."""
+    """The waking day: slots, the sky rail, the now badge and hand, Work, cards, free stretches. Children are real
+    widgets (ticks and free stretches are buttons); the rest is drawn. Dragging a card moves it, dragging its top or
+    bottom edge resizes it (both snap to thirties); each becomes one tool call (timeline_layout.move_call, ...)."""
 
     __gtype_name__ = "ThirtiesTimelineDay"
 
@@ -264,22 +327,32 @@ class DayCanvas(Gtk.Widget):
         super().__init__()
         self.layout: Optional[DayLayout] = None
         self.cards: List[CardWidget] = []
+        self.work: List[tuple] = []         # (label, Card)
         self.frees: List[tuple] = []        # (button, FreeStretch)
         self.notes: List[tuple] = []        # (label, SlotNote)
         self.on_tick: Callable[[Card], None] = lambda card: None
         self.on_free: Callable[[Gtk.Widget, FreeStretch], None] = lambda w, f: None
-        self.on_move: Callable[[str, datetime], None] = lambda span_id, start: None
+        self.on_change: Callable[[str, dict], None] = lambda name, args: None
+        self.on_delete: Callable[[Card], None] = lambda card: None
+        self.ghost: Optional[tuple] = None  # (x, y, w, h) while dragging
+        self._drag: Optional[dict] = None
         self.set_hexpand(True)
-        target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
-        target.connect("drop", self._on_drop)
-        self.add_controller(target)
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", self._drag_begin)
+        drag.connect("drag-update", self._drag_update)
+        drag.connect("drag-end", self._drag_end)
+        self.add_controller(drag)
 
     # --- content ---
 
+    def _children(self) -> List[Gtk.Widget]:
+        return [b for b, _ in self.frees] + [lbl for lbl, _ in self.work] + list(self.cards) + \
+            [lbl for lbl, _ in self.notes]
+
     def _clear(self) -> None:
-        for w in [c for c in self.cards] + [b for b, _ in self.frees] + [lbl for lbl, _ in self.notes]:
+        for w in self._children():
             w.unparent()
-        self.cards, self.frees, self.notes = [], [], []
+        self.cards, self.work, self.frees, self.notes = [], [], [], []
 
     def do_dispose(self) -> None:
         self._clear()
@@ -287,7 +360,7 @@ class DayCanvas(Gtk.Widget):
     def set_layout(self, layout: DayLayout) -> None:
         self._clear()
         self.layout = layout
-        for f in layout.free:  # under the notes, so a note of someone else's event doesn't block the click
+        for f in layout.free:
             b = Gtk.Button()
             b.add_css_class("tl-free")
             b.set_tooltip_text("Plan something here")
@@ -295,25 +368,26 @@ class DayCanvas(Gtk.Widget):
             b.connect("clicked", lambda btn, f=f: self.on_free(btn, f))
             b.set_parent(self)
             self.frees.append((b, f))
+        for w in layout.work:
+            lbl = Gtk.Label(label=w.span.title, xalign=0, valign=Gtk.Align.START, can_target=True,
+                            tooltip_text=f"{w.span.title}\n{w.times}")
+            lbl.add_css_class("tl-work-label")
+            lbl.set_parent(self)
+            self.work.append((lbl, w))
         for c in layout.cards:
-            w = CardWidget(c, lambda card: self.on_tick(card), self._open_card)
-            if c.span.category.value in ("activity", "task") and not c.span.tentative:
-                source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
-                source.connect("prepare", lambda *_a, sid=c.span.id: Gdk.ContentProvider.new_for_value(sid))
-                w.add_controller(source)
+            w = CardWidget(c, lambda card: self.on_tick(card), self._open_card, lambda card: self.on_delete(card))
             w.set_parent(self)
             self.cards.append(w)
         for n in layout.notes:
             lbl = Gtk.Label(label=n.text, xalign=0, ellipsize=Pango.EllipsizeMode.END, can_target=False)
             lbl.add_css_class("caption")
             lbl.add_css_class("tl-note")
-            lbl.set_tooltip_text(f"{n.span.title}, {format_clock(n.span.start_dt)} – {format_clock(n.span.end_dt)}")
             lbl.set_parent(self)
             self.notes.append((lbl, n))
         self.queue_resize()
 
-    def _open_card(self, w: CardWidget) -> None:
-        """Tapping a card shows its real times (and what's noted on it)."""
+    def _open_card(self, w: CardWidget) -> Gtk.Popover:
+        """Tapping a card shows its real times (and what's noted on it), with Remove for what can be removed."""
         card = w.card
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=6, margin_bottom=6,
                       margin_start=8, margin_end=8)
@@ -326,19 +400,81 @@ class DayCanvas(Gtk.Widget):
             lbl.add_css_class("dim-label")
             box.append(lbl)
         pop = Gtk.Popover(child=box)
+        if delete_call(card.span) is not None:
+            remove = Gtk.Button(label="Remove", halign=Gtk.Align.START, margin_top=4)
+            remove.add_css_class("destructive-action")
+            remove.connect("clicked", lambda _b: (pop.popdown(), self.on_delete(card)))
+            box.append(remove)
+            pop.remove_button = remove
         pop.set_parent(w)
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         if w.get_mapped():
             pop.popup()
+        return pop
 
-    def _on_drop(self, _target, value, _x, y) -> bool:
-        if self.layout is None or not value:
-            return False
-        row = int((y - TOP) // PITCH)
-        if not 0 <= row < len(self.layout.slots):
-            return False
-        self.on_move(str(value), self.layout.slots[row].start)
-        return True
+    # --- dragging and resizing ---
+
+    def card_at(self, x: float, y: float) -> Optional[CardWidget]:
+        width = self.get_width()
+        for w in reversed(self.cards):
+            cx, cy, cw, ch = self.lane_rect(width, w.card)
+            if cx <= x <= cx + cw and cy <= y <= cy + ch:
+                return w
+        return None
+
+    def begin_gesture(self, x: float, y: float) -> Optional[dict]:
+        """What a press at (x, y) would drag: a card's body (move) or its top or bottom edge (resize)."""
+        w = self.card_at(x, y)
+        if w is None or not movable(w.card.span):
+            return None
+        picked = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while picked is not None and picked is not w:
+            if isinstance(picked, Gtk.Button):
+                return None  # the tick
+            picked = picked.get_parent()
+        _cx, cy, _cw, ch = self.lane_rect(self.get_width(), w.card)
+        local = y - cy
+        mode = "top" if local <= GRIP else "bottom" if local >= ch - GRIP else "move"
+        return {"card": w.card, "mode": mode, "grab": int(max(0.0, y - self.y_of(w.card.row)) // PITCH),
+                "x": x, "y": y}
+
+    def gesture_call(self, drag: dict, dy: float, push: bool = False):
+        """The tool call a drag of ``dy`` px produces (None: nothing changes)."""
+        rows = (drag["y"] + dy - TOP) / PITCH
+        if drag["mode"] == "move":
+            return move_call(self.layout, drag["card"], drag["grab"], rows, push)
+        return resize_call(self.layout, drag["card"], drag["mode"], rows)
+
+    def _drag_begin(self, gesture, x, y) -> None:
+        self._drag = self.begin_gesture(x, y) if self.layout else None
+        if self._drag is None:
+            gesture.set_state(Gtk.EventSequenceState.DENIED)
+
+    def _drag_update(self, _gesture, dx, dy) -> None:
+        d = self._drag
+        if d is None or (abs(dx) < 4 and abs(dy) < 4):
+            return
+        card = d["card"]
+        x, _y, w, _h = self.lane_rect(self.get_width(), card)
+        rows = (d["y"] + dy - TOP) / PITCH
+        if d["mode"] == "move":
+            first, count = move_target(self.layout, card, d["grab"], rows), card.rows
+        else:
+            first, count = resize_extent(self.layout, card, d["mode"], rows)
+        count = min(count, len(self.layout.slots) - first)
+        self.ghost = (x, self.y_of(first) + GAP / 2, w, count * PITCH - GAP)
+        self.queue_draw()
+
+    def _drag_end(self, gesture, dx, dy) -> None:
+        d, self._drag = self._drag, None
+        self.ghost = None
+        self.queue_draw()
+        if d is None or (abs(dx) < 4 and abs(dy) < 4):
+            return
+        push = bool(gesture.get_current_event_state() & Gdk.ModifierType.SHIFT_MASK)
+        call = self.gesture_call(d, dy, push)
+        if call is not None:
+            GLib.idle_add(lambda: self.on_change(*call) and False)
 
     # --- geometry ---
 
@@ -352,6 +488,9 @@ class DayCanvas(Gtk.Widget):
         x = RAIL + card.lane * (lane_w + LANE_GAP)
         y = self.y_of(card.row) + GAP / 2
         return x, y, lane_w, card.rows * PITCH - GAP
+
+    def full_rect(self, width: float, row: int, rows: int) -> tuple:
+        return RAIL, self.y_of(row) + GAP / 2, width - RAIL - PAD_RIGHT, rows * PITCH - GAP
 
     def do_get_request_mode(self) -> Gtk.SizeRequestMode:
         return Gtk.SizeRequestMode.CONSTANT_SIZE
@@ -372,7 +511,10 @@ class DayCanvas(Gtk.Widget):
         for w in self.cards:
             self._place(w, *self.lane_rect(width, w.card))
         for b, f in self.frees:
-            self._place(b, RAIL, self.y_of(f.row) + GAP / 2, width - RAIL - PAD_RIGHT, f.rows * PITCH - GAP)
+            self._place(b, *self.full_rect(width, f.row, f.rows))
+        for lbl, c in self.work:
+            x, y, w, _h = self.full_rect(width, c.row, 1)
+            self._place(lbl, x + 14, y + 10, w / 2, 20)
         for lbl, n in self.notes:
             self._place(lbl, RAIL + 12, self.y_of(n.row) + GAP / 2, (width - RAIL - PAD_RIGHT) / 2, PITCH - GAP)
 
@@ -386,31 +528,20 @@ class DayCanvas(Gtk.Widget):
         fg = _fg(self)
         bg = _lookup(self, "window_bg_color", (0.13, 0.13, 0.15, 1) if _dark() else (0.98, 0.98, 0.98, 1))
         success = _lookup(self, "success_color", (0.18, 0.76, 0.49, 1))
-        cr = snapshot.append_cairo(Graphene.Rect().init(0, 0, width, height))
+        green = (success[0], success[1], success[2], 0.85)
+        rect = Graphene.Rect().init(0, 0, width, height)
+        cr = snapshot.append_cairo(rect)
         x0, slot_w = RAIL, width - RAIL - PAD_RIGHT
 
-        # the slots: subtle rounded bands tinted from the foreground (so they show in light and dark); Work hatched
+        # the slots: subtle rounded bands tinted from the foreground, so they show in light and dark
         for s in layout.slots:
             y = self.y_of(s.row) + GAP / 2
-            alpha = 0.03 if s.past else 0.055
             if s.sleep:
                 cr.set_source_rgba(*INDIGO, 0.18)
             else:
-                cr.set_source_rgba(*fg, alpha)
+                cr.set_source_rgba(*fg, 0.03 if s.past else 0.055)
             _rounded(cr, x0, y, slot_w, PITCH - GAP, 8)
             cr.fill()
-            if s.work:
-                cr.save()
-                _rounded(cr, x0, y, slot_w, PITCH - GAP, 8)
-                cr.clip()
-                cr.set_source_rgba(*fg, 0.07)
-                cr.set_line_width(1.5)
-                h = PITCH - GAP
-                for k in range(-int(h), int(slot_w) + int(h), 8):
-                    cr.move_to(x0 + k, y + h)
-                    cr.line_to(x0 + k + h, y)
-                cr.stroke()
-                cr.restore()
 
         # the sky bar, to the minute, rounded at its ends
         top, bottom = self.y_of(0) + GAP / 2, self.y_of(len(layout.slots)) - GAP / 2
@@ -422,40 +553,65 @@ class DayCanvas(Gtk.Widget):
             cr.rectangle(SKY_X, self.y_of(band.top), SKY_W, self.y_of(band.bottom) - self.y_of(band.top))
             cr.fill()
         cr.restore()
+
+        # Work: one hatched card, its own grey accent strip, pips and notches; under everything placed on it
+        for _lbl, c in self.work:
+            x, y, w, h = self.full_rect(width, c.row, c.rows)
+            cr.save()
+            _rounded(cr, x, y, w, h, 9)
+            cr.clip()
+            cr.set_source_rgba(*bg)
+            cr.paint()
+            cr.set_source_rgba(*fg, 0.06)
+            cr.paint()
+            cr.set_source_rgba(*fg, 0.08)
+            cr.set_line_width(1.5)
+            for k in range(-int(h), int(w) + int(h), 9):
+                cr.move_to(x + k, y + h)
+                cr.line_to(x + k + h, y)
+            cr.stroke()
+            cr.set_source_rgba(*fg, 0.35)
+            cr.rectangle(x, y, 3, h)
+            cr.fill()
+            cr.restore()
+            draw_pips(cr, x + w, self.y_of, c.row, c.rows, (*fg, 0.6))
+            draw_notches(cr, x, w, self.y_of, c.row, c.rows, bg)
         del cr
 
         for b, _f in self.frees:
             self.snapshot_child(b, snapshot)
+        for lbl, _c in self.work:
+            self.snapshot_child(lbl, snapshot)
+        cr = snapshot.append_cairo(rect)
+        for _b, f in self.frees:  # green pips, and notches that carry the dotted outline round them
+            x, _y, w, _h = self.full_rect(width, f.row, f.rows)
+            draw_pips(cr, x + w, self.y_of, f.row, f.rows, green)
+            draw_notches(cr, x, w, self.y_of, f.row, f.rows, bg, outline=(success[0], success[1], success[2], 0.7),
+                         size=11)
+        del cr
+
         for w in self.cards:
             self.snapshot_child(w, snapshot)
         for lbl, _n in self.notes:
             self.snapshot_child(lbl, snapshot)
 
-        cr = snapshot.append_cairo(Graphene.Rect().init(0, 0, width, height))
-        # free stretches: a green pip per thirty, centred
-        cr.set_source_rgba(success[0], success[1], success[2], 0.85)
-        for _b, f in self.frees:
-            cx = x0 + slot_w / 2
-            for i in range(f.rows):
-                cy = self.y_of(f.row + i) + PITCH / 2
-                _rounded(cr, cx - PIP / 2, cy - PIP / 2, PIP, PIP, 2)
-                cr.fill()
-        # cards: a pip per thirty in a column at the right edge, and a notch at each thirty boundary inside
+        cr = snapshot.append_cairo(rect)
+        # each card: a pip per thirty at its own right edge, and its notches (cutting its accent strip too)
         for w in self.cards:
             c = w.card
-            x, y, cw, ch = self.lane_rect(width, c)
-            cr.set_source_rgba(*fg, 0.6 * (0.6 if c.state in ("done", "skipped", "moot") else 1))
-            for i in range(c.rows):
-                cy = self.y_of(c.row + i) + PITCH / 2
-                _rounded(cr, x + cw - PIP - 7, cy - PIP / 2, PIP, PIP, 2)
-                cr.fill()
-            cr.set_source_rgba(*bg)
-            for i in range(1, c.rows):
-                cy = self.y_of(c.row + i)
-                cr.new_path()
-                cr.arc(x, cy, NOTCH / 2, -math.pi / 2, math.pi / 2)
-                cr.close_path()
-                cr.fill()
+            x, _y, cw, _ch = self.lane_rect(width, c)
+            draw_pips(cr, x + cw, self.y_of, c.row, c.rows,
+                      (*fg, 0.6 * (0.6 if c.state in ("done", "skipped", "moot") else 1)))
+            draw_notches(cr, x, cw, self.y_of, c.row, c.rows, bg)
+        if self.ghost is not None:  # where a dragged card will land
+            accent = Adw.StyleManager.get_default().get_accent_color().to_standalone_rgba(_dark())
+            gx, gy, gw, gh = self.ghost
+            _rounded(cr, gx, gy, gw, gh, 9)
+            cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.18)
+            cr.fill_preserve()
+            cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.9)
+            cr.set_line_width(2)
+            cr.stroke()
         # now: the badge on the sky bar and the hour hand into the day
         if layout.now_row is not None:
             cy = self.y_of(layout.now_row)
@@ -712,6 +868,8 @@ class TimelinePage(Gtk.Box):
         self.load_week: Optional[Callable[[date, List[date]], tuple]] = None
         self.stretch_options: Optional[Callable[[FreeStretch, int], list]] = None  # placement.Slot list
         self.suggestions: Optional[Callable[[], List[Dict[str, str]]]] = None
+        # (title, undo) -> shows a toast with Undo (the window's toast overlay)
+        self.toast: Optional[Callable[[str, Callable[[], None]], None]] = None
         self.get_units: Callable[[], str] = lambda: DEFAULT_UNITS
         self.set_units: Callable[[str], None] = lambda units: None
         self.week_start = 0
@@ -741,7 +899,8 @@ class TimelinePage(Gtk.Box):
         self.canvas = DayCanvas()
         self.canvas.on_tick = self._tick_card
         self.canvas.on_free = self._plan_here
-        self.canvas.on_move = self.move_to
+        self.canvas.on_change = self._change
+        self.canvas.on_delete = self._delete
         self.day_scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         clamp = Adw.Clamp(maximum_size=720, tightening_threshold=480)
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6, margin_top=4)
@@ -828,6 +987,22 @@ class TimelinePage(Gtk.Box):
             return False
         self.run_tool("update_event", {"event": span_id, "start": format_clock(start)})
         return True
+
+    def _change(self, name: str, args: dict) -> str:
+        """A drag or a resize: one tool call, like the assistant's."""
+        return self.run_tool(name, args) if self.run_tool is not None else ""
+
+    def _delete(self, card: Card) -> None:
+        """Remove an item (remove_event), with Undo putting it back at its own times."""
+        call = delete_call(card.span)
+        if call is None or self.run_tool is None:
+            return
+        result = self.run_tool(*call) or ""
+        if result.startswith(NOT_DONE):
+            return
+        span = card.span
+        if self.toast is not None:
+            self.toast(f"Removed {span.title}", lambda: self.run_tool(*restore_call(span)))
 
     # --- planning something into a free stretch ---
 

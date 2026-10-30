@@ -248,6 +248,12 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             self.core.settings.set(UNITS_SETTING, units)
             self._push_sync()
 
+        def toast(title, undo):
+            t = Adw.Toast(title=title, button_label="Undo", timeout=6)
+            t.connect("button-clicked", lambda *_: undo())
+            self.toast_overlay.add_toast(t)
+
+        page.toast = toast
         page.load_week = self._load_week
         page.stretch_options = options
         page.suggestions = suggestions

@@ -148,7 +148,7 @@
 .tl-card.moot .tl-tick { border-style: dashed; }
 
 .tl-free {
-    border: 1.5px dashed color-mix(in srgb, var(--success-color) 55%, transparent);
+    border: 1.5px dashed color-mix(in srgb, var(--success-color) 70%, transparent);
     border-radius: 9px;
     background: none;
     box-shadow: none;
@@ -168,3 +168,7 @@
 .tl-chips { padding: 10px 12px; }
 
 .timeline .accent { color: var(--accent-color); }
+.tl-card:focus-visible,
+.tl-card:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.tl-card.fixed .tl-title { font-weight: 600; }
+.tl-work-label { font-weight: 600; opacity: 0.55; }
