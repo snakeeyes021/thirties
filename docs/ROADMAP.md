@@ -284,7 +284,7 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
       - The model judges the unclear cases, and the item stores which it is.
     - A flexible item that starts mid-block and crosses into the next block moves to the next block, to discourage overstuffing. A fixed item never moves.
 
-### B. 0.2: design settled enough to build (in this order; branch `feature/0.2` once 0.1 is released)
+### B. 0.2: design settled enough to build (the details; the order of work is in "0.2" below)
 1. **Joplin stays clean, and Thirties does the upkeep** (M). The user never has to manage two places.
    - Thirties adds items to the right list, in the right section.
    - Thirties records done items and moves them out of their lists into its Done log (decided below).
@@ -344,6 +344,51 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 - **Where done items live in Joplin** (2026-10-24): a single Thirties notebook with one Done note per month. Each done item is one dated line naming the list it came from. Items move out of their lists into it, and undo moves them back. There are no per-list or per-notebook Done sections, because more places means more ways to fall out of step. Routine items stay in place (they're templates). Ongoing items stay too, with a "worked on" line in the log.
 
 ---
+
+## 0.2: Trustworthy data, and a day that sets itself up (agreed 2026-10-30; branch `feature/0.2`)
+
+The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus section B above. The user chose to have all of it in 0.2 rather than split it with 0.3. The full friction list, with quotes, is in `docs/eval_reports/frictions/2026-10-30_oct14-30.md` (gitignored, because it's private chat). Codes like J1 and S3 refer to it. Each block lands on the branch as it's done, so the user's builds get the fixes as they come.
+
+**Block 0: the data is right** (blockers, first)
+1. **Today matches the plan, and routines are written right** (soak 6, J1, J2, S9). Everything on today's plan is on Today. A routine goes on as one item, named after its note, with its steps nested under it. Nothing is written back into a routine note.
+2. **Completion times** (J8, J9). A "done" in chat with no time is stored at the time it was said, as an estimate (start = that time minus the planned length). A tick in the app is stored at the time of the tick. Notices and replies see ticks.
+3. **Ghost copies and outcomes on the wrong item** (S3, S8). Moving or redrawing an item moves it; it never leaves a copy behind. An outcome is written only to the item the user named, on the day they meant.
+4. **Internal text never reaches the user** (A1). Python strips `CALL …` lines and any tool syntax before a reply is sent. Retry prompts ("[System check…]") are kept out of the visible history.
+5. **Check the possible recurrences** in the database: Work moved on 10-27 (S1), and done items offered again on 10-25 (J3). Fix whichever is real.
+6. **Every Joplin write is recorded and scored** (B1). The write log, a Joplin fake in the day sim, and grading against the script's truth.
+
+**Block 1: the day sets itself up**
+7. **What kind of item** (B2): once, ongoing or daily.
+8. **Routines and daily anchors** (B3, R1, R2, R6). The user's two morning thirties go on every day without being asked: kitties, caffeinate, water and breakfast in one; throne, shower, PT and brush teeth in the other. Fixed times are kept (cats' dinner at 5), and known facts are applied (dinner takes an hour; outside things wait until after the shower).
+9. **Things go moot** (B4, R5).
+10. **The morning rollover offers only what should roll over** (R4). No routine items, no generic "dev" blocks, nothing done or moot, and a plain question.
+11. **The assistant proposes the day** (A6). It covers the daily items plus what keeps goals on track, so the user doesn't have to micromanage.
+
+**Block 2: lists and items**
+12. **New items go on the right list and in the right section, without asking** (B1, J5). The **drop box** list role (soak 5) is a fallback for when it isn't obvious. Done items move to the monthly Done note.
+13. **"Remind me" schedules an item** (B5, C4).
+14. **"Pencilled in" items** (O3): on Today, but not given a time.
+15. **Planning tomorrow and later days** (O2).
+16. **Editing a note's structure** (J7): sub-items, and splitting a line.
+
+**Block 3: the schedule model**
+17. **Overlapping, nested and coincident items** (S2, T4): one coherent model. Items placed alongside never move, split or hide each other; Work shows under what's placed on top of it; a group reads as one entry.
+18. **Placement with judgement** (B8, S5): no cramming; "later" means a real gap.
+19. **"Push everything back" includes what's past and unmarked** (S4).
+20. **Times** (S6, S7). "Now" is the real time. Thirties never picks minute times or a time that crosses blocks. Calendar events can be ticked (soak 1). Ticking items before their time leaves a clean card (soak 3).
+
+**Block 4: messages**
+21. **Missed items** (C2): shown with the "you're in this block" line, one per line, without duplicates, and not for the current block. **No "did you get to the rest?" after every done** (C5). **Late notices are dropped**, not sent stale (C3).
+22. **Schedule replies** (A5): from now on, with no "(until…)" when the next item follows. Grouped items read as one entry.
+23. **Act, don't ask** (A3). Don't make up explanations or capabilities (A4). Reply once to a burst of quick messages (A8).
+24. **Telegram** (T1, T2, T3): timeouts retried automatically; formatting escaped; the desktop chat mirrored to the phone.
+25. **Times on chat messages in the app** (soak 2).
+
+**Block 5: records and the rest**
+26. **Actual wake, sleep and work times** (B6). **Context with each outcome** (B7).
+27. **Calendar** (O1): "not mine" per recurring series; mine / show only / ignore, per calendar.
+28. **Stale goals** (A7), and **memory notes that paper over fixed bugs get deleted** (D).
+29. **The eval counts only minute times Thirties picked itself** (gate write-up, docs/SLM_BRAIN.md).
 
 ## After 0.1
 
