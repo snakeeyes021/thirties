@@ -70,6 +70,12 @@ class TestGemmaHorizons(SlmTestCase):
                                                "duration": "1 hour"})
         self.assertEqual(self.tell("eh, that's a someday thing"), "Noted: 'Fix the media server' is someday.")
 
+    def test_something_not_on_a_list_goes_to_the_model(self):
+        before = len(self.rt.parse.seen)
+        self.say("I need to do laundry this week", {"type": "add", "title": "Laundry"})
+        self.assertGreater(len(self.rt.parse.seen), before)
+        self.assertEqual(HorizonCatalog(self.sched.state_db).items(), {})
+
     def test_moving_whats_on_the_schedule_isnt_pinning(self):
         self.say("move the dentist to Thursday", {"type": "move", "target": "dentist", "to_day": "Thursday"})
         self.assertEqual(HorizonPlans(self.sched.state_db).rows(), [])

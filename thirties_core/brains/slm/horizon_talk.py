@@ -74,8 +74,8 @@ PIN_RE = re.compile(rf"^(?:can you\s+|could you\s+|please\s+|let'?s\s+|and\s+|ok
                     rf"push|bump|drop|do|leave)\s+(?P<what>.+?)\s+(?:on|for|to|into|in|till|until|til)\s+{_WHEN}"
                     rf"\s*(?:instead|then|please)?\s*[.!]*$", re.I)
 SHOW_RE = re.compile(r"\b(?:what'?s|what is|what do i have|what have i got|anything|show(?: me)?|list|see|how'?s|"
-                     r"how is|how are we|how am i|am i|are we|where are we)\b[^.?!]{0,40}?\b(?P<when>(?:this|next|the|my) "
-                     r"(?:week|month|year)|(?:january|february|march|april|may|june|july|august|september|october|"
+                     r"how is|how are we|how am i|am i|are we|where are we)\b[^.?!]{0,40}?\b"
+                     r"(?P<when>(?:this|next|the|my) (?:week|month|year)|(?:january|february|march|april|may|june|july|august|september|october|"
                      r"november|december))\b", re.I)
 PLAN_RE = re.compile(r"\b(?:plan(?:ning)?|map out|set up|organi[sz]e)\s+(?:out\s+)?(?P<when>(?:my|the|this|our|next)\s+"
                      r"(?:week|month|year))\b", re.I)
@@ -164,6 +164,10 @@ class HorizonTalk:
             # only a list item that isn't on it is pinned
             what = re.sub(r"^(?:the|my|a|an)\s+", "", horizon.get("target") or "", flags=re.I)
             if what.lower() in PRONOUNS or self._task_for(what) is None or self._span_candidates(what):
+                return None
+        elif horizon is not None and horizon.get("target"):
+            task, _ = self._horizon_item(horizon.get("target"))
+            if task is None:  # "I need to do laundry this week": not a list item; the parse may add it
                 return None
         return horizon
 
