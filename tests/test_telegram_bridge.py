@@ -167,7 +167,8 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
         self.assertIn("Schedule for", msg)
-        self.assertIn("8:30 AM – 4:00 PM: Work", msg)
+        self.assertIn("- 8:30 AM – Work", msg)  # laid out like the assistant's schedule replies
+        self.assertIn("You're in the 9:00 AM block: Work", msg)
         self.assertNotIn("Block", msg)
 
     def test_new_command_starts_fresh_conversation(self):

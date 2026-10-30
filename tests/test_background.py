@@ -33,7 +33,9 @@ class TestBackground(unittest.TestCase):
         self.svc.check_ins(at("18:15"))
         self.svc.check_ins(at("18:20"))
         self.assertEqual(self.desktop, [("checkin", "👋 Just checking in: did you get to Taxes, or are you still on it?")])
-        self.svc.bridge.broadcast.assert_called_once_with("👋 Just checking in: did you get to *Taxes*, or are you still on it?")
+        self.svc.bridge.broadcast.assert_called_once()
+        self.assertEqual(self.svc.bridge.broadcast.call_args[0][0],
+                         "👋 Just checking in: did you get to *Taxes*, or are you still on it?")
         self.assertIn("did you get to Taxes", self.svc.manager().history()[-1]["content"])
         fresh = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=self.svc.joplin_engine,
                                   inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
@@ -62,7 +64,7 @@ class TestBackground(unittest.TestCase):
             self.svc.starts(at("11:00") + timedelta(minutes=minute))
         self.assertEqual(self.desktop, [("start", "🔔 11:00: Feed kitties, Caffeinate, Water bottle")])
         self.svc.starts(at("17:00") + timedelta(seconds=20))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
 
     def test_moved_item_is_not_announced_again(self):
         self.svc.starts(at("17:00"))
@@ -90,23 +92,24 @@ class TestBackground(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("t2", "Brush teeth", at("22:00"), at("22:30"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("22:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 10:00: Brush teeth")  # the first was done: new
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00: Brush teeth")  # the first was done: new
 
-    def test_whats_behind_is_listed_at_the_bottom_when_something_new_falls_behind(self):
+    def test_whats_behind_is_listed_under_the_status_when_something_new_falls_behind(self):
         for sid, title, start in (("k", "Feed kitties", "11:00"), ("c", "Caffeinate", "11:10"), ("s", "Shower", "11:30")):
             self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(start) + timedelta(minutes=15),
                                                       SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("s2", "Shower", at("11:45"), at("11:55"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("w", "Walk", at("12:00"), at("12:30"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:30"), at("13:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("12:00"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\n- Feed kitties, "
-                                                      "Caffeinate\n- Shower"))  # by block, no times
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\nNot marked yet:\n- Feed kitties\n"
+                                                      "- Caffeinate\n- Shower"))  # one per line, once each, no times
         self.svc.starts(at("12:30"))
-        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\n- Feed kitties, "
-                                                               "Caffeinate\n- Shower\n- Walk")  # Walk fell behind
+        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\nNot marked yet:\n- Feed kitties\n"
+                                                               "- Caffeinate\n- Shower\n- Walk")  # Walk fell behind
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
         self.assertIn("- Lunch", self.desktop[-1][1])
         self.sched.state_db.upsert_span(EventSpan("x", "Stretch", at("17:30"), at("18:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
