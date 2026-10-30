@@ -119,14 +119,16 @@ def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = N
     block = thirty_of(now)
     here = [s for s in _row_items(plan) if not s.tentative and s.status == SpanStatus.PLANNED
             and s.start_dt < block + HALF and s.end_dt > block]
+    on_top = [s for s in here if not s.is_envelope]
+    here = on_top or here  # what's placed on Work is what's happening; Work alone when nothing is
     if not here:
         return f"You're in the {format_clock(block)} block, with nothing planned in it."
-    lines = slice_lines([(max(s.start_dt, block), s.end_dt, s.title) for s in here])
-    text = f"You're in the {format_clock(block)} block: " + ", then ".join(lines)
-    last_end = max(s.end_dt for s in here)
-    if last_end > block + HALF and last_end != next_start:
-        text += f" (until {format_clock(last_end)})"
-    return text + "."
+
+    def said(s: EventSpan) -> str:
+        runs_on = s.end_dt > block + HALF and s.end_dt != next_start
+        return f"{s.title} (until {format_clock(s.end_dt)})" if runs_on else s.title
+    lines = slice_lines([(max(s.start_dt, block), s.end_dt, said(s)) for s in here])
+    return f"You're in the {format_clock(block)} block: " + ", then ".join(lines) + "."
 
 
 # --- the schedule ---

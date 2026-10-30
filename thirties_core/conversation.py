@@ -297,7 +297,12 @@ class ConversationManager:
     def _catch_up(self) -> None:
         """Another manager (the window's, or the background service's for Telegram) may have added to this
         conversation since this one last looked: continue from the stored copy, never write over it."""
-        if self._store is None or self.conversation is None:
+        if self._store is None:
+            return
+        if self.conversation is None:  # the day had none when this one started; another client may have begun it
+            latest = self._store.latest_for_day(self.day_plan.target_date)
+            if latest is not None:
+                self._load(latest)
             return
         stored = self._store.get(self.conversation.id)
         if stored is not None and stored.updated_at > self.conversation.updated_at:
