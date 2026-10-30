@@ -14,7 +14,7 @@ generated from the same setup the brain sees.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 

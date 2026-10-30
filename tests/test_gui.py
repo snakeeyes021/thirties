@@ -236,6 +236,22 @@ class ChatPanelTests(unittest.TestCase):
         panel.set_conversation_manager(self.manager())
         self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
 
+    def test_a_turn_holds_the_store_lock(self) -> None:
+        # The window's background refresh takes the same lock, so it never reloads the manager mid-turn.
+        manager = self.manager()
+        panel = ChatPanel(manager)
+        seen = []
+        original = manager.send_user_message
+
+        def send(text):
+            seen.append(panel.store_lock.locked())
+            return original(text)
+        manager.send_user_message = send
+        panel.send_user_text("Plan my evening")
+        self.assertTrue(_iterate_until(lambda: not panel.is_busy))
+        self.assertEqual(seen, [True])
+        self.assertFalse(panel.store_lock.locked())
+
     def test_new_conversation_and_switching_survive_refresh(self) -> None:
         manager = self.manager()
         manager.send_user_message("first")
@@ -277,6 +293,25 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertEqual([n.text for n in services.memory.notes()], ["Probation items are maybes; never push them"])
         self.assertEqual(len(changes), 3)
 
+    def test_outdated_memory_notes_are_marked_and_can_be_kept(self) -> None:
+        from thirties_core.memory_audit import to_review
+        manager = ConversationManager(*self._day(), inference_engine=MockInferenceEngine(), active_notes=[])
+        services = manager.tools.services
+        services.memory.add("Probation items are maybes")
+        services.memory.add("Items don't cross block boundaries")
+        dialog = ProfileMemoryDialog(services.profile, services.memory)
+        flagged = [r for r in dialog._note_rows if r.has_css_class("warning")]
+        self.assertEqual([r.get_text() for r in flagged], ["Items don't cross block boundaries"])
+        def walk(widget):
+            for child in _children(widget):
+                yield child
+                yield from walk(child)
+        keep = next(c for c in walk(flagged[0]) if isinstance(c, Gtk.Button) and c.get_label() == "Keep")
+        keep.emit("clicked")
+        self.assertEqual(to_review(manager.scheduler.state_db), [])
+        self.assertFalse(any(r.has_css_class("warning") for r in dialog._note_rows))
+        self.assertEqual(len(services.memory.notes()), 2)  # kept, not deleted
+
     def test_lists_roles_and_urgency(self) -> None:
         from thirties_core.lists import ListCatalog
         from thirties_core.models import TaskItem
@@ -314,6 +349,16 @@ def _children(widget):
     while child is not None:
         yield child
         child = child.get_next_sibling()
+
+
+def _combo_rows(widget):
+    """Every ComboRow under ``widget``, by title."""
+    found = {}
+    for child in _children(widget):
+        if isinstance(child, Adw.ComboRow):
+            found[child.get_title()] = child
+        found.update(_combo_rows(child))
+    return found
 
 
 
@@ -369,6 +414,21 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertIsNotNone(dialog)
         group = settings_rows.schedule_group(settings_rows.SettingsContext(self.core))
         self.assertIsNotNone(group)
+
+    def test_each_calendar_is_mine_show_only_or_ignored(self):
+        from unittest import mock
+        self.core.scheduler.calendar_engine = mock.MagicMock()
+        self.core.scheduler.calendar_engine.list_calendars.return_value = [
+            {"name": "matt@example.com", "uid": "u1", "mine": True, "mode": ""},
+            {"name": "Sarah", "uid": "u2", "mine": False, "mode": ""}]
+        ctx = settings_rows.SettingsContext(self.core)
+        group = settings_rows.calendars_group(ctx)
+        rows = {}
+        self.assertTrue(_iterate_until(lambda: rows.update(_combo_rows(group)) or len(rows) == 2))
+        self.assertEqual(rows["matt@example.com"].get_subtitle(), "Your commitments: planned around")
+        self.assertEqual(rows["Sarah"].get_subtitle(), "Thirties asks once per event (once per series if it repeats)")
+        rows["Sarah"].set_selected(2)  # Mine, Ask, Show only, Ignore
+        self.assertEqual(self.core.settings.get("calendar.modes"), {"sarah": "show"})
 
 
 if __name__ == "__main__":

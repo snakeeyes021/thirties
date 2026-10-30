@@ -23,7 +23,7 @@ import os
 import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
@@ -195,7 +195,7 @@ class BackgroundService:
     def _quiet(self, now: datetime) -> bool:
         """Asleep, or in a calendar event: no messages (except reminders the user asked for)."""
         plan = self.manager().day_plan
-        return any(s.start_dt <= now < s.end_dt for s in plan.active_spans() if not s.tentative
+        return any(s.covers(now) for s in plan.active_spans() if not s.tentative  # covers: the instant (DST)
                    and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm)))
 
     def _talking(self, now: datetime) -> bool:
@@ -418,6 +418,10 @@ class BackgroundService:
             return
         wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
             timedelta(minutes=30 * day_hours(self.config.general, day).sleep_end + 30)  # that weekday's wake time
+        from thirties_core.day_times import wake_time
+        history = db.get_spans_between(manager.day_plan.day_start - timedelta(hours=18), manager.day_plan.day_start)
+        woke = wake_time(manager.day_plan, history)  # the night as planned or recorded ("sleeping in")
+        wake = woke + timedelta(minutes=30) if woke else wake  # half an hour after waking, as before
         if now < wake:
             return
         db.set_sync_meta(key, "1")
@@ -446,6 +450,21 @@ class BackgroundService:
             return
         if text:
             self.send(text, "proposal", now=now, to_conversation=not stored)
+
+    def day_times(self, now: datetime) -> None:
+        """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),
+        unless the answer is already on the record."""
+        from thirties_core.day_times import ASK_AT_LEVELS, due_question
+        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now):
+            return
+        plan = self.manager().day_plan
+        history = self.scheduler.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        asked = self._remembered("day_times_asked")
+        due = due_question(plan, now, asked, history)
+        if due:
+            asked[due[0]] = now.date().isoformat()
+            self._remember("day_times_asked", asked, now)
+            self.send(due[1], "checkin", now=now)
 
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
@@ -518,7 +537,7 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
         for duty in (self.moot, self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
-                     self.starts, self.today_sync):
+                     self.starts, self.day_times, self.today_sync):
             try:
                 duty(now)
             except Exception as e:

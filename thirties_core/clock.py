@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta
-from typing import Iterable, List, Optional, Sequence, Set, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 
 class ClockError(ValueError):

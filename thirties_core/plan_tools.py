@@ -25,7 +25,7 @@ from thirties_core.assistant_tools import (
     ToolError,
 )
 from thirties_core.astronomy import get_current_time, get_diurnal_date
-from thirties_core.calendar_engine import CalendarEvent
+from thirties_core.calendar_engine import CalendarEvent, series_key
 from thirties_core.clock import (
     thirty_ceil,
     unmarked_lines,
@@ -211,10 +211,13 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "resolve_calendar_event",
-        "description": "Record the user's decision on an unconfirmed calendar invite.",
+        "description": "Record the user's decision on an unconfirmed calendar invite. \"Not mine\" (someone else's "
+                       "event) is attend=false. On someone else's calendar it covers the whole recurring series.",
         "parameters": {
             "event": "The invite's id (or its exact title).",
-            "attend": "true if the user is going, false if not.",
+            "attend": "true if the user is going, false if not (or it isn't theirs).",
+            "series": "true/false to say whether it holds for every time this recurring event comes up (\"I go "
+                      "every week\", \"just this once\"); leave out otherwise.",
         },
         "required": ["event", "attend"],
     },
@@ -239,9 +242,9 @@ _JOINER = re.compile(r"\s+(?:/|&|\+|and|with)\s+|\s*/\s*", re.IGNORECASE)
 
 def _merge_intervals(intervals: List[Tuple[datetime, datetime]]) -> List[Tuple[datetime, datetime]]:
     merged: List[Tuple[datetime, datetime]] = []
-    for start, end in sorted(intervals):
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    for start, end in sorted(intervals, key=lambda iv: (iv[0].timestamp(), iv[1].timestamp())):  # instants (DST)
+        if merged and start.timestamp() <= merged[-1][1].timestamp():
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end, key=lambda t: t.timestamp()))
         else:
             merged.append((start, end))
     return merged
@@ -392,7 +395,7 @@ class PlanTools:
         shorts = [s for s in self.day_plan.spans_overlapping(block, block + timedelta(minutes=30))
                   if s.id != ignore and not s.is_envelope and s.duration_minutes < 30
                   and s.start_dt >= block and s.end_dt <= block + timedelta(minutes=30)]
-        if not any(s.start_dt < end and start < s.end_dt for s in shorts):
+        if not any(s.overlaps(start, end) for s in shorts):
             return start, end
         after = max(s.end_dt for s in shorts)
         if after + length <= block + timedelta(minutes=30):
@@ -543,10 +546,11 @@ class PlanTools:
     def _carve(self, span: EventSpan, start: datetime, end: datetime) -> str:
         """Remove [start, end) from a span: delete, trim, or split it. Returns a description."""
         before = self.describe(span)
-        if start <= span.start_dt and span.end_dt <= end:
+        start_t, end_t, s_t, e_t = start.timestamp(), end.timestamp(), span.start_dt.timestamp(), span.end_dt.timestamp()
+        if start_t <= s_t and e_t <= end_t:  # instants: wall times repeat on the DST fall-back night
             self._drop(span)
             return f"removed {before}"
-        if span.start_dt < start and end < span.end_dt:
+        if s_t < start_t and end_t < e_t:
             tail = EventSpan(
                 new_span_id(), span.title, end, span.end_dt, span.category, source=span.source,
                 task_id=span.task_id, status=span.status,
@@ -556,7 +560,7 @@ class PlanTools:
             self._persist(span)
             self._persist(tail)
             return f"split {before} around the cleared time"
-        if span.start_dt < start:
+        if s_t < start_t:
             span.end_dt = start
         else:
             span.start_dt = end
@@ -634,7 +638,7 @@ class PlanTools:
                             if s.id != anchor.id and self._movable(s) and not self._is_fixed(s)
                             and s.end_dt > anchor.start_dt
                             and s.start_dt >= anchor.start_dt - timedelta(minutes=1)
-                            and s.status == SpanStatus.PLANNED and not (s.start_dt <= now < s.end_dt)),
+                            and s.status == SpanStatus.PLANNED and not s.covers(now)),
                            key=lambda s: s.start_dt)  # what's done, or happening right now, stays where it is
         for span in followers:
             if span.start_dt >= cursor:
@@ -1098,13 +1102,13 @@ class PlanTools:
     def _behind(self, now: datetime) -> List[EventSpan]:
         """Planned items whose time has passed with nothing reported (not assumed done)."""
         return [s for s in self.day_plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
-                and s.status == SpanStatus.PLANNED and not s.tentative and s.end_dt <= now]
+                and s.status == SpanStatus.PLANNED and not s.tentative and s.end_dt.timestamp() <= now.timestamp()]
 
     def redraw(self, **_: Any) -> str:
         import json
         plan = self.day_plan
         now = self._now()
-        if not (plan.day_start <= now < plan.day_end):
+        if not (plan.day_start.timestamp() <= now.timestamp() < plan.day_end.timestamp()):
             raise ToolError("Redrawing works on today, from now; for another day, move items directly.")
         from thirties_core.item_facts import redraw_facts
         start_from = thirty_ceil(now)
@@ -1231,7 +1235,8 @@ class PlanTools:
         plan = self.day_plan
         lines = []
         shown_blocks = set()
-        in_view = plan.spans_in_view()
+        # someone else's events (show-only calendars) are for the Day page only: the assistant never brings them up (O1)
+        in_view = [s for s in plan.spans_in_view() if not s.shown_only]
         clusters: List[List[EventSpan]] = []
         for s in (x for x in in_view if not x.is_envelope):
             if clusters and s.start_dt < max(x.end_dt for x in clusters[-1]):
@@ -1279,19 +1284,34 @@ class PlanTools:
                 + ("\nNot marked yet (past their time, not assumed done; by block):\n"
                    + "\n".join(unmarked_lines(behind)) if behind else ""))
 
-    def resolve_calendar_event(self, event: Any, attend: Any = True, **_: Any) -> str:
+    def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
         if span.source != "calendar":
             raise ToolError(f"{span.title} is not a calendar invite.")
         going = _as_bool(attend)
+        invite = next((e for e in self.ambiguous_events if e.id == span.source_event_id), None)
+        # Obvious default: a decision on someone else's event is about the series (O1: the wife's rehearsals came
+        # back every week); on the user's own calendar it's about this one time.
+        whole = _as_bool(series) if series not in (None, "") else bool(invite is not None and not invite.is_primary)
         if self._state_db and span.source_event_id:
-            self._state_db.set_event_decision(span.source_event_id, "attend" if going else "decline")
-        self.ambiguous_events = [e for e in self.ambiguous_events if e.id != span.source_event_id]
+            if whole:
+                self._state_db.set_event_decision(series_key(invite or span.source_event_id),
+                                                  "attend" if going else "not_mine")
+            else:
+                self._state_db.set_event_decision(span.source_event_id, "attend" if going else "decline")
+        decided = {span.source_event_id}
+        if whole:  # the rest of the series on this day, too
+            key = series_key(invite or span.source_event_id)
+            decided |= {e.id for e in self.ambiguous_events if series_key(e) == key}
+        self.ambiguous_events = [e for e in self.ambiguous_events if e.id not in decided]
+        every = " (every time it comes up)" if whole else ""
         if going:
-            span.tentative, span.is_firm = False, True
-            return f"{self.describe(span)} is confirmed and now fixed on the schedule."
-        self.day_plan.spans = [s for s in self.day_plan.spans if s.id != span.id]
-        return f"Declined {self.describe(span)}; that time is free."
+            for s in self.day_plan.spans:
+                if s.source_event_id in decided:
+                    s.tentative, s.is_firm = False, True
+            return f"{self.describe(span)} is confirmed and now fixed on the schedule{every}."
+        self.day_plan.spans = [s for s in self.day_plan.spans if s.source_event_id not in decided]
+        return f"Declined {self.describe(span)}{every}; that time is free."
 
     # ------------------------------------------------------------------
     # Dispatch & state tracking

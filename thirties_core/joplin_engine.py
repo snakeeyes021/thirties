@@ -249,7 +249,7 @@ class JoplinAPIClient:
 
 
 class JoplinEngine:
-    """Orchestrates read-only SQLite extraction and write-back mutations."""
+    """The first ``connectors.TaskSource``: reads Joplin's SQLite database; writes go through its Data API."""
 
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
         self.config = config or ThirtiesConfig()

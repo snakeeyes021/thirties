@@ -445,10 +445,49 @@ def _words(text: str) -> List[str]:
     return [w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2]
 
 
+def _clock_minutes(h: int, m: int) -> set:
+    """A clock time as minutes after midnight, both readings when AM/PM isn't said (3:15 is 3:15 or 15:15)."""
+    return {(h % 12) * 60 + m, (h % 12 + 12) * 60 + m} if h <= 12 else {h * 60 + m}
+
+
+def _times_in(text: str) -> set:
+    found = set()
+    for m in re.finditer(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", text or ""):
+        found |= _clock_minutes(int(m.group(1)), int(m.group(2)))
+    return found
+
+
+def given_times(run: DayRun) -> set:
+    """Minute times Thirties didn't pick, as minutes after midnight (ROADMAP 0.2 item 29): what the user said (in
+    messages, in their lists, the script's work hours, and the time of each message, which is when a "done" with no
+    time is stored), and calendar events' real times. Showing these is right (A13: real times are kept)."""
+    script = run.script
+    given = set()
+
+    def hhmm(value: str) -> set:  # the harness's own 24-hour times: one reading only
+        h, _, m = (value or "").partition(":")
+        return {int(h) * 60 + int(m)} if h.isdigit() and m.isdigit() else set()
+    for t, who, text in run.log:
+        if who == "user":
+            given |= _times_in(text) | hhmm(t)
+    for note in script.notes:
+        given |= _times_in(note.get("body", ""))
+    for value in (script.work or []) + [e[k] for e in script.events for k in ("start", "end") if e.get(k)]:
+        given |= hhmm(value)
+    try:
+        calendar = [s for offset in (0, 1) for s in run.plan(offset).spans_in_view() if s.source == "calendar"]
+    except Exception:
+        calendar = []
+    for s in calendar:
+        given |= {s.start_dt.hour * 60 + s.start_dt.minute, s.end_dt.hour * 60 + s.end_dt.minute}
+    return given
+
+
 def measure(run: DayRun) -> Dict[str, Any]:
     script = run.script
     facts: Dict[str, Any] = {}
-    leaks, internal = [], []
+    leaks, internal, excused = [], [], 0
+    given = given_times(run)
     asked_exact = False
     for t, who, text in run.log:
         if who == "tool":
@@ -456,12 +495,19 @@ def measure(run: DayRun) -> Dict[str, Any]:
         if who == "user":
             asked_exact = bool(EXACT_ASKED_RE.search(text))
             continue
-        if not asked_exact:
-            leaks += [f"[{t}] {m.group(0)}" for m in CLOCK_RE.finditer(text) if m.group(2) not in ("00", "30")]
+        if not asked_exact:  # minutes the user asked for are quoted back on purpose
+            for m in CLOCK_RE.finditer(text):
+                if m.group(2) in ("00", "30"):
+                    continue
+                if _clock_minutes(int(m.group(1)), int(m.group(2))) & given:
+                    excused += 1  # a real time the user or a calendar gave: kept as it is, by design
+                else:
+                    leaks.append(f"[{t}] {m.group(0)}")
         if who == "assistant" and LEAK_RE.search(text):
             internal.append(f"[{t}] {text[:120]}")
-    facts["minute_times_shown"] = len(leaks)
+    facts["minute_times_shown"] = len(leaks)  # only times Thirties picked itself
     facts["minute_time_examples"] = leaks[:8]
+    facts["minute_times_given"] = excused
     facts["internal_text_in_replies"] = internal[:8]
     app = [x for _, w, x in run.log if w == "app"]
     awake_h = max(1.0, (at(script.day, script.bed, 1 if script.bed < script.wake else 0)

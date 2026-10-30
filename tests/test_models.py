@@ -1,9 +1,8 @@
 """Unit tests for thirties_core.models."""
 
 import unittest
-from datetime import datetime, timedelta
 
-from tests.fixtures import DAY, TZ, at, build_day
+from tests.fixtures import DAY, at, build_day
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus, TaskItem, ThirtyBlock
 
 

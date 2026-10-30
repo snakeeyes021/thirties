@@ -13,8 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from thirties_core.clock import (ClockError, format_clock, format_duration, parse_day, parse_duration_minutes,
-                                 thirty_ceil, thirty_of)
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
@@ -73,6 +72,17 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["event", "status"],
     },
     {
+        "name": "log_day_times",
+        "description": "Record when the user actually woke, went to sleep, started or finished work (\"started work "
+                       "at 9:40\", \"done with work\", an answer to the morning or end-of-work question). Only what "
+                       "they said; Work and Sleep move to the real times.",
+        "parameters": {"woke": "Clock time they woke up.", "slept": "Clock time they went to sleep.",
+                       "work_started": "Clock time work started.",
+                       "work_ended": "Clock time work ended, or 'now' if they're just done.",
+                       "estimated": "true if the times are your best guess rather than what the user said."},
+        "required": [],
+    },
+    {
         "name": "log_energy",
         "description": "Record how energetic the user says they feel, 1 (drained) to 5 (great).",
         "parameters": {"level": "1 to 5.", "note": "Optional note."},
@@ -106,6 +116,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
             "replace": "true to replace the whole section instead of adding a line.",
         },
         "required": ["section", "text"],
+    },
+    {
+        "name": "check_goal",
+        "description": "Record the user's answer about a goal from GOALS TO CHECK: still current, done, or dropped.",
+        "parameters": {"goal": "The goal, as written in the profile.",
+                       "state": "'current' (still a goal), 'done' (finished) or 'dropped' (no longer wanted)."},
+        "required": ["goal", "state"],
     },
     {
         "name": "search_history",
@@ -922,6 +939,7 @@ class AssistantTools(KindTools):
                                    time_source="estimated" if guessed or not (started and finished) else "reported")
                 self.pt.day_plan.spans.append(logged)
                 self.pt._persist(logged)
+                self._capture_context(logged)
                 result += f"; logged it {format_clock(start_dt)} – {format_clock(end_dt)}"
             return result + "."
 
@@ -955,6 +973,7 @@ class AssistantTools(KindTools):
             else:
                 span.time_source = "planned"
         self.pt._persist(span)
+        self._capture_context(span)
         result = f"Marked {span.title} {st.value}"
         if span.actual_start and st != SpanStatus.SKIPPED:
             result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
@@ -982,6 +1001,41 @@ class AssistantTools(KindTools):
         elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
             result += " (a session on it; it carries on)"
         return result + "."
+
+    def _capture_context(self, span: EventSpan) -> None:
+        """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
+        if self._db is None:
+            return
+        try:
+            from thirties_core.day_times import night_sleep, wake_time
+            from thirties_core.outcome_context import OutcomeContextStore
+            plan = self.pt.day_plan
+            history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+            bed = night_sleep(plan, history)
+            OutcomeContextStore(self._db).record(plan, span, self.pt._now(), wake_time(plan, history),
+                                                 bed.start_dt if bed else None)
+        except Exception as e:
+            logger.warning("Couldn't capture the outcome's context: %s", e)
+
+    def log_day_times(self, woke: Any = None, slept: Any = None, work_started: Any = None, work_ended: Any = None,
+                      estimated: Any = False, **_: Any) -> str:
+        """B6: actual wake, sleep and work times, on the day's Sleep and Work (thirties_core.day_times)."""
+        from thirties_core.day_times import DayTimesError, record_day_times
+        plan = self.pt.day_plan
+        history = self._db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_end) if self._db else None
+        guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        try:
+            changed, said = record_day_times(plan, self.pt._now(), woke=woke, slept=slept, work_started=work_started,
+                                             work_ended=work_ended, source="estimated" if guessed else "reported",
+                                             history=history)
+        except DayTimesError as e:
+            raise ToolError(str(e))
+        for span in changed:
+            self.pt._persist(span)
+            if plan.get_span(span.id) is None and span.overlaps(plan.day_start, plan.day_end):
+                plan.spans.append(span)  # a late wake now reaches into this day: its morning isn't open time
+                plan.spans.sort(key=lambda s: s.start_dt.timestamp())
+        return "Recorded: " + ", ".join(said) + "."
 
     def log_energy(self, level: Any, note: str = "", **_: Any) -> str:
         try:
@@ -1295,11 +1349,25 @@ class AssistantTools(KindTools):
             name = next((s for s in PROFILE_SECTIONS if str(section).strip().lower() in s.lower()), None)
         if name is None:
             raise ToolError(f"Unknown profile section '{section}'. Sections: {', '.join(PROFILE_SECTIONS)}.")
+        from thirties_core.goals import GOAL_SECTIONS, dated, stamp_new_lines
         if str(replace).strip().lower() in ("true", "1", "yes"):
-            self.s.profile.set_section(name, str(text))
+            content = str(text)
+            if name in GOAL_SECTIONS:  # goals carry the day they were last known current (A7)
+                content = stamp_new_lines(self.s.profile.sections().get(name, ""), content, self._today())
+            self.s.profile.set_section(name, content)
             return f"Rewrote the '{name}' section of the profile."
-        self.s.profile.append(name, str(text))
+        self.s.profile.append(name, dated(str(text), self._today()) if name in GOAL_SECTIONS else str(text))
         return f"Added to '{name}' in the profile."
+
+    def check_goal(self, goal: str, state: str = "current", **_: Any) -> str:
+        """A7: the user's answer about a stale goal: still current (dated today), done or dropped (taken out)."""
+        from thirties_core.goals import check_goal
+        try:
+            section, content, said = check_goal(self.s.profile.sections(), str(goal), str(state), self._today())
+        except ValueError as e:
+            raise ToolError(str(e))
+        self.s.profile.set_section(section, content)
+        return said
 
     # --- history ---
 
@@ -1355,6 +1423,8 @@ class AssistantTools(KindTools):
                 kinds[key] = self.kind_of(s, ctx)
             return kinds[key] == ONGOING
         facts += session_lines(spans, ongoing)
+        from thirties_core.day_times import day_time_facts
+        facts += day_time_facts(spans)
         note = self.capacity_note()
         return ([note] if note else []) + facts
 
@@ -1590,10 +1660,12 @@ class AssistantTools(KindTools):
         return {
             "log_outcome": self.log_outcome,
             "log_energy": self.log_energy,
+            "log_day_times": self.log_day_times,
             "review_day": self.review_day,
             "remember": self.remember,
             "forget": self.forget,
             "update_profile": self.update_profile,
+            "check_goal": self.check_goal,
             "search_history": self.search_history,
             "list_conversations": self.list_conversations,
             "read_conversation": self.read_conversation,

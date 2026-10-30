@@ -3,6 +3,15 @@
 Discovers calendars configured in the desktop environment, extracts events for
 the diurnal cycle, turns them into event spans, and identifies invites that
 still need the user's decision.
+
+Two kinds of standing choice keep other people's events from coming back (O1:
+"advanced acting is not mine. That's my wife's", asked again every week):
+
+- **Per calendar** (Preferences): mine, show only, or ignore. Unset, a calendar
+  the user owns is "mine" and anyone else's asks about its events.
+- **Per recurring series**: a decision on one occurrence of someone else's
+  recurring event covers the whole series (``series_key``), so the wife's weekly
+  rehearsal is asked about once, not every week.
 """
 
 from __future__ import annotations
@@ -10,10 +19,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from thirties_core.config import CalendarConfig, ThirtiesConfig
+from thirties_core.connectors import CalendarSource
 from thirties_core.models import EventSpan, SpanCategory
 
 logger = logging.getLogger(__name__)
@@ -33,31 +43,85 @@ class CalendarEvent:
     attendees: List[str] = field(default_factory=list)
     response_status: str = "accepted"  # accepted, tentative, declined, needsAction
     is_ambiguous: bool = False
+    series_id: str = ""  # the recurring series it belongs to (the iCalendar UID); empty: series_of(id)
+
+    @property
+    def series(self) -> str:
+        return self.series_id or series_of(self.id)
 
     def overlaps_interval(self, start: datetime, end: datetime) -> bool:
         """Return True if this event overlaps the [start, end) time interval."""
         return max(self.start_dt, start) < min(self.end_dt, end)
 
 
+# Per-calendar choices (Preferences, keyed by the calendar's display name, lowercased: EDS uids differ between
+# computers, names don't). Unset: "mine" for the user's own calendars, ask about each event (once per series)
+# for anyone else's.
+CALENDAR_MODES = ("mine", "show", "ignore")
+
+# What "not mine" on a recurring series does to the rest of it: dropped from the day entirely. "show" would keep
+# the events visible on the Day page as someone else's, taking no time (the per-calendar "show only"). Dropped is
+# the default because the friction was these events coming back at all (O1).
+NOT_MINE_SERIES_BECOMES = "ignore"
+
+
+def series_of(event_id: str) -> str:
+    """The recurring series an occurrence id belongs to. EDS occurrence ids are "<uid>@<epoch>" (Google uids have
+    their own "@google.com"), so the series is everything before a final all-digit "@..."; anything else is its
+    own series."""
+    head, sep, tail = (event_id or "").rpartition("@")
+    return head if sep and tail.isdigit() and head else event_id
+
+
+def series_key(event: "CalendarEvent | str") -> str:
+    """The decisions-table key for a whole series (it shares the per-occurrence table, so it syncs the same way)."""
+    return "series:" + (event.series if isinstance(event, CalendarEvent) else series_of(event))
+
+
+def calendar_mode(event: CalendarEvent, modes: Optional[Dict[str, str]]) -> str:
+    """The user's choice for the event's calendar: "mine", "show", "ignore", or "" when unset."""
+    if not modes:
+        return ""
+    for name in (event.calendar_name, event.calendar_id):
+        mode = modes.get((name or "").strip().lower())
+        if mode in CALENDAR_MODES:
+            return mode
+    return ""
+
+
 def events_to_spans(
     events: List[CalendarEvent],
     decisions: Optional[Dict[str, str]] = None,
+    modes: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[EventSpan], List[CalendarEvent]]:
-    """Turn calendar events into spans, applying the user's attend/decline decisions.
+    """Turn calendar events into spans, applying the user's choices.
 
     Returns (spans, pending): accepted events become firm spans; invites the user
     has not decided on become tentative spans and are also returned as pending.
-    Declined events (in the calendar or by decision) are dropped.
+    Declined events (in the calendar or by decision, for the occurrence or its
+    whole series) and events on ignored calendars are dropped. Events on "show
+    only" calendars (or a series marked "not mine", if NOT_MINE_SERIES_BECOMES
+    is "show") become show-only spans: on the Day page, taking no time, never
+    asked about. An occurrence's own decision wins over its series'.
     """
     decisions = decisions or {}
     spans: List[EventSpan] = []
     pending: List[CalendarEvent] = []
 
     for event in events:
-        if event.response_status == "declined" or decisions.get(event.id) == "decline":
+        mode = calendar_mode(event, modes)
+        decision = decisions.get(event.id) or decisions.get(series_key(event))
+        if decision == "not_mine":
+            decision = None if NOT_MINE_SERIES_BECOMES == "show" else "decline"
+            mode = "show" if NOT_MINE_SERIES_BECOMES == "show" else mode
+        if mode == "ignore" or event.response_status == "declined" or decision == "decline":
             continue
-        is_invite = event.is_ambiguous or event.response_status in ("tentative", "needsAction")
-        tentative = is_invite and decisions.get(event.id) != "attend"
+        shown_only = mode == "show" and decision != "attend"
+        if mode == "mine":  # the user said the calendar is theirs: only a real RSVP question makes it an invite
+            is_invite = event.response_status in ("tentative", "needsAction")
+        else:
+            is_invite = event.is_ambiguous or event.response_status in ("tentative", "needsAction")
+        tentative = is_invite and decision != "attend" and not shown_only
         if tentative:
             pending.append(event)
         spans.append(EventSpan(
@@ -68,18 +132,15 @@ def events_to_spans(
             category=SpanCategory.CALENDAR,
             source="calendar",
             source_event_id=event.id,
-            is_firm=not tentative,
+            is_firm=not tentative and not shown_only,
             tentative=tentative,
+            shown_only=shown_only,
         ))
 
     return spans, pending
 
 
-class CalendarEngine(Protocol):
-    """Protocol for calendar sources."""
-
-    def fetch_events_for_day(self, target_date: date, tz: ZoneInfo) -> List[CalendarEvent]:
-        ...
+CalendarEngine = CalendarSource  # the interface every calendar connector implements (connectors.py)
 
 
 class MockCalendarEngine:
@@ -104,7 +165,7 @@ class MockCalendarEngine:
 
 
 class EDSCalendarEngine:
-    """Calendars from Evolution Data Server, which is where GNOME Online Accounts puts Google calendars.
+    """A ``CalendarSource``: calendars from Evolution Data Server, which is where GNOME Online Accounts puts Google calendars.
 
     Recurring events are expanded into their real occurrences, times are read in
     each event's own time zone, all-day events are skipped (they don't occupy
@@ -137,7 +198,16 @@ class EDSCalendarEngine:
 
     # --- sources ---
 
-    def _sources(self, registry) -> List[Any]:
+    def _mode(self, source) -> str:
+        """The user's per-calendar choice (Preferences), or "" when unset."""
+        modes = getattr(self.cal_config, "modes", None) or {}
+        for name in (source.get_display_name(), source.get_uid()):
+            mode = modes.get((name or "").strip().lower())
+            if mode in CALENDAR_MODES:
+                return mode
+        return ""
+
+    def _sources(self, registry, with_ignored: bool = False) -> List[Any]:
         from gi.repository import EDataServer
         include = {c.lower() for c in self.cal_config.include_calendars}
         exclude = {c.lower() for c in self.cal_config.exclude_calendars}
@@ -148,8 +218,25 @@ class EDSCalendarEngine:
                 continue
             if include and not names & include:
                 continue
+            if self._mode(source) == "ignore" and not with_ignored:
+                continue  # never read: nothing from it reaches the day
             chosen.append(source)
         return chosen
+
+    def list_calendars(self) -> List[Dict[str, Any]]:
+        """The calendars the user can choose for, for Preferences: name, uid, whether they own it, and the
+        current choice ("" when unset)."""
+        if not self._available:
+            return []
+        try:
+            from gi.repository import EDataServer
+            registry = EDataServer.SourceRegistry.new_sync(None)
+            emails = self._my_emails(registry)
+            return [{"name": s.get_display_name(), "uid": s.get_uid(), "mine": self._owned(s, emails),
+                     "mode": self._mode(s)} for s in self._sources(registry, with_ignored=True)]
+        except Exception as e:
+            logger.warning("Couldn't list calendars: %s", e)
+            return []
 
     def _my_emails(self, registry) -> set:
         from gi.repository import EDataServer
@@ -163,11 +250,16 @@ class EDSCalendarEngine:
                 pass
         return emails
 
-    def _is_mine(self, source, registry, emails: set) -> bool:
+    def _owned(self, source, emails: set) -> bool:
         if source.get_uid() == self.cal_config.primary_calendar_id:
             return True
         backend = source.get_extension("Calendar").get_backend_name() if source.has_extension("Calendar") else ""
         return backend == "local" or source.get_display_name().lower() in emails
+
+    def _is_mine(self, source, registry, emails: set) -> bool:
+        """Owned, or chosen as "mine" in Preferences; "show only" is never mine."""
+        mode = self._mode(source)
+        return mode == "mine" or (mode == "" and self._owned(source, emails))
 
     def _client(self, source):
         from gi.repository import ECal
@@ -217,7 +309,7 @@ class EDSCalendarEngine:
             emails = self._my_emails(registry)
             for source in self._sources(registry):
                 mine = self._is_mine(source, registry, emails)
-                if not mine and self.cal_config.default_ignore_secondary:
+                if not mine and self._mode(source) == "" and self.cal_config.default_ignore_secondary:
                     continue
                 try:
                     events.extend(self._source_events(source, mine, emails, start, end, tz))
@@ -253,6 +345,7 @@ class EDSCalendarEngine:
                 is_primary=mine,
                 response_status=status,
                 is_ambiguous=ambiguous,
+                series_id=icomp.get_uid() or "",
             ))
             return True
 

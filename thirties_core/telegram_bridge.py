@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import signal
 import sys
 import threading
@@ -19,7 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -434,7 +433,7 @@ class ThirtiesTelegramBridge:
             lines.append("Nothing scheduled.")
         for span in spans:
             marker = "👉 " if span.covers(now) else "• "
-            note = " (unconfirmed)" if span.tentative else ""
+            note = " (unconfirmed)" if span.tentative else " (not yours)" if span.shown_only else ""
             lines.append(f"{marker}{format_clock(span.start_dt)} – {format_clock(span.end_dt)}: {span.title}{note}")
         self.client.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 

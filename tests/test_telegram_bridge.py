@@ -1,9 +1,8 @@
-import io
 import json
 import tempfile
 import unittest
 import urllib.error
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

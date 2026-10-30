@@ -602,7 +602,8 @@ class DeterministicScheduler:
 
         if events is None:
             events = self.fetch_calendar_events(plan)
-        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions())
+        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
+                                                  getattr(self.config.calendar, "modes", None))
         calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]
         from thirties_core.calendar_outcomes import CalendarOutcomes
         CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar

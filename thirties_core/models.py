@@ -107,6 +107,9 @@ class EventSpan:
     source_event_id: Optional[str] = None
     is_firm: bool = False    # a hard commitment (accepted calendar event): never moved or overlapped without force
     tentative: bool = False  # an unconfirmed calendar invite awaiting the user's decision
+    # Someone else's calendar event, shown for context only ("show only" calendars): it takes no time, is never
+    # asked about and never moves anything (O1: the user's wife's rehearsals).
+    shown_only: bool = False
     status: SpanStatus = SpanStatus.PLANNED
     notes: str = ""
     # What actually happened, once known. time_source says how reliable the times are:
@@ -137,10 +140,11 @@ class EventSpan:
         return self.category in (SpanCategory.WORK, SpanCategory.SLEEP)
 
     def overlaps(self, start: datetime, end: datetime) -> bool:
-        return self.start_dt < end and start < self.end_dt
+        # Instants, not wall times: same-zone comparison ignores fold (the DST fall-back hour).
+        return self.start_dt.timestamp() < end.timestamp() and start.timestamp() < self.end_dt.timestamp()
 
     def covers(self, t: datetime) -> bool:
-        return self.start_dt <= t < self.end_dt
+        return self.start_dt.timestamp() <= t.timestamp() < self.end_dt.timestamp()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -154,6 +158,7 @@ class EventSpan:
             "source_event_id": self.source_event_id,
             "is_firm": self.is_firm,
             "tentative": self.tentative,
+            "shown_only": self.shown_only,
             "status": self.status.value,
             "notes": self.notes,
             "actual_start": self.actual_start.isoformat() if self.actual_start else None,
@@ -176,6 +181,7 @@ class EventSpan:
             source_event_id=data.get("source_event_id"),
             is_firm=data.get("is_firm", False),
             tentative=data.get("tentative", False),
+            shown_only=data.get("shown_only", False),
             status=SpanStatus(data.get("status", "planned")),
             notes=data.get("notes", ""),
             actual_start=datetime.fromisoformat(data["actual_start"]) if data.get("actual_start") else None,
@@ -252,7 +258,8 @@ class DayPlan:
         return self.blocks[index]
 
     def block_at(self, t: datetime) -> Optional[ThirtyBlock]:
-        return next((b for b in self.blocks if b.start_dt <= t < b.end_dt), None)
+        at = t.timestamp()  # the instant: 1:10 AM happens twice on a fall-back night
+        return next((b for b in self.blocks if b.start_dt.timestamp() <= at < b.end_dt.timestamp()), None)
 
     # --- spans ---
 
@@ -260,12 +267,12 @@ class DayPlan:
         return next((s for s in self.spans if s.id == span_id), None)
 
     def active_spans(self) -> List[EventSpan]:
-        """Spans that occupy time (unconfirmed invites do not)."""
-        return [s for s in self.spans if not s.tentative]
+        """Spans that occupy time (unconfirmed invites and show-only events do not)."""
+        return [s for s in self.spans if not s.tentative and not s.shown_only]
 
     def spans_overlapping(self, start: datetime, end: datetime, include_tentative: bool = False) -> List[EventSpan]:
         pool = self.spans if include_tentative else self.active_spans()
-        return sorted((s for s in pool if s.overlaps(start, end)), key=lambda s: s.start_dt)
+        return sorted((s for s in pool if s.overlaps(start, end)), key=lambda s: s.start_dt.timestamp())
 
     def spans_in_view(self) -> List[EventSpan]:
         """All spans touching this day's canvas, in start order."""
@@ -276,7 +283,7 @@ class DayPlan:
         occupants = self.spans_overlapping(block.start_dt, block.end_dt)
         if not occupants:
             return None
-        return min(occupants, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt))
+        return min(occupants, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt.timestamp()))
 
     def display_title(self, block: ThirtyBlock) -> Optional[str]:
         """Title for a thirty, joining things done at the same time ("Dinner + Audiobook")."""
@@ -286,11 +293,12 @@ class DayPlan:
         foreground = [s for s in occupants if not s.is_envelope]
         if not foreground:
             return self.display_span(block).title
-        in_order = sorted(foreground, key=lambda s: s.start_dt)
-        if len(in_order) > 1 and all(b.start_dt >= a.end_dt for a, b in zip(in_order, in_order[1:])):
+        in_order = sorted(foreground, key=lambda s: s.start_dt.timestamp())
+        if len(in_order) > 1 and all(b.start_dt.timestamp() >= a.end_dt.timestamp()
+                                     for a, b in zip(in_order, in_order[1:])):
             return "\n".join(s.title for s in in_order)  # one after another inside the thirty: a line each
         titles: List[str] = []
-        for s in sorted(foreground, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt)):
+        for s in sorted(foreground, key=lambda s: (_DISPLAY_PRIORITY[s.category], s.start_dt.timestamp())):
             if s.title not in titles:
                 titles.append(s.title)
         return " + ".join(titles)

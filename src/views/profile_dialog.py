@@ -167,6 +167,9 @@ class ProfileMemoryDialog(Adw.Dialog):
             self.memory_group.remove(row)
         self._note_rows: list[Adw.EntryRow] = []
         notes = self.memory.notes() if self.memory is not None else []
+        from thirties_core.memory_audit import MemoryReview, why_outdated
+        review = MemoryReview(self.memory.db) if self.memory is not None else None
+        kept = review.kept() if review is not None else set()
         for note in notes:
             row = Adw.EntryRow()
             row.note_id = note.id
@@ -174,6 +177,15 @@ class ProfileMemoryDialog(Adw.Dialog):
             row.set_text(note.text)
             row.set_show_apply_button(True)
             row.connect("apply", self._on_note_apply)
+            why = why_outdated(note.text) if note.id not in kept else None
+            if why:  # a workaround for a bug that's since been fixed (AGENTS.md §7.5): the user decides
+                row.set_title("Probably outdated: delete it, or keep it · " + row.get_title())
+                row.set_tooltip_text(f"This note looks like a workaround: {why}.")
+                row.add_css_class("warning")
+                keep_btn = Gtk.Button(label="Keep", valign=Gtk.Align.CENTER, tooltip_text="Keep this note")
+                keep_btn.add_css_class("flat")
+                keep_btn.connect("clicked", lambda _b, nid=note.id: (review.keep(nid), self.load_memory()))
+                row.add_suffix(keep_btn)
 
             delete_btn = Gtk.Button(icon_name="user-trash-symbolic")
             delete_btn.add_css_class("flat")

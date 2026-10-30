@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.clock import format_clock
+from thirties_core.goals import prompt_lines as goal_check_lines
 from thirties_core.inference import InferenceEngine
 from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.models import TaskItem
@@ -97,6 +98,11 @@ class FrontierBrain:
         services = self.tools.services
         assistant = self.tools.assistant
         profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
+        stale = goal_check_lines(services.profile.sections(), self.tools.today()) if services else []
+        if stale:  # A7: weeks-old goals fed stale suggestions ("did we not finish the Ethernet cable?")
+            profile += ("\n\nGOALS TO CHECK (not checked in a while: before suggesting anything for one, ask the user "
+                        "once whether it's still current, done or dropped, and record it with check_goal)\n"
+                        + "\n".join(stale))
         memory = "\n".join(f"- {n.text} (id {n.id})" for n in services.memory.notes()) if services else ""
         stats = "\n".join(f"- {f}" for f in assistant.statistics_facts()) if assistant else ""
         weather = "\n".join(f"- {f}" for f in assistant.weather_facts()) if assistant else ""
@@ -178,7 +184,7 @@ RULES
 9. Scheduling versus lists. When the user names something to do, call match_backlog. "Same task": schedule it with that task_id. "Only similar": don't assume or correct them; ask whether it's that item (quote it) or something new. "Nothing": schedule it as a new item. Add to a list (add_task) when they ask, or offer once if it sounds like a to-do they'll want to track (not meals or routines); when they want it both added and scheduled, do both in one add_task call by giving it start (and duration), so the two stay linked.
 10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. Each note says what it's for, and items say how pressing they are (now, soon, by a date; unmarked is no hurry): favour what's pressing, and never push someday or reference items. When the user says how pressing something is, record it with set_urgency. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or blocks, so do you ("you have three open chunks at 4:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed cat"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
-12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing PT doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. If they don't say when, estimate and pass estimated=true. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. If you're unsure whether something happened, ask a short check-in question ("Did you get to X, or are you still on Y?"). If they mention how they feel, log_energy.
+12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing PT doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. If they don't say when, estimate and pass estimated=true. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. If you're unsure whether something happened, ask a short check-in question ("Did you get to X, or are you still on Y?"). If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
 13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
 14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned. For bigger-picture planning (goals over weeks), look at week_overview, statistics and the profile, and spread work across days. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: just add each at its time. Never join two things into one title.

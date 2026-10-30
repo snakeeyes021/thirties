@@ -27,7 +27,7 @@ def _flexible(span: EventSpan) -> bool:
 def _markable(span: EventSpan) -> bool:
     """Planned activities, and calendar events too: an event is something you'd mark done, and its outcome is kept
     in Thirties without touching the calendar (soak friction 1)."""
-    return _flexible(span) or (span.category == SpanCategory.CALENDAR and not span.tentative)
+    return _flexible(span) or (span.category == SpanCategory.CALENDAR and not span.tentative and not span.shown_only)
 
 
 def _rows_by_thirty(spans: List[EventSpan]) -> List[tuple]:
@@ -110,6 +110,9 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = Adw.ActionRow(title=title, subtitle=("planned " + when) if behind else when)
             if first.tentative:
                 row.set_subtitle(f"{when} · invite, not answered yet")
+            elif first.shown_only:
+                row.set_subtitle(f"{when} · not yours (shown only)")
+                row.add_css_class("dim-label")
             if markable and _markable(first):
                 # done now: it finished at the click; done early (ahead): Thirties picks the times, on blocks (soak 3);
                 # a calendar event happened at its calendar time
