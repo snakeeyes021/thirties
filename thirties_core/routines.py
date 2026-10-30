@@ -482,6 +482,8 @@ class RoutineTools:
             when = part.get("start") or part.get("at")
             if when in (None, "") or not items:
                 continue
+            if re.fullmatch(r"\d{2}:\d{2}", str(when).strip()):
+                when = _clock_of(str(when).strip())  # a stored part's "15:00"
             try:
                 start = thirty_of(self.pt._start(when))
             except (ClockError, ValueError) as e:
