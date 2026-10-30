@@ -105,6 +105,11 @@ class TestPlacing(unittest.TestCase):
     def test_a_reply_without_rows_gets_the_schedule_at_the_end(self):
         self.assertEqual(place_schedule("Moved lunch.", self.CANON), "Moved lunch.\n\n" + self.CANON)
 
+    def test_the_models_own_status_and_missed_list_go_too(self):
+        model = ("You're in the 10:00 block: Shower.\nNot marked yet:\n- Caffeinate\n- Breakfast\n\n"
+                 "- 10:30 – Work\n\nAnything else?")
+        self.assertEqual(place_schedule(model, self.CANON), self.CANON + "\n\nAnything else?")
+
     def test_a_reply_that_copied_it_is_left_alone(self):
         self.assertEqual(place_schedule("Sure:\n" + self.CANON, self.CANON), "Sure:\n" + self.CANON)
 

@@ -216,10 +216,12 @@ def place_schedule(reply: str, schedule: str) -> str:
     if not marks:
         return (reply.rstrip() + "\n\n" + schedule.strip()).strip()
     start, end = marks[0], marks[0]
-    for i in range(marks[0] + 1, len(lines)):  # the run of schedule-like lines (indented and blank ones between)
-        if i in marks:
+    for i in range(marks[0] + 1, len(lines)):  # the run: rows, bullets, indented lines, blank lines between
+        line = lines[i]
+        if i in marks or line.startswith((" ", "\t")) or line.lstrip().startswith(("-", "•", "*")) \
+                or line.strip().lower() in ("the whole day:", "coming up:", "next:"):
             end = i
-        elif lines[i].strip() and not lines[i].startswith((" ", "\t")) and not lines[i].strip().startswith("-"):
+        elif line.strip():
             break
     return "\n".join(lines[:start] + schedule.strip().splitlines() + lines[end + 1:]).strip()
 
@@ -260,5 +262,6 @@ def drop_repeat_checkins(reply: str, missed: Sequence[EventSpan], already: set) 
     return out, asked
 
 
-__all__ = ["MISSED_HEADING", "MissedTracker", "drop_repeat_checkins", "missed_block", "missed_items", "missed_lines",
+__all__ = ["MISSED_HEADING", "MissedTracker", "drop_repeat_checkins", "missed_block", "missed_for", "missed_items",
+           "missed_lines", "now_section", "with_missed",
            "place_schedule", "render_schedule", "schedule_rows", "status_line"]

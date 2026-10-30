@@ -263,6 +263,7 @@ class ConversationManager:
         if kind:
             message["kind"] = kind
         with self.turn_lock:
+            self._catch_up()
             self.brain.messages.append(message)
             self._stamp(via="background")
             self._save()
@@ -444,12 +445,13 @@ class ConversationManager:
         """Each user message is stamped when it arrived, not when the reply was saved (soak friction 2)."""
         users = [m for m in self.brain.messages[before:] if m.get("role") == "user" and "at" not in m
                  and not str(m.get("content", "")).startswith("[System check")]
+        from thirties_core import build
         if self.brain_name == "slm" and users:
-            users[0]["at"], users[0]["via"] = batch[0].at, batch[0].via
+            users[0]["at"], users[0]["via"], users[0]["build"] = batch[0].at, batch[0].via, build.BUILD
             return
         for item, m in zip(batch, users):
             if item.at:
-                m["at"], m["via"] = item.at, item.via
+                m["at"], m["via"], m["build"] = item.at, item.via, build.BUILD
 
     def _no_repeat_checkins(self, reply: str) -> str:
         """Don't ask again about missed items the user was already shown or asked about (C5), and count what
