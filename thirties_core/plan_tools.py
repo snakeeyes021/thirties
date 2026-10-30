@@ -59,9 +59,10 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "duration": "How long, e.g. '2 hours' or '30 minutes'. Give either end or duration.",
             "category": "'activity' (default), 'task' (with task_id), 'work' or 'sleep'.",
             "task_id": "Backlog task ID when scheduling a backlog task.",
-            "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
-            "alongside": "true if it happens at the same time as something else (e.g. an audiobook during dinner).",
-            "push_later": "true to make room by sliding the planned activities that follow it later, in order.",
+            "replace_overlaps": "true only when the user says it replaces what's there ('instead', 'replace'): trims or "
+                                "removes the planned activities it covers (never fixed ones).",
+            "alongside": "true if it happens during something fixed (an audiobook on the drive to an appointment).",
+            "push_later": "true only when the user asks to make room by sliding what follows later, in order.",
             "fixed": "true if its time is set by someone else's clock (an appointment, a ride, a show, a call at a "
                      "set time): it keeps its exact time and never slides. false if it's flexible. Leave it out "
                      "when it's obvious (appointments, flights and rides are fixed; chores are flexible).",
@@ -81,8 +82,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "duration": "New length, keeping the start.",
             "shift": "Move the whole item, keeping its length: '+1 hour' is later, '-30 minutes' is earlier.",
             "title": "New title.",
-            "replace_overlaps": "true to trim or remove planned activities in the way (never calendar events).",
-            "push_later": "true to slide the planned activities that follow it later instead of overlapping them.",
+            "replace_overlaps": "true only when the user says it replaces what's there: trims or removes the planned "
+                                "activities it covers (never fixed ones).",
+            "push_later": "true only when the user asks to slide what follows later to make room.",
             "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
             "day": "The day the item is on (default: the day being planned).",
         },
@@ -153,6 +155,33 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "slot_options",
+        "description": "Where something new could go when the user gives no time, or says 'later': the candidate "
+                       "slots, each with what's around it and how full that part of the day is. Read-only; pick one "
+                       "with a short reason (don't cram a packed stretch), then add it.",
+        "parameters": {
+            "duration": "How long it takes, e.g. '1 hour' (default 30 minutes).",
+            "after": "Earliest clock time to consider.",
+            "before": "Latest clock time to consider.",
+            "daylight": "true for daylight only, false for dark only.",
+            "later": "true when the user said 'later' (a real gap later on, not the next free block).",
+            "day": "Which day (default: the day being planned).",
+        },
+        "required": [],
+    },
+    {
+        "name": "push_back",
+        "description": "Push the rest of today back by an amount ('push everything back two hours'). Every flexible "
+                       "item still to do moves that much later, including the one happening now and ones past their "
+                       "time that weren't marked. Fixed things, work and sleep stay; an item that would land on a "
+                       "fixed thing goes right after it. Says what no longer fits before bedtime. Undo with undo_redraw.",
+        "parameters": {
+            "by": "How much later, e.g. '2 hours'.",
+            "since": "Only items from this clock time on (default: everything not done from that long ago on).",
+        },
+        "required": ["by"],
+    },
+    {
         "name": "list_schedule",
         "description": "Show a day's schedule (any day). Read-only; you will see the result before replying.",
         "parameters": {"day": "Which day, e.g. 'tomorrow' or 'Oct 20' (default: the day being planned).",
@@ -172,7 +201,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
 
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
 TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY
+READ_ONLY_TOOLS = {"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY
 
 
 def _as_bool(value: Any) -> bool:
@@ -228,6 +257,14 @@ class StateDelta:
 
 ENVELOPE_WORDS_RE = re.compile(r"\b(work\w*|job|shift|office|sleep\w*|slept|bed\w*|wak\w*|woke|awake|nap\w*|"
                                r"alarm|night|tired|late|day off|off (?:today|tomorrow)|holiday|vacation|pto|sick)\b", re.IGNORECASE)
+# Items may share time, so trimming, removing or sliding another item happens only when the user's message asks for it
+# (10-21: "removed Throne"; 10-27: a one-hour item split at 8:00). Broad on purpose: a false refusal costs a retry.
+REPLACE_WORDS_RE = re.compile(r"\b(instead|replac\w*|rather|swap\w*|drop\w*|cancel\w*|scrap\w*|ditch\w*|remov\w*|"
+                              r"clear\w*|bump\w*|nix|get rid|in place of|over\s?(?:write|ride)\w*|trim\w*|cut\w*|"
+                              r"shorten\w*)\b", re.IGNORECASE)
+PUSH_WORDS_RE = re.compile(r"\b(push\w*|back|later|slid\w*|shift\w*|bump\w*|delay\w*|postpon\w*|mov\w*|make room|"
+                           r"after|behind|late|run(?:s|ning)? (?:over|long)|ran (?:over|long)|overr?an|reflow\w*|"
+                           r"rest of|everything|resched\w*|slip\w*)\b", re.IGNORECASE)
 
 class PlanTools:
     """Executes schedule tool calls against a DayPlan and persists the result."""
@@ -311,8 +348,8 @@ class PlanTools:
 
         matched = [p for p in parts if is_known(p)]
         if len(matched) >= 2:
-            raise ToolError(f"'{title}' is {len(parts)} separate things. Give each its own item (the second "
-                            f"with alongside=true if they happen at the same time).")
+            raise ToolError(f"'{title}' is {len(parts)} separate things. Give each its own item; items can share "
+                            f"the same time.")
 
     def _start(self, text: Any) -> datetime:
         return resolve_clock(str(text), self.day_plan.day_start)
@@ -321,10 +358,11 @@ class PlanTools:
         return resolve_clock(str(text), self.day_plan.day_start, after=start)
 
     def _stack_short(self, start: datetime, end: datetime, ignore: Optional[str] = None) -> Tuple[datetime, datetime]:
-        """Something under 30 minutes put into a thirty that already holds short items goes after them,
-        so three five-minute errands at 5:00 run 5:00, 5:05, 5:10 instead of overlapping."""
+        """Something under 30 minutes put at the start of a thirty that already holds short items goes after them,
+        so three five-minute errands at 5:00 run 5:00, 5:05, 5:10. Only the new item moves, and only inside its
+        thirty: a minute time the user gave is kept, and when the thirty is full it simply shares the time."""
         length = end - start
-        if length >= timedelta(minutes=30):
+        if length >= timedelta(minutes=30) or start != thirty_of(start):
             return start, end
         block = thirty_of(start)
         shorts = [s for s in self.day_plan.spans_overlapping(block, block + timedelta(minutes=30))
@@ -349,6 +387,21 @@ class PlanTools:
         else:
             begin = thirty_ceil(start)
         return begin, begin + length
+
+    def _user_said(self, dt: datetime) -> bool:
+        """A minute time the user said in this message ("8:47") is a real time, not one Thirties picked."""
+        if not self.user_message or dt.minute in (0, 30):
+            return False
+        from thirties_core.clock import real_times
+        return ((dt.hour % 12) or 12, dt.minute) in real_times(self.user_message)
+
+    def _keep_to_blocks(self, start: datetime, end: datetime) -> Tuple[datetime, datetime]:
+        """A flexible item Thirties places keeps to blocks (10-28 "9:35 – Work + Feed kitties", 10-29 "8:47 – Torquio
+        dev"); a time the user gave is kept as it is (AGENTS §7.1: rounded only when Thirties picks a time), so a
+        one-hour item the user put at 7:30 is never cut or moved at a block line (10-27)."""
+        if self._user_said(start):
+            return start, end
+        return self._snap(start, end)
 
     def _is_fixed(self, span: EventSpan) -> bool:
         """Set by someone else's clock: a calendar event, a firm commitment, or an item that stays put."""
@@ -402,16 +455,28 @@ class PlanTools:
         raise ToolError(f"There is no item '{ref_str}' on this day's schedule.")
 
     def _conflicts(self, span: EventSpan) -> List[EventSpan]:
-        """Active spans that this span may not overlap.
+        """The hard conflicts: active spans this span may not overlap.
 
-        Activities, tasks and calendar items may sit on top of work and sleep, but not on
-        each other. Work and sleep only conflict with another span of the same kind.
+        Planned items may overlap, nest and coincide freely (10-26: "Just make them overlap! Things are allowed to
+        overlap!"), and anything may sit on work and sleep. The only hard conflicts are fixed things (calendar
+        commitments and fixed-time items), and work or sleep against another span of the same kind.
         """
         others = [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
                   and s.status != SpanStatus.SKIPPED]  # a skipped item didn't happen: its time is free
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
-        return [s for s in others if not s.is_envelope]
+        return [s for s in others if not s.is_envelope and self._is_fixed(s)]
+
+    def _sharing(self, span: EventSpan) -> List[EventSpan]:
+        """The other planned items this span shares time with (not work or sleep, not fixed ones)."""
+        return [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
+                and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._is_fixed(s)]
+
+    def _push_asked(self) -> None:
+        """Sliding other items later happens only when the user asks for it ("push the rest back")."""
+        if self.user_message is not None and not PUSH_WORDS_RE.search(self.user_message):
+            raise ToolError("Items can share time: add or move it without push_later and nothing else moves. Slide "
+                            "what follows only when the user asks ('push the rest back').")
 
     def _persist(self, span: EventSpan) -> None:
         if self._state_db and span.source != "calendar":
@@ -445,32 +510,47 @@ class PlanTools:
         self._persist(span)
         return f"trimmed {before} to {format_clock(span.start_dt)} – {format_clock(span.end_dt)}"
 
-    def _place(self, span: EventSpan, replace_overlaps: bool) -> List[str]:
-        """Check conflicts for a new or moved span; carve overlapping activities if allowed."""
-        conflicts = self._conflicts(span)
-        if not conflicts:
-            return []
-        firm = [s for s in conflicts if s.is_firm or s.source == "calendar"]
-        if firm:
+    def _place(self, span: EventSpan, replace_overlaps: bool, alongside: bool = False) -> List[str]:
+        """Place a new or moved span: one coherent model for overlapping, nested and coincident items.
+
+        Placing an item never trims, splits, pushes or removes another: they share the time, and the result says so
+        (so a reply reads them as one entry, "Redfox dev + Thirties dev"). A fixed thing (a calendar commitment, a
+        fixed-time item) is a hard conflict: reported, never overwritten, unless the new item really happens during
+        it (alongside=true). replace_overlaps, when the user said so, trims the flexible planned items at its edges
+        and removes the ones it covers; one that runs around it is never split (10-27: a one-hour item was split into
+        two half-hours at 8:00), it stays and shares the time.
+        """
+        hard = self._conflicts(span)
+        if span.is_envelope:
+            if not hard:
+                return []
+            if not replace_overlaps:
+                raise ToolError(f"{span.title} at {format_clock(span.start_dt)} – {format_clock(span.end_dt)} would "
+                                "overlap " + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in hard)
+                                + ". Change that one instead, or retry with replace_overlaps=true.")
+            return [self._carve(s, span.start_dt, span.end_dt) for s in hard]
+        if hard and not alongside:
+            calendar = any(s.source == "calendar" or s.is_firm for s in hard)
             raise ToolError(
                 f"{span.title} at {format_clock(span.start_dt)} – {format_clock(span.end_dt)} would overlap "
-                + "; ".join(self.describe(s) for s in firm)
-                + ", which is a fixed calendar commitment."
-            )
+                + "; ".join(self.describe(s) for s in hard)
+                + (", which is a fixed calendar commitment." if calendar else ", which is fixed (it keeps its time).")
+                + " Pick another time, or add it with alongside=true if it really happens during it.")
+        sharing = self._sharing(span)
         if not replace_overlaps:
-            raise ToolError(
-                f"{span.title} at {format_clock(span.start_dt)} – {format_clock(span.end_dt)} would overlap "
-                + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in conflicts)
-                + ". Ask the user, then retry with replace_overlaps=true, move it, or pick another time."
-            )
-        kept = [s for s in conflicts if self._is_fixed(s) or s.status != SpanStatus.PLANNED
-                or (span.start_dt <= s.start_dt and s.end_dt <= span.end_dt)]
-        if kept:  # replacing only trims: it never deletes an item, a fixed one, or one that already happened
-            raise ToolError(
-                f"{span.title} would wipe out " + "; ".join(f"{self.describe(s)} [id {s.id}]" for s in kept)
-                + ". To keep both, add it with alongside=true (same time) or push_later=true (slide what follows); "
-                "to drop that item, the user has to say so, then remove_event it.")
-        return [self._carve(s, span.start_dt, span.end_dt) for s in conflicts]
+            return [f"alongside {self.describe(s)} [id {s.id}], both kept" for s in sharing]
+        if self.user_message is not None and not REPLACE_WORDS_RE.search(self.user_message):
+            raise ToolError("Items can share time, so nothing needs replacing: add it without replace_overlaps and "
+                            "the other items keep their times. Replace only when the user says so ('instead').")
+        notes = []
+        for s in sharing:
+            if s.status != SpanStatus.PLANNED:
+                notes.append(f"{s.title} already happened, kept")
+            elif s.start_dt < span.start_dt and span.end_dt < s.end_dt:
+                notes.append(f"{self.describe(s)} runs around it and stays (an item is never split)")
+            else:
+                notes.append(self._carve(s, span.start_dt, span.end_dt))
+        return notes
 
     def _movable(self, span: EventSpan) -> bool:
         return not span.is_envelope and span.source != "calendar" and not span.tentative
@@ -573,20 +653,19 @@ class PlanTools:
         from thirties_core.facts import looks_fixed
         is_fixed = looks_fixed(str(title)) if fixed in (None, "") else _as_bool(fixed)
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
-            start_dt, end_dt = self._snap(start_dt, end_dt)  # flexible: keeps to blocks; fixed: its real time
+            start_dt, end_dt = self._keep_to_blocks(start_dt, end_dt)  # flexible: keeps to blocks; fixed: real time
         if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
-        if _as_bool(alongside):
-            notes = []
-        elif _as_bool(push_later) and not span.is_envelope:
+        if _as_bool(push_later) and not span.is_envelope and not _as_bool(alongside):
+            self._push_asked()
             firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
                     if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
             if firm:
                 raise ToolError(f"{span.title} would overlap {self.describe(firm[0])}, which is fixed.")
             notes = self._push_following(span)
         else:
-            notes = self._place(span, _as_bool(replace_overlaps))
+            notes = self._place(span, _as_bool(replace_overlaps), alongside=_as_bool(alongside))
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
@@ -646,13 +725,14 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
 
-        if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
-            new_start, new_end = self._snap(new_start, new_end)
+        if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt:
+            new_start, new_end = self._keep_to_blocks(new_start, new_end)  # a new length alone keeps the start
         if start not in (None, "") and shift in (None, "") and not self._is_fixed(span):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
         if _as_bool(push_later) and not span.is_envelope:
+            self._push_asked()
             notes = []
             span_backup = (span.start_dt, span.end_dt)
             span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
@@ -749,13 +829,16 @@ class PlanTools:
                 clash = [s for s in self._conflicts(span) if s.id not in (a.id, b.id)]
                 if clash:
                     a.start_dt, a.end_dt, b.start_dt, b.end_dt = a_start, a_start + a_len, b_start, b_start + b_len
-                    raise ToolError(f"Swapping would make {span.title} overlap {clash[0].title}.")
+                    raise ToolError(f"Swapping would make {span.title} overlap {clash[0].title}, which is fixed.")
         for span in (a, b):
             self._persist(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._save_plan_after_change()
-        return f"Swapped: {self.describe(b)}; {self.describe(a)}." if b.start_dt < a.start_dt else \
-            f"Swapped: {self.describe(a)}; {self.describe(b)}."
+        first, second = (b, a) if b.start_dt < a.start_dt else (a, b)
+        shared = [f"{span.title} now shares time with "
+                  + ", ".join(o.title for o in self._sharing(span) if o.id not in (a.id, b.id))
+                  for span in (first, second) if any(o.id not in (a.id, b.id) for o in self._sharing(span))]
+        return f"Swapped: {self.describe(first)}; {self.describe(second)}." + (f" ({'; '.join(shared)})" if shared else "")
 
     def _envelope_ok(self, span: EventSpan) -> None:
         """Work and sleep change only when the user talks about them (10-27: placing the morning routine moved Work
@@ -1009,36 +1092,63 @@ class PlanTools:
     def list_schedule(self, exact: Any = False, **_: Any) -> str:
         return self.schedule_text(exact=_as_bool(exact))
 
+    @staticmethod
+    def _flags(s: EventSpan, upcoming_from: Optional[datetime]) -> List[str]:
+        flags = [s.category.value]
+        if s.tentative:
+            flags.append("UNCONFIRMED invite")
+        elif s.is_firm:
+            flags.append("fixed calendar commitment")
+        if s.status.value != "planned":
+            flags.append(s.status.value)
+        if upcoming_from and s.end_dt <= upcoming_from:
+            flags.append("already over")
+        return flags
+
     def schedule_text(self, upcoming_from: Optional[datetime] = None, exact: bool = False) -> str:
-        """The day's spans and free time as plain text, shared by tools and prompts."""
+        """The day's spans and free time as plain text, shared by tools and prompts. Items that share time (overlap,
+        nest or coincide) are one entry joined with +, so they're told as one ("Redfox dev + Thirties dev")."""
         plan = self.day_plan
         lines = []
         shown_blocks = set()
-        for s in plan.spans_in_view():
+        in_view = plan.spans_in_view()
+        clusters: List[List[EventSpan]] = []
+        for s in (x for x in in_view if not x.is_envelope):
+            if clusters and s.start_dt < max(x.end_dt for x in clusters[-1]):
+                clusters[-1].append(s)
+            else:
+                clusters.append([s])
+        shared = {s.id: c for c in clusters if len(c) > 1 for s in c}
+
+        def when(start: datetime, end: datetime) -> str:
+            start, end = (start, end) if exact else (thirty_of(start), thirty_ceil(end))
+            return f"{format_clock(start)} – {format_clock(end)}"
+
+        for s in in_view:
+            if s.id in shared:
+                group = shared[s.id]
+                if group[0].id != s.id:
+                    continue
+                lo, hi = min(x.start_dt for x in group), max(x.end_dt for x in group)
+                lines.append(f"- {when(lo, hi)}: " + " + ".join(
+                    f"{x.title}" + ("" if (x.start_dt, x.end_dt) == (lo, hi) else f" ({when(x.start_dt, x.end_dt)})")
+                    + f" [{', '.join(self._flags(x, upcoming_from))}] id={x.id}" for x in group)
+                    + " (sharing this time: one entry)")
+                continue
             if s.duration_minutes < 30 and thirty_of(s.start_dt) == thirty_of(s.end_dt - timedelta(seconds=1)) \
                     and not s.is_envelope and not exact:
                 block = thirty_of(s.start_dt)
                 if block in shown_blocks:
                     continue
                 shown_blocks.add(block)
-                group = [x for x in plan.spans_in_view() if x.duration_minutes < 30 and not x.is_envelope
+                group = [x for x in in_view if x.duration_minutes < 30 and not x.is_envelope and x.id not in shared
                          and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
                 lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
                     f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
                     for x in group) + " (short items sharing this block, in this order)")
                 continue
-            flags = [s.category.value]
-            if s.tentative:
-                flags.append("UNCONFIRMED invite")
-            elif s.is_firm:
-                flags.append("fixed calendar commitment")
-            if s.status.value != "planned":
-                flags.append(s.status.value)
-            if upcoming_from and s.end_dt <= upcoming_from:
-                flags.append("already over")
-            start, end = (s.start_dt, s.end_dt) if exact else (thirty_of(s.start_dt), thirty_ceil(s.end_dt))
-            lines.append(f"- {format_clock(start)} – {format_clock(end)}: {s.title} "
-                         f"[{', '.join(flags)}] id={s.id}")
+            lines.append(f"- {when(s.start_dt, s.end_dt)}: {s.title} [{', '.join(self._flags(s, upcoming_from))}] "
+                         f"id={s.id}")
         windows = self.open_windows(after=upcoming_from)
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
         scope = "Free time remaining" if upcoming_from else "Free time"

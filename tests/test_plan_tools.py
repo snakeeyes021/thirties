@@ -49,23 +49,59 @@ class TestAddEvent(unittest.TestCase):
         self.assertEqual(occupant(t.day_plan, "15:00"), "Dentist")
         self.assertNotIn("Gym", [s.title for s in t.day_plan.spans])
 
-    def test_overlapping_activity_needs_permission_then_is_trimmed(self) -> None:
+    def test_overlapping_items_share_the_time_unless_the_user_says_replace(self) -> None:
         t = tools_for()
         t.execute("add_event", {"title": "Composing", "start": "5:00 PM", "end": "7:00 PM"})
         out = t.execute("add_event", {"title": "Dinner", "start": "6:30 PM", "end": "7:30 PM"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertTrue(out.startswith("Added Dinner") and "alongside Composing" in out, out)  # 10-26: just overlap
+        composing = t.day_plan.get_span(span_id(t, "Composing"))
+        self.assertEqual((composing.start_dt, composing.end_dt), (at("17:00"), at("19:00")))  # never trimmed
+        t.execute("remove_event", {"event": "Dinner"})
         out = t.execute("add_event", {"title": "Dinner", "start": "6:30 PM", "end": "7:30 PM", "replace_overlaps": True})
-        self.assertIn("trimmed Composing", out)
+        self.assertIn("trimmed Composing", out)  # asked for (no person talking here)
         self.assertEqual(occupant(t.day_plan, "18:00"), "Composing")
         self.assertEqual(occupant(t.day_plan, "18:30"), "Dinner")
 
-    def test_replacing_never_wipes_out_an_item(self) -> None:
+    def test_replacing_only_when_the_user_says_so(self) -> None:
         t = tools_for()
         t.execute("add_event", {"title": "Throne", "start": "3:00 PM", "duration": "30 min"})
+        t.user_message = "shower at 3 too"
         out = t.execute("add_event", {"title": "Shower", "start": "3:00 PM", "duration": "30 min",
                                       "replace_overlaps": True})
-        self.assertTrue(out.startswith(NOT_DONE) and "alongside" in out, out)  # 10-21: "removed Throne"
+        self.assertTrue(out.startswith(NOT_DONE) and "share time" in out, out)  # 10-21: "removed Throne"
         self.assertEqual(occupant(t.day_plan, "15:00"), "Throne")
+        t.user_message = "shower at 3 instead of the throne"
+        out = t.execute("add_event", {"title": "Shower", "start": "3:00 PM", "duration": "30 min",
+                                      "replace_overlaps": True})
+        self.assertIn("removed Throne", out)
+
+    def test_nested_and_coincident_items_are_never_split_or_moved(self) -> None:
+        t = tools_for()
+        t.execute("remove_event", {"event": "Work"})
+        t.execute("add_event", {"title": "Redfox dev", "start": "7:30 PM", "duration": "1 hour"})
+        out = t.execute("add_event", {"title": "Thirties dev", "start": "7:30 PM", "duration": "1 hour"})
+        self.assertIn("alongside Redfox dev", out)  # perfect coincidence
+        out = t.execute("add_event", {"title": "Message Brad", "start": "8:00 PM", "duration": "15 min"})
+        self.assertIn("alongside Redfox dev", out)  # nested inside both
+        t.user_message = "lab call at 7:45 instead"
+        out = t.execute("add_event", {"title": "Lab work", "start": "7:45 PM", "duration": "15 min",
+                                      "replace_overlaps": True})
+        self.assertIn("never split", out)  # 10-27: a one-hour item was split into two half-hours at 8:00
+        devs = [s for s in t.day_plan.spans if s.title.endswith("dev")]
+        self.assertEqual([(s.start_dt, s.end_dt) for s in devs], [(at("19:30"), at("20:30"))] * 2)
+        self.assertIn("Redfox dev", t.day_plan.display_title(t.day_plan.block_at(at("19:31"))))
+
+    def test_a_time_the_user_gave_is_kept_and_one_thirties_picks_keeps_to_blocks(self) -> None:
+        t = tools_for()
+        t.execute("remove_event", {"event": "Work"})
+        t.user_message = "do upgrades from 7:45 to 8:45"
+        out = t.execute("add_event", {"title": "Upgrades", "start": "7:45 PM", "end": "8:45 PM"})
+        self.assertIn("7:45 PM – 8:45 PM", out)  # the user's time, kept (AGENTS §7.1)
+        t.user_message = "and dinner after that"
+        out = t.execute("add_event", {"title": "Dinner", "start": "8:47 PM", "duration": "1 hour"})
+        self.assertIn("Dinner, 9:00 PM – 10:00 PM", out)  # 10-29 "8:47 – Torquio dev": Thirties' pick, on blocks
+        out = t.execute("update_event", {"event": "Dinner", "duration": "45 minutes"})
+        self.assertIn("→ Dinner, 9:00 PM – 9:45 PM", out)  # a new length keeps the start
 
     def test_fixed_things_keep_their_minutes_and_flexible_ones_keep_to_blocks(self) -> None:
         t = tools_for()
@@ -146,7 +182,9 @@ class TestUpdateEvent(unittest.TestCase):
         block = t.day_plan.block_at(at("17:01"))
         self.assertEqual(t.day_plan.display_title(block), "Feed the cats\nMessage Brad\nWater the alligator")
         out = t.execute("add_event", {"title": "Laundry", "start": "5:00 PM", "duration": "20 min"})
-        self.assertTrue(out.startswith(NOT_DONE), out)  # no room left in that thirty: a conflict, not an overlap
+        self.assertIn("Laundry, 5:00 PM – 5:20 PM", out)  # no room left in that thirty: it shares the time
+        out = t.execute("add_event", {"title": "Call back", "start": "5:20 PM", "duration": "5 min"})
+        self.assertIn("Call back, 5:20 PM – 5:25 PM", out)  # a minute time is never stacked away
 
     def test_the_user_only_ever_sees_thirties(self) -> None:
         t = tools_for()
@@ -168,7 +206,7 @@ class TestUpdateEvent(unittest.TestCase):
         t.execute("add_event", {"title": "Message Brad back", "start": "7:00 PM", "duration": "15 min"})
         out = t.execute("add_event", {"title": "Thirties dev / Message Brad", "start": "5:00 PM", "duration": "1 hour"})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("alongside=true", out)
+        self.assertIn("share the same time", out)
         out = t.execute("update_event", {"event": "thirties dev", "title": "Thirties dev & Message Brad back"})
         self.assertTrue(out.startswith(NOT_DONE), out)
         out = t.execute("add_event", {"title": "Rice and beans", "start": "8:00 PM", "duration": "30 min"})
@@ -248,11 +286,17 @@ class TestInsertAndSwap(unittest.TestCase):
         self.assertEqual(occupant(t.day_plan, "13:00"), "Reading")
         self.assertEqual(occupant(t.day_plan, "17:00"), "Upgrades")
 
-    def test_swap_refuses_when_lengths_would_collide(self) -> None:
+    def test_swap_shares_time_rather_than_moving_a_third_item(self) -> None:
         t = self.day()
         out = t.execute("swap_events", {"first": "Shower", "second": "Reading"})  # Reading is 1h, Chores follows Shower
-        self.assertTrue(out.startswith(NOT_DONE) and "Chores" in out, out)
-        self.assertEqual(occupant(t.day_plan, "14:00"), "Shower")
+        self.assertTrue(out.startswith("Swapped") and "Reading now shares time with Chores" in out, out)
+        self.assertEqual(t.day_plan.get_span(span_id(t, "Chores")).start_dt, at("14:30"))
+
+    def test_swap_refuses_to_land_on_a_fixed_thing(self) -> None:
+        t = self.day()
+        t.execute("add_event", {"title": "Vet", "start": "5:30 PM", "duration": "30 min"})  # fixed by its name
+        out = t.execute("swap_events", {"first": "Upgrades", "second": "Reading"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Vet" in out, out)
 
 
 class TestRemoveAndClear(unittest.TestCase):
