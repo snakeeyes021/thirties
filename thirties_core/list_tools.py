@@ -398,9 +398,12 @@ class ListTools:
         if not refs:
             raise ToolError("Which items?")
         found = []
+        from thirties_core.assistant_tools import _same_words
+        mine = [t for t in self.a.s.tasks if t.parent_note_id == source["id"] and t.is_checkbox_item]
         for ref in refs:
-            t = self.a._exact_task(ref)
-            if t is None or t.parent_note_id != source["id"]:
+            t = next((x for x in mine if x.id == ref.strip()), None) or next(
+                (x for x in mine if _same_words(x.title, ref) and x not in found), None)
+            if t is None:
                 raise ToolError(f"'{ref}' isn't an item of {source['title']}. Use its task_id from triage_list.")
             found.append(t)
         op: Dict[str, Any] = {"op": "move_many", "note_id": source["id"], "title": source["title"],
@@ -465,10 +468,9 @@ class ListTools:
             self.pt._save_plan_after_change()
         if self.pt.is_current(plan):
             self.a._day_begun(off + keep)
-            out = self.a.add_to_today(keep)
-            listed = [x for x in re.findall(r"(?:Added to today's list|Already on it): ([^.]+)", out)]
-            names_out = ", ".join(listed) or ", ".join(keep)
-            said = f"On today's list, no time yet: {names_out}."
+            self.a.add_to_today(keep)
+            shown = [(self.a._exact_task(k) or TaskItem(id="", source_notebook="", title=k)).title for k in keep]
+            said = f"On today's list, no time yet: {', '.join(shown)}."
         elif plan.target_date > self.pt.today():
             said = add_ahead(self.a, keep)
         else:
