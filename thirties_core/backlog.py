@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.config import ThirtiesConfig
+from thirties_core.connectors import TaskSource
 from thirties_core.models import TaskItem
 
 logger = logging.getLogger(__name__)
@@ -20,11 +21,12 @@ logger = logging.getLogger(__name__)
 DONE_HIDES_DAYS = 7  # an item recorded done stays hidden this long, even if Joplin still shows it open
 
 
-def load_backlog(config: ThirtiesConfig, joplin_engine=None, scheduler=None, media: Optional[List[TaskItem]] = None
-                 ) -> Tuple[List[TaskItem], List[Dict[str, Any]]]:
-    """Return (tasks, joplin notes) from all sources, with list roles, urgency and deferral history attached
-    (and without the notes the user set to be ignored). `media`: wishlist items already fetched (a re-read of
-    Joplin needn't go to the network again)."""
+def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = None, scheduler=None,
+                 media: Optional[List[TaskItem]] = None) -> Tuple[List[TaskItem], List[Dict[str, Any]]]:
+    """Return (tasks, notes) from all sources, with list roles, urgency and deferral history attached
+    (and without the notes the user set to be ignored). `joplin_engine` is the task source (any
+    ``connectors.TaskSource``; Joplin is the first). `media`: wishlist items already fetched (a re-read of
+    the lists needn't go to the network again)."""
     tasks: List[TaskItem] = []
     notes: List[Dict[str, Any]] = []
     if joplin_engine is not None:
