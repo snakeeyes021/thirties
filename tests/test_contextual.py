@@ -49,6 +49,11 @@ class TestRule(ContextualCase):
         self.assertEqual((found[0].at, found[0].until), (at("16:45"), at("17:00")))
         self.assertIn("Have you left for Vet appointment", found[0].text)
 
+    def test_a_commute_before_work(self):
+        self.add("cm", "Commute", "08:00", "08:30")  # the fixture's Work starts at 8:30
+        found = moments(self.plan(), lambda s: False, set())
+        self.assertEqual([(m.key, m.text) for m in found], [("cm", "🚗 Are you on your way to Work? It's at 8:30 AM.")])
+
     def test_ordinary_items_and_travel_to_nothing_fixed_get_nothing(self):
         self.add("w", "Walk", "13:00", "13:30")
         self.add("drv", "Drive to the park", "17:00", "17:30")

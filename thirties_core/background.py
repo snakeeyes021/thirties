@@ -425,7 +425,12 @@ class BackgroundService:
     def answer_lost_turns(self, now: datetime) -> None:
         """A turn the model never answered (it timed out, even after retries) is tried again in the background,
         and the reply is sent to the desktop and the phone (T1: the user's "Cats are fed" never landed, 10-17)."""
-        if self._answering or not self.manager().unanswered():
+        if self._answering:
+            return
+        manager = self.manager()
+        with manager.turn_lock:
+            manager._catch_up()  # the window's manager may have kept it: it's in the stored conversation
+        if not manager.unanswered():
             return
         self._answering = True
 

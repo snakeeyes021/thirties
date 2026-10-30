@@ -4,7 +4,7 @@ Most items need no question at all (C1: "checking in to see if I'm doing it is i
 ones where being late costs something set by someone else's clock. The default rule (After 0.1, item 4; the user
 may refine it, and every threshold is a named constant here):
 
-- **A fixed-time item with travel before it**: a travel item ("Drive to dentist", "Uber to the airport") that ends
+- **A fixed-time item (or Work) with travel before it**: a travel item ("Drive to dentist", "Commute") that ends
   at most ``TRAVEL_GAP`` before a fixed item starts. Once the travel's time has begun (plus ``AFTER_START``) and
   nothing is said about it: "Are you on your way to X?".
 - **A fixed-time item with a "leave by" time** in its title or notes ("Dentist (leave by 2:40)"), or a "Leave for
@@ -126,7 +126,7 @@ def moments(plan: DayPlan, is_fixed: Callable[[EventSpan], bool], flagged: set) 
     claimed = set()
 
     def fixed(s: EventSpan) -> bool:
-        return is_fixed(s) or looks_fixed(s.title)
+        return is_fixed(s) or looks_fixed(s.title) or s.category == SpanCategory.WORK  # a commute counts too
 
     for f in spans:
         if not fixed(f) or f.status != SpanStatus.PLANNED or _is_travel(f) and not f.is_firm:
