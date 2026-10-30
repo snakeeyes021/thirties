@@ -104,6 +104,9 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = Adw.ActionRow(title=title, subtitle=("planned " + when) if behind else when)
             if first.tentative:
                 row.set_subtitle(f"{when} · invite, not answered yet")
+            elif first.shown_only:
+                row.set_subtitle(f"{when} · not yours (shown only)")
+                row.add_css_class("dim-label")
             if markable and _flexible(first):
                 row.add_suffix(self._outcome_button(first, "done", now if (current or ahead) else None))
                 if behind or ahead:

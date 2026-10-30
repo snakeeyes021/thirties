@@ -106,6 +106,9 @@ class EventSpan:
     source_event_id: Optional[str] = None
     is_firm: bool = False    # a hard commitment (accepted calendar event): never moved or overlapped without force
     tentative: bool = False  # an unconfirmed calendar invite awaiting the user's decision
+    # Someone else's calendar event, shown for context only ("show only" calendars): it takes no time, is never
+    # asked about and never moves anything (O1: the user's wife's rehearsals).
+    shown_only: bool = False
     status: SpanStatus = SpanStatus.PLANNED
     notes: str = ""
     # What actually happened, once known. time_source says how reliable the times are:
@@ -154,6 +157,7 @@ class EventSpan:
             "source_event_id": self.source_event_id,
             "is_firm": self.is_firm,
             "tentative": self.tentative,
+            "shown_only": self.shown_only,
             "status": self.status.value,
             "notes": self.notes,
             "actual_start": self.actual_start.isoformat() if self.actual_start else None,
@@ -176,6 +180,7 @@ class EventSpan:
             source_event_id=data.get("source_event_id"),
             is_firm=data.get("is_firm", False),
             tentative=data.get("tentative", False),
+            shown_only=data.get("shown_only", False),
             status=SpanStatus(data.get("status", "planned")),
             notes=data.get("notes", ""),
             actual_start=datetime.fromisoformat(data["actual_start"]) if data.get("actual_start") else None,
@@ -261,8 +266,8 @@ class DayPlan:
         return next((s for s in self.spans if s.id == span_id), None)
 
     def active_spans(self) -> List[EventSpan]:
-        """Spans that occupy time (unconfirmed invites do not)."""
-        return [s for s in self.spans if not s.tentative]
+        """Spans that occupy time (unconfirmed invites and show-only events do not)."""
+        return [s for s in self.spans if not s.tentative and not s.shown_only]
 
     def spans_overlapping(self, start: datetime, end: datetime, include_tentative: bool = False) -> List[EventSpan]:
         pool = self.spans if include_tentative else self.active_spans()

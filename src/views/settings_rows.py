@@ -607,3 +607,53 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     for row in (level, delay, background):
         group.add(row)
     return group
+
+
+# --- calendars ---
+
+CALENDAR_CHOICES = [("mine", "Mine", "Your commitments: planned around"),
+                    ("", "Ask about its events", "Thirties asks once per event (once per series if it repeats)"),
+                    ("show", "Show only", "On the Day page as someone else's; takes no time, never asked about"),
+                    ("ignore", "Ignore", "Never read")]
+
+
+def calendars_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Per calendar: mine, show only or ignore (O1: a partner's shared calendar kept coming up). Keyed by the
+    calendar's name, which is the same on every computer (EDS uids aren't)."""
+    group = Adw.PreferencesGroup(title="Calendars",
+                                 description="What each calendar from GNOME Online Accounts is to you.")
+    engine = getattr(getattr(ctx.core, "scheduler", None), "calendar_engine", None)
+    placeholder = Adw.ActionRow(title="Looking for calendars…")
+    group.add(placeholder)
+
+    def save(name, key):
+        modes = dict(ctx.config().calendar.modes or {})
+        if key:
+            modes[name.strip().lower()] = key
+        else:
+            modes.pop(name.strip().lower(), None)
+        ctx.set("calendar.modes", modes)
+
+    def fill(calendars, error):
+        group.remove(placeholder)
+        if error or not calendars:
+            group.add(Adw.ActionRow(title="No calendars found",
+                                    subtitle="Add one in GNOME Settings → Online Accounts."))
+            return
+        for cal in calendars:
+            choices = CALENDAR_CHOICES if not cal["mine"] else [c for c in CALENDAR_CHOICES if c[0] != ""]
+            row = Adw.ComboRow(title=cal["name"], model=Gtk.StringList.new([label for _, label, _ in choices]))
+            current = cal["mode"] or ("mine" if cal["mine"] else "")
+            index = next((i for i, (k, _, _) in enumerate(choices) if k == current), 0)
+            row.set_selected(index)
+            row.set_subtitle(choices[index][2])
+
+            def on_pick(r, _p, name=cal["name"], choices=choices):
+                key, _, note = choices[r.get_selected()]
+                r.set_subtitle(note)
+                save(name, key)
+            row.connect("notify::selected", on_pick)
+            group.add(row)
+    lister = getattr(engine, "list_calendars", None)
+    ctx.run_async(lister if lister else (lambda: []), fill)
+    return group

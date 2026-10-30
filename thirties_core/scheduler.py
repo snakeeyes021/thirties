@@ -601,7 +601,8 @@ class DeterministicScheduler:
 
         if events is None:
             events = self.fetch_calendar_events(plan)
-        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions())
+        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
+                                                  getattr(self.config.calendar, "modes", None))
         plan.spans.extend(s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end))
         plan.spans.sort(key=lambda s: s.start_dt)
 

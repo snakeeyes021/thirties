@@ -52,6 +52,8 @@ class CalendarConfig:
     exclude_calendars: List[str] = field(default_factory=lambda: ["Birthdays & Anniversaries"])
     # Your addresses, used to read your RSVP on invites; found automatically from GNOME Online Accounts.
     my_emails: List[str] = field(default_factory=list)
+    # Per calendar, by display name (lowercased): "mine", "show" (show only) or "ignore" (calendar_engine).
+    modes: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

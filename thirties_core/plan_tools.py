@@ -25,7 +25,7 @@ from thirties_core.assistant_tools import (
     ToolError,
 )
 from thirties_core.astronomy import get_current_time, get_diurnal_date
-from thirties_core.calendar_engine import CalendarEvent
+from thirties_core.calendar_engine import CalendarEvent, series_key
 from thirties_core.clock import (
     thirty_ceil,
     unmarked_lines,
@@ -161,10 +161,13 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "resolve_calendar_event",
-        "description": "Record the user's decision on an unconfirmed calendar invite.",
+        "description": "Record the user's decision on an unconfirmed calendar invite. \"Not mine\" (someone else's "
+                       "event) is attend=false. On someone else's calendar it covers the whole recurring series.",
         "parameters": {
             "event": "The invite's id (or its exact title).",
-            "attend": "true if the user is going, false if not.",
+            "attend": "true if the user is going, false if not (or it isn't theirs).",
+            "series": "true/false to say whether it holds for every time this recurring event comes up (\"I go "
+                      "every week\", \"just this once\"); leave out otherwise.",
         },
         "required": ["event", "attend"],
     },
@@ -1016,6 +1019,8 @@ class PlanTools:
         lines = []
         shown_blocks = set()
         for s in plan.spans_in_view():
+            if s.shown_only:  # someone else's event, for the Day page only: the assistant never brings it up (O1)
+                continue
             if s.duration_minutes < 30 and thirty_of(s.start_dt) == thirty_of(s.end_dt - timedelta(seconds=1)) \
                     and not s.is_envelope and not exact:
                 block = thirty_of(s.start_dt)
@@ -1050,19 +1055,34 @@ class PlanTools:
                 + ("\nNot marked yet (past their time, not assumed done; by block):\n"
                    + "\n".join(unmarked_lines(behind)) if behind else ""))
 
-    def resolve_calendar_event(self, event: Any, attend: Any = True, **_: Any) -> str:
+    def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
         if span.source != "calendar":
             raise ToolError(f"{span.title} is not a calendar invite.")
         going = _as_bool(attend)
+        invite = next((e for e in self.ambiguous_events if e.id == span.source_event_id), None)
+        # Obvious default: a decision on someone else's event is about the series (O1: the wife's rehearsals came
+        # back every week); on the user's own calendar it's about this one time.
+        whole = _as_bool(series) if series not in (None, "") else bool(invite is not None and not invite.is_primary)
         if self._state_db and span.source_event_id:
-            self._state_db.set_event_decision(span.source_event_id, "attend" if going else "decline")
-        self.ambiguous_events = [e for e in self.ambiguous_events if e.id != span.source_event_id]
+            if whole:
+                self._state_db.set_event_decision(series_key(invite or span.source_event_id),
+                                                  "attend" if going else "not_mine")
+            else:
+                self._state_db.set_event_decision(span.source_event_id, "attend" if going else "decline")
+        decided = {span.source_event_id}
+        if whole:  # the rest of the series on this day, too
+            key = series_key(invite or span.source_event_id)
+            decided |= {e.id for e in self.ambiguous_events if series_key(e) == key}
+        self.ambiguous_events = [e for e in self.ambiguous_events if e.id not in decided]
+        every = " (every time it comes up)" if whole else ""
         if going:
-            span.tentative, span.is_firm = False, True
-            return f"{self.describe(span)} is confirmed and now fixed on the schedule."
-        self.day_plan.spans = [s for s in self.day_plan.spans if s.id != span.id]
-        return f"Declined {self.describe(span)}; that time is free."
+            for s in self.day_plan.spans:
+                if s.source_event_id in decided:
+                    s.tentative, s.is_firm = False, True
+            return f"{self.describe(span)} is confirmed and now fixed on the schedule{every}."
+        self.day_plan.spans = [s for s in self.day_plan.spans if s.source_event_id not in decided]
+        return f"Declined {self.describe(span)}{every}; that time is free."
 
     # ------------------------------------------------------------------
     # Dispatch & state tracking
