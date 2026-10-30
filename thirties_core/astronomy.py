@@ -166,32 +166,11 @@ def get_solar_phases(
     tz_name: str | ZoneInfo = "UTC",
 ) -> Dict[str, datetime]:
     """Retrieve solar phase datetimes (dawn, sunrise, solar_noon, sunset, dusk) for a date.
-    
-    Uses Astral if installed; falls back to pure-Python NOAA astronomical equations.
+
+    Pure-Python NOAA equations only: an optional Astral path meant the Flatpak (no Astral) and a dev venv
+    with it installed could disagree by a minute about where the day starts.
     """
-    tz = _get_zoneinfo(tz_name)
-
-    try:
-        from astral import LocationInfo
-        from astral.sun import sun
-
-        loc = LocationInfo(
-            name="Custom",
-            region="Custom",
-            timezone=tz.key if hasattr(tz, "key") else str(tz_name),
-            latitude=lat,
-            longitude=lon,
-        )
-        s = sun(loc.observer, date=target_date, tzinfo=tz)
-        return {
-            "dawn": s["dawn"],
-            "sunrise": s["sunrise"],
-            "solar_noon": s["noon"],
-            "sunset": s["sunset"],
-            "dusk": s["dusk"],
-        }
-    except (ImportError, Exception):
-        return _noaa_solar_phases(lat, lon, target_date, tz)
+    return _noaa_solar_phases(lat, lon, target_date, _get_zoneinfo(tz_name))
 
 
 def get_diurnal_date(
