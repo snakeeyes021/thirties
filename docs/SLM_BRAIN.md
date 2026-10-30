@@ -216,6 +216,17 @@ Parse benchmark (`tests/slm_parse_eval.py`): 40/50 straight from the model, medi
 
   No minute times or internal text on any day. The two worst Frontier days were people insisting on a minute-precise time ("3:15, not 3:00"; "leaving at 12:15, don't book for 12:00") while the rounding kept saying the block; a reply now keeps minutes when the user gave them (113737e).
 
+**Release gate for 0.1 (run 2026-10-24/25, compared 2026-10-30)**: commit 747de89 against the milestone run above (dde95f7), the same 106 days, paired.
+
+| Brain | Whose days | Requests met | User's rating | Messages per waking hour | Done items recorded | Plan respect | Message load |
+|---|---|---|---|---|---|---|---|
+| Frontier | other people | 0.91 → 0.94 | 6.9 → 7.3 | 0.26 → 0.36 | 72% → 71% | 4.2 → 4.4 | 4.4 → 4.6 |
+| Frontier | the user | 0.90 → 0.92 | 6.8 → 6.6 | 0.20 → 0.31 | 62% → 64% | 4.2 → 4.0 | 4.6 → 4.4 |
+| SLM | other people | 0.51 → 0.53 | 3.8 → 3.9 | 0.26 → 0.37 | 64% → 62% | 1.9 → 1.8 | 3.5 → 3.4 |
+| SLM | the user | 0.48 → 0.51 | 3.0 → 3.1 | 0.22 → 0.33 | 50% → 42% | 1.2 → 1.4 | 3.3 → 3.2 |
+
+  No worse: every difference is within the measured noise except messages per waking hour, up about 0.1 on every row (about one more message a day), with the judge's message load unchanged. That's the "not reported yet" lines added on 10-24. Internal text: none on either run. Minute times went from 0 to 117 (Frontier) and 177 (SLM). By design, real times are now shown when the user or a calendar gave them (113737e, §7.1), but the metric still counts them; it should count only times Thirties picked itself. SLM done items recorded on the user's days dipped (50% → 42%); watch it in 0.2.
+
 Raw reports go to `docs/eval_reports/sim/` (gitignored).
 
 ### 4.4 Next experiments
