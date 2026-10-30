@@ -83,6 +83,8 @@ class AssistantConfig:
     # How often Thirties messages on its own: "off" (only reminders asked for), "light" (a heads-up before
     # calendar events), "medium" (plus the start and end of each stretch of the day), "heavy" (every item).
     message_level: str = "medium"
+    sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
+    sunset_notice: bool = False
 
 
 @dataclass
