@@ -1,0 +1,135 @@
+{
+  "id": "caregiver_elderly_parent",
+  "date": "2026-10-20",
+  "source": "made up: caregiver for an elderly father managing medication times, a pharmacy run, and outpatient PT",
+  "wake": "07:00",
+  "bed": "22:30",
+  "work": null,
+  "persona": "Denise, full-time family caregiver for her 81-year-old father (Frank), who is recovering from hip replacement surgery. Texts clearly and methodically, treats her dad's 08:00 and 20:00 medication-with-food windows as sacred, and builds extra time into every outing because transferring Frank with his walker into the car takes patience.",
+  "situation": "Tuesday morning at 07:00. Frank has an outpatient physical therapy appointment at 11:00, his weekly pill organizer needs refilling, a prescription has to be picked up at Walgreens, and the home health aide comes from 14:00 to 16:00 so Denise can do errands and take a breather.",
+  "life": [
+    "07:10 Wake up and text the app: let's plan Tuesday. Dad needs breakfast and morning meds at 08:00, then we have his outpatient PT at 11:00 (need 30m each way for walker + car transfer). Home health aide Carla is here 14:00–16:00, which is when I want to do the Walgreens prescription pickup, grocery shop at Aldi, and take 30 minutes for coffee by myself. Also need to call Medicare about the walker billing code before 16:30 and cook pot roast for dinner.",
+    "07:15 If the app schedules the Walgreens and Aldi run outside the 14:00–16:00 window, remind it that I don't leave Dad home alone right now and errands have to happen while Carla is here.",
+    "07:20 Shower, dress, and prepare oatmeal, scrambled eggs, and morning pills for Dad.",
+    "08:00 Help Dad get dressed, eat breakfast together, and give him his 08:00 morning medications until 08:55.",
+    "08:58 Report breakfast and Dad's 08:00 meds done. Starting a load of Dad's laundry and calling Medicare about the walker claim while he reads the paper.",
+    "09:05 Start laundry and call Medicare billing; wait on hold for 35 minutes, get the corrected provider code, and fax the form via phone app at 10:05.",
+    "10:08 Tell the app Medicare call is finally done! Getting Dad's shoes and coat on now so we're ready to load into the car at 10:25 for 11:00 PT.",
+    "10:25 Help Dad down the front ramp into the car and drive to the orthopedic PT clinic.",
+    "11:00 Outpatient PT session until 12:00; physical therapist shows Denise two new seated leg exercises and prints an updated sheet, getting them back home at 12:40.",
+    "12:42 Report PT went well and we're back home. Making turkey sandwiches and vegetable soup for lunch now, then settling Dad in his recliner for his afternoon rest.",
+    "12:45 Eat lunch with Dad, move laundry to the dryer, and get him settled with an ice pack on his hip until 13:55.",
+    "14:00 Home health aide Carla arrives. Text the app: lunch done and Carla just got here! Heading out now for Walgreens, Aldi groceries, and my solo coffee break before 16:00.",
+    "14:05 Drive to Walgreens pharmacy—pharmacist has to re-run the secondary insurance card, taking 25 minutes. Finish Aldi grocery shopping at 15:25, leaving only 20 minutes to sit in the bakery café with a cappuccino before driving back at 15:50.",
+    "15:58 Return home right as Carla wraps up at 16:00. Text the app: back home! Walgreens insurance took forever so my coffee break was short, but prescriptions and groceries are done.",
+    "16:15 Unpack groceries and start the beef pot roast and carrots in the Dutch oven so it braises until 18:30.",
+    "16:50 Report groceries put away and pot roast in the oven. Sit down to refill Dad's 7-day pill organizer with the new Walgreens bottles and fold the dry laundry until 17:40.",
+    "17:42 Report pill organizer filled and laundry folded. Doing 30 minutes of reading on the back porch while the roast finishes.",
+    "18:30 Serve pot roast dinner with Dad and clean up the kitchen until 19:45.",
+    "19:55 Give Dad his 20:00 evening medications with applesauce and help him get ready for bed by 20:45.",
+    "20:50 Report dinner and Dad's 20:00 evening meds done. Relaxing with a crossword puzzle until 22:30."
+  ],
+  "constraints": [
+    "Dad's morning (08:00) and evening (20:00) medications must be given on time with food.",
+    "Requires 30 minutes before and after the 11:00 PT appointment for walker assistance and car transfers.",
+    "Solo errands away from the house (Walgreens, Aldi, coffee break) can only happen between 14:00 and 16:00 while the home health aide is present."
+  ],
+  "truth": [
+    {
+      "item": "Morning prep, breakfast & Dad's 8 AM meds",
+      "match": "breakfast|8:00|morning med|meds",
+      "start": "07:20",
+      "end": "08:55"
+    },
+    {
+      "item": "Start laundry & call Medicare billing",
+      "match": "medicare|call|laundry",
+      "start": "09:05",
+      "end": "10:05"
+    },
+    {
+      "item": "Outpatient PT appointment (with transport)",
+      "match": "pt|physical therapy|appointment",
+      "start": "10:25",
+      "end": "12:40"
+    },
+    {
+      "item": "Lunch & settle Dad with ice pack",
+      "match": "lunch|sandwich|soup",
+      "start": "12:45",
+      "end": "13:55"
+    },
+    {
+      "item": "Walgreens pickup, Aldi groceries & coffee break",
+      "match": "walgreens|pharmacy|aldi|grocer|coffee",
+      "start": "14:05",
+      "end": "15:58"
+    },
+    {
+      "item": "Unpack groceries & put pot roast in oven",
+      "match": "pot roast|unpack|cook",
+      "start": "16:15",
+      "end": "16:50"
+    },
+    {
+      "item": "Refill weekly pill organizer & fold laundry",
+      "match": "pill|organizer|fold",
+      "start": "16:50",
+      "end": "17:40"
+    },
+    {
+      "item": "Read on back porch",
+      "match": "read|porch|break",
+      "start": "17:45",
+      "end": "18:25"
+    },
+    {
+      "item": "Pot roast dinner & kitchen cleanup",
+      "match": "dinner|pot roast|eat",
+      "start": "18:30",
+      "end": "19:45"
+    },
+    {
+      "item": "Dad's 8 PM meds & bedtime assistance",
+      "match": "8:00 pm|20:00|evening med|meds|bed",
+      "start": "19:55",
+      "end": "20:45"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Frank - Outpatient Hip PT",
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "summary": "Home Health Aide (Carla)",
+      "start": "14:00",
+      "end": "16:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Caregiving": "Caring for father (Frank, 81). Meds at 08:00 and 20:00 sharp. Can only run solo errands when aide is present."
+  },
+  "notes": [
+    {
+      "notebook": "Caregiving",
+      "title": "Dad's Daily Care Routine",
+      "role": "routine",
+      "body": "- [ ] 08:00 Breakfast + morning blood thinner & BP meds\n- [ ] Post-PT ice pack on right hip (20 mins)\n- [ ] Afternoon seated leg exercises\n- [ ] 20:00 Evening meds + bedtime prep"
+    },
+    {
+      "notebook": "Caregiving",
+      "title": "Medical & Errands",
+      "role": "list",
+      "body": "- [ ] Pick up Eliquis refill at Walgreens\n- [ ] Refill Dad's 7-day pill organizer\n- [ ] Call Medicare billing about durable medical equipment code\n- [ ] Aldi grocery run (chuck roast, carrots, milk, applesauce)\n- [x] Install raised toilet seat frame"
+    },
+    {
+      "notebook": "Home",
+      "title": "House & Respite",
+      "role": "list",
+      "body": "- [ ] Wash & fold Dad's laundry\n- [ ] Braise pot roast for dinner (needs 2 hours in oven)\n- [ ] 30-min solo coffee break while Carla is here\n- [ ] Read on the back porch"
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "id": "homeowner_late_contractor",
+  "date": "2026-10-13",
+  "source": "made up: homeowner waiting on a plumber with a 10 AM-2 PM arrival window who shows up late",
+  "wake": "07:30",
+  "bed": "22:45",
+  "work": null,
+  "persona": "Marcus, a high school guidance counselor taking a personal day off to deal with a leaking main shutoff valve in his basement and get fall house maintenance done. Texts with dry patience that slowly turns into irritation as the plumber's 10:00–14:00 window stretches past 14:30, trapping him at home when he wanted to go to Home Depot.",
+  "situation": "Tuesday morning at 07:30. Plumber is scheduled for an arrival window between 10:00 and 14:00, and Marcus needs to clear the basement utility corner before 10:00, do indoor tasks while waiting, and run to Home Depot and the nursery once the plumber leaves.",
+  "life": [
+    "07:40 Wake up and text the app: took a personal day for the plumber! Arrival window is 10:00–14:00, so I can't leave the house during that block. Before 10:00 I need breakfast and clearing the storage bins away from the basement main water valve. While waiting 10:00–14:00 I can pay bills, clean out the garage tool chest, and eat lunch. Once the plumber finishes, I want to drive to Home Depot for gutter guards and drop off library books.",
+    "07:45 Remind the app that the water will be shut off while the plumber works on the main valve, so any showering, dishes, or laundry has to happen before 10:00!",
+    "07:50 Shower, make coffee and bacon/eggs, and run the dishwasher right away so it finishes before 10:00.",
+    "08:55 Report shower, breakfast, and dishwasher started. Heading down to the basement to move the holiday bins away from the water meter and main shutoff valve.",
+    "09:00 Clear out the basement utility corner, sweep up cobwebs, and set up a work light for the plumber until 09:50.",
+    "09:52 Report basement utility area cleared and pitchers of drinking water filled just in case. Waiting on the plumber now and sitting down to pay the water and property tax bills.",
+    "10:00 Pay utilities and property tax installment online and file insurance paperwork until 11:15.",
+    "11:18 Report bills paid and paperwork filed. Still no call from the plumber—going out to the attached garage to organize the tool chest so I can still hear the doorbell.",
+    "11:20 Sort sockets, wrenches, and drill bits in the garage tool chest until 12:30.",
+    "12:35 Report garage tool chest organized. Making a turkey club sandwich for lunch while still waiting on the plumber.",
+    "13:20 Finish eating lunch. At 13:45 the plumbing dispatch calls: the tech got delayed on an emergency water heater burst and won't arrive until 14:30. Text the app: plumber dispatch just called, tech is running late and won't even get here until 14:30 (so probably here until 16:00). Push the Home Depot & library run to 16:00, and I'll vacuum the upstairs bedrooms while I'm stuck waiting.",
+    "13:50 Vacuum the upstairs bedrooms and hallway rug until 14:35.",
+    "14:38 Plumber finally pulls into the driveway! Text the app: vacuuming done and plumber is finally here, shutting the main water off now.",
+    "14:40 Supervise and assist as the plumber replaces the corroded main ball valve and pressure regulator; job wraps up and water is restored at 16:15.",
+    "16:18 Text the app: plumber is done, new shutoff valve is in and no leaks! Heading out right now for the library book drop and Home Depot before rush hour gets worse.",
+    "16:20 Drive to the public library book drop, then hit Home Depot for gutter guards and furnace filters, returning home at 17:45.",
+    "17:50 Report library drop and Home Depot run done! Skip installing the gutter guards today since it's getting dusk—just going to replace the basement furnace filter now (10 mins) and start grilling sausages and peppers for dinner.",
+    "17:55 Swap in the new furnace filter, then grill Italian sausages and peppers for dinner, finishing cleanup at 19:30.",
+    "19:35 Report furnace filter swapped and dinner done. Relaxing on the couch for the rest of the evening."
+  ],
+  "constraints": [
+    "Showering and running the dishwasher must finish before 10:00 because the main water valve will be shut off when the plumber arrives.",
+    "Cannot leave the house until the plumber arrives, completes the main valve replacement, and restores water.",
+    "Installing gutter guards on a ladder requires full daylight and cannot be started at dusk."
+  ],
+  "truth": [
+    {
+      "item": "Shower, breakfast & start dishwasher",
+      "match": "shower|breakfast|dishwasher",
+      "start": "07:50",
+      "end": "08:55"
+    },
+    {
+      "item": "Clear basement utility corner for plumber",
+      "match": "basement|clear|bin|valve",
+      "start": "09:00",
+      "end": "09:50"
+    },
+    {
+      "item": "Pay bills & file insurance paperwork",
+      "match": "bill|tax|paperwork",
+      "start": "10:00",
+      "end": "11:15"
+    },
+    {
+      "item": "Organize garage tool chest",
+      "match": "garage|tool",
+      "start": "11:20",
+      "end": "12:30"
+    },
+    {
+      "item": "Lunch",
+      "match": "lunch|sandwich",
+      "start": "12:35",
+      "end": "13:20"
+    },
+    {
+      "item": "Vacuum upstairs bedrooms",
+      "match": "vacuum|upstairs",
+      "start": "13:50",
+      "end": "14:35"
+    },
+    {
+      "item": "Plumber main shutoff valve replacement",
+      "match": "plumber|valve",
+      "start": "14:38",
+      "end": "16:15"
+    },
+    {
+      "item": "Library book drop & Home Depot run",
+      "match": "library|home depot|errand",
+      "start": "16:20",
+      "end": "17:45"
+    },
+    {
+      "item": "Replace furnace filter & grill dinner",
+      "match": "furnace|filter|dinner|grill|sausage",
+      "start": "17:55",
+      "end": "19:30"
+    },
+    {
+      "item": "Install gutter guards",
+      "match": "gutter",
+      "start": "16:30",
+      "end": "17:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Plumber Arrival Window (Main Shutoff Valve)",
+      "start": "10:00",
+      "end": "14:00"
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Home",
+      "title": "Plumber Day To-Do",
+      "role": "today",
+      "body": "- [ ] Move storage bins away from basement main water valve before 10 AM\n- [ ] Pay water bill & property tax online\n- [ ] Organize garage rolling tool chest\n- [ ] Return 3 books at library drop-off\n- [ ] Home Depot: buy 16x25x4 furnace filters & gutter guards\n- [ ] Swap basement furnace filter\n- [ ] Install gutter guards over front porch"
+    },
+    {
+      "notebook": "Home",
+      "title": "Indoor Chores",
+      "role": "list",
+      "body": "- [ ] Vacuum upstairs bedrooms & hallway\n- [ ] File EOB insurance statements\n- [ ] Put holiday bins back after plumber finishes"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Meals",
+      "role": "menu",
+      "body": "- [ ] Turkey club sandwich for lunch\n- [ ] Grill Italian sausages & peppers for dinner"
+    }
+  ]
+}

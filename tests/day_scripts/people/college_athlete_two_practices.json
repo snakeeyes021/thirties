@@ -1,0 +1,157 @@
+{
+  "id": "college_athlete_two_practices",
+  "date": "2026-10-19",
+  "source": "made up: college swimmer with 6 AM and 4 PM practices, classes in between, and a paper due",
+  "wake": "05:15",
+  "bed": "22:00",
+  "work": null,
+  "persona": "Jordan, a Division I college swimmer juggling two-a-day practices (06:00–08:00 and 16:00–18:00), two mid-day classes, and a 5-page sociology paper due tonight at 23:59. Texts briskly from campus walkways, constantly hungry, and relies on a quick afternoon nap between classes and afternoon weights/swim.",
+  "situation": "Monday morning at 05:15. Morning swim practice is 06:00–08:00, classes are 10:00–11:15 and 13:00–14:15, afternoon dryland/swim is 16:00–18:00, and the Sociology 204 paper needs its final two sections and citations completed before 22:00.",
+  "life": [
+    "05:20 Wake up, eat a banana and granola bar, and text the app while walking to the natatorium: morning practice 06:00–08:00, classes at 10:00 and 13:00, afternoon practice 16:00–18:00. Help me fit in dining hall breakfast after morning swim, finishing my Soc 204 paper (need about 2.5 hours total), lunch, a 45-min dorm nap before afternoon practice, dinner, and foam rolling.",
+    "05:25 If the app schedules writing the sociology paper right before the 16:00 practice instead of the nap, remind it that I'm useless at 18:30 if I don't get a 45-minute nap between 14:30 and 15:30.",
+    "06:00 Swim 5,500 yards at morning practice until 08:00, then shower in the locker room and walk to the dining hall at 08:20.",
+    "08:25 Eat a huge dining hall breakfast (omelet, oatmeal, smoothies) until 09:05.",
+    "09:08 Report morning practice and breakfast done. Sitting in the library now to write Section 3 of the Soc 204 paper before my 10:00 class.",
+    "09:10 Write 450 words of Section 3 until 09:50, then walk to Econ 101.",
+    "10:00 Attend Econ 101 lecture until 11:15.",
+    "11:20 Athletic trainer texts asking you to stop by the training room for 20 minutes of shoulder ultrasound treatment before noon. Text the app: Econ done, trainer just asked me to come in for 20 mins of shoulder treatment right now, so push lunch to 12:00 and I'll do Soc paper work after my 13:00 class or tonight.",
+    "11:25 Get ultrasound and ice on right shoulder in the athletic training room until 11:55.",
+    "12:00 Grab a chicken caesar wrap and pasta salad at the student union, eating until 12:45.",
+    "12:48 Report shoulder treatment and lunch done. Walking to Sociology 204 lecture now.",
+    "13:00 Attend Sociology 204 lecture until 14:15; professor clarifies the citation format during class.",
+    "14:20 Walk back to the dorm and text the app: Soc lecture done. Setting an alarm for a 45-min nap now (14:30–15:15) before pre-practice snack and walking to the pool at 15:40.",
+    "14:30 Nap in the dorm until 15:20, eat peanut butter toast, and walk to the pool at 15:40.",
+    "16:00 Afternoon lift and swim practice until 18:10 (coach held a 10-minute team meeting about Friday's travel meet).",
+    "18:20 Text the app walking out of the locker room: practice ran 10 mins late with a team meeting. Going straight to the dining hall for dinner now, then library from 19:15 to 21:00 to finish the Soc 204 conclusion and bibliography.",
+    "18:25 Eat dinner with teammates at the dining hall until 19:10.",
+    "19:15 Report dinner done. Lock in at the library to write the final section, conclusion, and APA works cited for the Soc 204 paper.",
+    "20:55 Proofread and submit the Soc 204 PDF on Canvas! Text the app: paper submitted!! Heading back to the dorm to pack my swim bag for 06:00 tomorrow and foam roll.",
+    "21:05 Pack dry towels and goggles for morning practice and foam roll quads/lats until 21:40, then lights out at 22:00."
+  ],
+  "constraints": [
+    "Must eat a large breakfast within 30 minutes of finishing the 06:00–08:00 swim practice.",
+    "Needs a 45-minute dorm nap in the window between the 13:00–14:15 class and 16:00 afternoon practice.",
+    "Sociology 204 paper must be submitted before going to sleep at 22:00."
+  ],
+  "truth": [
+    {
+      "item": "Morning swim practice & locker room shower",
+      "match": "morning.*swim|morning.*practice|swim",
+      "start": "06:00",
+      "end": "08:20"
+    },
+    {
+      "item": "Dining hall breakfast",
+      "match": "breakfast|dining",
+      "start": "08:25",
+      "end": "09:05"
+    },
+    {
+      "item": "Write Soc 204 paper (Block 1)",
+      "match": "soc.*paper|sociology.*paper|write|paper",
+      "start": "09:10",
+      "end": "09:50"
+    },
+    {
+      "item": "Econ 101 Lecture",
+      "match": "econ",
+      "start": "10:00",
+      "end": "11:15"
+    },
+    {
+      "item": "Athletic trainer shoulder treatment",
+      "match": "trainer|shoulder|treatment",
+      "start": "11:25",
+      "end": "11:55"
+    },
+    {
+      "item": "Lunch at student union",
+      "match": "lunch|wrap",
+      "start": "12:00",
+      "end": "12:45"
+    },
+    {
+      "item": "Sociology 204 Lecture",
+      "match": "sociology.*lecture|soc 204 lecture|class",
+      "start": "13:00",
+      "end": "14:15"
+    },
+    {
+      "item": "Dorm nap & pre-practice snack",
+      "match": "nap|rest|snack",
+      "start": "14:30",
+      "end": "15:40"
+    },
+    {
+      "item": "Afternoon lift & swim practice",
+      "match": "afternoon.*practice|lift|swim",
+      "start": "16:00",
+      "end": "18:10"
+    },
+    {
+      "item": "Team dinner at dining hall",
+      "match": "dinner",
+      "start": "18:25",
+      "end": "19:10"
+    },
+    {
+      "item": "Finish & submit Soc 204 paper",
+      "match": "soc.*paper|sociology.*paper|paper|submit",
+      "start": "19:15",
+      "end": "20:55"
+    },
+    {
+      "item": "Pack morning swim bag & foam roll",
+      "match": "pack|swim bag|foam roll",
+      "start": "21:05",
+      "end": "21:40"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Morning Swim Practice",
+      "start": "06:00",
+      "end": "08:00"
+    },
+    {
+      "summary": "ECON 101 Lecture",
+      "start": "10:00",
+      "end": "11:15"
+    },
+    {
+      "summary": "SOC 204 Lecture",
+      "start": "13:00",
+      "end": "14:15"
+    },
+    {
+      "summary": "Afternoon Dryland & Swim Practice",
+      "start": "16:00",
+      "end": "18:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Athletics": "D1 swimmer; needs high-calorie meals after practices, a 45-min afternoon nap, and 22:00 lights out."
+  },
+  "notes": [
+    {
+      "notebook": "School",
+      "title": "Assignments Due",
+      "role": "today",
+      "body": "- [ ] Finish Soc 204 paper (Section 3, conclusion, APA citations) - DUE 11:59 PM\n- [ ] Submit Soc 204 PDF on Canvas\n- [ ] Read Econ Ch 8 before Wednesday"
+    },
+    {
+      "notebook": "Swim",
+      "title": "Daily Athlete Routine",
+      "role": "routine",
+      "body": "- [ ] 05:20 Pre-swim banana & granola bar\n- [ ] Post-morning-swim big breakfast\n- [ ] 45-min afternoon dorm nap\n- [ ] 15 min evening foam rolling & shoulder bands\n- [ ] Pack 2 dry towels + cap/goggles for 6 AM"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Dorm & Life",
+      "role": "list",
+      "body": "- [ ] Wash mesh gear bag on Friday\n- [ ] Confirm travel roster bus time for Friday meet\n- [x] Pick up ankle fins from equipment room"
+    }
+  ]
+}

@@ -1,0 +1,145 @@
+{
+  "id": "moving_apartments_next_week",
+  "date": "2026-10-18",
+  "source": "made up: person moving apartments next week doing packing, utilities, and change of address",
+  "wake": "08:00",
+  "bed": "23:00",
+  "work": null,
+  "persona": "Tessa, an architectural drafter moving to a new apartment next Saturday. Texts in slightly frantic, list-heavy bursts, underestimates how long packing fragile items takes, and gets stressed when cardboard boxes take over the living room.",
+  "situation": "Sunday morning at 08:00, six days before moving day. Has a mountain of packing, utility transfer forms, USPS address changes, and a 14:00 Facebook Marketplace buyer coming to pick up the old dining table.",
+  "life": [
+    "08:10 Wake up and text the app: moving in 6 days! Help me plan today: breakfast & coffee, pack books & living room shelves, pack kitchen glassware, submit ConEd & fiber internet move transfers, do USPS change of address online, sell the dining table to the Marketplace buyer at 14:00, and drop off 3 bags of donations at Goodwill before 17:00.",
+    "08:15 Remind the app that the dining table has to be cleared off and the legs unbolted at least 30 minutes before the buyer arrives at 14:00.",
+    "08:20 Make coffee and a bagel, and clear space in the hallway for stacked boxes until 09:05.",
+    "09:08 Report breakfast done. Starting on packing the living room bookshelves now.",
+    "09:10 Pack books into small boxes; run out of packing tape at 10:15 with two shelves still left.",
+    "10:18 Text the app: ran out of packing tape and bubble wrap halfway through the bookshelves! Need to walk to the hardware store right now (about 30–40 mins round trip) before I can pack the remaining books or any kitchen glassware.",
+    "10:20 Walk to Ace Hardware, buy three rolls of tape and a big roll of bubble wrap, and walk back by 11:00.",
+    "11:02 Report hardware store run done. Finishing the bookshelves now.",
+    "11:05 Finish boxing up the books and label the boxes until 11:50.",
+    "11:52 Report bookshelves packed! Sit down with laptop to do the USPS change of address and transfer ConEd electric and fiber internet while eating leftover pad thai for lunch.",
+    "11:55 Eat pad thai, complete USPS address forwarding, and submit the ConEd transfer, but the fiber internet portal says transfers require calling support on Monday. Finish at 13:10.",
+    "13:12 Tell the app lunch, USPS, and ConEd are done, but fiber internet has to wait until Monday because their phone support is closed on Sundays. Starting to clear and unbolt the dining table now for the 14:00 pickup.",
+    "13:15 Clear packing supplies off the dining table and unbolt the four legs with an Allen wrench until 13:45.",
+    "13:50 Marketplace buyer texts that they're stuck in bridge traffic and will be there at 14:30 instead of 14:00. Text the app: buyer is running 30 mins late (14:30), so I'm going to start wrapping kitchen glassware while I wait.",
+    "13:55 Wrap wine glasses and mugs in bubble wrap until 14:35.",
+    "14:35 Buyer arrives; help them carry the tabletop and legs down to their SUV and collect Venmo payment, finishing at 15:00.",
+    "15:02 Report table sold and out of the apartment! Ask how much time is left before Goodwill donation drop-off closes at 17:00.",
+    "15:10 Load the three trash bags of clothes and old toaster into the car, drive to Goodwill, wait in the donation lane, and get back home at 16:20.",
+    "16:25 Report Goodwill drop-off done! Back to wrapping kitchen glassware and plates.",
+    "16:30 Finish packing two big dish barrels of kitchen glassware and seasonal cookware until 18:15.",
+    "18:20 Tell the app kitchen glassware is finally packed, your lower back is sore, and you want to skip sorting the hall closet tonight. Ask to schedule a hot shower now, ordering burritos at 19:00, and watching a movie on the mattress.",
+    "18:25 Take a hot shower until 18:55, then order and eat burritos on the floor until 20:00."
+  ],
+  "constraints": [
+    "Cannot pack boxes or fragile kitchen glassware without packing tape and bubble wrap.",
+    "Dining table must be cleared and disassembled before the 14:00 Marketplace buyer arrives.",
+    "Goodwill donation center drop-off lane closes at 17:00 on Sundays."
+  ],
+  "truth": [
+    {
+      "item": "Breakfast & coffee",
+      "match": "breakfast|coffee|bagel",
+      "start": "08:20",
+      "end": "09:05"
+    },
+    {
+      "item": "Pack living room bookshelves (Part 1)",
+      "match": "book|shelf|shelves|living room",
+      "start": "09:10",
+      "end": "10:15"
+    },
+    {
+      "item": "Buy packing tape & bubble wrap at hardware store",
+      "match": "tape|bubble|hardware|store",
+      "start": "10:20",
+      "end": "11:00"
+    },
+    {
+      "item": "Pack living room bookshelves (Part 2)",
+      "match": "book|shelf|shelves|living room",
+      "start": "11:05",
+      "end": "11:50"
+    },
+    {
+      "item": "Lunch, USPS address change & ConEd transfer",
+      "match": "lunch|usps|address|coned|utilit",
+      "start": "11:55",
+      "end": "13:10"
+    },
+    {
+      "item": "Clear and unbolt dining table",
+      "match": "unbolt|disassemble|clear.*table|dining table",
+      "start": "13:15",
+      "end": "13:45"
+    },
+    {
+      "item": "Pack kitchen glassware (Part 1)",
+      "match": "kitchen|glassware|dish|mug",
+      "start": "13:55",
+      "end": "14:35"
+    },
+    {
+      "item": "Marketplace buyer dining table pickup",
+      "match": "buyer|table|marketplace",
+      "start": "14:35",
+      "end": "15:00"
+    },
+    {
+      "item": "Drop off donations at Goodwill",
+      "match": "goodwill|donation",
+      "start": "15:10",
+      "end": "16:20"
+    },
+    {
+      "item": "Pack kitchen glassware (Part 2)",
+      "match": "kitchen|glassware|dish",
+      "start": "16:30",
+      "end": "18:15"
+    },
+    {
+      "item": "Shower & burrito dinner",
+      "match": "shower|dinner|burrito",
+      "start": "18:25",
+      "end": "20:00"
+    },
+    {
+      "item": "Sort and pack hall linen closet",
+      "match": "closet|linen|hall",
+      "start": "17:30",
+      "end": "18:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "FB Marketplace Dining Table Pickup",
+      "start": "14:00",
+      "end": "14:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Move": "Moving apartments Saturday Oct 24."
+  },
+  "notes": [
+    {
+      "notebook": "Move",
+      "title": "Apartment Move Project",
+      "role": "project",
+      "body": "## Packing\n- [ ] Pack living room bookshelves\n- [ ] Pack kitchen glassware & special cookware\n- [ ] Sort and pack hall linen closet\n- [ ] Disassemble dining table before buyer comes\n- [x] Pack out-of-season winter coats\n\n## Logistics & Admin\n- [ ] USPS online change of address\n- [ ] Transfer ConEd electricity to new unit\n- [ ] Transfer fiber internet service\n- [ ] Drop 3 donation bags at Goodwill (before 5 PM)"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Errands & Supplies",
+      "role": "list",
+      "body": "- [ ] Buy more packing tape & bubble wrap if low\n- [ ] Pick up move-in cashier's check (Thu/Fri)\n- [ ] Confirm elevator reservation with new super"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Meals & Rest",
+      "role": "menu",
+      "body": "- [ ] Eat leftover pad thai to clear fridge\n- [ ] Order burritos for dinner\n- [ ] Hot shower & stretch back"
+    }
+  ]
+}

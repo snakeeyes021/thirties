@@ -438,6 +438,12 @@ class StateDatabase:
             ON CONFLICT(task_id) DO UPDATE SET completed_date = excluded.completed_date
             """, (task_id, comp_str, comp_str, comp_str))
 
+    def completed_since(self, since: date) -> set:
+        """Ids of items Thirties recorded as done on or after `since`."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT task_id FROM task_history WHERE completed_date >= ?", (since.isoformat(),))
+            return {r[0] for r in rows.fetchall()}
+
     def get_all_task_histories(self) -> List[TaskHistoryRecord]:
         with self._get_connection() as conn:
             cur = conn.cursor()

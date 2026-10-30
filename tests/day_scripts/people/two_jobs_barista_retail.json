@@ -1,0 +1,121 @@
+{
+  "id": "two_jobs_barista_retail",
+  "date": "2026-10-14",
+  "source": "made up: two-job worker with a morning barista shift and an evening retail shift",
+  "wake": "05:30",
+  "bed": "23:15",
+  "work": [
+    "06:30",
+    "21:30"
+  ],
+  "persona": "Chloe, a 24-year-old working two part-time jobs: opening barista at a specialty coffee shop (06:30–12:30) and closing floor associate at an outdoor gear store (16:30–21:30). Texts quickly in lowercase with occasional abbreviations, guards her 13:00–16:00 mid-day gap fiercely so she can eat, nap, and get one or two life chores done before putting on her second uniform.",
+  "situation": "Wednesday morning at 05:30. Opening espresso bar shift is 06:30–12:30, closing retail shift is 16:30–21:30, and in the afternoon break she needs to drop off her rent money order, do a quick laundry load of work shirts, and take a 45-minute nap.",
+  "life": [
+    "05:35 wake up and text the app while getting dressed: double shift Wednesday! coffee shop 06:30–12:30, then outdoor store 16:30–21:30 (have to leave at 16:00). help me plan my 12:30–16:00 gap: eat my shift meal on the bus home, wash my black work shirts, drop off the rent check at the property management dropbox, take a 45-min nap, and pack dinner for my night break.",
+    "05:40 remind the app that i can't leave the house for the rent dropbox while my work shirts are in the shared basement washer because neighbors take clothes out if you aren't there when the cycle ends (takes 45 mins).",
+    "05:45 drink half a protein shake, grab apron, and catch the 06:00 bus to the coffee shop.",
+    "06:30 work the opening barista shift until 12:40 (delivery truck arrived right at shift change).",
+    "12:45 text the app on the bus home: out of the coffee shop 10 mins late, eating my turkey pesto panini on the bus right now so lunch is done when i walk in at 13:10. start the basement washer right at 13:15.",
+    "13:15 get home, throw black work shirts and socks into the basement washing machine, and set a 40-minute timer.",
+    "13:20 while the washer runs, pack pasta salad and an apple into Tupperware for tonight's retail break and wipe down the kitchen counter until 13:55.",
+    "13:55 move laundry to the dryer, then walk 10 minutes down the street to drop the rent envelope into the management office slot, returning at 14:25.",
+    "14:28 text the app: rent dropped off and pulled my dry shirts out of the basement dryer! setting an alarm for my 45-min nap right now (14:30–15:15) so my feet don't die tonight.",
+    "14:30 sleep until 15:20.",
+    "15:22 wake up and text the app: nap done. skipping vacuuming my bedroom rug—just going to take a quick shower, put on my retail polo, and stretch my calves before catching the 16:00 bus.",
+    "15:25 shower, get dressed for shift #2, and stretch calves until 15:55.",
+    "16:00 catch the bus to the outdoor gear store and work the floor and register from 16:30 to 21:30 (eating packed pasta salad on the 19:00 break).",
+    "22:00 get home from the evening shift. text the app: home! feet are toast. heating up chamomile tea and watching one episode of a show before bed at 23:15."
+  ],
+  "constraints": [
+    "Must stay in the building during the 45-minute basement washing machine cycle so neighbors don't remove wet clothes.",
+    "Requires a 45-minute nap during the midday gap between the 06:30–12:30 and 16:30–21:30 shifts.",
+    "Must pack dinner before leaving at 16:00 for the evening retail shift."
+  ],
+  "truth": [
+    {
+      "item": "Morning prep & bus to coffee shop",
+      "match": "morning|bus|prep",
+      "start": "05:45",
+      "end": "06:30"
+    },
+    {
+      "item": "Opening barista shift & bus lunch",
+      "match": "barista|coffee shop|shift|lunch",
+      "start": "06:30",
+      "end": "13:10"
+    },
+    {
+      "item": "Wash work shirts & pack dinner",
+      "match": "wash|laundry|shirt|pack.*dinner",
+      "start": "13:15",
+      "end": "13:55"
+    },
+    {
+      "item": "Dry shirts & drop off rent check",
+      "match": "rent|dropbox|dry",
+      "start": "13:55",
+      "end": "14:25"
+    },
+    {
+      "item": "Midday nap",
+      "match": "nap|rest",
+      "start": "14:30",
+      "end": "15:20"
+    },
+    {
+      "item": "Shower & get dressed for retail shift",
+      "match": "shower|dress|stretch",
+      "start": "15:25",
+      "end": "15:55"
+    },
+    {
+      "item": "Evening retail shift (with commute)",
+      "match": "retail|outdoor|evening shift|work",
+      "start": "16:00",
+      "end": "22:00"
+    },
+    {
+      "item": "Vacuum bedroom rug",
+      "match": "vacuum|rug",
+      "start": "15:15",
+      "end": "15:45",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Barista Shift @ Ritual Coffee",
+      "start": "06:30",
+      "end": "12:30"
+    },
+    {
+      "summary": "Closing Shift @ Trailhead Gear",
+      "start": "16:30",
+      "end": "21:30"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Schedule": "Works two shifts on Wednesdays (06:30-12:30 and 16:30-21:30); needs 30m bus commute buffer and a 45m midday nap."
+  },
+  "notes": [
+    {
+      "notebook": "Daily",
+      "title": "Double Shift Gap Routine",
+      "role": "routine",
+      "body": "- [ ] Eat shift panini on bus home\n- [ ] Pack Tupperware dinner for evening break\n- [ ] 45-min afternoon nap\n- [ ] Quick shower & calf stretches before 4 PM bus"
+    },
+    {
+      "notebook": "Life",
+      "title": "Midweek Chores",
+      "role": "today",
+      "body": "- [ ] Wash & dry black work shirts in basement laundry\n- [ ] Drop rent check at property management slot\n- [ ] Vacuum bedroom rug"
+    },
+    {
+      "notebook": "Life",
+      "title": "Errands & Admin",
+      "role": "list",
+      "body": "- [ ] Reload transit pass for November\n- [ ] Buy insoles for work boots\n- [x] Swap Friday morning shift with Liam"
+    }
+  ]
+}

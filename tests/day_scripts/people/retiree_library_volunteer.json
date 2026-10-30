@@ -1,0 +1,127 @@
+{
+  "id": "retiree_library_volunteer",
+  "date": "2026-10-21",
+  "source": "made up: retiree volunteering at the library on Wednesday with a doctor's appointment and hobbies",
+  "wake": "06:30",
+  "bed": "22:00",
+  "work": null,
+  "persona": "Arthur, a 68-year-old retired civil engineer who volunteers at the public library on Wednesdays, tends his dahlias, practices watercolor painting, and bakes sourdough. Texts politely in complete sentences with proper punctuation, enjoys an orderly schedule, and appreciates knowing when he has buffer time to drive and park.",
+  "situation": "Wednesday morning at 06:30. Volunteering at the library 09:30–12:30 and seeing Dr. Patel for a routine blood pressure check at 14:30, with gardening, watercolor, and sourdough starter feeding to fit in.",
+  "life": [
+    "06:40 Good morning message to the app: ask to set up today's schedule around the 09:30–12:30 library shift and 14:30 Dr. Patel appointment, including morning coffee and crossword, watering the dahlias, feeding the sourdough starter, picking up a prescription at CVS, and an hour of watercolor painting.",
+    "06:45 Remind the app that both the library and Dr. Patel's office require 30 minutes beforehand for driving and parking.",
+    "06:50 Approve the schedule. Drink coffee on the porch, do the newspaper crossword, and eat toast until 07:50.",
+    "07:50 Feed the sourdough starter on the counter (15 mins), then go outside to water and deadhead the dahlias until 08:40.",
+    "08:42 Tell the app morning coffee, sourdough starter, and dahlias are all finished. Getting dressed for the library now.",
+    "09:00 Drive to the public library and work the book-sorting and holds desk shift from 09:30 to 12:30.",
+    "12:30 Chat with fellow volunteer Barbara in the parking lot about the upcoming book sale for 20 minutes; arrive home at 13:10.",
+    "13:12 Report library shift completed (got talking with Barbara after). Make soup and a sandwich for lunch until 13:55.",
+    "13:55 Report lunch finished and head out at 14:00 for Dr. Patel's office.",
+    "14:30 Appointment with Dr. Patel runs slow because the nurse orders an extra EKG check; leave the clinic at 15:45 instead of 15:15.",
+    "15:48 Text the app from the car: Dr. Patel ran 30 minutes late, everything is fine, and he sent a refill to CVS. Driving straight to CVS now to pick it up on the way home.",
+    "15:55 Stop at CVS pharmacy counter, wait in line, and return home at 16:35.",
+    "16:40 Report prescription picked up. Neighbor Greg stops by the driveway to borrow a socket wrench; end up talking in the garage until 17:15.",
+    "17:18 Tell the app Greg stopped by to borrow a tool, so watercolor painting got bumped. Ask if there's still time for 45 minutes of watercolor before starting dinner at 18:15.",
+    "17:20 Paint a watercolor study of autumn leaves at the sunroom table until 18:10.",
+    "18:12 Report watercolor session done and very relaxing. Start baking cod and roasting potatoes for dinner.",
+    "19:30 Finish dinner and kitchen cleanup. Ask the app to check off the library book list prep for tonight since you already sorted it with Barbara at the library.",
+    "19:35 Read biography of Olmsted in the armchair until bedtime at 22:00."
+  ],
+  "constraints": [
+    "Needs a 30-minute travel and parking buffer before both the 09:30 library shift and the 14:30 doctor's appointment.",
+    "Watering dahlias should happen in the morning before the sun gets too high.",
+    "Prefers dinner on the table around 18:15–18:30."
+  ],
+  "truth": [
+    {
+      "item": "Morning coffee, crossword & breakfast",
+      "match": "coffee|crossword|breakfast|morning",
+      "start": "06:50",
+      "end": "07:50"
+    },
+    {
+      "item": "Feed sourdough starter",
+      "match": "sourdough|starter",
+      "start": "07:50",
+      "end": "08:05"
+    },
+    {
+      "item": "Water and deadhead dahlias",
+      "match": "dahlia|garden|water",
+      "start": "08:05",
+      "end": "08:40"
+    },
+    {
+      "item": "Library volunteer shift (with drive)",
+      "match": "library|volunteer",
+      "start": "09:00",
+      "end": "13:10"
+    },
+    {
+      "item": "Lunch",
+      "match": "lunch|soup|sandwich",
+      "start": "13:12",
+      "end": "13:55"
+    },
+    {
+      "item": "Dr. Patel appointment (with drive)",
+      "match": "patel|doctor|appointment",
+      "start": "14:00",
+      "end": "15:45"
+    },
+    {
+      "item": "Pick up prescription at CVS",
+      "match": "cvs|prescription|pharmacy",
+      "start": "15:50",
+      "end": "16:35"
+    },
+    {
+      "item": "Watercolor painting",
+      "match": "watercolor|paint",
+      "start": "17:20",
+      "end": "18:10"
+    },
+    {
+      "item": "Make and eat dinner",
+      "match": "dinner|cod|eat",
+      "start": "18:12",
+      "end": "19:30"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Library Volunteer Shift",
+      "start": "09:30",
+      "end": "12:30"
+    },
+    {
+      "summary": "Dr. Patel - Checkup",
+      "start": "14:30",
+      "end": "15:15"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Preferences": "Always leave 30 minutes before appointments for driving and parking."
+  },
+  "notes": [
+    {
+      "notebook": "Daily",
+      "title": "Morning Routine",
+      "role": "routine",
+      "body": "- [ ] Coffee & NYT crossword on the porch\n- [ ] Toast & fruit\n- [ ] Feed sourdough starter\n- [ ] Check garden / water dahlias"
+    },
+    {
+      "notebook": "Errands & Health",
+      "title": "To Do",
+      "role": "list",
+      "body": "- [ ] Pick up lisinopril refill at CVS\n- [ ] Sort Friends of the Library book sale list\n- [ ] Buy birdseed at hardware store\n- [ ] Clean garage workbench\n- [x] Mail property tax installment"
+    },
+    {
+      "notebook": "Hobbies",
+      "title": "Pastimes & Projects",
+      "role": "menu",
+      "body": "- [ ] Watercolor study (autumn leaves)\n- [ ] Read Olmsted biography\n- [ ] Oil garden shears\n- [ ] Practice classical guitar"
+    }
+  ]
+}

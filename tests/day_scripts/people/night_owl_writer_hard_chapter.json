@@ -1,0 +1,124 @@
+{
+  "id": "night_owl_writer_hard_chapter",
+  "date": "2026-10-15",
+  "source": "made up: night-owl novelist working 11 AM-2 AM who avoids a difficult chapter until late at night",
+  "wake": "10:45",
+  "bed": "02:30",
+  "work": [
+    "11:30",
+    "23:30"
+  ],
+  "persona": "Soren, a speculative-fiction novelist on a shifted nocturnal schedule (wakes around 10:45, hits peak creative stride between 21:00 and 01:30). Texts wryly and introspectively, engages in classic productive procrastination (cleaning the kitchen, researching obscure 19th-century lighthouses, answering agent emails) to avoid tackling the pivotal scene in Chapter 14 until dark.",
+  "situation": "Thursday late morning waking at 10:45. Has an editorial call with his literary agent at 15:00, needs to critique a fellow writer's short story, buy cat food and groceries, and is supposed to draft the difficult confrontation scene in Chapter 14.",
+  "life": [
+    "10:55 Wake up and text the app: awake. Let's plan 11:00 to 02:00: coffee & breakfast now, first Chapter 14 drafting block at 12:00, lunch at 14:00, agent call at 15:00, critique Elena's short story draft, walk to the pet store and market before 19:00, dinner at 20:00, and my late-night Chapter 14 deep writing block from 21:30 to 01:00.",
+    "11:00 Brew a Chemex of black coffee and eat toast with jam until 11:50.",
+    "11:55 Report coffee and breakfast done. Open Scrivener for Chapter 14, stare at the blinking cursor for 15 minutes, and immediately pivot to 'researching 1890s kerosene lighthouse lamps' and reorganizing the spice rack until 13:40.",
+    "13:42 Text the app: okay, I wrote literally 60 words of Chapter 14 and then spent an hour reading lighthouse keeper logs and alphabetizing my spices. Count the first writing block as a bust—making ramen for lunch now before my 15:00 agent call.",
+    "13:45 Cook and eat spicy miso ramen with a soft-boiled egg until 14:35.",
+    "14:40 Report lunch done. Skim agent's email notes on the UK foreign rights offer for 20 minutes before the call.",
+    "15:00 Phone call with literary agent Sarah about UK audio rights and Spring copyedit timeline; call goes well and wraps up at 15:50.",
+    "15:52 Text the app: agent call done! Going to ride the momentum by reading and marking up Elena's 6,000-word short story draft at the neighborhood tea house from 16:15 to 17:45, then hit the pet store and market on the way back.",
+    "16:10 Walk to the tea house, order oolong tea, and write margin comments on Elena's short story PDF until 17:50.",
+    "17:52 Email the critiqued draft back to Elena, then walk to the pet supply shop for canned cat food and the market for tortellini and greens, getting home at 18:45.",
+    "18:48 Text the app: Elena's critique sent and pet store/market run done! Still haven't touched the actual Chapter 14 scene. Going to take a 45-minute evening walk in the dusk to untangle the dialogue in my head, eat dinner at 20:00, and then do the real writing from 21:00 to 01:00.",
+    "18:55 Walk through the park after sunset, dictating three voice memos of dialogue ideas into phone until 19:45.",
+    "19:50 Report walk done—actually figured out why the scene wasn't working! Boiling tortellini and making a salad for dinner now.",
+    "19:55 Eat tortellini dinner and wash dishes until 20:50.",
+    "20:55 Report dinner done. Putting phone on Do Not Disturb and locking into Scrivener for Chapter 14.",
+    "21:00 Write 1,850 words of the Chapter 14 confrontation scene in one deep late-night stretch until 00:50.",
+    "00:52 Text the app: 1,850 words written!! The scene finally works. Backing up Scrivener project to Dropbox and reading in bed until 02:30."
+  ],
+  "constraints": [
+    "Peak creative fiction drafting happens after 21:00; daytime writing blocks frequently stall out unless plotting is already solved.",
+    "Neighborhood pet supply store closes at 19:00.",
+    "Needs 20 minutes before the 15:00 literary agent call to review foreign rights emails."
+  ],
+  "truth": [
+    {
+      "item": "Coffee & breakfast",
+      "match": "coffee|breakfast|toast",
+      "start": "11:00",
+      "end": "11:50"
+    },
+    {
+      "item": "Procrastination lighthouse research & spice rack",
+      "match": "chapter 14|write|draft|research",
+      "start": "11:55",
+      "end": "13:40"
+    },
+    {
+      "item": "Ramen lunch & prep for agent call",
+      "match": "lunch|ramen|prep",
+      "start": "13:45",
+      "end": "15:00"
+    },
+    {
+      "item": "Call with literary agent",
+      "match": "agent|call",
+      "start": "15:00",
+      "end": "15:50"
+    },
+    {
+      "item": "Critique Elena's short story at tea house",
+      "match": "elena|critique|story",
+      "start": "16:10",
+      "end": "17:52"
+    },
+    {
+      "item": "Buy cat food & groceries",
+      "match": "pet|cat food|grocer|market",
+      "start": "17:52",
+      "end": "18:45"
+    },
+    {
+      "item": "Dusk plotting walk",
+      "match": "walk|plot",
+      "start": "18:55",
+      "end": "19:45"
+    },
+    {
+      "item": "Tortellini dinner",
+      "match": "dinner|tortellini|eat",
+      "start": "19:55",
+      "end": "20:50"
+    },
+    {
+      "item": "Late-night Chapter 14 writing block",
+      "match": "chapter 14|write|draft|scrivener",
+      "start": "21:00",
+      "end": "00:50"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Call w/ Sarah (Literary Agent)",
+      "start": "15:00",
+      "end": "15:45"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Schedule": "Night owl writer (wakes ~10:45, sleeps ~02:30). Best deep drafting window is 21:00–01:00."
+  },
+  "notes": [
+    {
+      "notebook": "Writing",
+      "title": "Novel Manuscript Backlog",
+      "role": "backlog",
+      "body": "- [ ] Draft Chapter 14 lighthouse confrontation scene (~1,500–2,000 words)\n- [ ] Revise Chapter 11 pacing transitions\n- [ ] Check 1890s Fresnel lens rotation timing\n- [ ] Back up Scrivener project to cloud"
+    },
+    {
+      "notebook": "Writing",
+      "title": "Literary Admin & Workshop",
+      "role": "today",
+      "body": "- [ ] Review UK audio rights email before 3 PM agent call\n- [ ] Critique Elena's 6,000-word short story draft\n- [ ] Submit festival travel reimbursement form"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Errands & Home",
+      "role": "list",
+      "body": "- [ ] Buy case of wet cat food at Pet Pantry (closes 7 PM)\n- [ ] Pick up tortellini & salad greens at market\n- [ ] Evening walk to plot dialogue"
+    }
+  ]
+}

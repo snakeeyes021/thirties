@@ -1,0 +1,136 @@
+{
+  "id": "bad_day_car_trouble_triage",
+  "date": "2026-10-20",
+  "source": "made up: person having a terrible day with poor sleep and a dead car battery who cancels half the plan and asks the app to make it manageable",
+  "wake": "08:45",
+  "bed": "21:30",
+  "work": [
+    "09:30",
+    "16:30"
+  ],
+  "persona": "Victor, a freelance insurance claims adjuster who had an awful night of insomnia after his upstairs neighbor's smoke detector chirped until 04:00. Texts in exhausted, defeated sentences; when his car won't start at lunchtime, he hits his limit and asks the app to ruthlessly triage his afternoon down to bare survival mode.",
+  "situation": "Tuesday morning waking at 08:45 after barely four hours of sleep, having slept through his 07:00 alarm. Supposed to write three claim reports, drive to an afternoon site inspection, go to the bank and Costco, work out, and cook dinner.",
+  "life": [
+    "08:50 Wake up in a panic after sleeping through the 07:00 alarm because the upstairs neighbor's smoke alarm chirped all night. Text the app: terrible night of sleep, just woke up at 08:45. I'm exhausted. Help me salvage today: quick coffee & toast now, write the 3 desktop claim reports 09:30–12:00, grab lunch and drive to the 13:30 Oak St roof inspection, hit Costco and the bank on the way back at 15:00, finish admin emails until 16:30, and cook stir-fry tonight.",
+    "08:55 Drop the morning workout immediately—remind the app there is zero chance I'm lifting weights on 4 hours of sleep.",
+    "09:00 Drink two cups of black coffee and eat toast while staring bleary-eyed at laptop until 09:30.",
+    "09:32 Report coffee and toast done. Starting the 3 desktop claim reports now.",
+    "09:35 Grind through only 2 of the 3 desktop claim reports because your brain is moving through molasses, finishing the second one at 12:15.",
+    "12:18 Text the app: only got 2 of the 3 claim reports done, my head is pounding. Eating a quick sandwich now and walking out to the car at 12:45 to drive to the 13:30 Oak St inspection.",
+    "12:20 Eat a turkey sandwich, grab clipboard and camera, and go out to the driveway at 12:45—turn the key and the car battery is completely dead (left the dome light on last night).",
+    "12:55 Call AAA for a jump/battery test and call the Oak St homeowner to move the roof inspection to Thursday morning. Text the app at 13:05: my car battery is completely dead in the driveway. Called AAA (coming between 13:30 and 15:00) and moved the Oak St inspection to Thursday. Today is officially cursed. Please cancel Costco, cancel the bank run, cancel cooking stir-fry—just help me make the rest of this day manageable so I don't lose my mind.",
+    "13:10 Agree to the stripped-down survival plan: wait for AAA and finish that 3rd desktop claim report so today isn't a total write-off, let AAA replace/jump the battery, take a 45-minute afternoon nap once the car is dealt with, order pho delivery for dinner, and go to bed at 21:30.",
+    "13:15 Sit on the front porch steps with laptop so you can see the tow truck, and finish writing the 3rd desktop claim report by 14:10.",
+    "14:12 AAA battery truck arrives; tech tests the 6-year-old battery (dead cell) and installs a new battery right in the driveway, finishing at 14:50.",
+    "14:55 Text the app: 3rd claim report is submitted AND the AAA tech put a brand-new battery in my car! Logging off work early—going to close the blinds and take a 1-hour nap right now (15:00–16:00).",
+    "15:00 Sleep deeply in a dark bedroom until 16:15.",
+    "16:20 Wake up from nap feeling slightly less miserable. Text the app: nap done. Taking a warm shower and then doing literally nothing except answering two quick client emails so my inbox doesn't explode tomorrow.",
+    "16:25 Take a warm shower and send two status emails until 17:15.",
+    "17:20 Report shower and emails done. Order beef pho and spring rolls on DoorDash at 18:00, eat on the couch at 18:45, and go to sleep early at 21:30."
+  ],
+  "constraints": [
+    "Running on 4 hours of sleep: cannot do workouts or heavy batch errands.",
+    "Dead car battery in the driveway prevents driving to the 13:30 site inspection, Costco, or the bank, and requires waiting at home for the AAA battery truck.",
+    "When overwhelmed by compounding mishaps, non-essential errands and cooking must be dropped in favor of rest and takeout."
+  ],
+  "truth": [
+    {
+      "item": "Coffee & toast",
+      "match": "coffee|toast|breakfast",
+      "start": "09:00",
+      "end": "09:30"
+    },
+    {
+      "item": "Write desktop claim reports #1 and #2",
+      "match": "claim|report",
+      "start": "09:35",
+      "end": "12:15"
+    },
+    {
+      "item": "Sandwich lunch & discover dead car battery",
+      "match": "lunch|sandwich|car|battery",
+      "start": "12:20",
+      "end": "13:05"
+    },
+    {
+      "item": "Write desktop claim report #3 while waiting for AAA",
+      "match": "claim|report",
+      "start": "13:15",
+      "end": "14:10"
+    },
+    {
+      "item": "AAA driveway car battery replacement",
+      "match": "aaa|battery|car",
+      "start": "14:12",
+      "end": "14:50"
+    },
+    {
+      "item": "Afternoon recovery nap",
+      "match": "nap|sleep|rest",
+      "start": "15:00",
+      "end": "16:15"
+    },
+    {
+      "item": "Warm shower & 2 status emails",
+      "match": "shower|email",
+      "start": "16:25",
+      "end": "17:15"
+    },
+    {
+      "item": "Order and eat pho delivery dinner",
+      "match": "dinner|pho|doordash|eat",
+      "start": "18:00",
+      "end": "19:15"
+    },
+    {
+      "item": "Oak St roof claim inspection",
+      "match": "oak st|inspection|roof",
+      "start": "13:30",
+      "end": "14:30",
+      "done": false
+    },
+    {
+      "item": "Costco & bank run",
+      "match": "costco|bank",
+      "start": "15:00",
+      "end": "16:30",
+      "done": false
+    },
+    {
+      "item": "Cook stir-fry dinner",
+      "match": "stir-fry|cook",
+      "start": "18:30",
+      "end": "19:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Site Inspection: 412 Oak St Roof Claim",
+      "start": "13:30",
+      "end": "14:30"
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Work",
+      "title": "Claims & Inspections",
+      "role": "today",
+      "body": "- [ ] Write & submit 3 desktop water-damage claim reports\n- [ ] 1:30 PM on-site roof inspection at 412 Oak St\n- [ ] Upload inspection photos & send client status emails"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Errands & House",
+      "role": "list",
+      "body": "- [ ] Costco run (paper towels, coffee beans, frozen dumplings)\n- [ ] Deposit insurance check at bank branch\n- [ ] Cook chicken & broccoli stir-fry\n- [ ] 45-min dumbbell workout"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Low-Energy Fallback",
+      "role": "menu",
+      "body": "- [ ] Order pho delivery\n- [ ] 1-hour afternoon nap\n- [ ] Hot shower & early bedtime"
+    }
+  ]
+}

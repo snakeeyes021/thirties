@@ -1,0 +1,108 @@
+{
+  "id": "new_user_onboarding_today_only",
+  "date": "2026-10-17",
+  "source": "made up: brand-new app user with only a single messy Today note who sets up routines and lists as the day goes",
+  "wake": "08:30",
+  "bed": "23:00",
+  "work": null,
+  "persona": "Dana, a 33-year-old museum curator who just installed Thirties this morning after a friend recommended it. Curious, conversational, and slightly skeptical of productivity apps; starts with everything dumped into a single Today note and asks the app mid-day to break items down and help organize her lists.",
+  "situation": "Saturday morning at 08:30. Brand-new user with no profile and only one Today note holding a jumble of errands, a 13:00 haircut on the calendar, and apartment projects.",
+  "life": [
+    "08:40 Open the app for the very first time and text: hey! my friend told me to try this app. i just dumped a bunch of stuff into my Today note and i have a 1:00 PM haircut on my calendar. how does this work—can you propose a schedule for my Saturday with thirty-minute blocks and some breathing room?",
+    "08:45 Look at the first proposal and clarify: oh wait, i didn't put breakfast or showering on my list! i need an hour right now (09:00–10:00) for coffee, breakfast, and a shower, and please add a Morning Routine note or remember that I always do coffee, breakfast, and shower first thing.",
+    "08:50 Approve the revised schedule (09:00 morning routine, 10:00 farmer's market + dry cleaners, 11:30 repot monstera, 12:15 lunch, 13:00 haircut, 14:30 clean out coat closet, 16:30 call mom, 18:00 cook butternut squash pasta).",
+    "09:00 Make coffee and eggs and take a shower until 09:55.",
+    "09:58 Text the app: morning routine done! heading out to walk to the farmer's market and pick up my winter coat from the dry cleaners.",
+    "10:00 Walk to the farmer's market (buy squash, sage, apples, and sourdough), then stop at the dry cleaners, getting home at 11:25.",
+    "11:28 Text the app: back from the farmer's market and dry cleaners! i realized 'Repot monstera' on my list actually requires buying a 12-inch terracotta pot and potting soil at the garden center first, and i don't have time before my 13:00 haircut. Can you break 'Repot monstera' into two steps in my note ('Buy 12-inch pot & soil at garden center' and 'Repot monstera on balcony') and move both to after my haircut?",
+    "11:35 Since the pre-haircut slot is now open, decide to call Mom now while eating an early sourdough sandwich for lunch before leaving at 12:40 for the salon.",
+    "11:38 Text the app: actually, I'm going to call my mom right now and eat lunch before leaving for my 13:00 haircut! Adjust the schedule for me.",
+    "11:40 Talk to Mom on the phone for 35 minutes, then make and eat a turkey and apple sandwich on the fresh sourdough until 12:38.",
+    "12:40 Report Mom call and lunch done! Walking to the salon for the 13:00 haircut.",
+    "13:00 Get a wash, cut, and blowout at the salon until 14:15; stop directly at the neighborhood garden center two blocks from the salon to buy the 12-inch terracotta pot and a bag of potting mix, walking home by 14:55.",
+    "15:00 Text the app: haircut is done AND I hit the garden center on the way back, so buying the pot and soil is done too! Going to repot the monstera on the balcony right now.",
+    "15:05 Repot the monstera into the new terracotta pot on the balcony and sweep up spilled soil until 16:00.",
+    "16:05 Report monstera repotted! Ask the app to add 'Buy cedar hangers' to the Today note after you start looking at the coat closet, and spend 45 minutes sorting scarves, boots, and donating two old jackets until 16:55.",
+    "16:58 Report coat closet sorted! Ask what's left for tonight—just cooking the farmer's market butternut squash pasta at 18:00 and watching a documentary.",
+    "18:00 Roast the butternut squash, brown butter and sage, boil pasta, and eat dinner until 19:20.",
+    "19:25 Report dinner done—tell the app the first day using thirties actually felt super manageable, and relax until 23:00."
+  ],
+  "constraints": [
+    "Needs an hour in the morning for coffee, breakfast, and shower before starting errands.",
+    "Cannot repot the monstera until a 12-inch terracotta pot and potting soil have been purchased at the garden center.",
+    "Needs 20 minutes to walk to the salon before the 13:00 haircut."
+  ],
+  "truth": [
+    {
+      "item": "Morning coffee, breakfast & shower",
+      "match": "coffee|breakfast|shower|morning",
+      "start": "09:00",
+      "end": "09:55"
+    },
+    {
+      "item": "Farmer's market & dry cleaners pickup",
+      "match": "farmer|market|dry clean",
+      "start": "10:00",
+      "end": "11:25"
+    },
+    {
+      "item": "Call Mom & eat lunch",
+      "match": "mom|call|lunch|sandwich",
+      "start": "11:40",
+      "end": "12:38"
+    },
+    {
+      "item": "Salon haircut & garden center pot/soil pickup",
+      "match": "haircut|salon|pot|garden center|soil",
+      "start": "12:40",
+      "end": "14:55"
+    },
+    {
+      "item": "Repot monstera on balcony",
+      "match": "repot|monstera",
+      "start": "15:05",
+      "end": "16:00"
+    },
+    {
+      "item": "Clean out & sort coat closet",
+      "match": "closet|coat",
+      "start": "16:05",
+      "end": "16:55"
+    },
+    {
+      "item": "Cook and eat butternut squash pasta dinner",
+      "match": "dinner|pasta|squash|cook",
+      "start": "18:00",
+      "end": "19:20"
+    }
+  ],
+  "events": [
+    {
+      "summary": "Haircut @ Studio Roux",
+      "start": "13:00",
+      "end": "14:00"
+    }
+  ],
+  "setup": [],
+  "profile": {},
+  "notes": [
+    {
+      "notebook": "Tasks",
+      "title": "Today",
+      "role": "today",
+      "body": "- [ ] Walk to Saturday farmer's market\n- [ ] Pick up winter coat from dry cleaners\n- [ ] Repot monstera\n- [ ] Clean out hallway coat closet\n- [ ] Call Mom\n- [ ] Cook butternut squash sage pasta for dinner"
+    },
+    {
+      "notebook": "Tasks",
+      "title": "Someday",
+      "role": "list",
+      "body": "(empty)"
+    },
+    {
+      "notebook": "Notes",
+      "title": "Recipes",
+      "role": "reference",
+      "body": "Butternut squash pasta: cubed squash, brown butter, fresh sage, pecorino, rigatoni."
+    }
+  ]
+}

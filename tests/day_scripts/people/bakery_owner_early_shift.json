@@ -1,0 +1,118 @@
+{
+  "id": "bakery_owner_early_shift",
+  "date": "2026-10-16",
+  "source": "made up: small-business bakery owner up at 4:30 AM doing admin and errands in the afternoon",
+  "wake": "04:30",
+  "bed": "20:30",
+  "work": [
+    "05:00",
+    "13:00"
+  ],
+  "persona": "Colette, owner and head baker of a neighborhood sourdough and pastry shop. Up at 04:30 every morning; brisk, decisive, and no-nonsense when texting. Needs a mandatory 45-minute afternoon nap or she crashes before finishing her vendor orders and bookkeeping.",
+  "situation": "Friday morning at 04:30. Working the bake and morning counter rush from 05:00 to 13:00, then transitioning to business admin, flour inventory ordering, a Restaurant Depot run, and an early bedtime.",
+  "life": [
+    "04:35 Wake up, throw on clothes, and text the app while walking to the bakery: on the ovens and counter 05:00–13:00 today. Help me plan 13:00 to 20:30: need lunch at 13:00, a 45-min nap at Home around 14:00, calling King Arthur flour rep before 16:00, doing next week's staff schedule, a Restaurant Depot run for butter and parchment, and early dinner at 18:30.",
+    "04:40 Remind the app that the flour distributor order cutoff for Monday delivery is 16:00 sharp, so the inventory check and phone call must happen before 16:00.",
+    "05:00 Bake sourdough loaves, laminate croissants, and run the Friday morning pastry line until 13:15 (trained the new counter staff member on closing the espresso bar for an extra 15 minutes).",
+    "13:18 Text the app: finally out of the kitchen! Ate a turkey baguette at the shop while training Noah, so lunch is already done. Walking home now to shower off the flour and take my nap from 13:45 to 14:30.",
+    "13:25 Walk home, take a quick shower, and sleep for 45 minutes until 14:35.",
+    "14:40 Wake up from nap and text the app: nap done, feeling human again. Counting flour inventory sheet and calling the King Arthur rep now.",
+    "14:45 Check the inventory sheet from the shop and call the flour distributor to place Monday's grain order, finishing at 15:20.",
+    "15:22 Report flour order placed well before the 16:00 cutoff. Starting next week's staff shift schedule in Gusto.",
+    "15:25 Build next week's baker and barista schedule; get interrupted by two texts from baristas swapping Sunday shifts, finishing at 16:25.",
+    "16:28 Report staff schedule published! Heading out in the van to Restaurant Depot for 2 cases of plugra butter and sheet pan parchment.",
+    "16:30 Drive to Restaurant Depot, load butter and parchment boxes, and drop the butter off at the bakery walk-in cooler on the way back, returning home at 17:55.",
+    "17:58 Text the app: Restaurant Depot run and walk-in drop-off done (traffic was gross on the avenue). What's left on my admin list? Decide to skip reconciling September Square fees tonight and just do 20 minutes of soaking my feet before making an omelet for dinner.",
+    "18:00 Soak feet in Epsom salt bath and stretch calves until 18:25.",
+    "18:30 Make a spinach and goat cheese omelet and salad, eat dinner, and clean up until 19:20.",
+    "19:25 Report dinner done. Set out clothes for the 04:30 Saturday wake-up and read in bed until lights out at 20:30."
+  ],
+  "constraints": [
+    "Wholesale flour order must be called in to the distributor before the 16:00 Friday cutoff.",
+    "Requires a 45-minute nap in the early afternoon after being on her feet since 05:00.",
+    "Perishable bulk butter from Restaurant Depot must be dropped into the bakery walk-in cooler before returning home.",
+    "Strict 20:30 bedtime ahead of the 04:30 Saturday morning bake."
+  ],
+  "truth": [
+    {
+      "item": "Morning bake, counter shift & shop lunch",
+      "match": "bake|bakery|work|shift|lunch",
+      "start": "05:00",
+      "end": "13:15"
+    },
+    {
+      "item": "Shower & afternoon nap",
+      "match": "shower|nap|rest",
+      "start": "13:25",
+      "end": "14:35"
+    },
+    {
+      "item": "Flour inventory & call distributor",
+      "match": "flour|king arthur|inventory|order",
+      "start": "14:45",
+      "end": "15:20"
+    },
+    {
+      "item": "Publish next week's staff schedule",
+      "match": "staff|schedule|gusto",
+      "start": "15:25",
+      "end": "16:25"
+    },
+    {
+      "item": "Restaurant Depot run & cooler drop-off",
+      "match": "restaurant depot|butter|parchment",
+      "start": "16:30",
+      "end": "17:55"
+    },
+    {
+      "item": "Epsom salt foot soak",
+      "match": "foot|soak|stretch",
+      "start": "18:00",
+      "end": "18:25"
+    },
+    {
+      "item": "Dinner",
+      "match": "dinner|omelet|eat",
+      "start": "18:30",
+      "end": "19:20"
+    },
+    {
+      "item": "Reconcile September Square fees",
+      "match": "square|reconcil|bookkeep",
+      "start": "17:30",
+      "end": "18:30",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Morning Bake & Counter Shift",
+      "start": "05:00",
+      "end": "13:00"
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Schedule": "Up at 04:30, asleep by 20:30. Needs a 45-min afternoon nap after the morning bake."
+  },
+  "notes": [
+    {
+      "notebook": "Bakery",
+      "title": "Friday Admin & Ordering",
+      "role": "today",
+      "body": "- [ ] Call in Monday flour order to King Arthur rep (before 4 PM!)\n- [ ] Publish next week's staff schedule in Gusto\n- [ ] Restaurant Depot run: 2 cases Plugra butter + half-sheet parchment\n- [ ] Reconcile September Square processing fees"
+    },
+    {
+      "notebook": "Bakery",
+      "title": "Shop Maintenance & Menu",
+      "role": "list",
+      "body": "- [ ] Order replacement gasket for deck oven #2\n- [ ] Cost out thanksgiving pecan pie pre-orders\n- [ ] Update chalkboard seasonal menu\n- [x] Train Noah on espresso bar closing"
+    },
+    {
+      "notebook": "Personal",
+      "title": "After-Bake Recovery",
+      "role": "routine",
+      "body": "- [ ] Rinse off flour & 45-min afternoon nap\n- [ ] Epsom salt foot soak\n- [ ] Early dinner (6:30 PM)\n- [ ] Prep coffee maker & clothes for 4:30 AM"
+    }
+  ]
+}

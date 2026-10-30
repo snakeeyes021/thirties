@@ -1,0 +1,2 @@
+# Generated at build time by meson's vcs_tag: the commit this build came from.
+COMMIT = "@VCS_TAG@"

@@ -1,0 +1,124 @@
+{
+  "id": "medical_resident_day_off",
+  "date": "2026-10-18",
+  "source": "made up: exhausted medical resident on a rare golden Sunday off trying to do everything and rest",
+  "wake": "09:00",
+  "bed": "21:30",
+  "work": null,
+  "persona": "Dr. Ananya Rao, a PGY-2 internal medicine resident on a rare 'golden weekend' Sunday off after a brutal 75-hour inpatient week. Starts the morning ambitiously trying to cram a week's worth of errands, chart completion, exercise, and cooking into one day, then hits a wall mid-afternoon and asks the app to pare the plan down so she can actually rest.",
+  "situation": "Sunday morning waking at 09:00 without a pager. Has 6 overdue clinic discharge summaries to sign in Epic, an empty fridge, a mountain of laundry, a friend's afternoon coffee invite, and deep cumulative fatigue.",
+  "life": [
+    "09:10 Wake up and text the app: golden Sunday off!! I have so much to catch up on—help me schedule: coffee & pancakes, finish 6 overdue Epic discharge summaries, peloton ride + shower, Trader Joe's grocery haul, meal-prep chicken tikka and roasted cauliflower for my 6 AM wards week, wash 2 loads of scrubs/linens, meet my co-resident Priya for coffee at 15:00, and call my parents.",
+    "09:15 Remind the app to get the 6 Epic discharge summaries out of the way before noon so hospital medical records stops emailing me.",
+    "09:20 Make cardamom coffee and protein pancakes, eating slowly on the couch until 10:15.",
+    "10:18 Report coffee and pancakes done. Starting first load of scrubs in the washer and opening my hospital laptop for the 6 Epic discharge summaries.",
+    "10:20 Dictate and sign all 6 overdue discharge summaries and clear inbox lab results until 11:55.",
+    "11:58 Text the app: Epic charts are 100% zeroed out!! Moved load #1 to the dryer and started load #2. Going to hop on the Peloton for a 30-min ride and shower before Trader Joe's.",
+    "12:05 Get 10 minutes into the Peloton warmup and realize your legs feel like lead bricks. Stop at 12:20, take a warm shower, and eat leftover rice and dal until 13:15.",
+    "13:18 Text the app: bailed on the Peloton ride after 10 mins, my body is way more wiped from wards than I thought. Showered and ate lunch. Driving to Trader Joe's now so I have food for the week.",
+    "13:25 Drive to Trader Joe's; Sunday afternoon crowds are packed, taking until 14:40 to get back and carry four heavy bags upstairs.",
+    "14:42 Text the app while putting cold groceries away: just got back from TJ's and I'm honestly hitting a wall. Texting Priya now to ask if we can do a 20-minute phone catch-up instead of me driving across town for 15:00 coffee, and I need a 90-minute nap after that. Please pare down the rest of my afternoon so I only do the essentials (nap, call parents, and meal-prep the chicken tikka for work).",
+    "14:55 Put groceries away and chat with co-resident Priya on the phone for 20 minutes while lying on the bed until 15:15.",
+    "15:18 Report groceries unpacked and had a nice phone catch-up with Priya instead of driving out. Going to sleep from 15:20 to 16:50.",
+    "15:20 Sleep deeply for 90 minutes until 16:50.",
+    "16:55 Wake up feeling much better. Text the app: nap saved my life. Calling my parents on FaceTime while I fold the two loads of clean scrubs.",
+    "17:00 FaceTime parents for 45 minutes while folding scrubs and setting out five pairs for Monday–Friday wards.",
+    "17:48 Report parents call and laundry folding done! Starting the big batch of chicken tikka, rice, and roasted cauliflower for the week's hospital lunches and tonight's dinner.",
+    "17:50 Cook chicken tikka and roast cauliflower, pack four glass lunch containers for the hospital fridge, and eat dinner until 19:30.",
+    "19:35 Report meal prep and dinner done! Pack hospital badge and stethoscope into backpack and read in bed before 21:30 lights out."
+  ],
+  "constraints": [
+    "Overdue Epic discharge summaries must be signed before noon so the rest of the day off isn't shadowed by hospital chart reminders.",
+    "Meal-prepping weekday hospital lunches and washing scrubs are non-negotiable before Monday's 06:00 inpatient shift.",
+    "When cumulative residency fatigue hits mid-day, optional driving/exercise must give way to a 90-minute recovery nap."
+  ],
+  "truth": [
+    {
+      "item": "Cardamom coffee & pancakes",
+      "match": "coffee|pancake|breakfast",
+      "start": "09:20",
+      "end": "10:15"
+    },
+    {
+      "item": "Start laundry & sign 6 Epic discharge summaries",
+      "match": "epic|discharge|chart|laundry",
+      "start": "10:20",
+      "end": "11:55"
+    },
+    {
+      "item": "Short aborted Peloton warmup, shower & lunch",
+      "match": "peloton|shower|lunch",
+      "start": "12:05",
+      "end": "13:15"
+    },
+    {
+      "item": "Trader Joe's grocery haul",
+      "match": "trader joe|grocer",
+      "start": "13:25",
+      "end": "14:40"
+    },
+    {
+      "item": "Unpack groceries & phone catch-up with Priya",
+      "match": "priya|unpack",
+      "start": "14:45",
+      "end": "15:15"
+    },
+    {
+      "item": "Afternoon recovery nap",
+      "match": "nap|sleep|rest",
+      "start": "15:20",
+      "end": "16:50"
+    },
+    {
+      "item": "Call parents & fold 2 loads of scrubs",
+      "match": "parent|call|fold|scrub",
+      "start": "17:00",
+      "end": "17:48"
+    },
+    {
+      "item": "Meal-prep chicken tikka & eat dinner",
+      "match": "meal-prep|meal prep|tikka|cauliflower|dinner",
+      "start": "17:50",
+      "end": "19:30"
+    },
+    {
+      "item": "Deep clean bathroom & mop kitchen",
+      "match": "clean|bathroom|mop",
+      "start": "16:00",
+      "end": "17:00",
+      "done": false
+    }
+  ],
+  "events": [
+    {
+      "summary": "Coffee w/ Priya @ Blue Bottle",
+      "start": "15:00",
+      "end": "16:00",
+      "invite": true
+    }
+  ],
+  "setup": [],
+  "profile": {
+    "Work": "Internal medicine resident (PGY-2); starts Monday inpatient wards at 06:00."
+  },
+  "notes": [
+    {
+      "notebook": "Residency",
+      "title": "Wards Sunday Prep",
+      "role": "today",
+      "body": "- [ ] Sign 6 overdue discharge summaries in Epic\n- [ ] Wash & fold 2 loads of hospital scrubs + bedsheets\n- [ ] Trader Joe's grocery run\n- [ ] Meal-prep 4 containers of chicken tikka & cauliflower for hospital lunches"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Day Off Wishlist",
+      "role": "list",
+      "body": "- [ ] 30-min Peloton climb ride\n- [ ] FaceTime parents\n- [ ] Deep clean bathroom & mop kitchen floor\n- [ ] Re-pot parlor palm"
+    },
+    {
+      "notebook": "Personal",
+      "title": "Sunday Night Routine",
+      "role": "routine",
+      "body": "- [ ] Pack badge, pager, stethoscope & pens in backpack\n- [ ] Set 5:00 AM alarm\n- [ ] In bed by 9:30 PM"
+    }
+  ]
+}

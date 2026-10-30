@@ -26,6 +26,15 @@ configure_file(
   install_mode: 'rwxr-xr-x'
 )
 
+vcs_tag(
+  command: ['git', '-C', meson.project_source_root(), 'describe', '--always', '--dirty'],
+  input: 'build_info.py.in',
+  output: 'build_info.py',
+  fallback: 'unknown',
+  install: true,
+  install_dir: moduledir,
+)
+
 thirties_sources = [
   '__init__.py',
   'main.py',

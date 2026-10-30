@@ -1,4 +1,4 @@
-"""Dialog showing what the assistant has learned: the user profile and its memory notes."""
+"""Dialog showing what the assistant has learned: the user profile, its memory notes, and your lists."""
 
 from __future__ import annotations
 
@@ -22,13 +22,15 @@ class ProfileMemoryDialog(Adw.Dialog):
     None when no database is attached. ``on_changed`` runs after every save or delete.
     """
 
-    def __init__(self, profile, memory, on_changed: Optional[Callable[[], None]] = None) -> None:
+    def __init__(self, profile, memory, on_changed: Optional[Callable[[], None]] = None, lists=None,
+                 load_lists=None) -> None:
+        """``lists`` is a ``ListCatalog`` and ``load_lists`` returns (notes, tasks) from the task backend."""
         super().__init__()
         self.profile = profile
         self.memory = memory
         self.on_changed = on_changed
 
-        self.set_title("Profile & Memory")
+        self.set_title("Profile")
         self.set_content_width(680)
         self.set_content_height(620)
 
@@ -38,6 +40,9 @@ class ProfileMemoryDialog(Adw.Dialog):
         self.stack = Adw.ViewStack()
         self.stack.add_titled_with_icon(self._build_profile_page(), "profile", "Profile", "user-info-symbolic")
         self.stack.add_titled_with_icon(self._build_memory_page(), "memory", "Memory", "user-bookmarks-symbolic")
+        from .lists_page import ListsPage
+        self.lists_page = ListsPage(lists, load_lists, on_changed=self._changed)
+        self.stack.add_titled_with_icon(self.lists_page, "lists", "Lists", "view-list-symbolic")
 
         header = Adw.HeaderBar()
         switcher = Adw.ViewSwitcher()

@@ -90,6 +90,73 @@ class DayViewTests(unittest.TestCase):
         return [(r.title_label.get_text(), isinstance(r, GroupedBlockWidget), len(getattr(r, "blocks", [None])))
                 for r in view._rows]
 
+    def test_the_day_page_shows_where_the_day_stands(self) -> None:
+        from thirties_core.models import SpanStatus
+        done = next(s for s in self.plan.spans if s.id == "research")
+        done.status, done.actual_start, done.actual_end = SpanStatus.DONE, at("13:15"), at("14:20")
+        self.sched.state_db.upsert_span(done)
+        plan, _ = self.sched.build_day_plan(DAY)
+        calls = []
+        view = DayView(plan)
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Redrew the rest of today:", None)
+        groups = view.agenda.groups
+        self.assertEqual(list(groups), ["behind", "now", "next", "done"])  # what's not marked yet comes first
+
+        def titles(group):
+            rows = []
+
+            def walk(w):
+                if isinstance(w, Adw.ActionRow):
+                    rows.append(w)
+                c = w.get_first_child()
+                while c is not None:
+                    walk(c)
+                    c = c.get_next_sibling()
+            walk(group)
+            return [(r.get_title(), r.get_subtitle() or "") for r in rows]
+        self.assertEqual(titles(groups["now"]), [("Free until 8:00 PM", "")])
+        self.assertEqual(titles(groups["behind"]), [("Dinner", "planned 6:00 PM – 7:00 PM"),
+                                                    ("Audiobook", "planned 6:00 PM – 7:00 PM")])
+        self.assertIn(("Movie", "8:00 PM – 9:30 PM"), titles(groups["next"]))
+        self.assertEqual(titles(groups["done"]), [("Research", "1:00 PM – 2:30 PM")])  # when it really happened
+        early = []
+
+        def find(w):
+            if isinstance(w, Gtk.Button) and w.get_tooltip_text() == "Mark Movie done":
+                early.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                find(c)
+                c = c.get_next_sibling()
+        find(groups["next"])
+        early[0].emit("clicked")  # done early, from Next
+        self.assertEqual(calls[-1][1]["event"], "movie")
+        self.assertEqual((calls[-1][0], calls[-1][1]["status"]), ("log_outcome", "done"))
+        self.assertIn("finished", calls[-1][1])
+        view.agenda.replan_btn.emit("clicked")
+        self.assertEqual(calls[-1], ("redraw", {}))
+        self.assertTrue(view.move_to("movie", at("21:00")))
+        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM", "push_later": True}))
+
+    def test_items_past_their_time_are_not_assumed_done(self) -> None:
+        set_debug_time(at("21:40"))
+        view = DayView(self.plan)
+        calls = []
+        view.set_actions(lambda name, args: calls.append((name, args)) or "", None)
+        self.assertIn("behind", view.agenda.groups)
+        buttons = []
+        def walk(w):
+            if isinstance(w, Gtk.Button) and (w.get_tooltip_text() or "").startswith("Mark Movie"):
+                buttons.append(w)
+            c = w.get_first_child()
+            while c is not None:
+                walk(c)
+                c = c.get_next_sibling()
+        walk(view.agenda.groups["behind"])
+        self.assertEqual([b.get_tooltip_text() for b in buttons], ["Mark Movie done", "Mark Movie skipped"])
+        buttons[0].emit("clicked")
+        self.assertEqual(calls, [("log_outcome", {"event": "movie", "status": "done"})])
+
     def test_multi_thirty_items_collapse_into_cards(self) -> None:
         view = DayView(self.plan)
         rows = self.rows(view)
@@ -210,6 +277,32 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertEqual([n.text for n in services.memory.notes()], ["Probation items are maybes; never push them"])
         self.assertEqual(len(changes), 3)
 
+    def test_lists_roles_and_urgency(self) -> None:
+        from thirties_core.lists import ListCatalog
+        from thirties_core.models import TaskItem
+        sched = make_scheduler()
+        catalog = ListCatalog(sched.state_db)
+        catalog.set_role("n1", "list", "Errands", source="guess")
+        catalog.set_urgency("t1", "soon", source="guess")
+        notes = [{"id": "n1", "title": "Errands", "source_notebook": "Tasks", "body": ""},
+                 {"id": "n2", "title": "Morning routine", "source_notebook": "Tasks", "body": ""}]
+        tasks = [TaskItem(id=t, source_notebook="Tasks", title=title, is_checkbox_item=True, parent_note_id="n1",
+                          parent_note_title="Errands") for t, title in (("t1", "Call the bank"), ("t2", "Buy stamps"))]
+        changes = []
+        dialog = ProfileMemoryDialog(None, None, on_changed=lambda: changes.append(1), lists=catalog,
+                                     load_lists=lambda: (notes, tasks))
+        page = dialog.lists_page
+        page.reload()
+        errands = page.note_rows["n1"]
+        self.assertEqual(errands.get_subtitle(), "List · guessed · 2 items")
+        self.assertEqual(page.note_rows["n2"].get_subtitle(), "Not sorted yet")
+        errands.set_expanded(True)
+        self.assertTrue(page.item_buttons["t1"]["soon"].get_active())  # the guess is the starting value
+        page.item_buttons["t1"]["whenever"].set_active(True)
+        row = catalog.urgencies()["t1"]
+        self.assertEqual((row["urgency"], row["source"]), ("whenever", "user"))
+        self.assertEqual(changes, [1])
+
     def _day(self):
         sched = make_scheduler()
         plan, pending = sched.build_day_plan(DAY)
@@ -251,6 +344,25 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertEqual(self.core.settings.get("assistant.brain"), "slm")  # Gemma unless chosen otherwise
         self.assertEqual(self.core.config.general.work_days, ["sat", "sun"])  # applied live
         self.app.request_background_permission.assert_called_once()
+
+    def test_setup_sorts_the_lists_and_shows_its_guesses(self):
+        from unittest import mock
+        notes = [{"id": "n1", "title": "Errands", "source_notebook": "1. Tasks", "body": "- [ ] Call the bank"},
+                 {"id": "n2", "title": "Cheat sheet", "source_notebook": "5. Misc", "body": "# Python"}]
+        self.core.joplin_engine = mock.MagicMock()
+        self.core.joplin_engine.fetch_active_notes.return_value = notes
+        self.core.joplin_engine.fetch_tasks.return_value = []
+        sorter = mock.MagicMock()
+        sorter.role.side_effect = lambda note: {"n1": "list", "n2": "ignore"}[note["id"]]
+        with mock.patch("thirties_core.brains.list_sorter.list_sorter_for", return_value=sorter):
+            win = SetupWindow(application=None, core=self.core, on_done=lambda: None)
+            page = next(p for p in win._pages if p.get_title() == "Your Lists")
+            page.emit("shown")
+            self.assertTrue(_iterate_until(lambda: page.status.get_title().startswith("Here's what")))
+        self.assertEqual(page.lists.note_rows["n1"].get_subtitle(), "List · guessed")
+        self.assertTrue(page.lists.notebook_switches["1. Tasks"].get_active())
+        self.assertFalse(page.lists.notebook_switches["5. Misc"].get_active())  # nothing to do in it, it seems
+        sorter.urgencies.assert_not_called()  # left for the background
 
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)

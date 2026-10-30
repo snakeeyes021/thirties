@@ -9,10 +9,11 @@ developer slash commands that never reach a model.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.clock import trim_meridiems
+from thirties_core.clock import EXACT_ASKED_RE, real_times, to_thirties, trim_meridiems
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
@@ -48,6 +49,8 @@ class ConversationManager:
         conversation_id: Optional[str] = None,
     ) -> None:
         self.joplin_engine = joplin_engine
+        self.turn_lock = threading.RLock()  # one turn at a time: Telegram, the background service's messages
+        self._backlog_stamp = None  # when Joplin's data was last read (its file's mtime)
         if active_notes is None:
             active_notes = self.joplin_engine.fetch_active_notes() if self.joplin_engine else []
         services = Services.for_db(scheduler.state_db, tasks, joplin_engine) if scheduler else None
@@ -100,6 +103,8 @@ class ConversationManager:
         self.brain.reset()
         if conv:
             self.brain.messages = [self.brain.messages[0]] + list(conv.messages)
+            for m in conv.messages:  # stored before messages carried a time: don't give them today's
+                m.setdefault("at", "")
         self._note_if_latest()
 
     def _note_if_latest(self) -> None:
@@ -115,16 +120,56 @@ class ConversationManager:
             return
         if self.conversation is None:
             self.conversation = self._store.create(self.day_plan.target_date)
+        self._stamp()
         self.conversation.messages = [m for m in self.brain.messages if m.get("role") != "system"]
         self._store.save(self.conversation)
         self._note_if_latest()
+
+    def reload_backlog(self) -> None:
+        """Re-read the lists when Joplin's data changed (by hand, or by Thirties' own writes), so nobody plans from
+        an old copy: the window kept one from startup across days and offered a done item again (10-24)."""
+        if self.scheduler is None or self.joplin_engine is None:
+            return
+        try:
+            path = self.joplin_engine.config.resolve_joplin_db_path()
+            stamp = path.stat().st_mtime if path else None
+        except (OSError, AttributeError):
+            stamp = None
+        if stamp is None or stamp == self._backlog_stamp:
+            return
+        from thirties_core.backlog import load_backlog
+        media = [t for t in (self.tools.services.tasks if self.tools.services else []) if t.id.startswith("media:")]
+        try:
+            tasks, notes = load_backlog(self.scheduler.config, self.joplin_engine, self.scheduler, media=media)
+        except Exception as e:
+            logger.warning("Re-reading the lists failed: %s", e)
+            return
+        self._backlog_stamp = stamp
+        if self.tools.services is not None:
+            self.tools.services.tasks = list(tasks)
+        if hasattr(self.brain, "tasks"):
+            self.brain.tasks = list(tasks)
+        if hasattr(self.brain, "active_notes"):
+            self.brain.active_notes = list(notes)
+        if self._brain_args is not None:
+            self._brain_args = (*self._brain_args[:2], tasks, notes)
+
+    def _stamp(self, via: str = "") -> None:
+        """When each message was stored, and by which build (and, for a turn, which channel it came through)."""
+        from thirties_core import build
+        now = get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")
+        for m in self.brain.messages:
+            if m.get("role") != "system" and "at" not in m:
+                m["at"], m["build"] = now, build.BUILD
+                if via:
+                    m["via"] = via
 
     def history(self) -> List[Dict[str, str]]:
         """The visible transcript of the current conversation: user and assistant text only."""
         return [{"role": m["role"], "content": m.get("content", "")}
                 for m in self.brain.messages
                 if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
-                and not str(m.get("content", "")).startswith("[System check")]
+                and not m.get("hidden") and not str(m.get("content", "")).startswith("[System check")]
 
     def conversations_for_day(self) -> List[Conversation]:
         return self._store.for_day(self.day_plan.target_date) if self._store else []
@@ -156,6 +201,7 @@ class ConversationManager:
         """
         if self.scheduler is None:
             return
+        self.reload_backlog()
         wanted = brain_choice(self.scheduler.config, self.scheduler.state_db)
         if wanted != self.brain_name:
             self._use_brain(wanted)  # switched on another client (the app's menu, or /brain in Telegram)
@@ -191,10 +237,16 @@ class ConversationManager:
                 logger.warning("Brain warm-up failed: %s", e)
         threading.Thread(target=run, daemon=True, name="BrainWarmup").start()
 
-    def add_assistant_message(self, text: str) -> None:
-        """Record something the assistant said on its own (e.g. a Telegram check-in)."""
-        self.brain.messages.append({"role": "assistant", "content": text})
-        self._save()
+    def add_assistant_message(self, text: str, kind: str = "") -> None:
+        """Record something the assistant said on its own (e.g. a Telegram check-in, or a start-of-block notice:
+        kind "notice")."""
+        message = {"role": "assistant", "content": text}
+        if kind:
+            message["kind"] = kind
+        with self.turn_lock:
+            self.brain.messages.append(message)
+            self._stamp(via="background")
+            self._save()
 
     @property
     def day_plan(self) -> DayPlan:
@@ -220,8 +272,18 @@ class ConversationManager:
         """Run a schedule tool directly, bypassing the model."""
         return self.tools.execute(name, arguments)
 
-    def send_user_message(self, user_text: str) -> str:
-        """Handle one user turn: developer slash commands here, everything else via the brain."""
+    def send_user_message(self, user_text: str, via: str = "app") -> str:
+        """Handle one user turn: developer slash commands here, everything else via the brain. `via` is the
+        channel ("app", "telegram"), stored with the turn's messages."""
+        with self.turn_lock:
+            return self._send_user_message(user_text, via)
+
+    def _send_user_message(self, user_text: str, via: str) -> str:
+        self._stamp()
+        self.reload_backlog()  # anything older is from before this turn
+        if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
+            self.scheduler.state_db.set_sync_meta("last_user_message_at",
+                                                  get_current_time(self.day_plan.day_start.tzinfo).isoformat())
         # Developer / Runtime Simulation Slash Commands
         clean_text = user_text.strip()
         if clean_text.startswith("/"):
@@ -264,13 +326,17 @@ class ConversationManager:
 
             self.messages.append({"role": "user", "content": user_text})
             self.messages.append({"role": "assistant", "content": reply})
+            self._stamp(via)
             self._save()
             return reply
 
 
         reply = self.brain.respond(user_text)
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
-        trimmed = trim_meridiems(reply, get_current_time(self.day_plan.day_start.tzinfo)
+        said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
+        keep = real_times(*said, user_text, spans=self.day_plan.spans)  # real item times, and the user's, as said
+        shown = reply if EXACT_ASKED_RE.search(user_text) else to_thirties(reply, keep)  # else blocks
+        trimmed = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
                                  if self.day_plan.target_date == self.tools.today() else None)
         if trimmed != reply:
             for m in reversed(self.brain.messages):
@@ -278,5 +344,6 @@ class ConversationManager:
                     if m.get("content") == reply:
                         m["content"] = trimmed
                     break
+        self._stamp(via)
         self._save()
         return trimmed
