@@ -76,6 +76,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
         self.content_toolbar.set_content(self.day_view)
+        self._wire_timeline(self.day_view.timeline)
 
         self.conv_manager = None
         self.chat_panel = ChatPanel(on_plan_updated=self._on_plan_updated, external_header=True)
@@ -226,6 +227,55 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         ctx = assistant._kind_context()
         return lambda span: assistant.kind_of(span, ctx) == ONGOING
 
+    # --- the Timeline page ---
+
+    def _wire_timeline(self, page) -> None:
+        """What the Timeline page reads and changes, all through the core (timeline_layout, placement, horizons)."""
+        from thirties_core.timeline_layout import DEFAULT_UNITS, UNITS_SETTING, stretch_options, what_to_plan
+
+        def tools():
+            return self.conv_manager.tools if self.conv_manager is not None else None
+
+        def options(stretch, minutes):
+            t = tools()
+            return stretch_options(t, t.day_plan, stretch, minutes, page.now()) if t else []
+
+        def suggestions():
+            t = tools()
+            return what_to_plan(t, t.day_plan.target_date) if t else []
+
+        def set_units(units):
+            self.core.settings.set(UNITS_SETTING, units)
+            self._push_sync()
+
+        page.load_week = self._load_week
+        page.stretch_options = options
+        page.suggestions = suggestions
+        page.get_units = lambda: self.core.settings.get(UNITS_SETTING, DEFAULT_UNITS)
+        page.set_units = set_units
+
+    def _load_week(self, anchor: date, days):
+        """The week's plans and its chips (pinned to the week, no day yet), read on the Timeline's worker thread;
+        never during an assistant turn."""
+        from thirties_core.horizons import HorizonPlanner
+        from thirties_core.timeline_layout import unplaced_in_week
+        manager = self.conv_manager
+        if manager is None:
+            return [], []
+        if not manager.turn_lock.acquire(timeout=60):
+            raise TimeoutError("the assistant is busy")
+        try:
+            plans = [manager.day_plan if d == manager.day_plan.target_date else self.scheduler.build_day_plan(d)[0]
+                     for d in days]
+            try:
+                chips = unplaced_in_week(HorizonPlanner(manager.tools), anchor)
+            except Exception as e:
+                logger.warning("Reading the week's plan failed: %s", e)
+                chips = []
+        finally:
+            manager.turn_lock.release()
+        return plans, chips
+
     # --- loading days ---
 
     def _new_conversation_manager(self, plan, ambiguous) -> ConversationManager:
@@ -256,6 +306,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         # The conversation manager owns the day's plan; the schedule shows the same object.
         plan, ambiguous = self.scheduler.build_day_plan(target_date)
         self.conv_manager = self._new_conversation_manager(plan, ambiguous)
+        from thirties_core.horizons import week_start_index
+        self.day_view.timeline.week_start = week_start_index(self.config)
         self.day_view.refresh_plan(self.conv_manager.day_plan)
         self.day_view.scroll_to_now()
         self.chat_panel.set_conversation_manager(self.conv_manager)

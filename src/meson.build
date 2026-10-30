@@ -43,5 +43,4 @@ thirties_sources = [
 ]
 
 install_data(thirties_sources, install_dir: moduledir)
-install_subdir('widgets', install_dir: moduledir)
 install_subdir('views', install_dir: moduledir)
