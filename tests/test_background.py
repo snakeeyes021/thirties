@@ -41,6 +41,21 @@ class TestBackground(unittest.TestCase):
         fresh.check_ins(at("18:30"))  # a restart doesn't ask again
         self.assertEqual(len(self.desktop), 1)
 
+    def test_the_morning_message_says_what_was_planned_ahead(self):
+        # O2 (10-24): something set for tomorrow should be seen the next morning
+        self.svc.rollover(at("09:00"))
+        self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n- 5:00 PM – Taxes")])
+
+    def test_the_drop_box_is_offered_in_the_afternoon_twice_an_hour_at_most(self):
+        from unittest.mock import patch
+        with patch("thirties_core.list_tools.ListTools.dropbox_offer", return_value="🗃️ 3 things are waiting") as offer:
+            self.svc.dropbox(at("09:30"))  # not in the morning
+            self.assertEqual(offer.call_count, 0)
+            self.svc.dropbox(at("14:00"))
+            self.svc.dropbox(at("14:01"))
+        self.assertEqual(offer.call_count, 1)
+        self.assertEqual(self.desktop, [("dropbox", "🗃️ 3 things are waiting")])
+
     def test_muted_items_and_muted_days_get_no_check_in(self):
         CheckinMutes(self.sched.state_db).mute(at("23:00"), "tx")
         self.svc.check_ins(at("18:15"))

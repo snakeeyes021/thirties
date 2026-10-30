@@ -236,7 +236,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
                        "item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
-                                "user's words."},
+                                "user's words.",
+                       "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning."},
         "required": ["items"],
     },
     {

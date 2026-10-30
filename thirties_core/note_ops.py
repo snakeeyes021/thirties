@@ -116,7 +116,8 @@ def _done(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
             return taken[0] if taken else None
 
         def put_back(body: str) -> str:
-            section = rec["section"] if rec["section"] in ([""] + _headings(body)) else None
+            heads = _headings(body)  # its old section, else the top: never after a later someday section
+            section = rec["section"] if rec["section"] in ([""] + heads) else ("" if heads else None)
             return ne.insert_lines(body, ne.untick(rec["block"] or [f"- [x] {rec['title']}"]), section)
         ok, msg = writer._edit_bodies([(done_id, take_line), (rec["source_note_id"], put_back)])
         if ok:

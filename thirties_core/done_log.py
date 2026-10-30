@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 
 DONE_NOTEBOOK = "Thirties"
 DONE_NOTE_TITLE = "Done {month}"   # month as 2026-10: the notes sort in order
-FILED_ROLES = ("list", "project", "menu", "backlog", "dropbox")  # where done items are filed from
+# Where done items are filed from. Not a menu: its options are picked again and again ("go outside"), so a tick
+# there isn't "finished for good" (decision; revisit with item kinds, B2).
+FILED_ROLES = ("list", "project", "backlog", "dropbox")
 FILE_AFTER = timedelta(minutes=30)  # a tick stands this long before it's filed (time to take a mis-tap back)
 
 _SCHEMA = """

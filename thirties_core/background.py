@@ -416,7 +416,7 @@ class BackgroundService:
             from thirties_core.day_lists import planned_ahead_text
             ahead = planned_ahead_text(manager.tools.assistant)
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
-            if ahead:
+            if ahead and self.level() != "off":
                 self.send("☀️ Good morning! " + ahead, "rollover", now=now)
             return
         self.send("☀️ Good morning! " + (ahead + "\n\n" if ahead else "") + text, "rollover", now=now)

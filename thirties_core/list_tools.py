@@ -78,13 +78,14 @@ LIST_TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "pencil_in",
         "description": "Put things on a day's list with no time (\"pencil it in\", \"maybe today\"); if one is on "
                        "the plan, it comes off the plan but stays on the list. Give it a time later with add_event.",
-        "parameters": {"items": "The things, as a list (titles, task_ids or plan ids)."},
+        "parameters": {"items": "The things, as a list (titles, task_ids or plan ids).",
+                       "day": "The day, if not today."},
         "required": ["items"],
     },
     {
         "name": "pencilled_in",
         "description": "What's on the day's list with no time yet. Read-only.",
-        "parameters": {},
+        "parameters": {"day": "The day, if not today."},
         "required": [],
     },
 ]
@@ -244,7 +245,8 @@ class ListTools:
             raise ToolError(f"Which list should {found.title} go to?")
         if target["id"] != found.parent_note_id:
             why = placement.refusal(target)
-            if why:
+            if why and not (placement.role(target) == "routine" and self.pt.user_message is not None
+                            and self._user_asked_about(target["title"])):  # a routine, when the user said so
                 raise ToolError(why + " Pick another list.")
         self._fill_body(target)
         dated = bool(found.due) or found.urgency == "now"
