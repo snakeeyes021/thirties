@@ -1243,7 +1243,7 @@ class PlanTools:
         plan = self.day_plan
         lines = []
         shown_blocks = set()
-        # someone else's events (show-only calendars) are for the Day page only: the assistant never brings them up (O1)
+        # someone else's events (show-only calendars) are for the Agenda only: the assistant never brings them up (O1)
         in_view = [s for s in plan.spans_in_view() if not s.shown_only]
         clusters: List[List[EventSpan]] = []
         for s in (x for x in in_view if not x.is_envelope):

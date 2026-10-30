@@ -973,7 +973,7 @@ class TimelinePage(Gtk.Box):
         GLib.timeout_add(100, go)
 
     def _tick_card(self, card: Card) -> None:
-        """Ticks it done through the same tool the Day page uses; happening now means it finished at the tick."""
+        """Ticks it done through the same tool the Agenda uses; happening now means it finished at the tick."""
         if self.run_tool is None or not card.tickable:
             return
         args = {"event": card.span.id, "status": "done"}

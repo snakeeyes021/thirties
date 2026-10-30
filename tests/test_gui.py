@@ -247,7 +247,7 @@ class TimelineTests(unittest.TestCase):
 
     def test_it_builds_a_slot_per_thirty_of_the_waking_day(self) -> None:
         from thirties.views import timeline
-        self.assertEqual(self.view.stack.get_visible_child_name(), "day")  # the Day page stays the first page
+        self.assertEqual(self.view.stack.get_visible_child_name(), "day")  # the Agenda stays the first page
         self.assertIsNotNone(self.view.stack.get_child_by_name("timeline"))
         self.assertEqual(len(self.page.layout.slots), 32)  # 7 AM to 11 PM, no clock times anywhere
         height = self.page.canvas.measure(Gtk.Orientation.VERTICAL, -1)[0]

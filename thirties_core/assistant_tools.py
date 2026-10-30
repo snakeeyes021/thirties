@@ -968,7 +968,7 @@ class AssistantTools(KindTools):
             return log_calendar_outcome(self.pt, span, st, start_dt, end_dt, note, guessed)
         if (span is not None and st != SpanStatus.SKIPPED and start_dt is None and end_dt is None
                 and duration in (None, "")):
-            # Said with no time ("kitties are fed", a tick in the Day page): it finished when it was said, as an
+            # Said with no time ("kitties are fed", a tick in the Agenda): it finished when it was said, as an
             # estimate (10-25: fed at 10:44, stored at the planned 10:00). Long after its time, nobody knows when:
             # the planned times stay, marked as planned. Ticked before its time, Thirties picks the times: on
             # blocks, and back to back with other early ticks (soak 3).

@@ -14,7 +14,7 @@ not very GNOME HIG"):
 - **Week**: seven shrunken waking days on one axis, with each day's free time, and the items pinned to the week but
   not to a day yet (horizons.py) as chips to drop onto a day.
 
-The display rules of the Day page and the old timeline carry over (day_layout.py, stream I): a moot item with
+The display rules of the Agenda and the old timeline carry over (day_layout.py, stream I): a moot item with
 nothing said reads "Not reported"; a done session on something ongoing reads "Worked on"; someone else's calendar
 events ("show only") and unanswered invites are quiet notes where they start, never cards of their own, and never
 make the user busy.
@@ -258,7 +258,7 @@ def look_of(span: EventSpan, ongoing: Optional[Ongoing] = None) -> str:
 
 
 def tickable(span: EventSpan) -> bool:
-    """What the Day page lets you mark done (agenda._markable): planned activities and tasks, and the user's own
+    """What the Agenda lets you mark done (agenda._markable): planned activities and tasks, and the user's own
     calendar events (soak 1: the outcome is kept in Thirties, the calendar untouched)."""
     if span.status != SpanStatus.PLANNED or span.tentative or span.shown_only or span.is_envelope:
         return False

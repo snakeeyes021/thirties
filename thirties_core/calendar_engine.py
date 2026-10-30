@@ -60,7 +60,7 @@ class CalendarEvent:
 CALENDAR_MODES = ("mine", "show", "ignore")
 
 # What "not mine" on a recurring series does to the rest of it: dropped from the day entirely. "show" would keep
-# the events visible on the Day page as someone else's, taking no time (the per-calendar "show only"). Dropped is
+# the events visible on the Agenda as someone else's, taking no time (the per-calendar "show only"). Dropped is
 # the default because the friction was these events coming back at all (O1).
 NOT_MINE_SERIES_BECOMES = "ignore"
 
@@ -101,7 +101,7 @@ def events_to_spans(
     Declined events (in the calendar or by decision, for the occurrence or its
     whole series) and events on ignored calendars are dropped. Events on "show
     only" calendars (or a series marked "not mine", if NOT_MINE_SERIES_BECOMES
-    is "show") become show-only spans: on the Day page, taking no time, never
+    is "show") become show-only spans: on the Agenda, taking no time, never
     asked about. An occurrence's own decision wins over its series'.
     """
     decisions = decisions or {}

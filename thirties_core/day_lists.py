@@ -3,7 +3,7 @@
 - **Pencilled in** (O3, 10-29: "pencil them out (not pen)… items that are on today's
   to-do list but are not scheduled?"): on today's list, with no time. Python works
   out which Today items have no time on the plan; replies say "on today's list, no
-  time yet", the Day page lists them, and they can be given a time later (scheduling
+  time yet", the Agenda lists them, and they can be given a time later (scheduling
   one finds it already on the list).
 - **Days ahead** (O2, 10-24: "should I see it in the day plan for tomorrow?"): what's
   planned for another day is on that day's plan, and reaches the Today note on that

@@ -204,7 +204,7 @@ class ConversationManager:
         return True
 
     def reload_plan(self) -> None:
-        """Reload only the day from storage: another client may have changed it (a tick in the app's Day page)."""
+        """Reload only the day from storage: another client may have changed it (a tick in the app's Agenda)."""
         if self.scheduler is None:
             return
         plan, pending = self.scheduler.build_day_plan(self.day_plan.target_date)
@@ -354,7 +354,7 @@ class ConversationManager:
             return self._run_turn(batch, via, attempts)
         finally:
             current_turn.reset(token)
-            self.tools.user_message = None  # a drag in the Day page later isn't judged by this message
+            self.tools.user_message = None  # a drag in the Agenda later isn't judged by this message
 
     def _command(self, user_text: str, via: str) -> str:
         """Developer / runtime simulation slash commands: never reach a model."""

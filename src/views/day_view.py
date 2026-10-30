@@ -1,4 +1,4 @@
-"""The schedule pane: the Day page (where the day stands: agenda.py) and the Timeline page (timeline.py).
+"""The schedule pane: the Agenda (where the day stands: agenda.py) and the Timeline page (timeline.py).
 
 The old timeline (a solar arc over a list of block cards) was replaced by the Timeline page on 10-30 ("fugly and
 confusing, not very GNOME HIG"); its header (the arc and the daylight/dark tallies) went with it: the Timeline's sky
@@ -49,7 +49,7 @@ class DayView(Gtk.Box):
         self.timeline.run_tool = lambda name, args: self.run_tool(name, args) if self.run_tool else ""
         self.timeline.ongoing = self._ongoing
         self.stack = Adw.ViewStack(vexpand=True)
-        self.stack.add_titled_with_icon(self.agenda, "day", "Day", "view-list-symbolic")
+        self.stack.add_titled_with_icon(self.agenda, "day", "Agenda", "view-list-symbolic")
         self.stack.add_titled_with_icon(self.timeline, "timeline", "Timeline", "x-office-calendar-symbolic")
         switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER,
                                     margin_top=6)

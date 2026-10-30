@@ -775,7 +775,7 @@ class RoutineTools:
                 {"how": "until", "label": "Skip until…", "back": None}]
 
     def day_routines(self, plan: Optional["DayPlan"] = None) -> List[Dict[str, Any]]:
-        """The routines a day holds that can still be skipped, for the app's Day page: each due one, and each on the
+        """The routines a day holds that can still be skipped, for the app's Agenda: each due one, and each on the
         plan (one put on by request too), unless every step of it on the plan is already marked. Each comes with
         its state in a few words and its three skip choices (skip_choices)."""
         if self.db is None or self.pt.scheduler is None:

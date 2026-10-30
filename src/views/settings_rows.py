@@ -710,7 +710,7 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
 CALENDAR_CHOICES = [("mine", "Mine", "Your commitments: planned around"),
                     ("", "Ask about its events", "Thirties asks once per event (once per series if it repeats)"),
-                    ("show", "Show only", "On the Day page as someone else's; takes no time, never asked about"),
+                    ("show", "Show only", "On the Agenda as someone else's; takes no time, never asked about"),
                     ("ignore", "Ignore", "Never read")]
 
 
