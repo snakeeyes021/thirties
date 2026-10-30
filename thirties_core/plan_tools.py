@@ -936,6 +936,29 @@ class PlanTools:
             return "No free stretch matches that."
         return "Free: " + "; ".join(self.describe_window(s, e) for s, e in fits) + "."
 
+    def slot_options(self, duration: Any = None, after: Any = None, before: Any = None, daylight: Any = None,
+                     later: Any = False, **_: Any) -> str:
+        """Where something new could go (B8): Python lists the slots and what's around them; the model picks."""
+        from thirties_core.placement import slot_options_text
+        minutes = parse_duration_minutes(duration) if duration not in (None, "") else 30
+        now = self._now()
+        live = self.day_plan.day_start <= now < self.day_plan.day_end
+        return slot_options_text(
+            self, self.day_plan, minutes, now if live else None,
+            after=self._start(after) if after not in (None, "") else None,
+            before=self._end(before, self.day_plan.day_start) if before not in (None, "") else None,
+            daylight=_as_bool(daylight) if daylight not in (None, "") else None, later=_as_bool(later))
+
+    def push_back(self, by: Any = None, since: Any = None, **_: Any) -> str:
+        """"Push everything back two hours" (S4): the rest of the day moves, past unmarked items included."""
+        from thirties_core.placement import push_back
+        if by in (None, ""):
+            raise ToolError("Say how much later, e.g. '2 hours' (or use redraw to lay the rest of today out again).")
+        minutes = parse_shift_minutes(by) if str(by).strip()[:1] in "+-" else parse_duration_minutes(by)
+        if minutes <= 0:
+            raise ToolError("push_back moves things later; to move one item earlier, use update_event.")
+        return push_back(self, minutes, self._start(since) if since not in (None, "") else None)
+
     # --- facts and redrawing ---
 
     def _facts(self):
@@ -1191,6 +1214,8 @@ class PlanTools:
             "set_item_facts": self.set_item_facts,
             "redraw": self.redraw,
             "undo_redraw": self.undo_redraw,
+            "slot_options": self.slot_options,
+            "push_back": self.push_back,
         }
         if self.assistant:
             handlers.update(self.assistant.handlers())

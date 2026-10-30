@@ -133,7 +133,7 @@ class BackgroundService:
         from thirties_core.clock import real_times, to_thirties, trim_meridiems
         try:
             now = now or self.now()
-            keep = real_times(spans=self.manager().day_plan.spans)
+            keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)
             text = trim_meridiems(to_thirties(text, keep), now)
             telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
         except Exception:
