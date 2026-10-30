@@ -101,6 +101,35 @@ def thirty_index(t: time, round_up: bool = False) -> int:
     return (minutes // 30 + (1 if round_up and minutes % 30 else 0)) % 48
 
 
+def with_day_hour(gen, day: str, name: str, value: int) -> Dict[str, Dict[str, int]]:
+    """``general.week`` after one weekday's hour is set (Preferences → Your week): kept only where it differs from
+    the usual hours, so a day that matches them follows them when they change later."""
+    if name not in HOUR_KEYS or day not in DAYS:
+        raise ValueError(f"Unknown day or hour: {day} {name}")
+    week = {k: dict(v) for k, v in (getattr(gen, "week", None) or {}).items()}
+    if int(value) % 48 == int(getattr(gen, name)) % 48:
+        week.get(day, {}).pop(name, None)
+    else:
+        week.setdefault(day, {})[name] = int(value) % 48
+    return {k: v for k, v in week.items() if v}
+
+
+def describe_day(gen, day: str) -> str:
+    """One weekday's hours in a line (Preferences): "Work 8:30 AM – 5:00 PM · bed 11:00 PM · up 7:00 AM", or
+    "Usual hours" when nothing about it differs."""
+    from datetime import datetime
+    from thirties_core.clock import format_clock
+    if not ((getattr(gen, "week", None) or {}).get(day)):
+        return "Usual hours"
+    d = date(2026, 1, 5 + DAYS.index(day))  # a week starting on a Monday: only the weekday matters
+    h = day_hours(gen, d)
+
+    def clock(thirty: int) -> str:
+        return format_clock(datetime.combine(d, time((thirty % 48) // 2, 30 * (thirty % 2))))
+    work = f"Work {clock(h.work_start)} – {clock(h.work_end + 1)}" if h.works else "No work"
+    return f"{work} · bed {clock(h.sleep_start)} · up {clock(h.sleep_end)}"
+
+
 def describe_days(days: Iterable[str]) -> str:
     days = [d for d in DAYS if d in set(days)]
     if days == list(DAYS):
@@ -131,5 +160,5 @@ def describe_week(gen) -> str:
     return "\n".join(f"- {describe_days(days)}: {text}" for text, days in groups.items())
 
 
-__all__ = ["DAYS", "DayHours", "day_hours", "parse_days", "describe_days", "describe_week", "thirty_index",
-           "weekday_key", "work_days"]
+__all__ = ["DAYS", "DayHours", "day_hours", "parse_days", "describe_day", "describe_days", "describe_week",
+           "thirty_index", "weekday_key", "with_day_hour", "work_days"]

@@ -380,6 +380,18 @@ class TestWeeklyPatterns(RoutineCase):
         friday = {s.title: s for s in self.sched.routine_spans(TOMORROW)}
         self.assertEqual(friday["Work"].start_dt, at("10:00", 1))
 
+    def test_preferences_keep_only_what_differs(self):
+        from thirties_core.week import describe_day, with_day_hour
+        gen = self.sched.config.general
+        gen.week = with_day_hour(gen, "sat", "sleep_end_thirty", 18)  # up at 9 on Saturdays
+        self.assertEqual(gen.week, {"sat": {"sleep_end_thirty": 18}})
+        self.assertEqual(describe_day(gen, "sat"), "No work · bed 11:00 PM · up 9:00 AM")
+        self.assertEqual(describe_day(gen, "mon"), "Usual hours")
+        gen.week = with_day_hour(gen, "sat", "sleep_end_thirty", gen.sleep_end_thirty)  # back to the usual
+        self.assertEqual(gen.week, {})
+        with self.assertRaises(ValueError):
+            with_day_hour(gen, "sat", "lunch_thirty", 24)
+
     def test_only_when_the_user_talks_about_it(self):
         self.t.user_message = "add lunch at noon"
         out = self.t.execute("set_week", {"days": "weekdays", "work_start": "7:00 AM", "work_end": "3:00 PM"})

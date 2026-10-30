@@ -217,6 +217,72 @@ def schedule_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     return group
 
 
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def week_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Your week: each weekday's work hours, bedtime and wake-up where they differ from the usual week (stored as
+    those differences in general.week, thirties_core/week.py; the set_week tool writes the same), and the day the
+    week starts on (general.week_start: week plans and the weekly planning offer)."""
+    from thirties_core.week import DAYS, describe_day, with_day_hour
+    group = Adw.PreferencesGroup(title="Your week",
+                                 description="Days that differ from the usual week. Bedtime is that evening's; "
+                                             "wake-up is that morning's.")
+    cfg = ctx.config().general
+    first = Adw.ComboRow(title="Week starts on", subtitle="For week plans and the weekly planning offer",
+                         model=Gtk.StringList.new(WEEKDAY_NAMES))
+    week_start = str(getattr(cfg, "week_start", "mon") or "mon").lower()[:3]
+    first.set_selected(DAYS.index(week_start) if week_start in DAYS else 0)
+    first.connect("notify::selected", lambda r, _p: ctx.set("general.week_start", DAYS[r.get_selected()]))
+    group.add(first)
+    hours = [("work_start_thirty", "Work starts", 0), ("work_end_thirty", "Work ends", 1),
+             ("sleep_start_thirty", "Bedtime", 0), ("sleep_end_thirty", "Wake up", 0)]
+    group.days = {}  # weekday key -> (expander, {setting: row}), for tests
+    for key, name in zip(DAYS, WEEKDAY_NAMES):
+        expander = Adw.ExpanderRow(title=name)
+        rows = {}
+        for setting, title, shown_after in hours:
+            row = _time_row(title, 0)
+            row.shown_after = shown_after  # Work ends shows the end of the last work thirty
+            rows[setting] = row
+            expander.add_row(row)
+        syncing = [False]
+
+        def sync(*_args, key=key, expander=expander, rows=rows, syncing=syncing):
+            """The day's rows show its hours now (the usual ones where it doesn't differ); work hours only on a
+            work day."""
+            from datetime import date as _date, timedelta as _td
+            from thirties_core.week import day_hours
+            gen = ctx.config().general
+            monday = _date(2026, 1, 5)
+            h = day_hours(gen, monday + _td(days=DAYS.index(key)))
+            syncing[0] = True
+            try:
+                for setting, value in (("work_start_thirty", h.work_start), ("work_end_thirty", h.work_end),
+                                       ("sleep_start_thirty", h.sleep_start), ("sleep_end_thirty", h.sleep_end)):
+                    rows[setting].set_selected((value + rows[setting].shown_after) % 48)
+            finally:
+                syncing[0] = False
+            for setting in ("work_start_thirty", "work_end_thirty"):
+                rows[setting].set_sensitive(h.works)
+                rows[setting].set_subtitle("" if h.works else "Not a work day (see Work days above)")
+            expander.set_subtitle(describe_day(gen, key))
+
+        def changed(row, _p, setting, key=key, sync=sync, syncing=syncing):
+            if syncing[0]:
+                return
+            gen = ctx.config().general
+            ctx.set("general.week", with_day_hour(gen, key, setting, (row.get_selected() - row.shown_after) % 48))
+            sync()
+        for setting, row in rows.items():
+            row.connect("notify::selected", changed, setting)
+        expander.connect("notify::expanded", sync)
+        sync()
+        group.days[key] = (expander, rows)
+        group.add(expander)
+    return group
+
+
 # --- the assistant ---
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:

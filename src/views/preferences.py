@@ -11,7 +11,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         ctx = rows.SettingsContext(core, toaster=self, app=app, parent=app.props.active_window if app else None)
         self.ctx = ctx
         pages = [
-            ("General", "preferences-system-time-symbolic", [rows.location_group, rows.schedule_group,
+            ("General", "preferences-system-time-symbolic", [rows.location_group, rows.schedule_group, rows.week_group,
                                                              rows.calendars_group]),
             ("Assistant", "user-available-symbolic", [rows.brain_group]),
             ("Tasks", "checkbox-checked-symbolic", [rows.joplin_group, rows.notebooks_group, rows.wishlists_group]),

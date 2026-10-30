@@ -481,6 +481,26 @@ class SetupAndPreferencesTests(unittest.TestCase):
         group = settings_rows.schedule_group(settings_rows.SettingsContext(self.core))
         self.assertIsNotNone(group)
 
+    def test_each_weekday_can_differ_and_the_week_can_start_on_sunday(self):
+        ctx = settings_rows.SettingsContext(self.core)
+        group = settings_rows.week_group(ctx)
+        expander, rows = group.days["sat"]
+        self.assertEqual(expander.get_subtitle(), "Usual hours")
+        self.assertFalse(rows["work_start_thirty"].get_sensitive())  # Saturday isn't a work day
+        rows["sleep_end_thirty"].set_selected(18)  # up at 9 on Saturdays
+        self.assertEqual(self.core.settings.get("general.week"), {"sat": {"sleep_end_thirty": 18}})
+        self.assertEqual(expander.get_subtitle(), "No work · bed 11:00 PM · up 9:00 AM")
+        expander, rows = group.days["fri"]
+        rows["work_end_thirty"].set_selected(26)  # Fridays end at 1 PM: the last work thirty is 12:30
+        self.assertEqual(self.core.settings.get("general.week")["fri"], {"work_end_thirty": 25})
+        rows["work_end_thirty"].set_selected(32)  # back to the usual 4 PM: nothing differs
+        self.assertNotIn("fri", self.core.settings.get("general.week"))
+        first = _combo_rows(group)["Week starts on"]
+        first.set_selected(6)
+        self.assertEqual(self.core.settings.get("general.week_start"), "sun")
+        ctx.flush()
+        self.assertEqual(self.core.config.general.week, {"sat": {"sleep_end_thirty": 18}})  # applied live
+
     def test_each_calendar_is_mine_show_only_or_ignored(self):
         from unittest import mock
         self.core.scheduler.calendar_engine = mock.MagicMock()
