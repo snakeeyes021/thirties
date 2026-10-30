@@ -127,4 +127,6 @@ jobs:
         with:
           files: tech.redfoxlabs.Thirties.flatpak
           generate_release_notes: true
-          prerelease: ${{ startsWith(github.ref, 'refs/tags/v0.') }}  # alpha while the version is 0.x
+          name: ${{ github.ref_name }}${{ startsWith(github.ref, 'refs/tags/v0.') && ' (alpha)' || '' }}
+          prerelease: false  # alpha is in the name: a pre-release is never "Latest", so the newest would be hidden
+          make_latest: true
