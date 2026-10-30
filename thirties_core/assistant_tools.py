@@ -392,6 +392,9 @@ class AssistantTools:
             self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
         if task.id.startswith("media:"):
             return ""
+        if task.list_role == "routine":  # a template: the day's tick goes on Today's copy
+            self._tick_on_today(task.title)
+            return ""
         writer = self._writer()
         if writer is None:
             return "(not checked off in Joplin: Joplin isn't connected)"
@@ -542,6 +545,13 @@ class AssistantTools:
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
 
+    def _day_begun(self) -> None:
+        """Before the first write to Today for the day being planned, that day's morning reset (start_the_day)."""
+        plan = self.pt.day_plan
+        if self._db is not None and self.pt.is_current(plan) and \
+                self._db.get_sync_meta(f"day_started:{plan.target_date.isoformat()}") != "done":
+            self.start_the_day(plan.target_date)
+
     def list_today(self, span: EventSpan) -> str:
         """Everything on today's plan is on today's list (10-29: the plan and the Today note had drifted apart): a list
         item as its linked copy, a routine's step under the routine's name, anything else as it's worded. Work, sleep
@@ -551,6 +561,7 @@ class AssistantTools:
         task = next((t for t in self.s.tasks if span.task_id and t.id == span.task_id), None)
         if task is not None and task.list_role == "today":
             return ""
+        self._day_begun()
         try:
             routine = self._routine_of(task.title if task is not None else span.title)
             if routine is not None:
@@ -635,17 +646,15 @@ class AssistantTools:
                 raise ToolError("Give start (one thirty for all of it) or parts (a start and the steps for each thirty).")
             parts = [{"start": start, "items": steps}]
         by_text = {s.lower(): s for s in steps}
-        placed, already, lines = [], [], []
+        placed, already, lines, extra = [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan
         on_plan = {sp.title.lower() for sp in plan.spans if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
         self._quiet_today = True
         try:
             for part in parts:
                 names = part.get("items") or steps
-                unknown = [n for n in names if str(n).strip().lower() not in by_text]
-                if unknown:
-                    raise ToolError(f"{', '.join(map(str, unknown))} isn't in {note['title']}. Its steps: {', '.join(steps)}.")
-                todo = [by_text[str(n).strip().lower()] for n in names]
+                extra += [str(n).strip() for n in names if str(n).strip().lower() not in by_text]
+                todo = [by_text.get(str(n).strip().lower(), str(n).strip()) for n in names]  # extras as said
                 already += [t for t in todo if t.lower() in on_plan]
                 todo = [t for t in todo if t.lower() not in on_plan]
                 if not todo:
@@ -653,8 +662,9 @@ class AssistantTools:
                 first = self.pt._start(part.get("start"))
                 at = [first + timedelta(minutes=30 * k // len(todo)) for k in range(len(todo) + 1)]
                 for k, text in enumerate(todo):
-                    args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "category": "task",
-                            "task_id": _checkbox_id(note["id"], text), "alongside": True}
+                    args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "alongside": True}
+                    if text.lower() in by_text:
+                        args.update(category="task", task_id=_checkbox_id(note["id"], text))
                     if day not in (None, ""):
                         args["day"] = day
                     out = self.pt.execute("add_event", args)
@@ -668,6 +678,7 @@ class AssistantTools:
             return f"{note['title']} is already on the plan."
         listed = ""
         if self.pt.is_current(plan):
+            self._day_begun()
             try:
                 listed = " " + self._routine_on_today(note, placed)
             except ToolError:
@@ -675,6 +686,9 @@ class AssistantTools:
         out = f"Put {note['title']} on the plan: " + "; ".join(lines) + "."
         if already:
             out += f" Already planned: {', '.join(already)}."
+        if extra:  # the template only changes when the user asks (10-30: the model wrote Brush teeth into it)
+            out += (f" {', '.join(extra)} isn't in the {note['title']} note: it's planned with it today only. Ask "
+                    "the user whether to add it to the routine itself.")
         return out + listed
 
     # --- changing the backlog in Joplin (only when the user asked or agreed) ---
@@ -725,6 +739,11 @@ class AssistantTools:
             options = ", ".join(sorted({name for name in notes.values()})[:12])
             raise ToolError(f"Which list should '{title}' go on? Lists: {options}.")
         _, note_title, note_id = scored[0]
+        said = (self.pt.user_message or "").lower()
+        if any(n["id"] == note_id for n in self._routines()) and self.pt.user_message is not None and not (
+                "routine" in said or note_title.lower() in said):
+            raise ToolError(f"{note_title} is a routine, and the user didn't ask to change it. To plan a step with it "
+                            "today only, give it to put_routine; ask before adding it to the routine itself.")
         if start not in (None, "") and any(n["id"] == note_id for n in self._routines()):
             # A routine is a template: scheduling it is put_routine, never a new line in it (10-26: "Morning Routine
             # steps" was written into the Morning Routine note).
@@ -1026,24 +1045,28 @@ class AssistantTools:
         add = [t.id for t in self.s.tasks if pressing(t) and t.title.lower() not in on][:3]
         return {"keep": keep, "add": add}
 
-    def _done_on_plan(self, today: Dict[str, Any]) -> List[str]:
+    def _done_on_plan(self, today: Dict[str, Any], day: Optional[date] = None) -> List[str]:
         """Open top-level lines on the Today note whose item is done on yesterday's or today's plan (10-25: "Charge
         watch", done the evening before, was offered again because its line was never ticked)."""
         from thirties_core.today import note_items
-        recent = [self.pt.plan_for(self._today() - timedelta(days=1)), self.pt.plan_for(self._today())]
+        day = day or self._today()
+        recent = [self.pt.plan_for(day - timedelta(days=1)), self.pt.plan_for(day)]
         titles = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.DONE}
         return [text for text, ticked in note_items(today) if not ticked and text.lower() in titles
                 and re.search(r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M)]
 
-    def start_the_day(self) -> str:
+    def start_the_day(self, day: Optional[date] = None) -> str:
         """Each morning, before the proposal: routine notes start unticked (if the user allows it) and the Today
-        note drops what was ticked off (the record keeps it). Returns what was done, for the log."""
+        note drops what was ticked off (the record keeps it). It runs once per day, at sunrise or before the first
+        write to Today for that day, whichever is first (10-30: planned at 6:32 on a dark morning, the group
+        written then was taken off at sunrise as "yesterday's"). Returns what was done, for the log."""
         from thirties_core.lists import ListCatalog
         from thirties_core.today import notes_with_role
         writer = self._writer()
         if writer is None or self._db is None or not writer.allowed:
             return ""
-        key = f"day_started:{self._today().isoformat()}"
+        day = day or self._today()
+        key = f"day_started:{day.isoformat()}"
         if self._db.get_sync_meta(key) == "done":
             return ""
         if not self._joplin_up():
@@ -1066,7 +1089,7 @@ class AssistantTools:
                     writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
-            for text in self._done_on_plan(today):
+            for text in self._done_on_plan(today, day):
                 writer.submit({"op": "remove", "note_id": today["id"], "title": text})
                 done.append(f"took {text} (done) off {today['title']}")
         if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):

@@ -214,6 +214,7 @@ class TestRoutinesOnToday(TodayTestCase):
         self.routine = "".join(f"- [x] {s}\n" for s in self.STEPS)  # the user ticks it there; it's a template
         self.api.notes["n_routine"] = {"id": "n_routine", "body": self.routine}
         ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")  # this morning's reset ran
 
     def test_a_routine_goes_on_the_plan_as_its_steps_and_on_today_as_one_group(self):
         out = self.t.execute("put_routine", {"routine": "morning routine", "parts": [
@@ -263,6 +264,18 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertFalse(self.t.today() == DAY)
         self.t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
         self.assertIn("- [ ] Lunch", self.body("n_today"))
+
+    def test_planned_before_sunrise_the_group_survives_the_morning_reset(self):
+        # 10-30 (sim): routine put on Today at 6:32 on a dark morning, then taken off at sunrise as "yesterday's"
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
+        self.api.notes["n_today"]["body"] = "- [ ] Morning Routine\n    - [ ] Shower\n- [x] Old done thing\n"  # yesterday
+        set_debug_time(at("06:30"))
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:30 AM", "parts": [
+            {"start": "6:30 AM", "items": ["Feed kitties", "Brush teeth"]}]})
+        set_debug_time(at("08:00"))
+        self.t.assistant.start_the_day()  # the sunrise duty: already done for today, so nothing more
+        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n    - [ ] Feed kitties\n    - [ ] Brush teeth\n")
+        self.assertNotIn("Brush teeth", self.body("n_routine"))  # an extra step is for today, not the template
 
     def test_a_done_step_ticks_todays_copy_and_the_group_leaves_the_next_morning(self):
         self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
