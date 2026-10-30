@@ -531,6 +531,20 @@ class BackgroundService:
             self._remember("day_times_asked", asked, now)
             self.send(due[1], "checkin", now=now)
 
+    def horizon_session(self, now: datetime) -> None:
+        """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short
+        planning session (one proposal, applied on "yes"; horizons.HorizonPlanner.offer_session)."""
+        manager = self.manager()
+        assistant = manager.tools.assistant
+        day = manager.day_plan.target_date
+        if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
+                or assistant.rollover_pending() or assistant.proposals.pending():
+            return  # one offer at a time: the day's proposal is answered first
+        from thirties_core.horizons import HorizonPlanner
+        text = HorizonPlanner(manager.tools).offer_session()
+        if text:
+            self.send("📅 " + text, "horizon", now=now)
+
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
         if time.time() - self._last_today < self.TODAY_EVERY:
@@ -582,9 +596,12 @@ class BackgroundService:
                     return
                 counts = sort_lists(ListCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today(),
                                     max_notes=10)  # a few notes each half hour, not the whole backlog at once
+                from thirties_core.horizons import HorizonCatalog, sort_horizons
+                counts.update({f"horizon_{k}": v for k, v in sort_horizons(
+                    HorizonCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today(), max_notes=10).items()})
                 if any(counts.values()):
-                    logger.info("Sorted lists: %d note roles and %d item urgencies guessed.",
-                                counts["roles"], counts["items"])
+                    logger.info("Sorted lists: %d note roles, %d item urgencies, %d note and %d item horizons guessed.",
+                                counts["roles"], counts["items"], counts["horizon_notes"], counts["horizon_items"])
                     with self._lock:
                         self._manager = None  # the next turn sees them
             except Exception as e:
@@ -602,8 +619,9 @@ class BackgroundService:
                 manager.reload_plan()  # 10:53 were listed as "not marked yet" at 11:00
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
-        for duty in (self.moot, self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
-                     self.starts, self.contextual, self.day_times, self.today_sync, self.answer_lost_turns):
+        for duty in (self.moot, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+                     self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.today_sync,
+                     self.answer_lost_turns):
             try:
                 duty(now)
             except Exception as e:

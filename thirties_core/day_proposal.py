@@ -392,11 +392,33 @@ class DayProposal:
 
 
 def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any]]:
-    """The pressing candidates for a day: one swap point. TODO(merge, G): when thirties_core/horizons.py lands, its
-    candidates_for_day(day) (items pinned to this week / month / year, bubbled down into days) should feed this;
-    each candidate here is {"rank", "task" (TaskItem or None), "title", "why", "where", "minutes"}. Until then,
-    DayProposal.own_candidates."""
-    return dp.own_candidates(plan)
+    """The candidates for a day, best first: what the horizon plans bubble down into it (pinned to the day, due,
+    the week's unplaced items, ...: horizons.candidates_for_day), then this module's own (urgency, Today, menus,
+    time on a project) for what they don't cover. Each is {"rank", "task", "title", "why", "where", "minutes"}."""
+    own = dp.own_candidates(plan)
+    try:
+        from thirties_core.horizons import candidates_for_day
+        bubbled = candidates_for_day(dp.a.pt, plan.target_date, limit=MAX_CANDIDATES)
+    except Exception as e:  # the proposal never fails for want of the horizons
+        logger.warning("Horizon candidates failed: %s", e)
+        return own
+    on_plan = {sp.title.strip().lower() for sp in plan.spans} | {sp.task_id for sp in plan.spans if sp.task_id}
+    on_plan |= dp.a.routines.daily_titles()  # anchors and routine steps come by themselves
+    on_plan |= {c.task.id for c in bubbled if c.task is not None and c.task.list_role == "routine"}
+    out, seen = [], set()
+    for i, c in enumerate(bubbled):
+        if c.title.strip().lower() in on_plan or c.task_id in on_plan:
+            continue  # already on the day
+        why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
+        if c.deferred >= DEFERRED_OFTEN:
+            why += f"; put off {c.deferred} times: offer a 30-minute start or breaking it down, kindly"
+            minutes = 30
+        out.append({"rank": (0, i), "task": c.task, "title": c.title, "why": why,
+                    "where": c.list or (c.task.parent_note_title if c.task is not None else "") or "",
+                    "minutes": minutes})
+        seen.add(c.title.lower())
+    out += [c for c in own if c["title"].lower() not in seen]
+    return out[:MAX_CANDIDATES]
 
 
 def morning_proposal(manager) -> Tuple[str, bool]:
