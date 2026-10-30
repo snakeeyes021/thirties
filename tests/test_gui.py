@@ -236,6 +236,22 @@ class ChatPanelTests(unittest.TestCase):
         panel.set_conversation_manager(self.manager())
         self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
 
+    def test_a_turn_holds_the_store_lock(self) -> None:
+        # The window's background refresh takes the same lock, so it never reloads the manager mid-turn.
+        manager = self.manager()
+        panel = ChatPanel(manager)
+        seen = []
+        original = manager.send_user_message
+
+        def send(text):
+            seen.append(panel.store_lock.locked())
+            return original(text)
+        manager.send_user_message = send
+        panel.send_user_text("Plan my evening")
+        self.assertTrue(_iterate_until(lambda: not panel.is_busy))
+        self.assertEqual(seen, [True])
+        self.assertFalse(panel.store_lock.locked())
+
     def test_new_conversation_and_switching_survive_refresh(self) -> None:
         manager = self.manager()
         manager.send_user_message("first")

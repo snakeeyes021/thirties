@@ -1,6 +1,7 @@
 """Main application window for Thirties."""
 
 import logging
+import threading
 import time
 from datetime import date, timedelta
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
@@ -92,6 +93,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self._install_type_to_chat()
 
         self._last_store_refresh = time.monotonic()
+        self._refreshing = False  # a background reload is running
+        self._local_changes = 0  # changes made in the day view (see _on_store_refreshed)
         self._timers = [
             GLib.timeout_add_seconds(TICK_SECONDS, self._on_tick),
             GLib.timeout_add_seconds(STORE_REFRESH_SECONDS, self._on_store_refresh_timer),
@@ -269,18 +272,46 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             self._refresh_from_store()
 
     def _refresh_from_store(self) -> None:
-        """Pick up changes other clients (e.g. the Telegram bot) made to this day and its conversation."""
-        if self.conv_manager is None or self.chat_panel.is_busy:
+        """Pick up changes other clients (e.g. the Telegram bot) made to this day and its conversation.
+
+        The reload (Joplin's database, the calendar over D-Bus, the plan) runs on a worker thread, so the window
+        never stalls every minute; the result is drawn back on the UI thread. One refresh at a time, and never
+        during an assistant turn (they share the chat panel's lock).
+        """
+        manager = self.conv_manager
+        if manager is None or self.chat_panel.is_busy or self._refreshing:
             return
+        lock = self.chat_panel.store_lock
+        if not lock.acquire(blocking=False):
+            return  # a turn is running; the next timer picks the changes up
+        self._refreshing = True
         self._last_store_refresh = time.monotonic()
-        try:
-            self.conv_manager.refresh()
-        except Exception as e:
-            logger.warning("Refreshing from the database failed: %s", e)
-            return
-        self.day_view.refresh_plan(self.conv_manager.day_plan)
+        taps_before = self._local_changes
+
+        def worker():
+            ok = True
+            try:
+                manager.refresh()
+            except Exception as e:
+                logger.warning("Refreshing from the database failed: %s", e)
+                ok = False
+            finally:
+                lock.release()
+            GLib.idle_add(self._on_store_refreshed, manager, ok, taps_before)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_store_refreshed(self, manager, ok: bool, taps_before: int) -> bool:
+        self._refreshing = False
+        if not ok or manager is not self.conv_manager:
+            return False  # failed, or another day was opened meanwhile
+        if self._local_changes != taps_before:
+            # a change made in the day view while the reload ran may be missing from the reloaded plan
+            manager.reload_plan()
+        self.day_view.refresh_plan(manager.day_plan)
         self.chat_panel.after_store_refresh()
         self._sync_brain_action()
+        return False
 
     def _on_plan_updated(self, plan) -> None:
         """Triggered after an assistant turn, which may have changed the plan."""
@@ -294,6 +325,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         if self.conv_manager is None:
             return ""
         from thirties_core.plan_tools import NOT_DONE
+        self._local_changes += 1
         result = self.conv_manager.execute_tool(name, args)
         if result.startswith(NOT_DONE):
             self._toast(result.split(":", 1)[1].split(". Ask the user")[0].strip())
