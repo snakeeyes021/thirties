@@ -1297,7 +1297,14 @@ class AssistantTools(KindTools):
         deferred = sorted(((t.title, t.deferred_count) for t in self.s.tasks if t.deferred_count >= 2
                            and put_off_counts(self.kind_of(t, ctx))), key=lambda x: -x[1])
         facts = fact_lines(spans, now, self.s.energy.entries(since=now - timedelta(days=days)), deferred)
-        facts += session_lines(spans, lambda s: self.kind_of(s, ctx) == ONGOING)
+        kinds: Dict[tuple, str] = {}  # one reading per item, not per session (this runs for every prompt)
+
+        def ongoing(s: EventSpan) -> bool:
+            key = (s.title.strip().lower(), s.task_id)
+            if key not in kinds:
+                kinds[key] = self.kind_of(s, ctx)
+            return kinds[key] == ONGOING
+        facts += session_lines(spans, ongoing)
         note = self.capacity_note()
         return ([note] if note else []) + facts
 
