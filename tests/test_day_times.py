@@ -138,6 +138,9 @@ class TestAsking(DayTimesCase):
         svc = BackgroundService(self.sched.config, lambda t, b, k: sent.append(b), scheduler=self.sched,
                                 joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         svc.today = lambda: DAY
+        self.t.execute("log_day_times", {"woke": "8:40 AM"})  # (said at 9:45, slept in)
+        svc.rollover(at("08:50"))
+        self.assertEqual(sent, [])  # the morning offer waits for half an hour after the recorded wake
         svc.day_times(at("09:00"))
         svc.day_times(at("09:15"))
         self.assertEqual(len(sent), 1)

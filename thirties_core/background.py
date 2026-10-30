@@ -405,7 +405,8 @@ class BackgroundService:
             timedelta(minutes=30 * gen.sleep_end_thirty + 30)
         from thirties_core.day_times import wake_time
         history = db.get_spans_between(manager.day_plan.day_start - timedelta(hours=18), manager.day_plan.day_start)
-        wake = wake_time(manager.day_plan, history) or wake  # the night as planned or recorded ("sleeping in")
+        woke = wake_time(manager.day_plan, history)  # the night as planned or recorded ("sleeping in")
+        wake = woke + timedelta(minutes=30) if woke else wake  # half an hour after waking, as before
         if now < wake:
             return
         db.set_sync_meta(key, "1")
