@@ -103,6 +103,12 @@ CASES: List[Tuple[str, List[str], Dict[int, Dict[str, str]], Dict[str, Any]]] = 
     ("the passport renewal has to happen by friday", ["urgency"], {0: {"target": "passport", "day": "friday"}}, {}),
     ("composing has to wait until after dinner", ["fact"], {0: {"target": "compos", "after": "dinner"}}, {}),
     ("dinner is at 6 and it can't move", ["fact"], {0: {"target": "dinner", "fixed": "True"}}, {}),
+    # 0.2: horizons and the day's actual times (horizon_talk.py; Python reads the plainest of these itself)
+    ("honestly the gutters can sit until next month", ["horizon"], {0: {"target": "gutter", "when": "month"}}, {}),
+    ("let's look at the whole month", ["horizon"], {0: {"topic": "show", "when": "month"}}, {}),
+    ("help me figure out next week", ["horizon"], {0: {"topic": "plan", "when": "next week"}}, {}),
+    ("I was up around 6:30 and in at work by 8", ["times"], {0: {"woke": "6:30", "started": "8"}}, {}),
+    ("ok I'm out, work's finished", ["times"], {0: {"finished": "now"}}, {}),
     # several requests, and one item with something alongside
     ("work ran until 4:30, and move composing to 8", ["move", "move"],
      {0: {"target": "work", "end": "4:30"}, 1: {"target": "compos", "start": "8"}}, {}),
@@ -225,6 +231,9 @@ CATEGORIES = {
     "today_list": "putting something on today's list, with no time",
     "urgency": "saying how pressing an item on their lists is, or a date it's due by",
     "fact": "a rule an item must keep: after another item, not before a time, can't move, needs daylight",
+    "horizon": "when something on their lists belongs (this week, this year, someday), putting it on a later day or in a "
+               "week or month, planning a week or month, or asking what's on for one",
+    "times": "saying when they actually woke, went to bed, started or finished work",
     "multi": "two or three different requests in one message",
     "ramble": "a long voice-to-text message with a self-correction; label only the final intent",
 }

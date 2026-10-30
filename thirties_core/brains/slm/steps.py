@@ -186,6 +186,8 @@ _TYPE_CUES: Dict[str, re.Pattern] = {
     "fact": re.compile(r"\b(has to|must|always|never|after|before|can'?t move|stays? put|fixed|daylight)\b", re.I),
     "routine": re.compile(r"\broutine\b", re.I),
     "today": re.compile(r"\btoday'?s?\b|\blist\b", re.I),
+    "horizon": re.compile(r"\b(week|month|year|someday|plan|mon|tues|wed|thurs|fri|sat|sun)\w*\b", re.I),
+    "times": re.compile(r"\b(woke|wake|up|bed|asleep|slept|work|clocked|shift)\b", re.I),
 }
 
 

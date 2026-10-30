@@ -1,6 +1,7 @@
 """Planning across horizons (ROADMAP C2): periods, each item's horizon, week/month/year plans, candidates that
 bubble down, the tools, the planning sessions, the guesses, and sync."""
 
+import copy
 import json
 import unittest
 from datetime import date, timedelta
@@ -498,7 +499,7 @@ class TestSlmAnswersTheOffer(unittest.TestCase):
         self.addCleanup(set_debug_time, None)
         self.rt = FakeRuntime()
         self.sched = make_scheduler()
-        tasks = list(TASKS) + [item("door", "Fix the door")]
+        tasks = [copy.copy(t) for t in TASKS] + [item("door", "Fix the door")]  # never the shared items
         HorizonCatalog(self.sched.state_db).set_item("door", "week")
         plan, pending = self.sched.build_day_plan(DAY + timedelta(days=4))
         self.m = ConversationManager(plan, tasks, pending, self.sched, active_notes=[], brain=None,

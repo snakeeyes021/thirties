@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 ACTION_TYPES = ["add", "move", "remove", "swap", "outcome", "confirm", "reject", "choose", "suggest", "question",
-                "remember", "profile", "energy", "chat", "today", "urgency", "fact", "routine"]
+                "remember", "profile", "energy", "chat", "today", "urgency", "fact", "routine", "horizon", "times"]
 URGENCIES = ["now", "soon", "whenever", "someday"]
 
 ACTION_SCHEMA: Dict[str, Any] = {
@@ -49,6 +49,9 @@ ACTION_SCHEMA: Dict[str, Any] = {
                     "urgency": {"type": "string", "enum": URGENCIES},
                     "fixed": {"type": "boolean"},
                     "daylight": {"type": "boolean"},
+                    "when": {"type": "string"},
+                    "woke": {"type": "string"},
+                    "slept": {"type": "string"},
                 },
                 "required": ["type"],
             },
@@ -74,6 +77,8 @@ today: put something on today's list, with no time. title.
 urgency: says how pressing something on their lists is. target; urgency now|soon|whenever|someday; day if it's due by a day.
 fact: a rule an item must keep. target; after (an item it must come after); start (it can't start before); fixed=true if it can't move; daylight=true if it needs daylight.
 routine: put one of their routines on the plan. title (e.g. "Morning routine"); start if given.
+horizon: when something on their lists belongs or is planned, beyond today; or planning or seeing a week, month or year. target (the item); when ("this year", "someday", "Thursday", "next week"); topic "plan" or "show" for a whole period.
+times: says when they actually woke, went to bed, or started or finished work. woke; slept; started (work); finished (work; "now" if just done).
 chat: anything else (thanks, greetings, small talk).
 Rules: copy times and durations exactly as written ("7:30", "2 hours"); never calculate new times. "Push back/later/after" is shift "+..."; "earlier/sooner" is shift "-...". One message can hold several actions, in order.
 Examples:
@@ -111,6 +116,12 @@ that's not urgent => {"actions":[{"type":"urgency","target":"that","urgency":"wh
 the passport renewal has to happen by friday => {"actions":[{"type":"urgency","target":"passport renewal","day":"friday"}]}
 the walk has to wait until after the shower => {"actions":[{"type":"fact","target":"walk","after":"shower"}]}
 the cats' dinner is at 5 and can't move => {"actions":[{"type":"fact","target":"cats' dinner","fixed":true}]}
+that's a this-year thing => {"actions":[{"type":"horizon","target":"that","when":"this year"}]}
+put the taxes on Thursday => {"actions":[{"type":"horizon","target":"taxes","when":"Thursday"}]}
+plan my week => {"actions":[{"type":"horizon","topic":"plan","when":"this week"}]}
+what's on this week? => {"actions":[{"type":"horizon","topic":"show","when":"this week"}]}
+I woke up at 7 and started work at 7:15 => {"actions":[{"type":"times","woke":"7","started":"7:15"}]}
+done with work => {"actions":[{"type":"times","finished":"now"}]}
 thanks! => {"actions":[{"type":"chat"}]}
 Reply with the JSON object only."""
 

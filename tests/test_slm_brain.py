@@ -1,5 +1,6 @@
 """SLM brain: Python-side behavior with a scripted stand-in for Gemma."""
 
+import copy
 import json
 import unittest
 from datetime import timedelta
@@ -77,9 +78,10 @@ class SlmTestCase(unittest.TestCase):
         self.rt = FakeRuntime()
         self.sched = make_scheduler([event("dentist", "18:00", "18:30", "Dentist")])
         plan, pending = self.sched.build_day_plan(DAY)
-        self.m = ConversationManager(plan, list(TASKS), pending, self.sched, active_notes=[],
+        tasks = [copy.copy(t) for t in TASKS]  # tools change items (urgency, horizon): never the shared ones
+        self.m = ConversationManager(plan, tasks, pending, self.sched, active_notes=[],
                                      brain=None, inference_engine=None)
-        self.brain = SlmBrain(self.m.tools, tasks=list(TASKS), runtime=self.rt)
+        self.brain = SlmBrain(self.m.tools, tasks=list(tasks), runtime=self.rt)
         self.m.brain = self.brain
         self.m._load(None)
 

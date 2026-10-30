@@ -31,6 +31,7 @@ from thirties_core.brains.slm.parse import (ACTION_SCHEMA, BREAKDOWN_PROMPT, BRE
                                             build_context, extract_json, parse_actions)
 from thirties_core.brains.slm import steps
 from thirties_core.brains.slm.fatigue import TIRED_MAX_ITEMS, TiredDay
+from thirties_core.brains.slm.horizon_talk import HorizonTalk
 from thirties_core.brains.slm.parity import ParityActions
 from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes,
                                  thirty_ceil, thirty_of)
@@ -114,7 +115,7 @@ DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursd
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
 
 
-class SlmBrain(ParityActions, TiredDay):
+class SlmBrain(ParityActions, TiredDay, HorizonTalk):
     """Pipeline brain for a small on-device model."""
 
     def __init__(self, tools: PlanTools, tasks: Optional[List[TaskItem]] = None, config: Any = None,
@@ -219,7 +220,7 @@ class SlmBrain(ParityActions, TiredDay):
         user_text = user_text[:MAX_MESSAGE_CHARS]  # a huge paste can't fit Gemma's context: read the start of it
         self._message = user_text
         self._unclear = []
-        shortcut = self._list_shortcut(user_text)
+        shortcut = self._list_shortcut(user_text) or self._horizon_shortcut(user_text)  # horizon_talk.py
         if shortcut is not None:  # today's list and urgency: plain enough for Python, no parse needed
             self.messages.append({"role": "assistant", "content": shortcut, "slm_state": self.state.to_dict(),
                                   "slm_actions": [{"type": "list_shortcut"}]})
@@ -291,7 +292,7 @@ class SlmBrain(ParityActions, TiredDay):
             return f"whether to add these steps to Joplin under {self.state.proposal[0]['title']}"
         if self.state.proposal_kind == "lighten":
             return "whether to move these to tomorrow: " + "; ".join(p["title"] for p in self.state.proposal)
-        if self.state.proposal_kind == "urgency":
+        if self.state.proposal_kind in ("urgency", "horizon"):
             return f"whether they mean {self.state.proposal[0]['title']}"
         items = "; ".join(f"{p['title']} at {p['start']}" if p.get("start") else p["title"] for p in self.state.proposal)
         kind = "pick one of" if self.state.proposal_kind == "options" else "whether to add"
@@ -314,7 +315,8 @@ class SlmBrain(ParityActions, TiredDay):
         """Parts of a message Python acts on by itself, which no parsed action needs to cover."""
         return any(r.search(clause) for r in (self._REMIND_RE, self._MUTE_RE, self._ADD_TO_LIST_RE, self._ON_LIST_RE,
                                               TODAY_LIST_RE, URGENCY_RE, REDRAW_RE, self._BREAKDOWN_RE, self._PICK_RE,
-                                              self._FILL_RE, self._PLACE_RE, self._SHOW_DAY_RE, self._WEATHER_RE))
+                                              self._FILL_RE, self._PLACE_RE, self._SHOW_DAY_RE, self._WEATHER_RE)) \
+            or self._python_reads(clause) is not None
 
     def _parse_one(self, message: str) -> List[Action]:
         now = self._now()
@@ -847,6 +849,7 @@ class SlmBrain(ParityActions, TiredDay):
         actions = self._sanity(actions, message)
         actions = steps.merge_alongside(actions, message)
         actions = self._parity(actions, message)
+        actions = self._horizon_repair(actions, message)
         actions = self._route(actions, message)
         actions = self._accept_readds(actions)
         if any(a.type in ("confirm", "accept", "choose") for a in actions) and self.state.proposal:
@@ -893,6 +896,7 @@ class SlmBrain(ParityActions, TiredDay):
             "task_add": self._do_task_add, "breakdown": self._do_breakdown,
             "remind": self._do_remind, "mute": self._do_mute, "proposal_swap": self._do_proposal_swap,
             "today": self._do_today, "urgency": self._do_urgency, "fact": self._do_fact, "routine": self._do_routine,
+            "horizon": self._do_horizon, "times": self._do_times,
         }
         self._action_types = {a.type for a in actions}
         untimed = [a for a in actions if a.type == "add" and not any(a.get(k) for k in ("start", "end", "after", "before"))]
@@ -1393,6 +1397,8 @@ class SlmBrain(ParityActions, TiredDay):
             return self._apply_lighter_day(self.state.proposal)
         if self.state.proposal_kind == "urgency":
             return self._apply_urgency(self.state.proposal[0])
+        if self.state.proposal_kind == "horizon":
+            return self._apply_horizon(self.state.proposal[0])
         if self.state.proposal_kind == "options":
             return self._apply_proposals(self.state.proposal[:1])
         return self._apply_proposals(self.state.proposal)
