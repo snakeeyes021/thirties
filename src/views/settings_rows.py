@@ -510,6 +510,10 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     here = Adw.SwitchRow(title="Run the phone connection on this computer",
                          subtitle="Only one computer should do this.",
                          active=bool(ctx.get("telegram.enabled", False)))
+    mirror = Adw.SwitchRow(title="Show the desktop chat on your phone",
+                           subtitle="What you type here, and the replies, also go to Telegram, so both show one "
+                                    "conversation.",
+                           active=bool(ctx.get("telegram.mirror_desktop", True)))
     bot = {"name": ""}
 
     def show():
@@ -558,8 +562,9 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     save_as_you_type(token, on_token, delay=900)
     pair_btn.connect("clicked", on_pair)
     here.connect("notify::active", lambda r, _p: ctx.set("telegram.enabled", r.get_active()))
+    mirror.connect("notify::active", lambda r, _p: ctx.set("telegram.mirror_desktop", r.get_active()))
     token.connect("changed", lambda *_: show())
-    for row in (token, pair, here):
+    for row in (token, pair, here, mirror):
         group.add(row)
     show()
     return group

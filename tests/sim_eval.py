@@ -427,7 +427,8 @@ class QuotaExhausted(AgyError):
     """agy says the usage quota is used up: stop the whole eval and report how far it got."""
 
 
-AGY_ERROR_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out")
+AGY_ERROR_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out",
+                      "Sorry, I couldn't reach the model")  # the last: turns.LOST_TURN_PREFIX, after retries
 QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many requests|usage limit|limit (reached|exceeded)",
                       re.IGNORECASE)
 

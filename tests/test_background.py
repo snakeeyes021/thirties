@@ -33,7 +33,9 @@ class TestBackground(unittest.TestCase):
         self.svc.check_ins(at("18:15"))
         self.svc.check_ins(at("18:20"))
         self.assertEqual(self.desktop, [("checkin", "👋 Just checking in: did you get to Taxes, or are you still on it?")])
-        self.svc.bridge.broadcast.assert_called_once_with("👋 Just checking in: did you get to *Taxes*, or are you still on it?")
+        self.svc.bridge.broadcast.assert_called_once()
+        self.assertEqual(self.svc.bridge.broadcast.call_args[0][0],
+                         "👋 Just checking in: did you get to *Taxes*, or are you still on it?")
         self.assertIn("did you get to Taxes", self.svc.manager().history()[-1]["content"])
         fresh = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=self.svc.joplin_engine,
                                   inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
@@ -62,7 +64,7 @@ class TestBackground(unittest.TestCase):
             self.svc.starts(at("11:00") + timedelta(minutes=minute))
         self.assertEqual(self.desktop, [("start", "🔔 11:00: Feed kitties, Caffeinate, Water bottle")])
         self.svc.starts(at("17:00") + timedelta(seconds=20))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
 
     def test_moved_item_is_not_announced_again(self):
         self.svc.starts(at("17:00"))
@@ -90,23 +92,24 @@ class TestBackground(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("t2", "Brush teeth", at("22:00"), at("22:30"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("22:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 10:00: Brush teeth")  # the first was done: new
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00: Brush teeth")  # the first was done: new
 
-    def test_whats_behind_is_listed_at_the_bottom_when_something_new_falls_behind(self):
+    def test_whats_behind_is_listed_under_the_status_when_something_new_falls_behind(self):
         for sid, title, start in (("k", "Feed kitties", "11:00"), ("c", "Caffeinate", "11:10"), ("s", "Shower", "11:30")):
             self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(start) + timedelta(minutes=15),
                                                       SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("s2", "Shower", at("11:45"), at("11:55"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("w", "Walk", at("12:00"), at("12:30"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:30"), at("13:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("12:00"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\n- Feed kitties, "
-                                                      "Caffeinate\n- Shower"))  # by block, no times
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\nNot marked yet:\n- Feed kitties\n"
+                                                      "- Caffeinate\n- Shower"))  # one per line, once each, no times
         self.svc.starts(at("12:30"))
-        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\n- Feed kitties, "
-                                                               "Caffeinate\n- Shower\n- Walk")  # Walk fell behind
+        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\nNot marked yet:\n- Feed kitties\n"
+                                                               "- Caffeinate\n- Shower\n- Walk")  # Walk fell behind
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
         self.assertIn("- Lunch", self.desktop[-1][1])
         self.sched.state_db.upsert_span(EventSpan("x", "Stretch", at("17:30"), at("18:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
@@ -263,6 +266,68 @@ class TestMessageLevels(unittest.TestCase):
         before = len(self.sent)
         self.svc.starts(at("15:00"))  # during the dentist: quiet
         self.assertEqual(len(self.sent), before)
+
+
+class TestTurnsInTheBackground(unittest.TestCase):
+    """T1: a lost turn is answered later and the reply delivered; T2: desktop turns go to the phone; C3: notices
+    carry when they go stale."""
+
+    def setUp(self):
+        from thirties_core import turns
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        waits = turns.RETRY_WAITS
+        turns.RETRY_WAITS = (0.0, 0.0)
+        self.addCleanup(setattr, turns, "RETRY_WAITS", waits)
+        self.sched = make_scheduler()
+        self.sched.config.assistant.message_level = "heavy"
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        self.engine = MockInferenceEngine()
+        self.desktop = []
+        self.svc = BackgroundService(self.sched.config, lambda t, b, k: self.desktop.append((k, b)),
+                                     scheduler=self.sched, joplin_engine=joplin, inference_engine=self.engine,
+                                     sync_engine=MagicMock())
+        self.svc.today = lambda: DAY
+        self.svc.bridge = MagicMock()
+        self.svc.run_in_threads = False
+
+    def test_a_lost_turn_is_answered_and_sent_once_the_model_is_back(self):
+        from tests.test_conversation import reply
+        timeout = {"role": "assistant", "content": "The Antigravity assistant timed out waiting.", "tool_calls": []}
+        self.engine.responses = [timeout] * 3
+        self.svc.manager().send_user_message("cats are fed", via="telegram")
+        self.engine.responses = [reply("Logged: cats fed.")]
+        self.svc._fixed_now = True
+        self.svc.answer_lost_turns(at("09:01"))  # not yet: the first retry waits two minutes
+        self.assertEqual(self.desktop, [])
+        self.svc.answer_lost_turns(at("09:03"))
+        self.assertEqual(self.desktop, [("reply", "Logged: cats fed.")])
+        self.svc.bridge.broadcast.assert_called_once_with("Logged: cats fed.")
+        self.svc.answer_lost_turns(at("09:10"))
+        self.assertEqual(len(self.desktop), 1)
+
+    def test_the_desktop_chat_is_mirrored_to_the_phone(self):
+        self.svc._mirror(["plan my evening"], "Sure: dinner at 7.", False)
+        sent = [c.args[0] for c in self.svc.bridge.broadcast.call_args_list]
+        self.assertEqual(sent, ["🖥 You, on the desktop:\nplan my evening", "Sure: dinner at 7."])
+        self.svc.bridge.broadcast.reset_mock()
+        self.sched.config.telegram.mirror_desktop = False
+        self.svc._mirror(["x"], "y", False)
+        self.svc.bridge.broadcast.assert_not_called()
+
+    def test_a_start_notice_goes_stale_at_the_end_of_its_block(self):
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
+        self.svc._manager = None
+        self.svc.starts(at("17:00"))
+        self.assertEqual(self.svc.bridge.broadcast.call_args.kwargs["expires"], at("17:30"))
+
+    def test_a_check_in_counts_as_asked_so_replies_dont_ask_again(self):
+        from thirties_core.messages import MissedTracker
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
+        self.svc._manager = None
+        self.svc.check_ins(at("18:45"))
+        self.assertIn("taxes", MissedTracker(self.sched.state_db).titles_shown(at("18:45")))
 
 
 if __name__ == "__main__":

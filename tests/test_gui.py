@@ -236,21 +236,22 @@ class ChatPanelTests(unittest.TestCase):
         panel.set_conversation_manager(self.manager())
         self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
 
-    def test_a_turn_holds_the_store_lock(self) -> None:
-        # The window's background refresh takes the same lock, so it never reloads the manager mid-turn.
+    def test_messages_show_when_they_arrived(self) -> None:
         manager = self.manager()
+        manager.send_user_message("first")
         panel = ChatPanel(manager)
-        seen = []
-        original = manager.send_user_message
+        times = [c.time_text for c in _children(panel.messages_box) if hasattr(c, "time_text")]
+        self.assertEqual(times, ["7:10 PM", "7:10 PM"])  # soak friction 2
 
-        def send(text):
-            seen.append(panel.store_lock.locked())
-            return original(text)
-        manager.send_user_message = send
-        panel.send_user_text("Plan my evening")
-        self.assertTrue(_iterate_until(lambda: not panel.is_busy))
-        self.assertEqual(seen, [True])
-        self.assertFalse(panel.store_lock.locked())
+    def test_more_can_be_sent_while_a_reply_is_on_its_way(self) -> None:
+        panel = ChatPanel(self.manager())
+        panel.send_user_text("one")
+        self.assertTrue(panel.text_view.get_sensitive())
+        panel.send_user_text("two")
+        self.assertEqual(self.bubbles(panel)[-2:], ["one", "two"])  # shown at once, before the reply
+        self.assertTrue(_iterate_until(lambda: not panel.is_busy, timeout=10))
+        self.assertEqual([m["role"] for m in panel.conversation_manager.history()],
+                         ["assistant", "user", "user", "assistant"])  # one reply for both (A8)
 
     def test_new_conversation_and_switching_survive_refresh(self) -> None:
         manager = self.manager()

@@ -38,6 +38,7 @@ from thirties_core.clock import (
     parse_shift_minutes,
     resolve_clock,
 )
+from thirties_core.message_tools import MESSAGE_READ_ONLY, MESSAGE_TOOL_SPECS, MessageTools
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus, new_span_id
 from thirties_core.scheduler import DeterministicScheduler
 
@@ -227,8 +228,9 @@ from thirties_core.day_proposal import PROPOSAL_READ_ONLY, PROPOSAL_TOOL_SPECS  
 from thirties_core.routines import ROUTINE_TOOL_SPECS  # noqa: E402
 
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
-TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
+TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS + MESSAGE_TOOL_SPECS
+READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
+                  | MESSAGE_READ_ONLY)
 
 
 def _as_bool(value: Any) -> bool:
@@ -313,6 +315,7 @@ class PlanTools:
         self._other_days: Dict[Any, DayPlan] = {}
         self.successful_changes = 0  # every tool call that changed something, on any day or store
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
+        self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1278,11 +1281,12 @@ class PlanTools:
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
         scope = "Free time remaining" if upcoming_from else "Free time"
         now = self._now()
-        behind = self._behind(now) if plan.day_start <= now < plan.day_end else []
+        from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
+        behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
-                + ("\nNot marked yet (past their time, not assumed done; by block):\n"
-                   + "\n".join(unmarked_lines(behind)) if behind else ""))
+                + ("\nNot marked yet (past their time, not assumed done):\n"
+                   + "\n".join(missed_lines(behind)) if behind else ""))
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
@@ -1337,6 +1341,7 @@ class PlanTools:
         }
         if self.assistant:
             handlers.update(self.assistant.handlers())
+        handlers.update(MessageTools(self).handlers())
         handler = handlers.get(name)
         if handler is None:
             return f"{NOT_DONE}: unknown tool '{name}'. Available: {', '.join(handlers)}."

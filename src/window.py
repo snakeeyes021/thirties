@@ -277,19 +277,21 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         The reload (Joplin's database, the calendar over D-Bus, the plan) runs on a worker thread, so the window
         never stalls every minute; the result is drawn back on the UI thread. One refresh at a time, and never
-        during an assistant turn (they share the chat panel's lock).
+        during an assistant turn (the worker takes the turn lock).
         """
         manager = self.conv_manager
         if manager is None or self.chat_panel.is_busy or self._refreshing:
             return
-        lock = self.chat_panel.store_lock
-        if not lock.acquire(blocking=False):
-            return  # a turn is running; the next timer picks the changes up
         self._refreshing = True
         self._last_store_refresh = time.monotonic()
         taps_before = self._local_changes
 
         def worker():
+            # never during an assistant turn: the turn lock is taken here, on the worker (it's re-entrant, so the
+            # thread that takes it releases it); a turn under way means the next timer picks the changes up
+            if not manager.turn_lock.acquire(blocking=False):
+                GLib.idle_add(self._on_store_refreshed, manager, False, taps_before)
+                return
             ok = True
             try:
                 manager.refresh()
@@ -297,7 +299,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                 logger.warning("Refreshing from the database failed: %s", e)
                 ok = False
             finally:
-                lock.release()
+                manager.turn_lock.release()
             GLib.idle_add(self._on_store_refreshed, manager, ok, taps_before)
 
         threading.Thread(target=worker, daemon=True).start()
