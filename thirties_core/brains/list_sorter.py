@@ -31,7 +31,7 @@ URGENCY_LINES = "\n".join(f"- {name}: {meaning}" for name, meaning in URGENCIES.
 
 ROLE_PROMPT = f"""You sort a person's to-do notes for their planning assistant. Given one note (its notebook, title and how it begins), say what the note is for:
 {ROLE_LINES}
-Notes are usually organized by area of life (home, errands, medical, a project). A note of daily repeated steps is a routine. A note named for today's tasks is today. A list of options for free time ("go outside", "read a book", "pick one item from...") is a menu. A software or other ongoing project's list of features, bugs or tickets is a backlog. Shopping lists are lists unless they read as wishlists. Notes of facts, plans, ideas, cheat sheets or logs, with few or no checkboxes, are ignore."""
+Notes are usually organized by area of life (home, errands, medical, a project). A note of daily repeated steps is a routine. A note named for today's tasks is today. A list of options for free time ("go outside", "read a book", "pick one item from...") is a menu. A software or other ongoing project's list of features, bugs or tickets is a backlog. A catch-all of unrelated quick items waiting to be sorted ("Assorted Quickies", "Inbox", "Misc") is a dropbox. Shopping lists are lists unless they read as wishlists. Notes of facts, plans, ideas, cheat sheets or logs, with few or no checkboxes, are ignore."""
 
 URGENCY_PROMPT = f"""You help a planning assistant judge how pressing each item on a person's to-do list is:
 {URGENCY_LINES}

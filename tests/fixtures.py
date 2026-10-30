@@ -69,3 +69,28 @@ class FakeJoplinAPI:
         self.notes[note_id].update(data)
         self.updates.append((note_id, data))
         return True
+
+    # folders and new notes (the Done notes, a list split by triage)
+    folders: dict = None
+
+    def get_folders(self):
+        return [dict(f) for f in (self.folders or {}).values()] if self.up else []
+
+    def create_folder(self, title, parent_id=None):
+        if not self.up:
+            return None
+        self.folders = self.folders or {}
+        fid = f"f{len(self.folders) + 1}"
+        self.folders[fid] = {"id": fid, "title": title, "parent_id": parent_id or ""}
+        return dict(self.folders[fid])
+
+    def get_folder_notes(self, folder_id):
+        return [{"id": k, "title": v.get("title", ""), "parent_id": v.get("parent_id", "")}
+                for k, v in self.notes.items() if v.get("parent_id") == folder_id] if self.up else []
+
+    def create_note(self, title, body, parent_id=None):
+        if not self.up:
+            return None
+        nid = f"new{len(self.notes) + 1}"
+        self.notes[nid] = {"id": nid, "title": title, "body": body, "parent_id": parent_id or ""}
+        return {"id": nid, "title": title}

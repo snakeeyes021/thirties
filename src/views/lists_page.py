@@ -18,7 +18,7 @@ from thirties_core.lists import ROLE_URGENCY, ROLES, SORTED_ROLES, URGENCIES, Li
 from thirties_core.models import TaskItem
 
 ROLE_NAMES = {"routine": "Routine", "today": "Today", "menu": "Menu", "list": "List", "project": "Project",
-              "backlog": "Project backlog", "reference": "Reference", "ignore": "Ignore"}
+              "backlog": "Project backlog", "dropbox": "Drop box", "reference": "Reference", "ignore": "Ignore"}
 URGENCY_NAMES = {"now": "Now", "soon": "Soon", "whenever": "Whenever", "someday": "Someday"}
 
 Loader = Callable[[], Tuple[List[Dict[str, Any]], List[TaskItem]]]

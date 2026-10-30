@@ -170,9 +170,11 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
 ]
 
+from thirties_core.list_tools import LIST_READ_ONLY, LIST_TOOL_SPECS  # noqa: E402 (after assistant_tools)
+
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
-TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS
-READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY
+TOOL_SPECS = SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + LIST_TOOL_SPECS
+READ_ONLY_TOOLS = {"list_schedule", "find_open_time"} | ASSISTANT_READ_ONLY | LIST_READ_ONLY
 
 
 def _as_bool(value: Any) -> bool:
@@ -600,6 +602,9 @@ class PlanTools:
         if self.assistant and self.is_current(self.day_plan):
             listed = self.assistant.list_today(span)
             extra += f" {listed}" if listed else ""
+        elif self.assistant and self.day_plan.target_date > self.today():
+            from thirties_core.day_lists import ahead_note
+            extra += f" {ahead_note(self.assistant, self.day_plan)}"
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
 
     def update_event(
@@ -1044,8 +1049,10 @@ class PlanTools:
         scope = "Free time remaining" if upcoming_from else "Free time"
         now = self._now()
         behind = self._behind(now) if plan.day_start <= now < plan.day_end else []
+        from thirties_core.day_lists import pencilled_text
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
+                + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + ("\nNot marked yet (past their time, not assumed done; by block):\n"
                    + "\n".join(unmarked_lines(behind)) if behind else ""))
 

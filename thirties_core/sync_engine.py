@@ -345,7 +345,16 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            **self._list_stores(),
         }
+
+    def _list_stores(self) -> Dict[str, Any]:
+        """Lists and items (0.2 block 2): drop box scopes, what was filed as done, lists for days ahead."""
+        from thirties_core.day_lists import AheadLists
+        from thirties_core.done_log import DoneLog
+        from thirties_core.placement_lists import DropBoxScopes
+        return {"dropbox_scopes": DropBoxScopes(self.state_db), "done_filed": DoneLog(self.state_db),
+                "day_list_ahead": AheadLists(self.state_db)}
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:
         """Import days from a pre-span (v1) payload, only for days this device has never touched."""

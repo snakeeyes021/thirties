@@ -193,6 +193,19 @@ class JoplinAPIClient:
             logger.warning("Failed to fetch Joplin folders: %s", e)
         return []
 
+    def get_folder_notes(self, folder_id: str) -> List[Dict[str, Any]]:
+        """The notes in a folder (id and title), via GET /folders/{id}/notes."""
+        url = self._build_url(f"/folders/{folder_id}/notes", {"fields": "id,title,parent_id", "limit": 100})
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Thirties/0.1"})
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data.get("items", data) if isinstance(data, dict) else data
+        except Exception as e:
+            logger.warning("Failed to list the notes of Joplin folder %s: %s", folder_id, e)
+        return []
+
     def create_folder(self, title: str, parent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Create a folder via POST /folders."""
         url = self._build_url("/folders")
