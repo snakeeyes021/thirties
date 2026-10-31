@@ -1012,9 +1012,11 @@ class TimelinePage(Gtk.Box):
             self.reload_week()
 
     def tick(self) -> None:
-        """A minute on: the hand moves; a new thirty changes what's free."""
+        """A minute on: the hand moves; a new thirty changes what's free (on the Week tab too: 10-31, its hands
+        stood still while the screen was up)."""
         if self.plan is None:
             return
+        self._tick_week()
         layout = day_layout(self.plan, self.now(), self.ongoing)
         if [(f.row, f.rows) for f in layout.free] != [(f.row, f.rows) for f in self.layout.free] or \
                 [c.current for c in layout.cards] != [c.current for c in self.layout.cards]:
@@ -1112,19 +1114,31 @@ class TimelinePage(Gtk.Box):
                 import logging
                 logging.getLogger(__name__).warning("Loading the week failed", exc_info=True)
                 return None
-            return layout, chips
+            return layout, chips, plans
 
         def show(result):
             if result is None or token != self._week_token:
                 return False
-            layout, chips = result
+            layout, chips, plans = result
             self.week.show_week(layout, chips, today, this_week=today in days)
+            self._week_plans, self._week_today = plans, today  # for the tick: the hands move with no reload
             return False
 
         if not self.threaded_week:
             show(work())
             return
         threading.Thread(target=lambda: GLib.idle_add(show, work()), daemon=True).start()
+
+    def _tick_week(self) -> None:
+        """Lay the shown week out again for now, from the plans already loaded (no reload), and redraw its days."""
+        plans = getattr(self, "_week_plans", None)
+        if not plans or self.stack.get_visible_child_name() != "week":
+            return
+        layout = week_layout(plans, self.now(), self._week_today, self.ongoing)
+        for area, col in zip(self.week.areas, layout.columns[:7]):
+            area.set_column(col)
+        self.week.layout = layout
+        self.week.set_units(self.week.units)  # today's free time, from now on
 
     def _pin(self, item_id: str, day: date) -> None:
         if self.run_tool is not None:

@@ -358,6 +358,14 @@ class TimelineTests(unittest.TestCase):
         self.page.units_toggle.set_active_name("hours")
         self.assertEqual(stored["units"], "hours")
         self.assertEqual(week.frees[3].get_text(), "2½ h free")
+        # the hands move with the clock while the week is up, with no reload (10-31: they stood still)
+        self.page.load_week = None
+        before = week.areas[3].column.now
+        set_debug_time(at("19:40"))
+        self.view.tick()
+        self.assertGreater(week.areas[3].column.now, before)
+        self.assertFalse(week.areas[3].column.now_daylight)  # after sunset: the moon
+        self.assertEqual(week.frees[3].get_text(), "2 h free")  # today's free time, from the new now
         self.page.stack.set_visible_child_name("day")
         self.assertFalse(self.page.units_toggle.get_visible())
 
