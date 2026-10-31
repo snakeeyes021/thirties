@@ -157,7 +157,9 @@ class StateDatabase:
     # --- spans ---
 
     def upsert_span(self, span: EventSpan, updated_at: Optional[str] = None) -> None:
+        from thirties_core.plan_log import record_span_change, stored_span
         with self._get_connection() as conn:
+            old = stored_span(conn, span.id)  # for the plan change log (plan_log.py)
             conn.execute("""
             INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, 0)
@@ -166,20 +168,28 @@ class StateDatabase:
                 updated_at = excluded.updated_at, deleted = 0
             """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
                   updated_at or utc_now_iso()))
+            record_span_change(self, conn, old, span.to_dict())
 
     def insert_span_if_absent(self, span: EventSpan, updated_at: str) -> None:
         """Insert a span unless a row with its id exists (live or deleted)."""
+        from thirties_core.plan_log import record_span_change
         with self._get_connection() as conn:
-            conn.execute("""
+            inserted = conn.execute("""
             INSERT OR IGNORE INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, 0)
-            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt), updated_at))
+            """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
+                  updated_at)).rowcount
+            if inserted:
+                record_span_change(self, conn, None, span.to_dict())
 
     def delete_span(self, span_id: str, updated_at: Optional[str] = None) -> None:
         """Soft-delete, so the deletion can sync to other devices."""
+        from thirties_core.plan_log import record_span_change, stored_span
         with self._get_connection() as conn:
+            old = stored_span(conn, span_id)
             conn.execute("UPDATE spans SET deleted = 1, updated_at = ? WHERE id = ?",
                          (updated_at or utc_now_iso(), span_id))
+            record_span_change(self, conn, old, None)
 
     def get_spans_between(self, start: datetime, end: datetime) -> List[EventSpan]:
         """Live spans overlapping [start, end)."""
@@ -204,6 +214,8 @@ class StateDatabase:
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             span = EventSpan.from_dict(record["data"])
+            from thirties_core.plan_log import record_span_change, stored_span
+            old = stored_span(conn, record["id"])
             conn.execute("""
             INSERT INTO spans (id, data, start_utc, end_utc, updated_at, deleted)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -212,6 +224,7 @@ class StateDatabase:
                 updated_at = excluded.updated_at, deleted = excluded.deleted
             """, (span.id, json.dumps(span.to_dict()), _utc_iso(span.start_dt), _utc_iso(span.end_dt),
                   record["updated_at"], int(record.get("deleted", False))))
+            record_span_change(self, conn, old, None if record.get("deleted") else span.to_dict(), via="another device")
             return True
 
     # --- day metadata ---
@@ -529,27 +542,28 @@ class DeterministicScheduler:
 
         Work runs from work_start_thirty through the end of work_end_thirty, on the
         configured work_days only. Sleep is the night of target_date: from
-        sleep_start_thirty until sleep_end_thirty the following morning.
+        sleep_start_thirty until sleep_end_thirty the following morning. Each weekday can differ (week.py).
         """
+        from thirties_core.week import day_hours
         gen = self.config.general
         tz = self.tz
-        work_start = datetime.combine(target_date, _thirty_to_time(gen.work_start_thirty), tzinfo=tz)
-        work_end = datetime.combine(target_date, _thirty_to_time(gen.work_end_thirty + 1), tzinfo=tz)
+        hours, morning_after = day_hours(gen, target_date), day_hours(gen, target_date + timedelta(days=1))
+        work_start = datetime.combine(target_date, _thirty_to_time(hours.work_start), tzinfo=tz)
+        work_end = datetime.combine(target_date, _thirty_to_time(hours.work_end + 1), tzinfo=tz)
         if work_end <= work_start:
             work_end += timedelta(days=1)
 
-        sleep_start_t = _thirty_to_time(gen.sleep_start_thirty)
+        sleep_start_t = _thirty_to_time(hours.sleep_start)
         sleep_day = target_date if sleep_start_t >= time(12, 0) else target_date + timedelta(days=1)
         sleep_start = datetime.combine(sleep_day, sleep_start_t, tzinfo=tz)
-        sleep_end = datetime.combine(sleep_day, _thirty_to_time(gen.sleep_end_thirty), tzinfo=tz)
+        sleep_end = datetime.combine(sleep_day, _thirty_to_time(morning_after.sleep_end), tzinfo=tz)
         if sleep_end <= sleep_start:
             sleep_end += timedelta(days=1)
 
         # Deterministic ids, so devices that both materialize a day produce the same spans.
         day = target_date.isoformat()
         spans = [EventSpan(f"routine-{day}-sleep", "Sleep", sleep_start, sleep_end, SpanCategory.SLEEP, source="routine")]
-        weekday = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[target_date.weekday()]
-        if weekday in [d.strip().lower()[:3] for d in gen.work_days]:
+        if hours.works:
             spans.insert(0, EventSpan(f"routine-{day}-work", "Work", work_start, work_end, SpanCategory.WORK, source="routine"))
         return spans
 
@@ -558,9 +572,11 @@ class DeterministicScheduler:
         meta = self.state_db.get_day_meta(target_date)
         if meta.routines_applied:
             return
-        for span in self.routine_spans(target_date):
-            # The oldest possible timestamp: any real edit or deletion, on any device, wins over a default.
-            self.state_db.insert_span_if_absent(span, updated_at=ROUTINE_TIMESTAMP)
+        from thirties_core.plan_log import caused_by
+        with caused_by("day set-up"):
+            for span in self.routine_spans(target_date):
+                # The oldest possible timestamp: any real edit or deletion, on any device, wins over a default.
+                self.state_db.insert_span_if_absent(span, updated_at=ROUTINE_TIMESTAMP)
         meta.routines_applied = True
         self.state_db.save_day_meta(meta)
 
@@ -601,14 +617,39 @@ class DeterministicScheduler:
 
         if events is None:
             events = self.fetch_calendar_events(plan)
-        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions())
-        plan.spans.extend(s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end))
+        calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
+                                                  getattr(self.config.calendar, "modes", None))
+        calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]
+        self._holiday_off(plan, events)
+        from thirties_core.calendar_outcomes import CalendarOutcomes
+        CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar
+        plan.spans.extend(calendar_spans)
         plan.spans.sort(key=lambda s: s.start_dt)
 
         meta = self.state_db.get_day_meta(target_date)
         plan.is_finalized = meta.is_finalized
         plan.notes = meta.notes
         return plan, pending
+
+    def _holiday_off(self, plan: DayPlan, events: List[CalendarEvent]) -> None:
+        """A holiday (on a calendar marked "holidays") on a work day: the day's default Work comes off, once, and the
+        morning message says so ("holiday:<date>" in sync meta) so the user can put it back. Work the user set by
+        hand stays."""
+        from thirties_core.calendar_engine import holidays_on
+        key = f"holiday:{plan.target_date.isoformat()}"
+        if self.state_db.get_sync_meta(key):
+            return
+        names = holidays_on(events, plan.target_date, getattr(self.config.calendar, "modes", None))
+        work = [s for s in plan.spans if s.category == SpanCategory.WORK and s.source == "routine"
+                and s.start_dt.date() == plan.target_date]
+        if not names or not work:
+            return
+        from thirties_core.plan_log import caused_by
+        with caused_by(f"holiday: {names[0]}"):
+            for s in work:
+                self.state_db.delete_span(s.id)
+        plan.spans = [s for s in plan.spans if s not in work]
+        self.state_db.set_sync_meta(key, names[0])
 
     def build_rolling_schedule(self, start_date: date, days: int = 7) -> List[DayPlan]:
         """Generate plans for several consecutive days."""

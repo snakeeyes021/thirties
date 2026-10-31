@@ -1,5 +1,6 @@
 """SLM brain: Python-side behavior with a scripted stand-in for Gemma."""
 
+import copy
 import json
 import unittest
 from datetime import timedelta
@@ -77,9 +78,10 @@ class SlmTestCase(unittest.TestCase):
         self.rt = FakeRuntime()
         self.sched = make_scheduler([event("dentist", "18:00", "18:30", "Dentist")])
         plan, pending = self.sched.build_day_plan(DAY)
-        self.m = ConversationManager(plan, list(TASKS), pending, self.sched, active_notes=[],
+        tasks = [copy.copy(t) for t in TASKS]  # tools change items (urgency, horizon): never the shared ones
+        self.m = ConversationManager(plan, tasks, pending, self.sched, active_notes=[],
                                      brain=None, inference_engine=None)
-        self.brain = SlmBrain(self.m.tools, tasks=list(TASKS), runtime=self.rt)
+        self.brain = SlmBrain(self.m.tools, tasks=list(tasks), runtime=self.rt)
         self.m.brain = self.brain
         self.m._load(None)
 
@@ -125,7 +127,7 @@ class TestSchedulingActions(SlmTestCase):
                        {"type": "add", "title": "Email recruiter", "start": "9", "end": "10"},
                        {"type": "move", "target": "natalie listening", "start": "10", "end": "11"})
         self.assertIn("Added Email recruiter: 9:00 PM – 10:00 PM", out)
-        self.assertIn("Natalie listening now 10:00 PM – 11:00 PM", out)  # slid along by the add, as asked
+        self.assertIn("Natalie listening to 10:00 PM – 11:00 PM", out)  # moved, as asked
         self.assertNotIn("overlap", out)
         self.assertNotIn("couldn't", out)
 
@@ -247,7 +249,8 @@ class TestSchedulingActions(SlmTestCase):
                                                          "duration": "30 minutes", "day": "tomorrow"})
         out = self.say("walk tmrw at 7:30 for an hour", {"type": "add", "title": "Walk", "start": "7:30 AM",
                                                           "duration": "1 hour", "day": "tomorrow"})
-        self.assertIn("To make room: Email the recruiter now 8:30 AM – 9:00 AM", out)  # slid, not a question
+        self.assertIn("Added Walk", out)  # it shares the time: nothing else moves unasked (item 17)
+        self.assertNotIn("To make room", out)
         out = self.say("actually move the recruiter email to 9:30", {"type": "move", "target": "recruiter email",
                                                                       "start": "9:30 AM"})
         self.assertIn("Moved", out)
@@ -371,7 +374,8 @@ class TestProposalsAndOutcomes(SlmTestCase):
         span = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Taxes")
         self.assertEqual((span.status.value, span.actual_end, span.time_source), ("done", at("15:30"), "estimated"))
         out = self.say("I'm wiped", {"type": "energy", "level": 1})
-        self.assertIn("lighten", out)
+        self.assertIn("low on energy", out)
+        self.assertIn("already light", out)  # nothing heavy is left today: nothing to propose
 
     def test_memory_and_profile(self):
         self.say("fyi probation is stuff I won't do", {"type": "remember", "text": "Probation items are maybes"})
@@ -681,6 +685,281 @@ class TestFromTheDaySim(unittest.TestCase):
     def test_tomorrow_when_the_parse_drops_the_day(self):
         out = self.say("what does tomorrow look like?", {"type": "question", "topic": "schedule"})
         self.assertNotIn("Here's today", out)
+
+
+class ParityTestCase(SlmTestCase):
+    """Joplin with a Today note, an errands list and the user's morning routine (a template, ticked there)."""
+
+    STEPS = ["Feed kitties", "Caffeinate", "Water bottle", "Breakfast", "Throne", "Shower", "PT", "Brush teeth"]
+    TITLES = {"n_today": "Today To-Do", "n1": "Errands/Admin", "n_routine": "Morning Routine"}
+
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock
+        from thirties_core.lists import ListCatalog
+        self.api = FakeJoplinAPI({"n_today": {"id": "n_today", "body": ""},
+                                  "n1": {"id": "n1", "body": "- [ ] Costco customer service\n"},
+                                  "n_routine": {"id": "n_routine", "body": "".join(f"- [x] {s}\n" for s in self.STEPS)}})
+        joplin = MagicMock()
+        joplin.api_client = self.api
+        joplin.fetch_active_notes.side_effect = lambda: [
+            {"id": nid, "title": self.TITLES[nid], "source_notebook": "1. Tasks", "body": n["body"]}
+            for nid, n in self.api.notes.items()]
+        self.m.tools.services.joplin = joplin
+        self.sched.config.joplin.write_back, self.sched.config.joplin.api_token = True, "tok"
+        catalog = ListCatalog(self.sched.state_db)
+        catalog.set_role("n_today", "today", "Today To-Do")
+        catalog.set_role("n1", "list", "Errands/Admin")
+        catalog.set_role("n_routine", "routine", "Morning Routine")
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")  # this morning's reset ran
+
+    def span(self, title):
+        return next(s for s in self.m.day_plan.spans if s.title == title)
+
+
+class TestParityWithGemini(ParityTestCase):
+    """0.2: a Gemma user can do what a Gemini user can (today's list, urgency, item facts, routines)."""
+
+    def test_put_things_on_todays_list(self):
+        out = self.say("I want to get the costco customer service thing done, stick it on my list for today",
+                       {"type": "today", "title": "costco customer service"})
+        self.assertEqual(out, "Added to today's list: Costco customer service.")
+        self.assertEqual(self.api.notes["n_today"]["body"], "- [ ] Costco customer service\n")
+        self.say("laundry at 7", {"type": "add", "title": "Laundry", "start": "7", "duration": "1 hour"})
+        out = self.say("and put that on the list for today too", {"type": "today", "title": "that"})
+        self.assertEqual(out, "Already on it: Laundry.")  # what's planned today is on Today already (Block 0)
+
+    def test_an_invented_list_item_is_dropped(self):
+        out = self.say("what a day", {"type": "today", "title": "Buy milk"})
+        self.assertNotIn("Buy milk", self.api.notes["n_today"]["body"])
+        self.assertNotIn("Added", out)
+
+    def test_thats_not_urgent_names_the_item_just_planned(self):
+        self.say("costco customer service at 5", {"type": "add", "title": "Costco customer service", "start": "5",
+                                                  "duration": "30 min"})
+        out = self.say("eh, that's not urgent", {"type": "urgency", "target": "that", "urgency": "now"})
+        self.assertEqual(out, "Noted: 'Costco customer service' is whenever.")  # the words win over the model's field
+        task = next(t for t in self.m.tools.services.tasks if t.id == "t1")
+        self.assertEqual(task.urgency, "whenever")
+
+    def test_urgency_on_a_near_match_asks_first(self):
+        out = self.say("the costco call has to happen by friday",
+                       {"type": "urgency", "target": "costco call", "day": "friday"})
+        self.assertEqual(out, "Do you mean Costco customer service?")
+        task = next(t for t in self.m.tools.services.tasks if t.id == "t1")
+        self.assertFalse(task.due)  # nothing written on a near match
+        out = self.say("yes", {"type": "confirm"})
+        self.assertTrue(out.startswith("Noted: 'Costco customer service' is by"), out)
+        self.assertEqual(task.due, "2026-10-16")
+
+    def test_after_the_shower_is_kept_and_applied_now(self):
+        from thirties_core.facts import SpanFacts
+        self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 min"})
+        self.say("shower at 7", {"type": "add", "title": "Shower", "start": "7", "duration": "30 min"})
+        out = self.say("oh the walk has to wait until after the shower",
+                       {"type": "move", "target": "walk", "after": "shower"})  # a rule said as a move
+        self.assertIn("Noted for Walk: after Shower.", out)
+        self.assertIn("Moved Walk to 7:30 PM – 8:00 PM to keep it.", out)
+        self.assertEqual(SpanFacts(self.sched.state_db).get(self.span("Walk").id).after, [self.span("Shower").id])
+
+    def test_outside_things_wait_for_the_shower(self):
+        self.say("walk at 5", {"type": "add", "title": "Walk", "start": "5", "duration": "30 min"})
+        self.say("shower at 7", {"type": "add", "title": "Shower", "start": "7", "duration": "30 min"})
+        out = self.say("remember, outside things wait until after the shower",
+                       {"type": "remember", "text": "Outside things wait until after the shower"})
+        self.assertIn("I'll keep outside things after Shower from now on.", out)
+        self.assertEqual(occupant(self.m.day_plan, "19:30"), "Walk")
+        self.assertIn("Outside things wait until after the shower", [n.text for n in self.m.tools.services.memory.notes()])
+
+    def test_it_cant_move(self):
+        from thirties_core.facts import SpanFacts
+        self.say("cats dinner at 5", {"type": "add", "title": "Cats' dinner", "start": "5", "duration": "15 min"})
+        out = self.say("that one's not allowed to move", {"type": "fact", "target": "that"})
+        self.assertIn("Noted for Cats' dinner", out)
+        self.assertTrue(SpanFacts(self.sched.state_db).get(self.span("Cats' dinner").id).anchored)
+
+    def test_put_the_morning_routine_on_as_two_thirties(self):
+        out = self.say("put my morning routine on", {"type": "routine", "title": "Morning routine"})
+        self.assertTrue(out.startswith("Put Morning Routine on the plan: 5:00 PM: Feed kitties, Caffeinate, Water "
+                                       "bottle, Breakfast; 5:30 PM: Throne, Shower, PT, Brush teeth."), out)
+        self.assertIn("It's on today's list too.", out)
+        self.assertEqual(len([s for s in self.m.day_plan.spans if s.title in self.STEPS]), 8)
+        self.assertTrue(self.api.notes["n_today"]["body"].startswith("- [ ] Morning Routine\n    - [ ] Feed kitties"))
+        self.assertEqual(self.api.notes["n_routine"]["body"], "".join(f"- [x] {s}\n" for s in self.STEPS))
+
+    def test_a_routine_parsed_as_an_add_at_a_time(self):
+        out = self.say("morning routine at 7 tonight, I'm off schedule",
+                       {"type": "add", "title": "Morning routine", "start": "7"})
+        self.assertIn("7:00 PM: Feed kitties", out)
+        self.assertIn("7:30 PM: Throne", out)
+        self.assertNotIn("Morning routine", [s.title for s in self.m.day_plan.spans])  # never one item
+
+    def test_the_routine_goes_on_the_way_it_did_last_time(self):
+        from tests.fixtures import TZ
+        from datetime import datetime, time as _t
+        from thirties_core.models import EventSpan, SpanCategory
+        y = DAY - timedelta(days=1)
+        layout = {"Feed kitties": "09:00", "Caffeinate": "09:00", "Water bottle": "09:00", "Breakfast": "09:00",
+                  "Throne": "15:00", "Shower": "15:00", "PT": "15:00", "Brush teeth": "15:00"}
+        for i, (title, hhmm) in enumerate(layout.items()):
+            h, m = (int(x) for x in hhmm.split(":"))
+            start = datetime.combine(y, _t(h, m + (i % 4) * 5), TZ)
+            self.sched.state_db.upsert_span(EventSpan(f"y{i}", title, start, start + timedelta(minutes=5),
+                                                      SpanCategory.TASK))
+        set_debug_time(at("08:10"))
+        self.say("put the morning routine on please", {"type": "routine", "title": "morning routine"})
+        # the morning set-up (routines.py) may already have put it on: either way, it's on the way it went last time
+        placed = {s.title: s.start_dt for s in self.m.day_plan.spans if s.title in layout}
+        from thirties_core.clock import thirty_of
+        self.assertEqual({t: thirty_of(d).strftime("%H:%M") for t, d in placed.items()}, layout)
+        set_debug_time(at("10:10"))  # the morning's thirty has passed: after work on a work day (B3's fallback)
+        note = self.brain._routine_note("morning")
+        parts = self.brain._routine_parts(note, self.STEPS, None)
+        self.assertEqual([p["start"] for p in parts], ["4:00 PM", "4:30 PM"])
+        self.m.tools.execute("remove_event", {"event": "Work"})  # a day off: the next free thirty, 3 PM kept
+        parts = self.brain._routine_parts(note, self.STEPS, None)
+        self.assertEqual([p["start"] for p in parts], ["10:30 AM", "3:00 PM"])
+
+
+class TestGemmaLearnsRoutinePlacement(ParityTestCase):
+    """0.2 stream K: a Gemma user's routine placement is learned like a Gemini user's (routines.py), so the next
+    morning is set up the same way."""
+
+    def book(self):
+        from thirties_core.routines import RoutineBook
+        return RoutineBook(self.sched.state_db).get("n_routine")
+
+    def test_placing_it_at_a_time_is_learned(self):
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        r = self.book()
+        self.assertEqual([p["at"] for p in r.parts], ["19:00", "19:30"])
+        self.assertEqual(r.placement_source, "learned")
+
+    def test_the_stored_placement_is_used_and_a_missed_part_isnt_learned_as_usual(self):
+        from thirties_core.routines import RoutineBook
+        book = RoutineBook(self.sched.state_db)
+        r = book.get("n_routine", "Morning Routine")
+        r.parts = [{"items": ["Feed kitties", "Caffeinate"], "at": "09:00", "fallback": ""},
+                   {"items": ["Water bottle", "Breakfast", "Throne", "Shower", "PT", "Brush teeth"], "at": "20:00",
+                    "fallback": ""}]
+        r.placement_source = "learned"
+        book.save(r)
+        set_debug_time(at("10:10"))
+        note = self.brain._routine_note("morning")
+        parts = self.brain._routine_parts(note, self.STEPS, None)
+        self.assertEqual(parts[1], {"start": "8:00 PM", "items": r.parts[1]["items"]})  # its own grouping, its time
+        self.assertTrue(self.brain._routine_shifted)  # 9:00 has passed: today's stand-in
+        self.brain._put_routine(note, None)
+        self.assertEqual([p["at"] for p in self.book().parts], ["09:00", "20:00"])  # still where it usually goes
+
+    def test_moving_a_step_by_itself_is_learned_but_not_inside_a_redraw(self):
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        self.m.tools.user_message = "move the shower to 9"
+        self.m.tools.execute("update_event", {"event": self.span("Shower").id, "start": "9:00 PM"})
+        parts = {p["at"]: p["items"] for p in self.book().parts}
+        self.assertEqual(parts["21:00"], ["Shower"])
+        self.assertNotIn("Shower", parts["19:30"])
+        from thirties_core import plan_log
+        with plan_log.tool_call("redraw"):
+            self.m.tools.execute("update_event", {"event": self.span("PT").id, "start": "10:00 PM"})
+        self.assertNotIn("22:00", {p["at"] for p in self.book().parts})
+
+    def test_a_day_page_drag_is_learned(self):
+        from thirties_core import plan_log
+        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        with plan_log.caused_by("Day page"):
+            self.m.execute_tool("update_event", {"event": self.span("Feed kitties").id, "start": "6:30 PM"})
+        self.assertEqual({p["at"]: p["items"] for p in self.book().parts}["18:30"], ["Feed kitties"])
+
+
+class TestHelpersForGemma(ParityTestCase):
+    """ROADMAP C3 and "After 0.1" 2: separate the requests, parse each, check nothing was lost."""
+
+    def test_each_request_is_parsed_on_its_own(self):
+        self.rt.parse_replies.extend([actions({"type": "move", "target": "work", "end": "4:30"}),
+                                      actions({"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"})])
+        self.m.send_user_message("work ran until 4:30, and put reading at 7 for an hour")
+        out = self.m.last_raw_reply
+        self.assertIn("Work now ends at 4:30 PM.", out)
+        self.assertIn("Added Reading: 7:00 PM – 8:00 PM", out)
+        asked = [s.split('Message: "')[1] for s in self.rt.parse.seen[-2:]]
+        self.assertEqual(asked, ['work ran until 4:30"', 'put reading at 7 for an hour"'])
+
+    def test_a_part_nothing_covered_is_retried_then_asked_about(self):
+        self.rt.parse_replies.extend([actions({"type": "chat"}),
+                                      actions({"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"}),
+                                      actions({"type": "chat"})])  # the retry of the lost part
+        self.m.send_user_message("move the budget review to thursday, and put reading at 7 for an hour")
+        out = self.m.last_raw_reply
+        self.assertIn("Added Reading", out)
+        self.assertTrue(out.endswith('I didn\'t catch what to do about "move the budget review to thursday". Could '
+                                     'you say that part again?'), out)
+        self.assertEqual(len(self.rt.parse.seen), 3)  # two requests, then the lost one again on its own
+
+    def test_a_lost_part_found_by_the_retry_is_done(self):
+        self.rt.parse_replies.extend([actions({"type": "add", "title": "Reading", "start": "7", "duration": "1 hour"}),
+                                      actions({"type": "move", "target": "work", "end": "4:30"})])
+        self.brain.SPLIT_REQUESTS = False  # the old one-shot parse, which dropped the work change
+        self.m.send_user_message("put reading at 7 for an hour and work ran until 4:30")
+        out = self.m.last_raw_reply
+        self.assertIn("Added Reading", out)
+        self.assertIn("Work now ends at 4:30 PM.", out)
+
+    def test_a_reminder_doesnt_swallow_the_other_request(self):
+        self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
+        self.rt.parse_replies.extend([actions({"type": "add", "title": "Call mom"}),
+                                      actions({"type": "move", "target": "dinner", "start": "8"})])
+        self.m.send_user_message("remind me tomorrow at 9 to call mom, and push dinner to 8")
+        out = self.m.last_raw_reply
+        self.assertIn("Call mom", out)
+        self.assertIn("Moved Dinner to 8:00 PM – 9:00 PM.", out)
+
+    def test_dinner_with_a_book_alongside_is_one_dinner(self):
+        out = self.say("Dinner at 7, cooking and eating, listening to Project Hail Mary",
+                       {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"},
+                       {"type": "add", "title": "Cooking and eating"},
+                       {"type": "add", "title": "Listening to Project Hail Mary"})
+        titles = sorted(s.title for s in self.m.day_plan.spans if not s.is_envelope and s.source != "calendar")
+        self.assertEqual(titles, ["Dinner", "Project Hail Mary"], out)
+        book = self.span("Project Hail Mary")
+        self.assertEqual((book.start_dt, book.end_dt), (self.span("Dinner").start_dt, self.span("Dinner").end_dt))
+
+    def test_low_energy_offers_one_lighter_plan_applied_on_sure(self):
+        self.say("grant report at 7", {"type": "add", "title": "Write the grant report", "start": "7",
+                                        "duration": "1 hour"})
+        self.say("call mom at 8:30", {"type": "add", "title": "Call mom", "start": "8:30", "duration": "30 min"})
+        out = self.say("ugh I'm wiped", {"type": "energy", "level": 1})
+        self.assertEqual(out, "Noted that you're low on energy. For a lighter rest of today, I'd move these to "
+                              "tomorrow:\n- Write the grant report (7:00 PM)\nOkay?")
+        out = self.say("sure", {"type": "chat"})
+        self.assertTrue(out.startswith("Moved to tomorrow: Write the grant report. Go easy on yourself."), out)
+        titles = [s.title for s in self.m.day_plan.spans]
+        self.assertNotIn("Write the grant report", titles)
+        self.assertIn("Call mom", titles)
+        tomorrow = self.m.tools.plan_for("tomorrow")
+        self.assertIn("Write the grant report", [s.title for s in tomorrow.spans])
+
+    def easy_task(self):
+        bank = TaskItem(id="t7", source_notebook="1. Tasks", title="Call the bank", parent_note_title="Errands/Admin",
+                        parent_note_id="n1", is_checkbox_item=True)
+        self.brain.tasks.append(bank)
+
+    def test_you_pick_when_tired_picks_easy_things(self):
+        self.easy_task()
+        out = self.say("I'm fried, you pick something for tonight", {"type": "energy", "level": 1})
+        self.assertIn("Call the bank", out)
+        self.assertIn("Call the bank", [s.title for s in self.m.day_plan.spans])  # "you pick": made, not asked
+        for hard in ("Fix the media server", "Write wedding thank-you notes", "Text search for Natalie's piece"):
+            self.assertNotIn(hard, out)
+
+    def test_ideas_when_tired_are_one_easy_plan_to_say_yes_to(self):
+        self.easy_task()
+        out = self.say("I'm beat. any ideas for tonight?", {"type": "suggest", "topic": "tonight"})
+        self.assertTrue(out.startswith("Here's an easy plan:"), out)
+        self.assertTrue(out.endswith("Want it?"), out)
+        self.assertNotIn("say the number", out)
+        out = self.say("sure", {"type": "confirm"})
+        self.assertIn("Added Call the bank", out)
 
 
 if __name__ == "__main__":

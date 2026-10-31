@@ -146,6 +146,48 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(out, "Done.")  # never raw tool output, never "Understood."
         self.assertIsNone(occupant(self.manager.day_plan, "10:00"))
 
+    def test_work_only_changes_when_the_user_talks_about_it(self) -> None:
+        # 10-27: placing the morning routine moved Work to 10:30; "Work starts at 7am"
+        self.engine.set_next_response(reply('CALL update_event {"event": "Work", "start": "10:30 AM"}'))
+        self.engine.set_next_response(reply("Your routine is on at 9:30."))
+        self.manager.send_user_message("put my morning routine on at 9:30")
+        work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
+        self.assertEqual(work.start_dt.strftime("%H:%M"), "08:30")
+        tool = next(m for m in self.manager.messages if m.get("role") == "tool")
+        self.assertIn("only changes when the user talks about it", tool["content"])
+        self.engine.set_next_response(reply('CALL update_event {"event": "Work", "end": "3:55 PM"}'))
+        self.engine.set_next_response(reply("Noted."))
+        self.manager.send_user_message("Just finished work")  # 10-28: that one is right
+        work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
+        self.assertEqual(work.end_dt.strftime("%H:%M"), "15:55")
+        self.assertIsNone(self.manager.tools.user_message)  # a drag in the Day page later isn't judged by it
+
+    def test_the_morning_offer_comes_with_the_first_message(self) -> None:
+        # 10-30 sim: planned at 6:30, then pinged at 7:30 about yesterday's items as if nothing had been said
+        from datetime import timedelta
+        from thirties_core.models import EventSpan, SpanCategory
+        from tests.fixtures import at
+        db = self.manager.scheduler.state_db
+        db.upsert_span(EventSpan("y1", "Email back GitHub", at("19:00") - timedelta(days=1),
+                                 at("19:30") - timedelta(days=1), SpanCategory.ACTIVITY))
+        self.engine.set_next_response(reply("Morning! Want Email back GitHub today too?"))
+        self.manager.send_user_message("morning! let's plan")
+        notes = [m["content"] for m in self.manager.brain.messages if m.get("role") == "user"]
+        self.assertTrue(any(n.startswith("[System check") and "Email back GitHub" in n for n in notes), notes)
+        self.assertEqual(db.get_sync_meta(f"rollover_offered:{DAY.isoformat()}"), "in_conversation")  # no ping later
+        self.assertNotIn("System check", " ".join(m["content"] for m in self.manager.history()))
+
+    def test_a_claimed_outcome_without_log_outcome_is_asked_again(self) -> None:
+        # 10-30 sim: "I've logged that session as done", with nothing logged; the notices nagged about it later
+        self.manager.execute_tool("add_event", {"title": "Natalie piece", "start": "9:00 AM", "duration": "1 hour"})
+        self.engine.set_next_response(reply("I've logged that session on the Natalie piece as done!"))
+        self.engine.set_next_response(reply('CALL log_outcome {"event": "Natalie piece", "status": "done"}'))
+        self.engine.set_next_response(reply("Logged the Natalie piece as done."))
+        self.manager.send_user_message("great session on the natalie piece")
+        notes = [m["content"] for m in self.manager.brain.messages if m.get("role") == "user"]
+        self.assertTrue(any("no log_outcome went through" in n for n in notes), notes)
+        self.assertEqual(self.manager.tools.outcomes_logged, 1)
+
     def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
         self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
         self.engine.set_next_response(reply("You're free all afternoon."))
@@ -158,12 +200,12 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(self.manager.send_user_message("what's pressing?"), text)  # 10-21: the list vanished
 
     def test_a_reply_claiming_a_failed_change_is_corrected(self) -> None:
-        self.engine.responses = [reply('CALL log_outcome {"event": "Put watch back on wrist", "status": "done"}'),
+        self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),
                                  reply("All set, noted!"),
-                                 reply("I couldn't find Put watch back on wrist on today's plan. Want me to add it?")]
-        out = self.manager.send_user_message("I put the watch back on")  # 10-24: three refusals, then "All set"
-        self.assertEqual(out, "I couldn't find Put watch back on wrist on today's plan. Want me to add it?")
-        self.engine.responses = [reply('CALL log_outcome {"event": "Nope", "status": "done"}'),
+                                 reply("I couldn't record that: Work isn't tracked that way.")]
+        out = self.manager.send_user_message("skipped work today")  # 10-24: three refusals, then "All set"
+        self.assertEqual(out, "I couldn't record that: Work isn't tracked that way.")
+        self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),
                                  reply("All set, noted!"), reply("All set!")]
         out = self.manager.send_user_message("done with nope")
         self.assertEqual(out, "All set, noted!\n\n(One part of that didn't go through, so it isn't recorded yet.)")

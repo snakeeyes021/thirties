@@ -38,7 +38,9 @@ _ALL = [
     Setting("general.work_end_thirty", "shared"),
     Setting("general.sleep_start_thirty", "shared"),
     Setting("general.sleep_end_thirty", "shared"),
+    Setting("general.week", "shared"),  # what's different on some weekdays (week.py)
     Setting("general.temperature_unit", "shared"),
+    Setting("general.week_start", "shared"),
     Setting("media.goodreads_user_id", "shared"),
     Setting("media.letterboxd_username", "shared"),
     Setting("media.serializd_username", "shared"),
@@ -48,10 +50,16 @@ _ALL = [
     Setting("joplin.whitelist_notes", "shared"),
     Setting("joplin.someday_sections", "shared"),
     Setting("joplin.reset_routines", "shared"),
+    Setting("joplin.file_done", "shared"),
     Setting("assistant.checkins", "shared"),
     Setting("assistant.checkin_after_minutes", "shared"),
     Setting("assistant.message_level", "shared"),
     Setting("telegram.notify_block_transitions", "shared"),
+    Setting("calendar.modes", "shared"),  # per calendar: mine / show only / ignore (by name: uids differ per device)
+    Setting("telegram.mirror_desktop", "shared"),
+    Setting("timeline.free_units", "shared"),  # free time in "blocks" or "hours" (timeline_layout.py)
+    Setting("assistant.sunrise_notice", "shared"),
+    Setting("assistant.sunset_notice", "shared"),
     # about this machine
     Setting("assistant.brain", "device"),
     Setting("general.latitude", "device"),
@@ -62,6 +70,13 @@ _ALL = [
     Setting("inference.gemini_api_key", "device", secret=True),
     Setting("joplin.api_token", "device", secret=True),
     Setting("joplin.launch_when_needed", "device"),
+    # the headless sync peer (joplin_peer.py): per machine, since each computer runs its own
+    Setting("joplin.peer_enabled", "device"),
+    Setting("joplin.peer_target", "device"),
+    Setting("joplin.peer_target_values", "device"),
+    Setting("joplin.peer_token", "device", secret=True),
+    Setting("joplin.peer_password", "device", secret=True),
+    Setting("joplin.peer_master_password", "device", secret=True),
     Setting("sync.mode", "device"),
     Setting("sync.folder", "device"),
     Setting("telegram.enabled", "device"),
@@ -69,6 +84,7 @@ _ALL = [
     Setting("telegram.allowed_chat_ids", "device"),
     Setting("setup.done", "device"),
     Setting("background.enabled", "device"),
+    Setting("background.autostart", "device"),
 ]
 SETTINGS: Dict[str, Setting] = {s.key: s for s in _ALL}
 

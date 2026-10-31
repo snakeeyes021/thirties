@@ -16,8 +16,10 @@ from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.clock import format_clock
+from thirties_core.goals import prompt_lines as goal_check_lines
 from thirties_core.inference import InferenceEngine
 from thirties_core.lists import ListCatalog, urgency_label
+from thirties_core.messages import now_section
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS, TOOL_SPECS, PlanTools
 
@@ -51,6 +53,7 @@ ROLE_BADGES = {
     "list": " [List]",
     "project": " [Project: a one-off with an end]",
     "backlog": " [Project backlog: plan time on the project as one item ('<project> dev'), never single tickets]",
+    "dropbox": " [Drop box: for new things with no obvious list; never suggest its items as they are]",
     "reference": " [Reference / wishlist: never suggest unless asked]",
 }
 
@@ -97,22 +100,40 @@ class FrontierBrain:
         services = self.tools.services
         assistant = self.tools.assistant
         profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
+        stale = goal_check_lines(services.profile.sections(), self.tools.today()) if services else []
+        if stale:  # A7: weeks-old goals fed stale suggestions ("did we not finish the Ethernet cable?")
+            profile += ("\n\nGOALS TO CHECK (not checked in a while: before suggesting anything for one, ask the user "
+                        "once whether it's still current, done or dropped, and record it with check_goal)\n"
+                        + "\n".join(stale))
         memory = "\n".join(f"- {n.text} (id {n.id})" for n in services.memory.notes()) if services else ""
         stats = "\n".join(f"- {f}" for f in assistant.statistics_facts()) if assistant else ""
         weather = "\n".join(f"- {f}" for f in assistant.weather_facts()) if assistant else ""
         weather = weather or "- No forecast available."
         review_block = ""
+        lasting = ""
+        if assistant is not None and self.tools.scheduler:
+            from thirties_core.item_facts import lasting_lines
+            try:
+                assistant.settle_moot()  # gone moot (lunch once dinner's begun) isn't waiting for an outcome
+            except Exception as e:
+                logger.warning("Settling moot items failed: %s", e)
+            lines = lasting_lines(self.tools._lasting())
+            if lines:
+                lasting = ("EVERY DAY (what the user said holds for these items every day; the tools keep it)\n"
+                           + "\n".join(f"- {line}" for line in lines) + "\n\n")
         if services and self.tools.scheduler:
             from thirties_core.stats import unreviewed_spans
             since = plan.day_start - timedelta(days=1)
             recent = self.tools.scheduler.state_db.get_spans_between(since, now)
             waiting = unreviewed_spans(recent, now, since)
             if waiting:
-                review_block = ("WAITING FOR AN OUTCOME (ask about these once, briefly, when it fits; record with log_outcome)\n"
+                review_block = ("WAITING FOR AN OUTCOME (record with log_outcome when the user mentions them; don't ask "
+                                "about them after each report: what's not marked yet is shown with the status)\n"
                                 + "\n".join(f"- {s.start_dt.strftime('%a')} {format_clock(s.start_dt)} – "
                                              f"{format_clock(s.end_dt)}: {s.title} id={s.id}" for s in waiting[-8:])
                                 + "\n\n")
 
+        day_setup = (assistant.routines.prompt_section() + assistant.proposals.prompt_section()) if assistant else ""
         pending = [s for s in plan.spans_in_view() if s.tentative]
         invites = "\n".join(
             f"- {s.title}, {format_clock(s.start_dt)} – {format_clock(s.end_dt)} id={s.id}" for s in pending
@@ -124,13 +145,13 @@ PLANNING DATE: {when}
 Sunrise {format_clock(plan.sunrise)}, sunset {format_clock(plan.sunset)}. This day runs from {format_clock(plan.day_start)} until {format_clock(plan.day_end)} tomorrow morning, so tonight belongs to this day.
 Open blocks (half-hour chunks) still ahead: {avail["daylight_open"]} in daylight, {avail["dark_open"]} in the dark.
 
-SCHEDULE
+{now_section(self.tools) if is_today else ""}SCHEDULE
 {self.tools.schedule_text(upcoming_from=now if is_today else None)}
 
 UNCONFIRMED CALENDAR INVITES
 {invites}
 
-{review_block}BACKLOG
+{day_setup}{review_block}{lasting}BACKLOG
 {self.build_backlog_summary()}
 
 USER PROFILE (what you know about the user's life; keep it current with update_profile)
@@ -155,7 +176,7 @@ Tools:
 {render_tool_specs()}
 
 RULES
-1. Change the schedule, or the user's lists in Joplin (add_task, break_down_task), only when the user asks or agrees to a proposal. When they ask for ideas or suggestions, propose and ask; don't change anything.
+1. Change the schedule, or the structure of the user's lists in Joplin (break_down_task, edit_list_item), only when the user asks or agrees to a proposal (adding to a list: rule 9). When they ask for ideas or suggestions, propose and ask; don't change anything.
 2. Every change needs a CALL. Never say something was scheduled, moved or removed without the CALL that does it. Tool results are notes for you, not the user: never quote them or mention tools; say what happened, or ask what you need to, in your own words.
 3. Give times as clock times. Say AM or PM only where it could be mistaken: the first time if it isn't obvious from the current time, whenever a time crosses noon or midnight from the one before, and on a bare hour that's ambiguous. Never work out end times or durations yourself; the tools do all time math and report the exact result.
 4. Use the statistics: propose durations from how long things really take the user, and if a heads-up says the day holds more than they usually get through, say so once, kindly, and offer what could move.
@@ -163,21 +184,28 @@ RULES
 6. A result starting with {NOT_DONE} means nothing changed. Tell the user plainly and offer a way forward. Calendar commitments are never overwritten.
 7. Daylight and dark are physical facts, not rules about what belongs when. Only consider them when it physically matters (a daylight hike) or the user has said what they prefer.
 8. Changes are live the moment you make them. There is no separate step to save, confirm, "lock in" or finalize a plan, so never offer one.
-9. Scheduling versus lists. When the user names something to do, call match_backlog. "Same task": schedule it with that task_id. "Only similar": don't assume or correct them; ask whether it's that item (quote it) or something new. "Nothing": schedule it as a new item. Add to a list (add_task) when they ask, or offer once if it sounds like a to-do they'll want to track (not meals or routines); when they want it both added and scheduled, do both in one add_task call by giving it start (and duration), so the two stay linked.
+9. Scheduling versus lists. When the user names something to do, call match_backlog. "Same task": schedule it with that task_id. "Only similar": don't assume or correct them; ask whether it's that item (quote it) or something new. "Nothing": schedule it as a new item. Add to a list (add_task) when they ask, or when it's clearly a to-do they'll want to track (not meals or routines). Choose the list and section yourself, with a short reason, and say where it went; never ask the user where it goes. When no list is obvious, use the drop box. When they want it both added and scheduled, do both in one add_task call by giving it start (and duration), so the two stay linked.
 10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. Each note says what it's for, and items say how pressing they are (now, soon, by a date; unmarked is no hurry): favour what's pressing, and never push someday or reference items. When the user says how pressing something is, record it with set_urgency. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or blocks, so do you ("you have three open chunks at 4:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed cat"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
-12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing PT doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. If they don't say when, estimate and pass estimated=true. If you're unsure whether something happened, ask a short check-in question ("Did you get to X, or are you still on Y?"). If they mention how they feel, log_energy.
+12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing PT doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. If they don't say when, estimate and pass estimated=true. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. After the user reports something, don't ask about the rest of the block or other items they didn't mention ("Did you get to X?"): what's not marked yet is shown with the status. If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
 13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
-14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned. For bigger-picture planning (goals over weeks), look at week_overview, statistics and the profile, and spread work across days. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
-15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: add the second one with alongside=true. Never join two things into one title.
+14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned; it goes on that day's plan and reaches the Today list that morning (say so). Things for a later day with no time: add_to_today with that day. Bigger picture: the user's lists are their goals, and each item belongs to a horizon (day, week, month, year, someday; set_horizon when they say so). A week plan is items dropped into the week (or onto a day of it), a month plan into the month, a year plan into the year; pin_to_period and unpin_from_period change one item, show_period answers "what's on this week?", and planning a week, month or year is propose_period (Python lists the candidates and their facts; you pick and say why), applied with apply_period_proposal when the user agrees, also after a planning offer Thirties sent. Plan days from the week's plan. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
+15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: just add each at its time. Never join two things into one title.
 16. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
-17. "Remind me to X" is a thing to do: set_reminder puts it on the plan (and today's list) with a ping when it's time; if they give no time, choose a sensible one and say it. Only a bare message with nothing to do ("ping me at 3 that the laundry's done") is ping_only; call that a ping, never a "reminder". If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
-18. Mornings: Thirties offers to carry yesterday's unfinished items into today, both planned ones and ones still on today's list, plus anything pressing (rollover_proposal shows it). When the user agrees, call apply_rollover (with skip for anything they want left out) instead of moving items one by one. If it names items with no list to go back to, propose a list for each, one per line ("- Clip cat nails → Errands/Admin"), and add them with add_task once the user agrees.
-19. Time is told in half-hour blocks, like reading a piano roll. Items keep their real times (the tools show them, with the block each is in); blocks are how the day is shown. A schedule or list is told by blocks: each row is a block and what's in it, things at the same time joined with + ("- 10:30 – Personal call + Break"); when one thing ends and another begins within a block, the block's time, then each on its own line; consecutive blocks with the same things are one row. Asked about one item, give its real time and its block ("Your Uber is at 12:15, in the 12:00 block"). Never change a time the user gave: 12:15 is never "12:00". Exact minutes for everything only if asked (list_schedule exact=true). Never put the word "thirty" next to a time: say block or chunk. Things set by someone else's clock (appointments, rides, flights, shows, calls at a set time) are fixed: they keep their exact time and never slide; for an unclear case, say fixed=true or false when adding it. Flexible things keep to blocks: one that would start mid-block and run into the next starts at the next block. Several short things can share a block: add each one normally (not alongside) and the tool stacks them in order. Use alongside only for things done at the same time.
+17. "Remind me to X" is a thing to do: set_reminder puts it on the plan (and today's list) with a ping when it's time; if they give no time, choose a sensible one and say it. Only a bare message the user asks for as a ping or alarm ("ping me at 3 that the laundry's done") is ping_only; call that a ping or an alarm, never a "reminder". If they say there's no need to keep asking about something, or to stop check-ins, use mute_checkins.
+18. Mornings: Thirties offers to carry yesterday's unfinished items into today, both planned ones and ones still on today's list, plus anything pressing (rollover_proposal shows it). When the user agrees, call apply_rollover (and apply_day_proposal too if a DAY PROPOSAL is waiting: one yes takes both) (with skip for anything they want left out) instead of moving items one by one. If it names items with no list to go back to, propose a list for each, one per line ("- Clip cat nails → Errands/Admin"), and add them with add_task once the user agrees.
+19. Time is told in half-hour blocks, like reading a piano roll. Items keep their real times (the tools show them, with the block each is in); blocks are how the day is shown. A schedule or list is told by blocks: each row is a block and what's in it, things at the same time joined with + ("- 10:30 – Personal call + Break"); when one thing ends and another begins within a block, the block's time, then each on its own line; consecutive blocks with the same things are one row. Asked about one item, give its real time and its block ("Your Uber is at 12:15, in the 12:00 block"). Never change a time the user gave: 12:15 is never "12:00". Exact minutes for everything only if asked (list_schedule exact=true). Never put the word "thirty" next to a time: say block or chunk. Things set by someone else's clock (appointments, rides, flights, shows, calls at a set time) are fixed: they keep their exact time and never slide; for an unclear case, say fixed=true or false when adding it. The time now is said as it is ("it's 8:41"), never as its block. Items may overlap, nest or coincide: adding or moving one never moves, trims or splits another unless the user asks ("push everything to make room": push_later), and things sharing time are told as one entry ("Redfox dev + Thirties dev"). Only fixed things conflict. When a result says they may not go together and the user didn't say, ask once ("Alongside the shower, or push the shower and what follows back?"); if the answer holds generally, record it with set_sharing.
 20. Weather: when suggesting or planning something outdoors (a walk, a run, yard work, errands on foot), check the forecast; don't suggest it into rain or bad weather, and if the user plans it there (a tool result says "Weather heads-up"), mention it once, briefly, with a better time if there is one.
-21. Today's list versus the plan: the list is what the user means to do today (their Today note, plus routines); the plan is when. When the user says they'll do something today, or agrees to a day's list, put it on the list with add_to_today (scheduling a list item for today adds it on its own). Mornings start from the list.
-22. The plan changes only when the user asks or agrees. When they report running late or behind, record what happened (log_outcome) and leave the rest of the plan alone; speak up only if a fixed commitment (calendar, work) is at risk, once. When they ask for a new plan ("replan", "push everything back", "just figure it out"), call redraw: Python lays the rest of today out again in order, around fixed things, and says what doesn't fit; then show the new plan, and if something didn't fit, ask whether to plan it tomorrow or let it go. Record constraints with set_item_facts as soon as the user states them (after X, not before a time, needs daylight, stays put) so every redraw keeps them. Nothing is done until the user says so: items not reported are still to do. When you list the day, items not marked yet go at the bottom under "Not marked yet", one line per block, with no times.
-23. A routine (a note of daily steps) is planned as its items, in its order, never as one block ("Morning routine"); short items share their block. Daily things and time on a project ("Redfox dev") don't carry over to the next day as unfinished.
+21. Today's list versus the plan: the list is what the user means to do today (their Today note); the plan is when. Everything put on today's plan goes on the list by itself. When the user says they'll do something today without a time, or agrees to a day's list, put it on the list with add_to_today. "Pencil it in" or "maybe today" is pencil_in: on the list with no time (off the plan if it was on it); say it as "on today's list, no time yet". Mornings start from the list.
+22. The plan changes only when the user asks or agrees. When they report running late or behind, record what happened (log_outcome) and leave the rest of the plan alone; speak up only if a fixed commitment (calendar, work) is at risk, once. "Push everything back" by an amount is push_back (it moves what's past and not marked too). When they ask for a new plan ("replan", "just figure it out"), call redraw: Python lays the rest of today out again in order, around fixed things, and says what doesn't fit; then show the new plan, and if something didn't fit, ask whether to plan it tomorrow or let it go. Record constraints with set_item_facts as soon as the user states them (after X, not before a time, needs daylight, stays put) so every redraw keeps them; when they say it holds every day ("dinner takes an hour", "cats' dinner is at 5", "PT goes with the shower", "nothing outside until after the shower"), add every_day=true. Nothing is done until the user says so: items not reported are still to do. Whenever you say where the user is now ("you're in the 10:00 block…"), what's not marked yet (see NOW) goes right after it, under "Not marked yet:", one item per line, no times; never items of the block they're still in, and not again once the user has seen them.
+23. Routines and daily anchors go on the plan by themselves each morning, at their usual times (ROUTINES AND DAILY ANCHORS shows what's on, each routine's schedule and placement): never ask whether to add them, and never say they haven't been scheduled. To place one differently today, or one that's only on request, use put_routine: give each thirty its start and the steps done in it, in the routine's order; that becomes its usual placement. When the user says it's how it always goes, set_routine confirm=true. Record how often a routine repeats, when it was last done, or where a missed part goes (its fallback) with set_routine. If a part was missed, pick its new spot from the free time, guided by its fallback. To skip a routine, use skip_routine; if the user didn't say how, ask its three choices in one short question. Record meals and other things at a set time every day with set_anchor. Never add a routine to a list, as a new item, or as one block ("Morning routine"). Daily things and time on a project ("Redfox dev") don't carry over to the next day as unfinished.
+24. When the user says their usual work or sleep hours (for some weekdays or all), record them with set_week; the plan's Work and Sleep follow.
+25. Proposing the day: when DAY OPTIONS is shown, nothing has been proposed for the day yet. Once the user's request is handled, propose one short, concrete plan for the free time with propose_day: a few things that matter now (due dates and urgency first, not the whole backlog), each at a start in the free time, and say why in one line. Something put off many times goes in kindly, as a 30-minute start. Show the proposal as a list and ask once; on yes, apply_day_proposal; on changes, propose_day again. Don't propose again once they pass.
+26. Something to do with no time given, or "later": call slot_options and pick a slot with a short reason (a quieter part of the day, not crammed against dinner); "later" is a real gap later on.
+27. Showing the schedule: call show_schedule and put its text in your reply as it is; don't lay the day out yourself. It gives where the user is now, what's not marked yet, then the rest of today from the next block on; use whole_day=true only when they ask for the whole day or for earlier today. Show it whenever they ask what's next or what's left, and after you change today's plan in more than one place (a redraw, a push back, several adds).
+28. Act, don't ask. When what the user wants is clear, do it and say in a few words what you did. Choose the obvious details yourself (a time, a length, which list) and say what you chose; they can change it. "Just put it somewhere" or "figure it out" means you pick. Ask only when there are two real readings and guessing wrong would cost them something, and then ask one short question.
+29. Never invent. Say only what the schedule, your tools and the conversation show. If you don't know why something happened (an item marked skipped, a copy, a change), say you don't know, check with item_history, and tell them what it shows; never make up a cause. Say you can do something only if one of your tools does it; if none does, say plainly that you can't yet. What you keep for yourself (memory notes) isn't something the user can open: say "I'll make a note of that", not that it's on a list they can see.
+30. The user's notes: change their structure only when asked (edit_list_item: reword, split a line, add sub-items, move to another section or list). Done items move out of their lists into the month's Done note by themselves; if the user says something isn't done after all, reopen_item. When the user agrees to empty the drop box, dropbox_review shows each item with likely homes: propose one per line with a reason, and move each one they agree to. A list marked as sorted by time: offer once, when it fits, to split it by area (triage_list, then apply_triage_group per agreed group).
 """
 
     def _day_list_section(self) -> str:
@@ -233,6 +261,11 @@ RULES
         day_list = self._day_list_section()
         if day_list:
             sections.append(day_list)
+        if self.tools.scheduler is not None:  # the week's, month's and year's plans (horizons.py)
+            from thirties_core.horizons import HorizonPlanner
+            plans = HorizonPlanner(self.tools, self.tasks).prompt_section()
+            if plans:
+                sections.append(plans)
         if chronic_lines:
             sections.append(
                 "🔥 CHRONICALLY DEFERRED ITEMS (Urgent / Needs Tough Love or Single 30-Min Chunk):\n"
@@ -257,8 +290,13 @@ RULES
                 })
 
         roles: Dict[str, str] = {}
+        placement = None
         if self.tools.scheduler is not None:
-            roles = {nid: r["role"] for nid, r in ListCatalog(self.tools.scheduler.state_db).roles().items()}
+            all_roles = ListCatalog(self.tools.scheduler.state_db).roles()
+            roles = {nid: r["role"] for nid, r in all_roles.items()}
+            from thirties_core.placement_lists import Placement
+            placement = Placement(self.active_notes, all_roles, self.tasks,
+                                  getattr(self.tools.scheduler.config.joplin, "someday_sections", []))
         backlog_sections = []
         for nb_path in sorted(notes_by_notebook.keys()):
             nb_notes = notes_by_notebook[nb_path]
@@ -287,6 +325,9 @@ RULES
                     note_type_badge = " [To-Do Note]"
                 else:
                     note_type_badge = " [Note]"
+                if placement is not None:  # a list sorted by time: offered a split by area, once
+                    from thirties_core.placement_lists import triage_offer_badge
+                    note_type_badge += triage_offer_badge(placement, self.tools.scheduler.state_db, note)
 
                 nb_block.append(f"### Note: \"{title}\"{note_type_badge}")
 
@@ -304,7 +345,8 @@ RULES
                         indent = "  " * (depth[t.id] + 1)
                         def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
                         maybe = " [someday]" if t.someday and not t.section else ""
-                        pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else ""
+                        pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else (
+                            "this month" if t.horizon == "month" else "")  # the horizon urgency can't say
                         pressing = f" [{pressing}]" if pressing and t.list_role not in ("today", "routine") else ""
                         nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}{pressing}")
                 elif is_todo and todo_comp == 0:
@@ -346,6 +388,13 @@ RULES
 
         return "\n\n".join(sections)
 
+    _OUTCOME_CLAIM_RE = re.compile(r"\b(marked|logged|recorded|checked (?:it |that |them )?off|ticked)\b[^.!?\n]*"
+                                   r"\b(done|finished|complete|skipped)\b|\b(logged|marked) (?:it|that|them|both)\b",
+                                   re.IGNORECASE)
+
+    def _claims_outcome(self, text: str) -> bool:
+        return bool(self._OUTCOME_CLAIM_RE.search(text or "")) and not self._ADMITS_RE.search(text or "")
+
     def _claims_change(self, text: str) -> bool:
         return bool(ACTION_CLAIM_PATTERN.search(text or ""))
 
@@ -363,6 +412,7 @@ RULES
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         changes_before = self.tools.successful_changes
+        outcomes_before = self.tools.outcomes_logged
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
@@ -390,6 +440,16 @@ RULES
 
             changed = self.tools.successful_changes - changes_before
             if not calls:
+                if (self._claims_outcome(content) and self.tools.outcomes_logged == outcomes_before
+                        and not reflected):  # 10-30 sim: "I've logged that session as done", with nothing logged
+                    reflected = True
+                    logger.warning("[FrontierBrain] Model claimed an outcome without log_outcome; asking it to correct.")
+                    self.messages.append({"role": "user", "content": (
+                        "[System check, not from the user] Your reply says something was marked done (or skipped), "
+                        "but no log_outcome went through this turn, so nothing was recorded. Call log_outcome now, "
+                        "or correct your reply."
+                    )})
+                    continue
                 if self._claims_change(content) and changed == 0 and not reflected:
                     reflected = True
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
@@ -430,6 +490,8 @@ RULES
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
+        reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
+                          if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
         if self._claims_change(reply) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
             reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"

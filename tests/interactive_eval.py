@@ -10,28 +10,24 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
-import shutil
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
+from typing import Any, Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from thirties_core.astronomy import get_current_time, get_diurnal_date, get_solar_phases, set_debug_time
-from thirties_core.calendar_engine import CalendarEvent, MockCalendarEngine
+from thirties_core.astronomy import get_diurnal_date, set_debug_time
+from thirties_core.calendar_engine import MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
 from thirties_core.brains.frontier import ACTION_CLAIM_PATTERN
 from thirties_core.conversation import ConversationManager
-from thirties_core.plan_tools import PlanSnapshot, StateDelta
-from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine, parse_model_directives
+from thirties_core.inference import LiteRTInferenceEngine, MockInferenceEngine
 from thirties_core.clock import format_clock
 from thirties_core.models import DayPlan, TaskItem
 from thirties_core.scheduler import DeterministicScheduler, StateDatabase

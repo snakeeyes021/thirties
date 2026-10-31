@@ -7,9 +7,10 @@ from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.lists import ListCatalog
-from thirties_core.models import TaskItem
+from thirties_core.models import SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.today import TodayLinks
+from thirties_core.assistant_tools import _checkbox_id
 
 TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Morning Routine"}
 
@@ -164,9 +165,9 @@ class TestWhatsLeft(TodayTestCase):
         brain = SlmBrain(self.t)
         brain._message = "back. what's still left for today?"
         out, _ = brain._do_question(Action("question", {"topic": "what's still left for today"}))
-        self.assertEqual(out, "Still planned today:\n- 2:00 PM – Call the bank\n"
-                              "On today's list, no time yet: Clip cat nails.\n"
-                              "Not marked yet:\n- Shower")  # at the bottom, by block, no times
+        self.assertEqual(out, "Not marked yet:\n- Shower\n\n"  # first (C2), one per line, no times
+                              "Still planned today:\n- 2:00 PM – Call the bank\n"
+                              "On today's list, no time yet: Clip cat nails.")
 
 
 class TestSlmShortcuts(TodayTestCase):
@@ -200,6 +201,107 @@ class TestSlmShortcuts(TodayTestCase):
         self.assertGreaterEqual(titles["Lunch"].start_dt.hour, 11)                       # lunch at lunchtime
         from datetime import timedelta
         self.assertGreaterEqual(titles["Walk"].start_dt - titles["Thirties dev"].end_dt, timedelta(minutes=30))  # room
+
+
+class TestRoutinesOnToday(TodayTestCase):
+    """10-26/27: "schedule my morning routine" wrote a made-up "Morning Routine steps" line into the routine note and
+    put only that on Today; the plan and the Today note had drifted apart."""
+
+    STEPS = ["Feed kitties", "Caffeinate", "Water bottle", "Breakfast (w/ vitamins)", "Throne", "Shower", "PT"]
+
+    def setUp(self):
+        super().setUp()
+        self.routine = "".join(f"- [x] {s}\n" for s in self.STEPS)  # the user ticks it there; it's a template
+        self.api.notes["n_routine"] = {"id": "n_routine", "body": self.routine}
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")  # this morning's reset ran
+
+    def test_a_routine_goes_on_the_plan_as_its_steps_and_on_today_as_one_group(self):
+        out = self.t.execute("put_routine", {"routine": "morning routine", "parts": [
+            {"start": "10:00 AM", "items": ["Feed kitties", "Caffeinate", "Water bottle", "Breakfast (w/ vitamins)"]},
+            {"start": "3:00 PM", "items": ["Throne", "Shower", "PT"]}]})
+        self.assertTrue(out.startswith("Put Morning Routine on the plan: 10:00 AM: Feed kitties, Caffeinate, Water "
+                                       "bottle, Breakfast (w/ vitamins); 3:00 PM: Throne, Shower, PT."), out)
+        steps = [s for s in self.t.day_plan.spans if s.title in self.STEPS]
+        self.assertEqual(len(steps), 7)
+        self.assertTrue(all(s.task_id for s in steps))
+        shower = next(s for s in steps if s.title == "Shower")
+        self.assertEqual((shower.start_dt, shower.end_dt), (at("15:10"), at("15:20")))
+        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n" + "".join(f"    - [ ] {s}\n" for s in self.STEPS))
+        self.assertEqual(self.body("n_routine"), self.routine)  # the template is never written to
+        again = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:00 PM"})
+        self.assertEqual(again, "Morning Routine is already on the plan.")
+
+    def test_scheduling_a_routine_is_never_a_new_line_in_it(self):
+        out = self.t.execute("add_task", {"title": "Morning Routine steps", "list": "Morning Routine",
+                                          "start": "4:00 PM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "put_routine" in out, out)
+        self.assertEqual(self.body("n_routine"), self.routine)
+
+    def test_everything_on_todays_plan_is_on_today(self):
+        self.t.execute("add_event", {"title": "Dinner", "start": "6:00 PM", "duration": "1 hour"})
+        self.t.execute("add_event", {"title": "Shower", "start": "3:00 PM", "duration": "30 min"})  # a routine step
+        self.t.execute("add_event", {"title": "Torquio dev", "start": "8:00 PM", "duration": "1 hour",
+                                     "day": "tomorrow"})
+        self.assertEqual(self.body("n_today"), "- [ ] Dinner\n- [ ] Morning Routine\n    - [ ] Shower\n")
+
+    def test_the_routine_note_is_never_written_however_a_step_is_ticked(self):
+        self.api.notes["n_routine"]["body"] = self.routine.replace("[x]", "[ ]")  # this morning: unticked
+        self.services.tasks += [TaskItem(id=_checkbox_id("n_routine", s), source_notebook="1. Tasks", title=s,
+                                         is_checkbox_item=True, parent_note_title="Morning Routine",
+                                         parent_note_id="n_routine", list_role="routine") for s in self.STEPS]
+        template = self.body("n_routine")
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        caffeinate = next(s for s in self.t.day_plan.spans if s.title == "Caffeinate")
+        self.t.execute("log_outcome", {"event": caffeinate.id, "status": "done"})  # said in chat
+        self.api.notes["n_today"]["body"] = self.body("n_today").replace("- [ ] Shower", "- [x] Shower")  # by hand
+        self.t.assistant.sync_today()
+        self.assertEqual(self.body("n_routine"), template)
+        self.assertIn("    - [x] Caffeinate\n", self.body("n_today"))
+
+    def test_an_extra_step_done_is_ticked_on_today(self):
+        # 10-30 sim: Brush teeth (not in the routine note) was done, but its Today line stayed open
+        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+            {"start": "10:00 AM", "items": ["Shower", "Brush teeth"]}]})
+        teeth = next(s for s in self.t.day_plan.spans if s.title == "Brush teeth")
+        self.t.execute("log_outcome", {"event": teeth.id, "status": "done"})
+        self.assertIn("    - [x] Brush teeth\n", self.body("n_today"))
+
+    def test_on_a_dark_morning_the_coming_day_is_the_one_on_today(self):
+        set_debug_time(at("06:40"))  # before sunrise: the calendar day is still yesterday's diurnal day
+        self.assertFalse(self.t.today() == DAY)
+        self.t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
+        self.assertIn("- [ ] Lunch", self.body("n_today"))
+
+    def test_planned_before_sunrise_the_group_survives_the_morning_reset(self):
+        # 10-30 (sim): routine put on Today at 6:32 on a dark morning, then taken off at sunrise as "yesterday's"
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
+        self.api.notes["n_today"]["body"] = "- [ ] Morning Routine\n    - [ ] Shower\n- [x] Old done thing\n"  # yesterday
+        set_debug_time(at("06:30"))
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:30 AM", "parts": [
+            {"start": "6:30 AM", "items": ["Feed kitties", "Brush teeth"]}]})
+        set_debug_time(at("08:00"))
+        self.t.assistant.start_the_day()  # the sunrise duty: already done for today, so nothing more
+        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n    - [ ] Feed kitties\n    - [ ] Brush teeth\n")
+        self.assertNotIn("Brush teeth", self.body("n_routine"))  # an extra step is for today, not the template
+
+    def test_a_done_step_ticks_todays_copy_and_the_group_leaves_the_next_morning(self):
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        shower = next(s for s in self.t.day_plan.spans if s.title == "Shower")
+        self.t.execute("log_outcome", {"event": shower.id, "status": "done"})
+        self.assertIn("    - [x] Shower\n", self.body("n_today"))
+        self.api.notes["n_today"]["body"] += "- [ ] Call the bank\n"
+        self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])  # routines never carry over
+        self.api.notes["n_today"]["body"] += "- [ ] Charge watch\n"  # done on the plan, its line never ticked (10-25)
+        self.t.execute("add_event", {"title": "Charge watch", "start": "8:00 AM", "duration": "30 min"})
+        self.sched.state_db.upsert_span(next(s for s in self.t.day_plan.spans if s.title == "Charge watch"))
+        span = next(s for s in self.t.day_plan.spans if s.title == "Charge watch")
+        span.status = SpanStatus.DONE
+        self.sched.state_db.upsert_span(span)
+        self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
+        self.t.assistant.start_the_day()
+        self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n")
 
 
 class TestMorning(TodayTestCase):
@@ -240,6 +342,21 @@ class TestMorning(TodayTestCase):
         out = self.t.execute("apply_rollover", {})
         self.assertIn("Couldn't put Buy stamps on today's list", out)
         self.assertEqual(self.t.execute("apply_rollover", {}), "Yesterday's items were already rolled over.")
+
+    def test_a_rolled_over_item_isnt_added_again(self):
+        # 10-31: "yes to Jon's podcast" rolled yesterday's copy into today, then add_event made a second one: the
+        # move landed in a fresh copy of today, which the duplicate guard never saw.
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        y = DAY - timedelta(days=1)
+        self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour",
+                                     "day": y.isoformat()})
+        self.t.execute("rollover_proposal", {})
+        self.assertIn("Return the library books", self.t.execute("apply_rollover", {}))
+        out = self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour"})
+        self.assertIn("already planned", out)
+        today = [s for s in self.t.day_plan.spans if s.title == "Return the library books"]
+        self.assertEqual(len(today), 1)
 
     def test_daily_things_and_project_time_dont_carry_over(self):
         from datetime import timedelta
@@ -283,7 +400,8 @@ class TestMorning(TodayTestCase):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
         self.assertEqual(out, "From yesterday, still open:\n- Call the bank\n- Clip cat nails\n"
-                              "Also pressing: Buy stamps (now).\nWant today like that?")
+                              "Also pressing: Buy stamps (now).\nShould I keep these on today's list and add the "
+                              "pressing one? Say which to leave out.")
         out = self.t.execute("apply_rollover", {"skip": ["bank", "nails"]})
         self.assertIn("Back to your lists: Call the bank.", out)
         self.assertIn("Added to today's list: Buy stamps.", out)

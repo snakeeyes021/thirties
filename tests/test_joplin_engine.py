@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from thirties_core.config import JoplinConfig, ThirtiesConfig
+from thirties_core.config import ThirtiesConfig
 from thirties_core.joplin_engine import JoplinEngine
 from thirties_core.models import TaskItem
 

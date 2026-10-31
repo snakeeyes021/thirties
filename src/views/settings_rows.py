@@ -217,6 +217,86 @@ def schedule_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     return group
 
 
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def week_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Your week: each weekday's work hours, bedtime and wake-up where they differ from the usual week (stored as
+    those differences in general.week, thirties_core/week.py; the set_week tool writes the same), and the day the
+    week starts on (general.week_start: week plans and the weekly planning offer)."""
+    from thirties_core.week import DAYS, describe_day, with_day_hour
+    group = Adw.PreferencesGroup(title="Your week",
+                                 description="Days that differ from the usual week. Bedtime is that evening's; "
+                                             "wake-up is that morning's.")
+    cfg = ctx.config().general
+    first = Adw.ComboRow(title="Week starts on", subtitle="For week plans and the weekly planning offer",
+                         model=Gtk.StringList.new(WEEKDAY_NAMES))
+    week_start = str(getattr(cfg, "week_start", "mon") or "mon").lower()[:3]
+    first.set_selected(DAYS.index(week_start) if week_start in DAYS else 0)
+    first.connect("notify::selected", lambda r, _p: ctx.set("general.week_start", DAYS[r.get_selected()]))
+    group.add(first)
+    hours = [("work_start_thirty", "Work starts", 0), ("work_end_thirty", "Work ends", 1),
+             ("sleep_start_thirty", "Bedtime", 0), ("sleep_end_thirty", "Wake up", 0)]
+    group.days = {}  # weekday key -> (expander, {setting: row}), for tests
+    for key, name in zip(DAYS, WEEKDAY_NAMES):
+        expander = Adw.ExpanderRow(title=name)
+        rows = {}
+        for setting, title, shown_after in hours:
+            row = _time_row(title, 0)
+            row.shown_after = shown_after  # Work ends shows the end of the last work thirty
+            rows[setting] = row
+            expander.add_row(row)
+        syncing = [False]
+
+        def sync(*_args, key=key, expander=expander, rows=rows, syncing=syncing):
+            """The day's rows show its hours now (the usual ones where it doesn't differ); work hours only on a
+            work day."""
+            from datetime import date as _date, timedelta as _td
+            from thirties_core.week import day_hours
+            gen = ctx.config().general
+            monday = _date(2026, 1, 5)
+            h = day_hours(gen, monday + _td(days=DAYS.index(key)))
+            syncing[0] = True
+            try:
+                for setting, value in (("work_start_thirty", h.work_start), ("work_end_thirty", h.work_end),
+                                       ("sleep_start_thirty", h.sleep_start), ("sleep_end_thirty", h.sleep_end)):
+                    rows[setting].set_selected((value + rows[setting].shown_after) % 48)
+            finally:
+                syncing[0] = False
+            for setting in ("work_start_thirty", "work_end_thirty"):
+                rows[setting].set_sensitive(h.works)
+                rows[setting].set_subtitle("" if h.works else "Not a work day (see Work days above)")
+            expander.set_subtitle(describe_day(gen, key))
+
+        def changed(row, _p, setting, key=key, sync=sync, syncing=syncing):
+            if syncing[0]:
+                return
+            gen = ctx.config().general
+            ctx.set("general.week", with_day_hour(gen, key, setting, (row.get_selected() - row.shown_after) % 48))
+            sync()
+        for setting, row in rows.items():
+            row.connect("notify::selected", changed, setting)
+        expander.connect("notify::expanded", sync)
+        sync()
+        group.days[key] = (expander, rows)
+        group.add(expander)
+    return group
+
+
+def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Free time in blocks (thirties) or hours: shared with the Timeline's own toggle (timeline_layout.py)."""
+    from thirties_core.timeline_layout import DEFAULT_UNITS, UNITS, UNITS_SETTING, normalise_units
+    group = Adw.PreferencesGroup(title="Timeline")
+    names = {"blocks": "Blocks (thirties)", "hours": "Hours"}
+    row = Adw.ComboRow(title="Show free time in", subtitle="\"7 blocks free\" or \"3½ h free\"",
+                       model=Gtk.StringList.new([names[u] for u in UNITS]))
+    row.set_selected(UNITS.index(normalise_units(ctx.get(UNITS_SETTING, DEFAULT_UNITS))))
+    row.connect("notify::selected", lambda r, _p: ctx.set(UNITS_SETTING, UNITS[r.get_selected()]))
+    group.add(row)
+    group.units_row = row
+    return group
+
+
 # --- the assistant ---
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
@@ -401,6 +481,231 @@ def joplin_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                              active=bool(getattr(cfg.joplin, "reset_routines", True)))
     routines.connect("notify::active", lambda r, _p: ctx.set("joplin.reset_routines", r.get_active()))
     group.add(routines)
+    filing = Adw.SwitchRow(title="File done items",
+                           subtitle="What you finish moves out of its list into a Done note for the month, in a "
+                                    "Thirties notebook, as a dated line naming the list. Untick it there to put it back.",
+                           active=bool(getattr(cfg.joplin, "file_done", True)))
+    filing.connect("notify::active", lambda r, _p: ctx.set("joplin.file_done", r.get_active()))
+    group.add(filing)
+    return group
+
+
+def joplin_peer_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """The headless Joplin sync peer (thirties_core/joplin_peer.py): the switch, its status, and whatever it
+    couldn't read from the Joplin app (the sync target's details, a password, a sign-in, the master password).
+    Everything slow (finding Node, installing, syncing, signing in) runs off the UI thread."""
+    from thirties_core import joplin_peer as jp
+    group = Adw.PreferencesGroup(
+        title="Without the Joplin app",
+        description="Thirties can run its own copy of Joplin in the background (Joplin's terminal app), synced "
+                    "with the same sync target as your Joplin apps. Then your notes, and your other devices, get "
+                    "Thirties' changes even when the Joplin app is closed or isn't installed.")
+    cfg = ctx.config()
+    peer = jp.peer_for(ctx.core.config)
+    switch = Adw.SwitchRow(title="Keep Joplin in sync without the Joplin app", active=bool(cfg.joplin.peer_enabled))
+    status = Adw.ActionRow(title="Status", subtitle="…")
+    setup = Gtk.Button(label="Set up", valign=Gtk.Align.CENTER)
+    sync_now = Gtk.Button(label="Sync now", valign=Gtk.Align.CENTER)
+    status.add_suffix(setup)
+    status.add_suffix(sync_now)
+    labels = ["As in the Joplin app"] + [t.label for t in jp.SYNC_TARGETS.values()]
+    ids = [0] + list(jp.SYNC_TARGETS)
+    target = Adw.ComboRow(title="Sync target", model=Gtk.StringList.new(labels))
+    target.set_selected(ids.index(cfg.joplin.peer_target) if cfg.joplin.peer_target in ids else 0)
+    details = Adw.ExpanderRow(title="Sync target details", subtitle="What Thirties couldn't read from Joplin")
+    password = Adw.PasswordEntryRow(title="Sync password")
+    password.set_text(ctx.get("joplin.peer_password", "") or "")
+    master = Adw.PasswordEntryRow(title="Encryption master password (if your notes are encrypted)")
+    master.set_text(ctx.get("joplin.peer_master_password", "") or "")
+    sign_in = Adw.ActionRow(title="Sign in", subtitle="Thirties' copy of Joplin signs in on its own, once")
+    sign_btn = Gtk.Button(label="Sign in", valign=Gtk.Align.CENTER)
+    sign_in.add_suffix(sign_btn)
+    code = Adw.EntryRow(title="Code from the sign-in page", show_apply_button=True)
+    for row in (switch, status, target, details, sign_in, code):
+        group.add(row)
+    field_rows = []
+    state = {"busy": False, "sign_in": None}
+
+    def build_fields():
+        for row in field_rows:
+            details.remove(row)
+        field_rows.clear()
+        tid, values, desk = peer.target()
+        info = jp.SYNC_TARGETS.get(tid)
+        target.set_subtitle(f"{desk.label}, as in your Joplin app" if desk.target and tid == desk.target
+                            else (info.label if info else "Choose where your Joplin apps sync"))
+        for suffix, label, _required in (info.fields if info else ()):
+            row = Adw.EntryRow(title=label)
+            row.set_text(str(values.get(suffix, "") or ""))
+
+            def save(text, suffix=suffix):
+                typed = dict(ctx.get("joplin.peer_target_values", {}) or {})
+                if typed.get(suffix, "") != text:
+                    typed[suffix] = text
+                    ctx.set("joplin.peer_target_values", typed)
+            save_as_you_type(row, save)
+            field_rows.append(row)
+        if info and info.secret:
+            field_rows.append(password)
+        field_rows.append(master)
+        for row in field_rows:
+            details.add_row(row)
+        sign_in.set_visible(bool(info and info.sign_in))
+        sign_in.set_title(f"Sign in to {info.label}" if info else "Sign in")
+
+    def show(snapshot, _error=None):
+        if snapshot is None:
+            return False
+        state_, installed, needs, desktop, st = snapshot
+        status.set_subtitle(
+            {"no_node": "Needs Node.js (Set up offers to download it)", "not_installed": "Not installed yet"}.get(
+                state_) or jp.describe(st, peer.clock(), installed, desktop, needs))
+        state["newer"] = "newer_node" in needs
+        setup.set_visible(state_ != "ready" or state["newer"])
+        setup.set_label("Download Node.js" if state_ == "ready" and state["newer"] else "Set up")
+        sync_now.set_visible(state_ == "ready" and switch.get_active())
+        details.set_subtitle("Needs: " + ", ".join(jp.NEED_LABELS.get(n, n) for n in needs) if needs
+                             else "Read from your Joplin app")
+        code.set_visible(bool(state["sign_in"]) and state["sign_in"].kind == "code")
+        return False
+
+    def refresh():
+        def look():
+            return (peer.install_state(), peer.installed_version(), peer.needs(), peer.desktop_up(), peer.status)
+        ctx.run_async(look, show)
+
+    def on_switch(row, _p):
+        jp.enable(ctx, row.get_active())  # a Data API token is made the first time
+        if row.get_active() and setup.get_visible():
+            on_setup(setup)  # switched on and not installed: set it up straight away
+        else:
+            refresh()
+
+    def on_target(row, _p):
+        ctx.set("joplin.peer_target", ids[row.get_selected()])
+        GLib.timeout_add(800, lambda: build_fields() or refresh() or False)
+
+    def on_setup(_btn):
+        if state["busy"]:
+            return
+        state["busy"] = True
+        setup.set_sensitive(False)
+        status.set_subtitle("Looking for Node.js…")
+
+        def install(download):
+            def work():
+                if download:
+                    ok, msg = peer.download_node()
+                    if not ok:
+                        return msg
+                return peer.install()[1]
+
+            def done(msg, error):
+                state["busy"] = False
+                setup.set_sensitive(True)
+                ctx.toast(str(error or msg))
+                refresh()
+            status.set_subtitle("Installing Joplin's terminal app (a few minutes)…")
+            ctx.run_async(work, done)
+
+        def found(result, error):
+            node, why = result if result else (None, str(error))
+            if node is not None and not state.get("newer"):
+                install(False)
+                return
+            if node is not None:
+                why = f"Your notes are encrypted, and {node.label} can't decrypt them."
+            dialog = Adw.AlertDialog(heading="Node.js is needed",
+                                     body=f"{why} Joplin's terminal app runs on Node.js. Thirties can download its "
+                                          "own copy (about 30 MB, from nodejs.org) into ~/.local/share/thirties, "
+                                          "used only for this.")
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("download", "Download Node.js")
+            dialog.set_response_appearance("download", Adw.ResponseAppearance.SUGGESTED)
+
+            def answered(_d, response):
+                if response == "download":
+                    install(True)
+                else:
+                    state["busy"] = False
+                    setup.set_sensitive(True)
+                    refresh()
+            dialog.connect("response", answered)
+            dialog.present(ctx.parent)
+        ctx.run_async(peer.node, found)
+
+    def on_sync(_btn):
+        sync_now.set_sensitive(False)
+        status.set_subtitle("Syncing…")
+
+        def done(outcome, error):
+            sync_now.set_sensitive(True)
+            ctx.toast(str(error) if error else ("Synced" if outcome.ok else outcome.message))
+            refresh()
+        ctx.flush()
+        ctx.run_async(peer.sync_now, done)
+
+    def on_sign_in(_btn):
+        ctx.flush()
+        sign_btn.set_sensitive(False)
+
+        def started(result, error):
+            run, msg = result if result else (None, str(error))
+            if run is None:
+                sign_btn.set_sensitive(True)
+                ctx.toast(msg)
+                return
+            state["sign_in"] = run
+
+            def poll():
+                if run.url and not getattr(run, "_opened", False):
+                    run._opened = True
+                    Gtk.UriLauncher.new(run.url).launch(ctx.parent, None, None, None)
+                    if run.kind == "code":
+                        code.set_visible(True)
+                        sign_in.set_subtitle("Paste the code the page shows below")
+                    elif run.kind == "confirm":
+                        sign_in.set_subtitle("Sign in in the browser, then press Done")
+                        sign_btn.set_label("Done")
+                        sign_btn.set_sensitive(True)
+                    else:
+                        sign_in.set_subtitle("Finish signing in in the browser")
+                if run.done.is_set():
+                    state["sign_in"] = None
+                    sign_btn.set_label("Sign in")
+                    sign_btn.set_sensitive(True)
+                    code.set_visible(False)
+                    outcome = run.outcome
+                    sign_in.set_subtitle("Signed in" if outcome and outcome.ok else
+                                         (outcome.message if outcome else "The sign-in didn't finish"))
+                    refresh()
+                    return False
+                return True
+            GLib.timeout_add(500, poll)
+        ctx.run_async(peer.begin_sign_in, started)
+
+    def on_sign_btn(btn):
+        run = state["sign_in"]
+        if run is not None and run.kind == "confirm":
+            run.answer("y")
+            btn.set_sensitive(False)
+        elif run is None:
+            on_sign_in(btn)
+
+    switch.connect("notify::active", on_switch)
+    target.connect("notify::selected", on_target)
+    setup.connect("clicked", on_setup)
+    sync_now.connect("clicked", on_sync)
+    sign_btn.connect("clicked", on_sign_btn)
+    code.connect("apply", lambda row: state["sign_in"] and state["sign_in"].answer(row.get_text().strip()))
+    save_as_you_type(password, lambda text: ctx.set("joplin.peer_password", text)
+                     if text != (ctx.get("joplin.peer_password", "") or "") else None)
+    save_as_you_type(master, lambda text: ctx.set("joplin.peer_master_password", text)
+                     if text != (ctx.get("joplin.peer_master_password", "") or "") else None)
+    code.set_visible(False)
+    build_fields()
+    refresh()
+    group.switch, group.status, group.target, group.details = switch, status, target, details  # for tests
     return group
 
 
@@ -510,6 +815,10 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     here = Adw.SwitchRow(title="Run the phone connection on this computer",
                          subtitle="Only one computer should do this.",
                          active=bool(ctx.get("telegram.enabled", False)))
+    mirror = Adw.SwitchRow(title="Show the desktop chat on your phone",
+                           subtitle="What you type here, and the replies, also go to Telegram, so both show one "
+                                    "conversation.",
+                           active=bool(ctx.get("telegram.mirror_desktop", True)))
     bot = {"name": ""}
 
     def show():
@@ -558,8 +867,9 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     save_as_you_type(token, on_token, delay=900)
     pair_btn.connect("clicked", on_pair)
     here.connect("notify::active", lambda r, _p: ctx.set("telegram.enabled", r.get_active()))
+    mirror.connect("notify::active", lambda r, _p: ctx.set("telegram.mirror_desktop", r.get_active()))
     token.connect("changed", lambda *_: show())
-    for row in (token, pair, here):
+    for row in (token, pair, here, mirror):
         group.add(row)
     show()
     return group
@@ -595,15 +905,83 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                         "Quit (Ctrl+Q) stops it until you open Thirties again.",
                                active=bool(ctx.get("background.enabled", True)))
 
+    login = Adw.SwitchRow(title="Start at login",
+                          subtitle="Quietly, in the background, so nothing waits for you to open Thirties",
+                          active=bool(ctx.get("background.autostart", True)))
+    login.set_sensitive(background.get_active())
+
     def on_background(row, _p):
         ctx.set("background.enabled", row.get_active())
-        if row.get_active() and ctx.app is not None:
-            ctx.app.request_background_permission()
+        login.set_sensitive(row.get_active())
         if ctx.app is not None:
+            ctx.app.request_background_permission()  # off: out of the login items too
             ctx.app.run_in_background()
 
+    def on_login(row, _p):
+        ctx.set("background.autostart", row.get_active())
+        if ctx.app is not None:
+            ctx.app.request_background_permission()
+
+    sunrise = Adw.SwitchRow(title="Tell me at sunrise", subtitle="Every day, at the real time: handy for the lights",
+                            active=bool(ctx.get("assistant.sunrise_notice", False)))
+    sunset = Adw.SwitchRow(title="Tell me at sunset", subtitle="Every day, at the real time",
+                           active=bool(ctx.get("assistant.sunset_notice", False)))
     delay.connect("notify::value", lambda r, _p: ctx.set("assistant.checkin_after_minutes", int(r.get_value())))
     background.connect("notify::active", on_background)
-    for row in (level, delay, background):
+    login.connect("notify::active", on_login)
+    sunrise.connect("notify::active", lambda r, _p: ctx.set("assistant.sunrise_notice", r.get_active()))
+    sunset.connect("notify::active", lambda r, _p: ctx.set("assistant.sunset_notice", r.get_active()))
+    for row in (level, delay, sunrise, sunset, background, login):
         group.add(row)
+    return group
+
+
+# --- calendars ---
+
+CALENDAR_CHOICES = [("mine", "Mine", "Your commitments: planned around"),
+                    ("", "Ask about its events", "Thirties asks once per event (once per series if it repeats)"),
+                    ("show", "Show only", "On the Agenda as someone else's; takes no time, never asked about"),
+                    ("ignore", "Ignore", "Never read"),
+                    ("holidays", "Holidays", "Shown only; on a work day, Work comes off (you can put it back)")]
+
+
+def calendars_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Per calendar: mine, show only or ignore (O1: a partner's shared calendar kept coming up). Keyed by the
+    calendar's name, which is the same on every computer (EDS uids aren't)."""
+    group = Adw.PreferencesGroup(title="Calendars",
+                                 description="What each calendar from GNOME Online Accounts is to you.")
+    engine = getattr(getattr(ctx.core, "scheduler", None), "calendar_engine", None)
+    placeholder = Adw.ActionRow(title="Looking for calendars…")
+    group.add(placeholder)
+
+    def save(name, key):
+        modes = dict(ctx.config().calendar.modes or {})
+        if key:
+            modes[name.strip().lower()] = key
+        else:
+            modes.pop(name.strip().lower(), None)
+        ctx.set("calendar.modes", modes)
+
+    def fill(calendars, error):
+        group.remove(placeholder)
+        if error or not calendars:
+            group.add(Adw.ActionRow(title="No calendars found",
+                                    subtitle="Add one in GNOME Settings → Online Accounts."))
+            return
+        for cal in calendars:
+            choices = CALENDAR_CHOICES if not cal["mine"] else [c for c in CALENDAR_CHOICES if c[0] != ""]
+            row = Adw.ComboRow(title=cal["name"], model=Gtk.StringList.new([label for _, label, _ in choices]))
+            current = cal["mode"] or ("mine" if cal["mine"] else "")
+            index = next((i for i, (k, _, _) in enumerate(choices) if k == current), 0)
+            row.set_selected(index)
+            row.set_subtitle(choices[index][2])
+
+            def on_pick(r, _p, name=cal["name"], choices=choices):
+                key, _, note = choices[r.get_selected()]
+                r.set_subtitle(note)
+                save(name, key)
+            row.connect("notify::selected", on_pick)
+            group.add(row)
+    lister = getattr(engine, "list_calendars", None)
+    ctx.run_async(lister if lister else (lambda: []), fill)
     return group

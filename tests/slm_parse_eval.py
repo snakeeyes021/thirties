@@ -1,8 +1,14 @@
-"""Parse accuracy of the SLM brain's one model call, on labelled utterances.
+"""Parse accuracy of the SLM brain's model calls, on labelled utterances.
 
 Fast feedback for instruction/example changes: each case is one user message
 with a little context, and the expected action types plus a few key fields.
-Runs the real Gemma parser session (KV cache reused across cases).
+Runs the real parser session (KV cache reused across cases) on Gemma, or on
+another small model from the catalog (--slm; see tests/slm_model_compare.py).
+
+By default a message goes through the brain's own steps (thirties_core/brains/slm/steps.py):
+Python separates the requests, the model parses each, and parts nothing covered
+are parsed again on their own. ``--pipeline whole`` is one parse per message,
+as measured before 0.2 (comparable with the 2026-10-15 numbers).
 
 Cases are the hand-written ones below plus tests/slm_parse_cases.json, which
 Gemini wrote and labelled from the parser's own instruction (--make-cases), and
@@ -10,6 +16,7 @@ which were then spot-checked. When Gemma and a label disagree, read both: the
 label can be the wrong one.
 
     ~/.local/share/thirties/venv/bin/python -m tests.slm_parse_eval
+    ~/.local/share/thirties/venv/bin/python -m tests.slm_parse_eval --pipeline whole
     ~/.local/share/thirties/venv/bin/python -m tests.slm_parse_eval --make-cases 15   # per category, via agy
 """
 
@@ -88,6 +95,27 @@ CASES: List[Tuple[str, List[str], Dict[int, Dict[str, str]], Dict[str, Any]]] = 
     ("finished taxes, still on the email", ["outcome"], {0: {"target": "tax", "status": "done"}}, {}),
     ("make the first upgrades block 3 thirties", ["move"], {0: {"target": "first", "duration": "3"}}, {}),
     ("put shower before the second upgrades", ["move"], {0: {"target": "shower", "before": "upgrades"}}, {}),
+    # 0.2: what a Gemini user could already do
+    ("put my morning routine on", ["routine"], {0: {"title": "routine"}}, {}),
+    ("do the morning routine at 9 tomorrow", ["routine"], {0: {"start": "9", "day": "tomorrow"}}, {}),
+    ("stick the bank call on today's list", ["today"], {0: {"title": "bank"}}, {}),
+    ("that's not urgent", ["urgency"], {0: {"urgency": "whenever"}}, {"last_item": "Composing"}),
+    ("the passport renewal has to happen by friday", ["urgency"], {0: {"target": "passport", "day": "friday"}}, {}),
+    ("composing has to wait until after dinner", ["fact"], {0: {"target": "compos", "after": "dinner"}}, {}),
+    ("dinner is at 6 and it can't move", ["fact"], {0: {"target": "dinner", "fixed": "True"}}, {}),
+    # 0.2: horizons and the day's actual times (horizon_talk.py; Python reads the plainest of these itself)
+    ("honestly the gutters can sit until next month", ["horizon"], {0: {"target": "gutter", "when": "month"}}, {}),
+    ("let's look at the whole month", ["horizon"], {0: {"topic": "show", "when": "month"}}, {}),
+    ("help me figure out next week", ["horizon"], {0: {"topic": "plan", "when": "next week"}}, {}),
+    ("I was up around 6:30 and in at work by 8", ["times"], {0: {"woke": "6:30", "started": "8"}}, {}),
+    ("ok I'm out, work's finished", ["times"], {0: {"finished": "now"}}, {}),
+    # several requests, and one item with something alongside
+    ("work ran until 4:30, and move composing to 8", ["move", "move"],
+     {0: {"target": "work", "end": "4:30"}, 1: {"target": "compos", "start": "8"}}, {}),
+    ("finished the taxes. push composing back half an hour and what's left tonight?", ["outcome", "move", "question"],
+     {0: {"target": "tax"}, 1: {"target": "compos", "shift": "+"}}, {}),
+    ("dinner at 6, cooking and eating, listening to Project Hail Mary", ["add", "add"],
+     {0: {"title": "inner"}, 1: {"title": "Hail Mary", "alongside": "True"}}, {}),
 ]
 
 
@@ -199,6 +227,13 @@ CATEGORIES = {
     "profile": "stating a goal, habit or preference about their life",
     "energy": "saying how energetic or tired they are",
     "chat": "thanks, greetings, small talk",
+    "routine": "putting one of their routines on the plan (morning routine, bedtime routine), sometimes at a time",
+    "today_list": "putting something on today's list, with no time",
+    "urgency": "saying how pressing an item on their lists is, or a date it's due by",
+    "fact": "a rule an item must keep: after another item, not before a time, can't move, needs daylight",
+    "horizon": "when something on their lists belongs (this week, this year, someday), putting it on a later day or in a "
+               "week or month, planning a week or month, or asking what's on for one",
+    "times": "saying when they actually woke, went to bed, started or finished work",
     "multi": "two or three different requests in one message",
     "ramble": "a long voice-to-text message with a self-correction; label only the final intent",
 }
@@ -288,8 +323,8 @@ def make_interpreter():
     return SlmBrain(manager.tools, tasks=[], runtime=_NoModel())
 
 
-def interpret(brain, raw: Dict[str, Any], message: str, context: Dict[str, Any]):
-    """What the SLM brain would actually do with this parse, given the same context."""
+def interpret(brain, raw, message: str, context: Dict[str, Any]):
+    """What the SLM brain would actually do with this parse (a raw reply or parsed actions), given the same context."""
     import re
     brain.state = type(brain.state)()
     asked = context.get("assistant") or context.get("pending") or ""
@@ -306,62 +341,117 @@ def interpret(brain, raw: Dict[str, Any], message: str, context: Dict[str, Any])
     if last:
         brain.state.last_ids = [s.id for s in brain.tools.day_plan.spans if s.title.lower() == last][:1]
     brain._message = message
-    return brain._interpret(parse_actions(raw), message)
+    actions = parse_actions(raw) if isinstance(raw, dict) else [type(a)(a.type, dict(a.fields)) for a in raw]
+    return brain._interpret(actions, message)
+
+
+PIPELINES = ("steps", "whole")
+
+
+def run_benchmark(runtime, cases: List[Dict[str, Any]], pipeline: str = "steps", quiet: bool = False,
+                  log=print) -> Dict[str, Any]:
+    """Run the cases through one runtime's parser session; returns the scores, timings and failures.
+
+    ``steps``: the brain's pipeline (separate the requests, parse each, retry what nothing covered).
+    ``whole``: one parse per message, as before 0.2. Either way "model" is what the model's parses gave, and "final"
+    is after Python's reading (SlmBrain._interpret). A case where the brain would ask about a part it couldn't read
+    counts as a miss, and is counted separately as "asked" (better than dropping it silently).
+    """
+    from thirties_core.brains.slm.steps import parse_in_steps
+    session = runtime.parser(SYSTEM_PROMPT)
+    brain = make_interpreter()
+    by_cat: Dict[str, List[bool]] = defaultdict(list)
+    by_type: Dict[str, List[bool]] = defaultdict(list)
+    final_cat: Dict[str, List[bool]] = defaultdict(list)
+    failures, times, calls, asked = [], [], [], 0
+    for c in cases:
+        extra = c["context"]
+        raws: List[Any] = []
+
+        def parse_one(text: str):
+            context = build_context("Thursday 3:00 PM", SCHEDULE, extra.get("assistant", ""), extra.get("pending"),
+                                    [], text, last_item=extra.get("last_item", ""))
+            raw = extract_json(session.ask(context)) or {}
+            raws.append(raw)
+            return parse_actions(raw)
+
+        start = time.time()
+        if pipeline == "whole":
+            actions, unclear = parse_one(c["message"]), []
+        else:
+            actions, unclear, _ = parse_in_steps(c["message"], parse_one, brain._python_handles)
+        times.append(time.time() - start)
+        calls.append(len(raws))
+        asked += bool(unclear)
+        ok, why = check(actions, c["types"], c["fields"], c["context"])
+        final_ok, final_why = check(interpret(brain, actions, c["message"], c["context"]), c["types"], c["fields"],
+                                    c["context"])
+        final_cat[c["category"]].append(final_ok)
+        by_cat[c["category"]].append(ok)
+        for t in set(c["types"]):
+            by_type[t].append(ok)
+        if not ok or not final_ok:
+            failures.append({**c, "why": why, "final_why": final_why, "final_ok": final_ok, "got": raws,
+                             "unclear": unclear})
+        if not final_ok or not quiet:
+            log(f"{'PASS' if final_ok else 'FAIL'} {times[-1]:.1f}s [{c['category']}] {c['message'][:110]}"
+                + ("" if final_ok else f"  -> {final_why}"))
+    n = max(1, len(cases))
+    ordered = sorted(times) or [0.0]
+    return {
+        "pipeline": pipeline, "cases": len(cases),
+        "model": sum(ok for oks in by_cat.values() for ok in oks),
+        "final": sum(ok for oks in final_cat.values() for ok in oks),
+        "asked": asked,
+        "median_s": round(ordered[len(ordered) // 2], 2), "p90_s": round(ordered[min(len(ordered) - 1, int(n * 0.9))], 2),
+        "calls_per_message": round(sum(calls) / n, 2),
+        "by_category": {cat: [sum(oks), len(oks), sum(by_cat[cat])] for cat, oks in final_cat.items()},
+        "by_type": {t: [sum(oks), len(oks)] for t, oks in by_type.items()},
+        "failures": failures,
+    }
+
+
+def print_summary(result: Dict[str, Any], log=print) -> None:
+    n = max(1, result["cases"])
+    log(f"\nModel alone: {result['model']}/{result['cases']} ({result['model'] / n:.0%}). After Python's reading: "
+        f"{result['final']}/{result['cases']} ({result['final'] / n:.0%}). Asked about a part: {result['asked']}. "
+        f"Median {result['median_s']:.1f}s per message, {result['calls_per_message']} model calls per message "
+        f"({result['pipeline']})")
+    log("\nBy category, after Python (worst first; model alone in brackets):")
+    for cat, (good, total, raw_good) in sorted(result["by_category"].items(), key=lambda kv: kv[1][0] / kv[1][1]):
+        log(f"  {cat:<18} {good:>3}/{total:<3} {good / total:>4.0%}   ({raw_good / total:.0%})")
+    log("\nModel alone, by expected action type:")
+    for t, (good, total) in sorted(result["by_type"].items(), key=lambda kv: kv[1][0] / kv[1][1]):
+        log(f"  {t:<10} {good:>3}/{total:<3} {good / total:.0%}")
+
+
+def select_cases(categories=None, limit: int = 0) -> List[Dict[str, Any]]:
+    cases = [c for c in all_cases() if not categories or c["category"] in categories]
+    random.Random(0).shuffle(cases)  # the KV-cached session sees a realistic mix, not one category in a row
+    return cases[:limit] if limit else cases
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--make-cases", type=int, default=0, metavar="N", help="have Gemini write N cases per category")
-    ap.add_argument("--model", default="gemini-3.8-flash-medium")
+    ap.add_argument("--model", default="gemini-3.8-flash-medium", help="the Gemini model that writes cases")
+    ap.add_argument("--slm", default=None, help="the small model to measure (tests/slm_model_compare.py lists them)")
+    ap.add_argument("--pipeline", choices=PIPELINES, default="steps")
     ap.add_argument("--category", nargs="*", help="only these categories")
+    ap.add_argument("--limit", type=int, default=0, help="only the first N cases (of the fixed shuffle)")
     ap.add_argument("--quiet", action="store_true", help="print only failures")
     args = ap.parse_args()
     if args.make_cases:
         make_cases(args.make_cases, args.model)
         return
 
-    from thirties_core.brains.slm.runtime import GemmaRuntime
-    rt = GemmaRuntime.shared()
-    session = rt.parser(SYSTEM_PROMPT)
-    cases = [c for c in all_cases() if not args.category or c["category"] in args.category]
-    random.Random(0).shuffle(cases)  # the KV-cached session sees a realistic mix, not one category in a row
-    brain = make_interpreter()
-    by_cat: Dict[str, List[bool]] = defaultdict(list)
-    by_type: Dict[str, List[bool]] = defaultdict(list)
-    final_cat: Dict[str, List[bool]] = defaultdict(list)
-    failures, times = [], []
-    for c in cases:
-        extra = c["context"]
-        context = build_context("Thursday 3:00 PM", SCHEDULE, extra.get("assistant", ""), extra.get("pending"),
-                                [], c["message"], last_item=extra.get("last_item", ""))
-        start = time.time()
-        raw = extract_json(session.ask(context)) or {}
-        times.append(time.time() - start)
-        ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
-        final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"], c["context"])
-        final_cat[c["category"]].append(final_ok)
-        by_cat[c["category"]].append(ok)
-        for t in set(c["types"]):
-            by_type[t].append(ok)
-        if not ok or not final_ok:
-            failures.append({**c, "why": why, "final_why": final_why, "final_ok": final_ok, "got": raw})
-        if not final_ok or not args.quiet:
-            print(f"{'PASS' if final_ok else 'FAIL'} {times[-1]:.1f}s [{c['category']}] {c['message'][:110]}"
-                  + ("" if final_ok else f"  -> {final_why}"), flush=True)
-    passed = sum(ok for oks in by_cat.values() for ok in oks)
-    final = sum(ok for oks in final_cat.values() for ok in oks)
-    print(f"\nModel alone: {passed}/{len(cases)} ({passed / len(cases):.0%}). After Python's reading: "
-          f"{final}/{len(cases)} ({final / len(cases):.0%}). Median {sorted(times)[len(times) // 2]:.1f}s per message")
-    print("\nBy category, after Python (worst first; model alone in brackets):")
-    for cat, oks in sorted(final_cat.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
-        raw_oks = by_cat[cat]
-        print(f"  {cat:<18} {sum(oks):>3}/{len(oks):<3} {sum(oks) / len(oks):>4.0%}   ({sum(raw_oks) / len(raw_oks):.0%})")
-    print("\nModel alone, by expected action type:")
-    for t, oks in sorted(by_type.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
-        print(f"  {t:<10} {sum(oks):>3}/{len(oks):<3} {sum(oks) / len(oks):.0%}")
+    from thirties_core.brains.slm.catalog import load_runtime
+    result = run_benchmark(load_runtime(model=args.slm), select_cases(args.category, args.limit), args.pipeline,
+                           args.quiet, log=lambda s: print(s, flush=True))
+    print_summary(result)
     out = REPO_ROOT / "docs" / "eval_reports" / f"parse_{time.strftime('%Y%m%d_%H%M%S')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(failures, indent=1, default=str))
+    out.write_text(json.dumps(result["failures"], indent=1, default=str))
     print(f"\nFailures: {out.relative_to(REPO_ROOT)}")
 
 

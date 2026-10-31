@@ -6,7 +6,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -22,6 +22,9 @@ class GeneralConfig:
     sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
     # Days that get default work (mon..sun). Other days start with no work.
     work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    # What's different on some weekdays, e.g. {"sat": {"sleep_end_thirty": 18}} (thirties_core/week.py).
+    week: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    week_start: str = "mon"  # the first day of the user's week: week plans and the week's planning session
 
 
 @dataclass
@@ -33,6 +36,16 @@ class JoplinConfig:
     write_back: bool = False          # the user allowed Thirties to check off, add and break down tasks
     launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
     reset_routines: bool = True       # with write-back: untick routine notes each morning
+    file_done: bool = True            # with write-back: done items move to the month's Done note (done_log.py)
+    # The headless sync peer (joplin_peer.py): Thirties' own copy of Joplin, for when the Joplin app is closed or
+    # not installed. It syncs with the same sync target as the user's Joplin apps.
+    peer_enabled: bool = False
+    peer_port: int = 41210            # its Data API; clear of the desktop app's 41184-41194
+    peer_token: str = ""              # its Data API token (made by Thirties; a secret)
+    peer_target: int = 0              # Joplin's sync.target id; 0: the one the desktop app uses
+    peer_target_values: Dict[str, str] = field(default_factory=dict)  # sync.N.* the user typed (path, username…)
+    peer_password: str = ""           # the sync target's password (a secret)
+    peer_master_password: str = ""    # the end-to-end encryption master password, if the notes are encrypted
     # Notebooks to read tasks from (empty: all of them except the excluded ones), and single notes to add.
     allowed_notebooks: List[str] = field(default_factory=list)
     excluded_notebooks: List[str] = field(default_factory=lambda: ["Archive"])
@@ -52,6 +65,8 @@ class CalendarConfig:
     exclude_calendars: List[str] = field(default_factory=lambda: ["Birthdays & Anniversaries"])
     # Your addresses, used to read your RSVP on invites; found automatically from GNOME Online Accounts.
     my_emails: List[str] = field(default_factory=list)
+    # Per calendar, by display name (lowercased): "mine", "show" (show only) or "ignore" (calendar_engine).
+    modes: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -77,6 +92,8 @@ class AssistantConfig:
     # How often Thirties messages on its own: "off" (only reminders asked for), "light" (a heads-up before
     # calendar events), "medium" (plus the start and end of each stretch of the day), "heavy" (every item).
     message_level: str = "medium"
+    sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
+    sunset_notice: bool = False
 
 
 @dataclass
@@ -86,6 +103,7 @@ class TelegramConfig:
     allowed_chat_ids: List[int] = field(default_factory=list)
     notify_block_transitions: bool = True
     poll_interval_seconds: float = 2.0
+    mirror_desktop: bool = True  # the desktop chat is also sent to the phone, marked as from the desktop (T2)
 
 
 @dataclass
@@ -125,8 +143,15 @@ class ThirtiesConfig:
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
 
-    def resolve_joplin_db_path(self) -> Optional[Path]:
-        """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
+    def resolve_joplin_db_path(self, desktop_only: bool = False) -> Optional[Path]:
+        """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths.
+
+        With the sync peer on, this is whichever copy is current (the desktop app's while it runs, else the
+        peer's once it has synced since): every reader goes through here. ``desktop_only``: the desktop app's own.
+        """
+        if not desktop_only and self.joplin.peer_enabled:
+            from thirties_core.joplin_peer import reading_db_path
+            return reading_db_path(self, self.resolve_joplin_db_path(desktop_only=True))
         candidates: List[Path] = []
 
         if self.joplin.db_path:

@@ -140,6 +140,45 @@ def get_host_home() -> Path:
     return Path.home()
 
 
+def _home_twins(home: Path) -> List[Path]:
+    """A home and its other spelling on image-based systems (/home/x is /var/home/x on Silverblue)."""
+    if str(home).startswith("/home/"):
+        return [home, Path("/var") / home.relative_to("/")]
+    if str(home).startswith("/var/home/"):
+        return [home, Path("/home") / home.relative_to("/var/home")]
+    return [home]
+
+
+def host_runner_candidates(host_home: Path, repo_root: Path, in_flatpak: bool,
+                           env: Optional[Dict[str, str]] = None) -> Tuple[List[str], List[str]]:
+    """Where the host-side LiteRT runner's python and script may be, best first.
+
+    No checkout path is assumed (it was hard-coded to ~/dev/Thirties). In order: THIRTIES_RUNNER_PYTHON (an
+    interpreter with litert-lm-api), then THIRTIES_REPO (a checkout with a .venv), then this package's own
+    checkout when not sandboxed, then the shared venv in ~/.local/share/thirties (what sim_eval uses). Inside the
+    Flatpak the script is the copy put in ~/.local/share/thirties, since the host can't see into the sandbox.
+    """
+    env = os.environ if env is None else env
+    pythons: List[str] = []
+    scripts: List[str] = []
+    if env.get("THIRTIES_RUNNER_PYTHON"):
+        pythons.append(os.path.expanduser(env["THIRTIES_RUNNER_PYTHON"]))
+    repos = [Path(os.path.expanduser(env["THIRTIES_REPO"]))] if env.get("THIRTIES_REPO") else []
+    if not in_flatpak:
+        repos.append(repo_root)
+    for repo in repos:
+        pythons.append(str(repo / ".venv" / "bin" / "python"))
+    for home in _home_twins(host_home):
+        pythons.append(str(home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"))
+    if not in_flatpak:
+        scripts.append(str(repo_root / "thirties_core" / "runner.py"))
+    for home in _home_twins(host_home):
+        scripts.append(str(home / ".local" / "share" / "thirties" / "runner.py"))
+    for repo in repos:
+        scripts.append(str(repo / "thirties_core" / "runner.py"))
+    return list(dict.fromkeys(pythons)), list(dict.fromkeys(scripts))
+
+
 def find_agy_binary(custom_path: Optional[str] = None) -> Optional[str]:
     """Locate the agy CLI binary on host or in environment."""
     if custom_path:
@@ -525,77 +564,34 @@ class LiteRTInferenceEngine:
 
     def _find_host_runner(self) -> Optional[Dict[str, str]]:
         """Find host python interpreter and runner script for host GPU execution."""
-        host_home = get_host_home()
         repo_root = Path(__file__).resolve().parent.parent
         is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
-
         if is_flatpak:
             xdg_share = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "thirties"
             xdg_share.mkdir(parents=True, exist_ok=True)
-            shared_runner = xdg_share / "runner.py"
             bundled_runner = Path(__file__).resolve().parent / "runner.py"
             if bundled_runner.is_file():
-                try:
-                    shutil.copy2(bundled_runner, shared_runner)
+                try:  # the host can't see inside the sandbox: it runs a copy in the shared data folder
+                    shutil.copy2(bundled_runner, xdg_share / "runner.py")
                 except Exception as e:
                     logger.debug("Failed to copy bundled runner: %s", e)
 
-            python_candidates = [
-                str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
-                str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
-            ]
-            script_candidates = [
-                str(host_home / ".local" / "share" / "thirties" / "runner.py"),
-                str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
-            ]
-            for h in (host_home,):
-                if str(h).startswith("/home/"):
-                    alt = Path("/var") / h.relative_to("/")
-                elif str(h).startswith("/var/home/"):
-                    alt = Path("/home") / h.relative_to("/var/home")
-                else:
-                    alt = None
-                if alt:
-                    python_candidates.append(str(alt / "dev" / "Thirties" / ".venv" / "bin" / "python"))
-                    script_candidates.append(str(alt / ".local" / "share" / "thirties" / "runner.py"))
-                    script_candidates.append(str(alt / "dev" / "Thirties" / "thirties_core" / "runner.py"))
-
-            def _test_host(path_str: str) -> bool:
+            def exists(path_str: str) -> bool:
                 try:
-                    res = subprocess.run(
-                        ["flatpak-spawn", "--host", "test", "-f", path_str],
-                        capture_output=True,
-                        timeout=2,
-                    )
+                    res = subprocess.run(["flatpak-spawn", "--host", "test", "-f", path_str],
+                                         capture_output=True, timeout=2)
                     return res.returncode == 0
                 except Exception:
                     return False
-
-            found_python = next((py for py in python_candidates if _test_host(py)), None)
-            if not found_python:
-                return None
-            found_script = next((sc for sc in script_candidates if _test_host(sc)), None)
-            if found_python and found_script:
-                return {"python": found_python, "script": found_script}
-            return None
         else:
-            python_candidates = [
-                str(repo_root / ".venv" / "bin" / "python"),
-                str(host_home / "dev" / "Thirties" / ".venv" / "bin" / "python"),
-                str(host_home / ".local" / "share" / "thirties" / "venv" / "bin" / "python"),
-            ]
-            script_candidates = [
-                str(repo_root / "thirties_core" / "runner.py"),
-                str(host_home / ".local" / "share" / "thirties" / "runner.py"),
-                str(host_home / "dev" / "Thirties" / "thirties_core" / "runner.py"),
-            ]
-            found_python = next((py for py in python_candidates if Path(py).is_file()), None)
-            if not found_python:
-                return None
-            found_script = next((sc for sc in script_candidates if Path(sc).is_file()), None)
-            if found_python and found_script:
-                return {"python": found_python, "script": found_script}
-            return None
+            def exists(path_str: str) -> bool:
+                return Path(path_str).is_file()
+        pythons, scripts = host_runner_candidates(get_host_home(), repo_root, is_flatpak)
+        found_python = next((py for py in pythons if exists(py)), None)
+        found_script = next((sc for sc in scripts if exists(sc)), None) if found_python else None
+        if found_python and found_script:
+            return {"python": found_python, "script": found_script}
+        return None
 
     def is_available(self) -> bool:
         """Return True if in-process LiteRT-LM or host runner is available."""
@@ -713,7 +709,8 @@ class LiteRTInferenceEngine:
         }
 
 
-_CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\{.*\})?\s*$")
+_CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*(\{.*\})?\s*\)|(\{.*\}))?\s*;?\s*$")
+_CALL_START_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
@@ -728,14 +725,28 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
     visible: list[str] = []
     calls: list[dict[str, Any]] = []
     # a call written mid-sentence ("...as planned.CALL update_event {...}") still gets its own line
-    raw_reply = re.sub(r"(?<=\S)[ \t]*(CALL\s+[A-Za-z_][A-Za-z0-9_]*\s*\{)", r"\n\1", raw_reply or "")
-    for line in raw_reply.splitlines():
+    raw_reply = re.sub(r"(?<=\S)[ \t]*(CALL\s+[A-Za-z_][A-Za-z0-9_]*\s*[\{(])", r"\n\1", raw_reply or "")
+    lines = raw_reply.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
         stripped = line.strip().strip("`")
+        start = _CALL_START_RE.match(stripped)
+        if start and stripped.count("{") > stripped.count("}"):
+            # arguments over several lines (10-29: a CALL update_event {...} reached the user): read to the close
+            while i < len(lines) and stripped.count("{") > stripped.count("}"):
+                stripped += " " + lines[i].strip().strip("`")
+                i += 1
         m = _CALL_LINE_RE.match(stripped)
         if not m:
+            if start:  # still a call, but not one we can read ("CALL redraw()" went to Telegram, 10-27): never shown
+                calls.append({"id": f"call_{len(calls) + 1}", "name": start.group(1), "arguments": {
+                    "_parse_error": f"could not read {stripped[:120]!r}"}})
+                continue
             visible.append(line)
             continue
-        name, arg_text = m.group(1), m.group(2)
+        name, arg_text = m.group(1), m.group(2) or m.group(3)
         try:
             args = json.loads(arg_text) if arg_text else {}
             if not isinstance(args, dict):

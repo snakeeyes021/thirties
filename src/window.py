@@ -1,6 +1,7 @@
 """Main application window for Thirties."""
 
 import logging
+import threading
 import time
 from datetime import date, timedelta
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
@@ -70,8 +71,14 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         # Schedule on the left, chat on the right (see window.ui)
         self.day_view = DayView()
-        self.day_view.set_actions(self._run_day_tool, self._on_replanned)
+        self.day_view.set_actions(self._run_day_tool, self._on_replanned, on_notice=self._toast,
+                                  routines=self._day_routines, ongoing=self._ongoing)
+        self.day_view.agenda.fixed = lambda span: (self.conv_manager.tools._is_fixed(span) if self.conv_manager
+                                                   else span.source == "calendar" or span.is_firm)
+        self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
+                                                             if self.conv_manager is not None else "")
         self.content_toolbar.set_content(self.day_view)
+        self._wire_timeline(self.day_view.timeline)
 
         self.conv_manager = None
         self.chat_panel = ChatPanel(on_plan_updated=self._on_plan_updated, external_header=True)
@@ -92,6 +99,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self._install_type_to_chat()
 
         self._last_store_refresh = time.monotonic()
+        self._refreshing = False  # a background reload is running
+        self._local_changes = 0  # changes made in the day view (see _on_store_refreshed)
         self._timers = [
             GLib.timeout_add_seconds(TICK_SECONDS, self._on_tick),
             GLib.timeout_add_seconds(STORE_REFRESH_SECONDS, self._on_store_refresh_timer),
@@ -99,6 +108,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
         self._load_day(self.current_date)
         GLib.idle_add(self.chat_panel.focus_input)
+        GLib.idle_add(self._mention_outdated_memory)
 
     # --- setup ---
 
@@ -192,8 +202,89 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.backlog_tasks, self.active_notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
         self.scheduler.attach_history_to_tasks(self.backlog_tasks)
         if not self.chat_panel.is_busy:
+            self._follow_week()
             self._load_day(self.current_date)
         self._sync_brain_action()
+
+    def _follow_week(self) -> None:
+        """Work and Sleep already on the plan follow new hours from Preferences, as they do after set_week (except
+        where they were changed by hand)."""
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        if assistant is not None:
+            from thirties_core.plan_log import caused_by
+            try:
+                with caused_by("new work hours in Preferences"):  # the plan change log's cause
+                    assistant.routines._refresh_envelopes()
+            except Exception as e:
+                logger.warning("Updating Work and Sleep to the new hours failed: %s", e)
+
+    def _day_routines(self, plan):
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        return assistant.routines.day_routines(plan) if assistant is not None else []
+
+    def _ongoing(self):
+        """span -> bool, from the assistant's reading of kinds (list roles, the user's word), read once."""
+        from thirties_core.kinds import ONGOING
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        if assistant is None:
+            raise LookupError("no assistant yet")
+        ctx = assistant._kind_context()
+        return lambda span: assistant.kind_of(span, ctx) == ONGOING
+
+    # --- the Timeline page ---
+
+    def _wire_timeline(self, page) -> None:
+        """What the Timeline page reads and changes, all through the core (timeline_layout, placement, horizons)."""
+        from thirties_core.timeline_layout import DEFAULT_UNITS, UNITS_SETTING, stretch_options, what_to_plan
+
+        def tools():
+            return self.conv_manager.tools if self.conv_manager is not None else None
+
+        def options(stretch, minutes):
+            t = tools()
+            return stretch_options(t, t.day_plan, stretch, minutes, page.now()) if t else []
+
+        def suggestions():
+            t = tools()
+            return what_to_plan(t, t.day_plan.target_date) if t else []
+
+        def set_units(units):
+            self.core.settings.set(UNITS_SETTING, units)
+            self._push_sync()
+
+        def toast(title, undo):
+            t = Adw.Toast(title=title, button_label="Undo", timeout=6)
+            t.connect("button-clicked", lambda *_: undo())
+            self.toast_overlay.add_toast(t)
+
+        page.toast = toast
+        page.load_week = self._load_week
+        page.stretch_options = options
+        page.suggestions = suggestions
+        page.get_units = lambda: self.core.settings.get(UNITS_SETTING, DEFAULT_UNITS)
+        page.set_units = set_units
+
+    def _load_week(self, anchor: date, days):
+        """The week's plans and its chips (pinned to the week, no day yet), read on the Timeline's worker thread;
+        never during an assistant turn."""
+        from thirties_core.horizons import HorizonPlanner
+        from thirties_core.timeline_layout import unplaced_in_week
+        manager = self.conv_manager
+        if manager is None:
+            return [], []
+        if not manager.turn_lock.acquire(timeout=60):
+            raise TimeoutError("the assistant is busy")
+        try:
+            plans = [manager.day_plan if d == manager.day_plan.target_date else self.scheduler.build_day_plan(d)[0]
+                     for d in days]
+            try:
+                chips = unplaced_in_week(HorizonPlanner(manager.tools), anchor)
+            except Exception as e:
+                logger.warning("Reading the week's plan failed: %s", e)
+                chips = []
+        finally:
+            manager.turn_lock.release()
+        return plans, chips
 
     # --- loading days ---
 
@@ -225,6 +316,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         # The conversation manager owns the day's plan; the schedule shows the same object.
         plan, ambiguous = self.scheduler.build_day_plan(target_date)
         self.conv_manager = self._new_conversation_manager(plan, ambiguous)
+        from thirties_core.horizons import week_start_index
+        self.day_view.timeline.week_start = week_start_index(self.config)
         self.day_view.refresh_plan(self.conv_manager.day_plan)
         self.day_view.scroll_to_now()
         self.chat_panel.set_conversation_manager(self.conv_manager)
@@ -269,18 +362,48 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             self._refresh_from_store()
 
     def _refresh_from_store(self) -> None:
-        """Pick up changes other clients (e.g. the Telegram bot) made to this day and its conversation."""
-        if self.conv_manager is None or self.chat_panel.is_busy:
+        """Pick up changes other clients (e.g. the Telegram bot) made to this day and its conversation.
+
+        The reload (Joplin's database, the calendar over D-Bus, the plan) runs on a worker thread, so the window
+        never stalls every minute; the result is drawn back on the UI thread. One refresh at a time, and never
+        during an assistant turn (the worker takes the turn lock).
+        """
+        manager = self.conv_manager
+        if manager is None or self.chat_panel.is_busy or self._refreshing:
             return
+        self._refreshing = True
         self._last_store_refresh = time.monotonic()
-        try:
-            self.conv_manager.refresh()
-        except Exception as e:
-            logger.warning("Refreshing from the database failed: %s", e)
-            return
-        self.day_view.refresh_plan(self.conv_manager.day_plan)
+        taps_before = self._local_changes
+
+        def worker():
+            # never during an assistant turn: the turn lock is taken here, on the worker (it's re-entrant, so the
+            # thread that takes it releases it); a turn under way means the next timer picks the changes up
+            if not manager.turn_lock.acquire(blocking=False):
+                GLib.idle_add(self._on_store_refreshed, manager, False, taps_before)
+                return
+            ok = True
+            try:
+                manager.refresh()
+            except Exception as e:
+                logger.warning("Refreshing from the database failed: %s", e)
+                ok = False
+            finally:
+                manager.turn_lock.release()
+            GLib.idle_add(self._on_store_refreshed, manager, ok, taps_before)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_store_refreshed(self, manager, ok: bool, taps_before: int) -> bool:
+        self._refreshing = False
+        if not ok or manager is not self.conv_manager:
+            return False  # failed, or another day was opened meanwhile
+        if self._local_changes != taps_before:
+            # a change made in the day view while the reload ran may be missing from the reloaded plan
+            manager.reload_plan()
+        self.day_view.refresh_plan(manager.day_plan)
         self.chat_panel.after_store_refresh()
         self._sync_brain_action()
+        return False
 
     def _on_plan_updated(self, plan) -> None:
         """Triggered after an assistant turn, which may have changed the plan."""
@@ -294,7 +417,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         if self.conv_manager is None:
             return ""
         from thirties_core.plan_tools import NOT_DONE
-        result = self.conv_manager.execute_tool(name, args)
+        from thirties_core.plan_log import caused_by
+        self._local_changes += 1
+        with caused_by("Day page"):  # the plan change log says "Day page drag" etc. (plan_log.py)
+            result = self.conv_manager.execute_tool(name, args)
         if result.startswith(NOT_DONE):
             self._toast(result.split(":", 1)[1].split(". Ask the user")[0].strip())
         self.day_view.refresh_plan(self.conv_manager.day_plan)
@@ -329,7 +455,22 @@ class ThirtiesWindow(Adw.ApplicationWindow):
 
     # --- profile & memory ---
 
-    def _show_profile_dialog(self) -> None:
+    def _mention_outdated_memory(self) -> bool:
+        """At startup: memory notes that work around since-fixed bugs are listed for the user (never deleted)."""
+        try:
+            from thirties_core.memory_audit import to_review
+            count = len(to_review(self.scheduler.state_db))
+        except Exception as e:
+            logger.warning("Checking memory notes failed: %s", e)
+            return False
+        if count:
+            toast = Adw.Toast(title=f"{count} memory note{'s look' if count > 1 else ' looks'} outdated",
+                              button_label="Review", timeout=8)
+            toast.connect("button-clicked", lambda *_: self._show_profile_dialog(page="memory"))
+            self.toast_overlay.add_toast(toast)
+        return False
+
+    def _show_profile_dialog(self, page: str = "") -> None:
         services = self.conv_manager.tools.services if self.conv_manager else None
         from thirties_core.lists import ListCatalog
         engine = self.joplin_engine
@@ -339,7 +480,11 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             on_changed=self._push_sync,
             lists=ListCatalog(self.scheduler.state_db) if self.scheduler else None,
             load_lists=lambda: (engine.fetch_active_notes(), engine.fetch_tasks()) if engine else ([], []),
+            routines=lambda: (self.conv_manager.tools.assistant.routines
+                              if self.conv_manager and self.conv_manager.tools.assistant else None),
         )
+        if page:
+            dialog.stack.set_visible_child_name(page)
         dialog.present(self)
 
     # --- navigation ---

@@ -4,8 +4,10 @@ The Today note is the user's own list of what they mean to do today; they may ed
 it by hand like any other note. Thirties writes to it only with permission
 (write-back), and keeps one thing of its own about it: which Today item came from
 which item on a home list ("Call the bank" from Errands), so ticking either one
-ticks both. Routines stay in their own notes (unticked each morning), so the day's
-list is the Today note together with the routines.
+ticks both. A routine note is a template: when a routine is on the day's plan it
+goes on the Today note as one item, named after the routine, with its steps
+nested under it. Nothing is written back into the routine note, and the group
+leaves the Today note the next morning (routines never carry over).
 """
 
 from __future__ import annotations
@@ -50,6 +52,26 @@ def with_done(note: Optional[Dict[str, Any]], done_ids: set) -> List[Tuple[str, 
             ticked = item_id((note or {}).get("id", ""), text, n) in done_ids
         out.append((text, ticked))
     return out
+
+
+def group_items(note: Optional[Dict[str, Any]], name: str) -> Optional[List[str]]:
+    """The items nested under the item named ``name`` (open or ticked), or None if there's no such item."""
+    lines = ((note or {}).get("body") or "").splitlines()
+    want = name.strip().lower()
+    for i, line in enumerate(lines):
+        m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
+        if not m or m.group(2).strip().lower() != want:
+            continue
+        width = len(m.group(1).replace("\t", "    "))
+        children = []
+        for child in lines[i + 1:]:
+            c = CHECKBOX_REGEX.match(child) or DONE_CHECKBOX_REGEX.match(child)
+            if c and len(c.group(1).replace("\t", "    ")) > width:
+                children.append(c.group(2).strip())
+            elif c or child.strip():
+                break
+        return children
+    return None
 
 
 def notes_with_role(roles: Dict[str, Dict[str, str]], notes: List[Dict[str, Any]], role: str) -> List[Dict[str, Any]]:

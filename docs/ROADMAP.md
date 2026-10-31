@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-24. Releases: 0.0.1 (2026-10-18). In progress: 0.1 on `feature/0.1`. Next: 0.2 (section B below).
+> Last revised: 2026-10-30. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30). In progress: 0.2 on `feature/0.2`.
 
 ---
 
@@ -138,7 +138,7 @@ Done means a generic user can install Thirties fresh and use it daily, with no c
 
 ---
 
-## 0.1: The day list (branch `feature/0.1`, agreed 2026-10-17; not released yet)
+## 0.1: The day list (agreed 2026-10-17; released as 0.1.0 on 2026-10-30)
 
 Real use of the MVP showed the root problem: the schedule does two jobs, the plan and the record. So every drift became a schedule edit, which brought shuffles, confirmations, nagging, and a day view full of things that never happened. 0.1 separates them.
 
@@ -284,7 +284,7 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
       - The model judges the unclear cases, and the item stores which it is.
     - A flexible item that starts mid-block and crosses into the next block moves to the next block, to discourage overstuffing. A fixed item never moves.
 
-### B. 0.2: design settled enough to build (in this order; branch `feature/0.2` once 0.1 is released)
+### B. 0.2: design settled enough to build (the details; the order of work is in "0.2" below)
 1. **Joplin stays clean, and Thirties does the upkeep** (M). The user never has to manage two places.
    - Thirties adds items to the right list, in the right section.
    - Thirties records done items and moves them out of their lists into its Done log (decided below).
@@ -345,6 +345,105 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 
 ---
 
+## 0.2: Trustworthy data, and a day that sets itself up (agreed 2026-10-30; branch `feature/0.2`)
+
+The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus section B above. The user chose to have all of it in 0.2 rather than split it with 0.3. The full friction list, with quotes, is in `docs/eval_reports/frictions/2026-10-30_oct14-30.md` (gitignored, because it's private chat). Codes like J1 and S3 refer to it. Each block lands on the branch as it's done, so the user's builds get the fixes as they come.
+
+**Block 0: the data is right** (blockers, first; all six done 2026-10-30)
+1. **Today matches the plan, and routines are written right** (soak 6, J1, J2, S9). Everything on today's plan is on Today. A routine goes on as one item, named after its note, with its steps nested under it. Nothing is written back into a routine note.
+2. **Completion times** (J8, J9). A "done" in chat with no time is stored at the time it was said, as an estimate (start = that time minus the planned length). A tick in the app is stored at the time of the tick. Notices and replies see ticks.
+3. **Ghost copies and outcomes on the wrong item** (S3, S8). Moving or redrawing an item moves it; it never leaves a copy behind. An outcome is written only to the item the user named, on the day they meant.
+4. **Internal text never reaches the user** (A1). Python strips `CALL …` lines and any tool syntax before a reply is sent. Retry prompts ("[System check…]") are kept out of the visible history.
+5. **Check the possible recurrences** in the database: Work moved on 10-27 (S1), and done items offered again on 10-25 (J3). Fix whichever is real.
+6. **Every Joplin write is recorded and scored** (B1). Every write is logged (`joplin_writes`: the operation, the lines it took out and put in, and the message that caused it), and the day sim's Joplin facts check what must hold: nothing written into a routine, everything on the plan is on Today, what's done is ticked, and no line appears twice.
+
+**Built 2026-10-30 (items 7–29, horizons C2, Gemma C3 and After 0.1 items 2, 5–9), in parallel streams merged on `feature/0.2`:** A1 kinds, lasting facts, moot, rollover; A2 routines, anchors, the day proposal, weekly patterns; B lists, drop box, Done note, remind me, pencilled in, later days, note edits, triage; C the overlap model, placement, push back, times; D missed items, schedule replies, bursts, retries, Telegram, mirroring, chat times, contextual questions; E actual times, outcome context, calendar choices, goals, memory review, connectors, housekeeping, the Frontier bar; F Gemma parity, step-by-step parsing, model-neutral runtime; G planning horizons. Then I (loose ends: skip buttons, Your week, Gemma horizon talk, on-track lines), and a sunrise/sunset message (the user's request 10-30, for the lights: off by default, Preferences or "tell me at sunset"). Then J (the timeline: Agenda | Timeline, Day and Week) and K (the last gaps). Still to do: the headless Joplin sync peer (moved into 0.2 by the user 10-30, from Later), the local model spike (stream H), and the full evals.
+
+**Block 1: the day sets itself up**
+7. **What kind of item** (B2): once, ongoing or daily.
+8. **Routines and daily anchors** (B3, R1, R2, R6). The user's two morning thirties go on every day without being asked: kitties, caffeinate, water and breakfast in one; throne, shower, PT and brush teeth in the other. Fixed times are kept (cats' dinner at 5), and known facts are applied (dinner takes an hour; outside things wait until after the shower). **Routines repeat on their own schedule** (added by the user 10-30): every day, every other day, every 12 days, some weekdays, or on request. The schedule is stored with the routine, and Python counts from the last time it was done, not from a fixed date. **Skipping one** asks, like a subscription would: skip for today (it comes back tomorrow), skip this time (the next one is a full cycle later), or skip until a day you pick. The same three choices appear as buttons in the app and as a short question in chat.
+9. **Things go moot** (B4, R5).
+10. **The morning rollover offers only what should roll over** (R4). No routine items, no generic "dev" blocks, nothing done or moot, and a plain question.
+11. **The assistant proposes the day** (A6). It covers the daily items plus what keeps goals on track, so the user doesn't have to micromanage.
+
+**Block 2: lists and items**
+12. **New items go on the right list and in the right section, without asking** (B1, J5). The **drop box** list role (soak 5) is a fallback for when it isn't obvious. Done items move to the monthly Done note.
+13. **"Remind me" schedules an item** (B5, C4).
+14. **"Pencilled in" items** (O3): on Today, but not given a time.
+15. **Planning tomorrow and later days** (O2).
+16. **Editing a note's structure** (J7): sub-items, and splitting a line.
+
+**Block 3: the schedule model**
+17. **Overlapping, nested and coincident items** (S2, T4): one coherent model. Items placed alongside never move, split or hide each other; Work shows under what's placed on top of it; a group reads as one entry.
+18. **Placement with judgement** (B8, S5): no cramming; "later" means a real gap.
+19. **"Push everything back" includes what's past and unmarked** (S4).
+20. **Times** (S6, S7). "Now" is the real time. Thirties never picks minute times or a time that crosses blocks. Calendar events can be ticked (soak 1). Ticking items before their time leaves a clean card (soak 3).
+
+**Block 4: messages**
+21. **Missed items** (C2): shown with the "you're in this block" line, one per line, without duplicates, and not for the current block. **No "did you get to the rest?" after every done** (C5). **Late notices are dropped**, not sent stale (C3).
+22. **Schedule replies** (A5): from now on, with no "(until…)" when the next item follows. Grouped items read as one entry.
+23. **Act, don't ask** (A3). Don't make up explanations or capabilities (A4). Reply once to a burst of quick messages (A8).
+24. **Telegram** (T1, T2, T3): timeouts retried automatically; formatting escaped; the desktop chat mirrored to the phone.
+25. **Times on chat messages in the app** (soak 2).
+
+**Block 5: records and the rest**
+26. **Actual wake, sleep and work times** (B6). **Context with each outcome** (B7).
+27. **Calendar** (O1): "not mine" per recurring series; mine / show only / ignore, per calendar.
+28. **Stale goals** (A7), and **memory notes that paper over fixed bugs get deleted** (D).
+29. **The eval counts only minute times Thirties picked itself** (gate write-up, docs/SLM_BRAIN.md).
+
+**0.2 soak** (AGENTS.md §6.3): the user switched to 0.2 on Fri Oct 30 at about 11:45 PM (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
+
+## 0.3 (not started; the next version after 0.2)
+- **Rethink the Profile** (the user, 10-30): it overlaps with other stores. Its "preferences" section held near-copies of memory notes (the user removed two), and it also overlaps with lasting item facts, routines and anchors, Your week, calendar choices and list roles, which now hold the same kinds of things in structured, enforced form. Decide what the Profile is still for (probably the free-text "who you are": goals, life context, what matters), what moves into the structured stores, whether memory notes and the Profile merge, and how the assistant uses whatever remains. Audit the overlap first: list every place a fact about the user can live.
+- **Sleep and wake from a tracker** (the user, 10-30): read when they fell asleep and woke from Google Health / Fitbit (or Health Connect on the phone) instead of asking, which "will get old fast". The Sleep span and the routine's "on waking" placement then follow the real times.
+
+### From the 0.2 soak (tagged Blocker / Polish / Next)
+Reported 10-31 (Sat, day 1). The causes were checked in the user's data and the code.
+1. **The Agenda breaks the block contract** (Next, then a Blocker on 10-31 at the user's word; **fixed in 0.2**: Now is the whole current thirty, past is only what's whole thirties are over, and every row shows only its block's start, a fixed thing at its own time, with no "planned", no ranges and no ":00". Now's rows can be skipped too. The day Timeline's rail also marks sunrise, solar noon and sunset, at the user's request). One 9:00 block was spread across all three sections: Feed kitties under the past items ("planned 9:00 AM"), Caffeinate under Now, and Water bottle onward under Next. The sections cut at each item's minute (the routine steps are 6 minutes apart under the hood), but the cards show "9:00". The fix: the Agenda works in thirties. The current thirty is Now, as a whole. An item counts as past only once its thirty is over. No section may show a time that contradicts the section it's in.
+2. **What the assistant is keeping track of, visibly** (Next), and **a promise that was silently lost** (Blocker). At 12:48 AM the user asked to "make sure I see the new Nathan Fielder documentary this weekend". It was pinned to the week (horizon_plan, week of 10-26), but the morning proposal never offered it.
+   - **Cause:** the pin points to the item's id, and the id hashes the note. When the item moved from Self to the new Media Queue, the pin pointed nowhere, and `HorizonPlanner.candidates` skips it without a word (`tasks.get(item_id)` is None).
+   - **Also:** Media Queue was guessed "someday", and candidates never include someday.
+   - **Fixed in 0.2:**
+     - A move carries its pins and horizon to the new id (`list_tools._rekey_horizons`; the old rows go out and new ones come in, so it syncs).
+     - A pin whose id is gone (moved in Joplin) finds its item by the same wording, if exactly one item has it; otherwise it's logged, not dropped silently.
+     - On a week's last two days, its unplaced items are pressing ("from the plan for this week, which ends tomorrow"), like something due.
+     - The user's own pin now resolves to Media Queue by its wording, with no data repair.
+   - **Someday is never proposed: wrong** (the user, 10-31; Next, part of horizons in 0.3). A someday item with a clear "maybe this year" should be worked into the long horizons: spread over the year for as long as it'll take, then trickled down into a month, a week and a day, so that on that day, months later, it's reliably offered. Add a horizon above year, **"beyond"** ("decade is too big and lifetime is morose"): everything on the backlog the user wants to get done someday.
+   - **The feature (0.3):** a visible place for what the assistant is tracking but hasn't scheduled ("penciled in": pinned to the day, the week, the weekend). It shows in the Agenda, so the user can tell "tracked but not mentioned" from "never tracked". If the user turns it down on Saturday, Sunday gets it without asking again.
+3. **Timeline month and year views** (Next), with the items' names on them. Week has no names; rethink that a little too. Move the Day/Week switch: it sits in an awkward place.
+4. **PT is blue (one-off) on the Timeline** (Polish). The other routine steps are green (daily). `timeline_layout.look_of` colours by wording (`kind_by_wording`), and "PT" matches no daily word. A routine step is daily because it's in a routine, whatever its wording.
+5. **Jon podcast twice at 8:30 PM** (Blocker: ghost copies again). After "yes to Jon's podcast", `apply_rollover` moved yesterday's copy to today, and then the model's add_event made a second one (plan_changes 42 and 46). The user deleted one from the Day page.
+   - **Cause:** apply_rollover calls `update_event` with `day=yesterday`. `execute` swaps `day_plan` to yesterday's, so `plan_for("today")` in `_move_to_day` builds a fresh copy of today instead of returning the one in use. The moved span lands only in that copy, and add_event's duplicate guard checks the one in use.
+   - **Fixed in 0.2:** `plan_for` returns the plan in use for its own date, even while a call works on another day.
+6. **Found in the transcript, not reported:**
+   - **Push back stranded Feed kitties** (Blocker). "I woke at 8:49. Push everything back" moved every routine step except Feed kitties, which stayed at 8:00 (its 6 minutes were over). The user's note: "even if it was passed, it wasn't done". **Fixed in 0.2:** push back works in whole blocks (from the thirty that was `by` ago).
+   - **Not a bug: "one reply stored two or three times", and the empty reply.** These are hidden drafts. The chat shows only the final reply (`_show_only`). I misread a dump of the history that included the drafts.
+   - **The morning message called the waking routine "passed" at 7:34 AM, before the user was up** (gone with the next item).
+7. **Triple texted at sunrise** (the user, 10-31; Blocker). Three messages arrived at once: the morning message, the day's proposal, and "when did you wake up?". The first two were "so verbose". The user expected the wake question to wait for a tracker (0.3).
+   - **Fixed in 0.2:**
+     - The morning is one message. The model's proposal turn also says what's already planned, yesterday's leftovers and a holiday, with one question.
+     - The routines and anchors put on by themselves are no longer listed; they're logged.
+     - Waking time isn't asked any more; it's used when the user says it. The work start and end questions stay, at the "heavy" level.
+8. **Double outlines at the Timeline's notches** (Polish). Where a card's dimple is drawn, the outline doubles: on both sides of free stretches, and on the right side of scheduled cards.
+9. **Clock times under the hood are still too exposed** (to discuss for 0.3). The user only ever wanted them to keep a block of small items from being overstuffed and to order them within it. The week Timeline's "cascading" morning routines are a granularity nobody needs, for routines especially, and maybe for every item. Revisit when planning 0.3, together with item 1.
+10. **A late wake shrinks the day on the week Timeline** (the user, 10-31: "that is weird"; Next). "I woke at 8:49" recorded the night's Sleep as running until 8:49, and the waking day is drawn as the time Sleep doesn't cover (`timeline_layout._awake_range`), so Saturday's column starts at 9:00 while the other days start earlier. The day's frame should stay the same; the late wake can show inside it as sleep that ran over, or not at all.
+11. **When does a day begin?** (the user, 10-31; to discuss for 0.3). So far it's sunrise. But getting the morning routine done before work (a goal) often means waking and doing things before sunrise, and a wake-up before the sunrise thirty currently falls at the end of the previous day's canvas. The user's idea: the day starts at least one full block before sunrise (usually one and some change, so about two). Decide together with item 10 and the Agenda's blocks (item 1).
+12. **Adding from the day Timeline needs a free block** (the user, 10-31; to discuss for 0.3). The only way to add something there is a free stretch's "plan here". To put an item where another already is, the user has to make it in a free block and then drag it over ("no bueno"). Any thirty, taken or not, should take a new item: a click or long-press on a slot or a card's edge, and items share the time as they already can.
+13. **Light, dark or follow the system, in the main menu** (the user, 10-31; Next). This is standard in GNOME apps (an `Adw.StyleManager` color scheme, kept as a local setting).
+14. **Are Profile, Memory & Lists and Preferences split the right way?** (the user, 10-31; to discuss with the Profile audit). The rule so far: *Profile, Memory & Lists* is what Thirties knows about the user and their things, which the assistant also changes in conversation. Its tabs are Profile (free text), Memory (notes), Lists (each note's role) and Routines (routines and anchors). *Preferences* is how the app is set up and connected: General (location, usual week, your week, Timeline units, calendars), Assistant (which brain), Tasks (Joplin, the sync peer, notebooks, wishlists), Sync, and Phone & Messages. Where it blurs: "Your usual week", "Your week" and the calendar choices are facts about the user, set in conversation too, but they live in Preferences.
+15. **Routines in the Agenda use the time gutter too** (the user, 10-31; Polish). They're the one section still in the old rows.
+16. **Message level order** (the user, 10-31; Polish). Preferences lists Light, Medium, High, Off; it should be High, Medium, Light, Off.
+17. **The "sunrise message" with the sunrise switches off** (the user, 10-31). It wasn't the sunrise notice: nothing with its text ("🌅 Sunrise.") was sent, and the switches are off. It was the morning message ("☀️ Good morning!"). That comes when the day starts and waking plus half an hour has passed. The day starts at sunrise, so with a planned wake before sunrise it lands right at sunrise and reads like a sunrise notice. **Decided (the user, 10-31):**
+   - The morning message comes at the planned wake time, not at sunrise. If the planned wake is before sunrise, the day has to be current by then (item 11).
+   - The sunrise notice comes at sunrise, as its switch says.
+   - The user can set the planned wake to sunrise, or relative to it ("half an hour before sunrise"), as a standing choice in Your usual week and Your week, and by saying so. Today it's only a clock time.
+   - When the planned wake is sunrise itself and the sunrise notice is on, the two are one message: the morning message, opening with the sunrise.
+18. **A day's conversation is titled "[Morning, not from the user]…"** (the user, 10-31; Polish). `ConversationStore.save` (memory.py) titles a conversation with its first user message once, and the first one is now the hidden instruction for the morning proposal turn. The title should come from the first message the user actually wrote (skip hidden ones; leave it untitled until there is one).
+
+## Soon, not today (from the user, 2026-10-30)
+- **Benchmark local models on other devices:** the user's 8 GB GPU desktop (a likely home-base machine, not set up yet) and their phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.
+
 ## After 0.1
 
 1. **Use it for real days and log friction.** That's still the best input. Turn each friction point into a sim scenario.
@@ -369,4 +468,4 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
    - the DST fall-back hour edge case: same-zone comparisons use wall time
    - the desktop app's periodic refresh runs on the UI thread
    - GUI tests in CI (they skip there: no display)
-10. **Later:** a headless Joplin CLI sync peer, Flathub, translations, a native mobile app.
+10. **Later:** Flathub, translations, a native mobile app. (The headless Joplin sync peer moved into 0.2.)

@@ -41,6 +41,11 @@
   </branding>
 
   <releases>
+    <release version="0.2.0" date="2026-10-30" type="development">
+      <description>
+        <p>In progress.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-30" type="development">
       <description>
         <p>The day list, and an assistant you can trust with your lists:</p>

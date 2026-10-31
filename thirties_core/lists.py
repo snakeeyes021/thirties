@@ -30,6 +30,8 @@ ROLES = {
     "list": "a list of things to get done",
     "project": "a one-off project with an end",
     "backlog": "a project's backlog of tickets: planned as time on the project ('Thirties dev'), never ticket by ticket",
+    "dropbox": "a drop box: a quick place to drop things without deciding where they go yet ('Assorted Quickies', "
+               "'Inbox'); emptied into the proper lists now and then",
     "reference": "reference or wishlist: never pushed, only mentioned when asked",
     "ignore": "not a to-do list: Thirties doesn't read it",
 }
@@ -40,7 +42,7 @@ URGENCIES = {
     "someday": "maybe, someday: never pushed",
 }
 # Roles whose items get an urgency each; the others' items take it from the role.
-SORTED_ROLES = ("list", "project", "menu")
+SORTED_ROLES = ("list", "project", "menu", "dropbox")
 ROLE_URGENCY = {"today": "now", "routine": "now", "reference": "someday", "backlog": "whenever"}
 
 _SCHEMA = """

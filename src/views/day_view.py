@@ -1,154 +1,110 @@
-"""Daily schedule view displaying the Solar Arc and consolidated big-time blocks."""
+"""The schedule pane: the solar arc header (the day's date, the sun's arc and the daylight/dark tallies), then the
+Agenda (where the day stands: agenda.py) and the Timeline page (timeline.py).
+
+The old block-card timeline was replaced by the Timeline page on 10-30; the solar arc header stays ("put that
+back. That was beautiful.", the user, 10-30).
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from gi.repository import Adw, Gdk, GLib, Graphene, Gtk
+
+from gi.repository import Adw, Gtk
 
 from thirties_core.astronomy import get_current_time
-from thirties_core.models import DayPlan, EventSpan, ThirtyBlock
-from thirties.widgets.block_widget import BlockWidget, GroupedBlockWidget, format_clock
+from thirties_core.kinds import ONGOING, kind_by_wording
+from thirties_core.models import DayPlan
+from thirties_core.clock import thirty_of
 from thirties.widgets.solar_arc import SolarArcWidget
 
 
-@dataclass
-class Segment:
-    """Consecutive thirties that show the same thing (or one open thirty)."""
-    blocks: list[ThirtyBlock]
-    spans: list[EventSpan] = field(default_factory=list)  # what fills it; empty when open
-    is_envelope: bool = False
-
-    @property
-    def key(self) -> tuple:
-        return (tuple(s.id for s in self.spans), self.blocks[0].index)
-
-
-def _occupancy(plan: DayPlan, block: ThirtyBlock) -> tuple[bool, list[EventSpan]]:
-    """What a thirty shows: its non-envelope spans if any, otherwise the envelope under it."""
-    occupants = plan.spans_overlapping(block.start_dt, block.end_dt)
-    foreground = [s for s in occupants if not s.is_envelope]
-    if foreground:
-        return False, foreground
-    span = plan.display_span(block)
-    return True, [span] if span else []
-
-
-def build_segments(plan: DayPlan) -> list[Segment]:
-    """Group the day's thirties into cards.
-
-    Consecutive thirties with exactly the same occupants become one segment, so
-    a two-thirty dinner is one card, and "Dinner + Audiobook" is its own card for
-    the thirties where both happen. Anything planned on top of work or sleep
-    splits the envelope around it, keeping the list in clock order. Open thirties
-    stay individual: each is a slot to plan.
-    """
-    segments: list[Segment] = []
-    for block in plan.blocks:
-        is_envelope, spans = _occupancy(plan, block)
-        prev = segments[-1] if segments else None
-        if (spans and prev is not None and prev.spans
-                and [s.id for s in prev.spans] == [s.id for s in spans]):
-            prev.blocks.append(block)
-        else:
-            segments.append(Segment([block], spans, is_envelope))
-    return segments
-
-
 class DayView(Gtk.Box):
-    """Container for the daily schedule timeline with collapsed locked chunks."""
+    """Day and Timeline pages for one day's plan."""
 
     def __init__(self, day_plan: DayPlan | None = None) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.day_plan = day_plan
         self.today: date | None = None  # the active diurnal date, set by the window
-        self._rows: list[Gtk.Widget] = []
         self._signature = None
-        self._now_idx = -1
-        self._expanded: set[tuple] = set()
-
+        self._now_thirty = None
+        # () -> (span -> bool): which items are ongoing (a done session reads "worked on"); the window gives the
+        # assistant's reading (list roles, the user's word), read once per redraw. Until then, the wording.
+        self.ongoing_provider = None
+        self._ongoing = lambda span: kind_by_wording(span.title) == ONGOING
         self.set_hexpand(True)
         self.set_vexpand(True)
-
         self._build_header()
         self._build_pages()
-
         if self.day_plan:
             self.refresh_plan(self.day_plan)
 
     def _build_header(self) -> None:
-        header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        header_card.set_margin_start(16)
-        header_card.set_margin_end(16)
-        header_card.set_margin_top(10)
-        header_card.set_margin_bottom(6)
+        """The date, the sun's arc over the day, and how much daylight and dark is still open."""
+        header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=16, margin_end=16,
+                              margin_top=10, margin_bottom=6)
         header_card.add_css_class("card")
-
-        # Date title placed cleanly at top of schedule
-        self.date_title = Gtk.Label(label="Today")
+        self.date_title = Gtk.Label(label="Today", margin_top=8, halign=Gtk.Align.CENTER)
         self.date_title.add_css_class("title-3")
-        self.date_title.set_margin_top(8)
-        self.date_title.set_halign(Gtk.Align.CENTER)
         header_card.append(self.date_title)
-
-        # Solar Arc drawing
         self.solar_arc = SolarArcWidget(self.day_plan)
         header_card.append(self.solar_arc)
-
-        # Tallies bar
-        tallies_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        tallies_box.set_halign(Gtk.Align.CENTER)
-        tallies_box.set_margin_bottom(8)
-
+        tallies = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16, halign=Gtk.Align.CENTER,
+                          margin_bottom=8)
         self.daylight_pill = Gtk.Label(label="☼ Daylight: 0/0 available")
         self.daylight_pill.add_css_class("badge-daylight")
-
         self.dark_pill = Gtk.Label(label="☾ Dark: 0/0 available")
         self.dark_pill.add_css_class("badge-dark")
-
-        tallies_box.append(self.daylight_pill)
-        tallies_box.append(self.dark_pill)
-        header_card.append(tallies_box)
-
+        tallies.append(self.daylight_pill)
+        tallies.append(self.dark_pill)
+        header_card.append(tallies)
         self.append(header_card)
 
+    def _update_title(self) -> None:
+        today = self.today or date.today()
+        target = self.day_plan.target_date
+        if target == today:
+            text = f"Today — {target.strftime('%A, %B %d')}"
+        elif target == today - timedelta(days=1):
+            text = f"Yesterday — {target.strftime('%A, %B %d')}"
+        elif target == today + timedelta(days=1):
+            text = f"Tomorrow — {target.strftime('%A, %B %d')}"
+        else:
+            text = target.strftime("%A, %B %d, %Y")
+        self.date_title.set_text(text)
+
+    def _update_tallies(self) -> None:
+        # Today counts only the thirties still ahead; other days count them all.
+        counts = self.day_plan.availability(self.live_now())
+        self.daylight_pill.set_text(f"☼ Daylight: {counts['daylight_open']}/{counts['daylight_total']} available")
+        self.dark_pill.set_text(f"☾ Dark: {counts['dark_open']}/{counts['dark_total']} available")
+
     def _build_pages(self) -> None:
-        """Day (where things stand: now and next, not reported, done) and Timeline (all 48 thirties)."""
+        """Day (where things stand: now and next, not reported, done) and Timeline (the day and the week)."""
         from thirties.views.agenda import AgendaPage
+        from thirties.views.timeline import TimelinePage
         self.run_tool = None
         self.agenda = AgendaPage(run_tool=lambda name, args: self.run_tool(name, args) if self.run_tool else "",
                                  on_replan=lambda result: self.on_replan(result) if self.on_replan else None)
         self.on_replan = None
+        self.agenda.ongoing = self._ongoing
+        self.timeline = TimelinePage()
+        self.timeline.run_tool = lambda name, args: self.run_tool(name, args) if self.run_tool else ""
+        self.timeline.ongoing = self._ongoing
         self.stack = Adw.ViewStack(vexpand=True)
-        self.stack.add_titled_with_icon(self.agenda, "day", "Day", "view-list-symbolic")
-        self._build_blocks_list()
-        self.stack.add_titled_with_icon(self.scrolled, "timeline", "Timeline", "x-office-calendar-symbolic")
-        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER)
+        self.stack.add_titled_with_icon(self.agenda, "day", "Agenda", "view-list-symbolic")
+        self.stack.add_titled_with_icon(self.timeline, "timeline", "Timeline", "x-office-calendar-symbolic")
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER,
+                                    margin_top=6)
         self.append(switcher)
         self.append(self.stack)
 
-    def set_actions(self, run_tool, on_replan=None) -> None:
-        """``run_tool(name, args)`` runs a schedule tool (and refreshes); ``on_replan(result)`` after Replan."""
+    def set_actions(self, run_tool, on_replan=None, on_notice=None, routines=None, ongoing=None) -> None:
+        """``run_tool(name, args)`` runs a schedule tool (and refreshes); ``on_replan(result)`` after Replan;
+        ``on_notice(text)`` shows a short result (a skip); ``routines(plan)`` lists the day's routines with their
+        skip choices (RoutineTools.day_routines); ``ongoing()`` gives a span -> bool for ongoing items."""
         self.run_tool, self.on_replan = run_tool, on_replan
-
-    def _build_blocks_list(self) -> None:
-        self.scrolled = Gtk.ScrolledWindow()
-        self.scrolled.set_vexpand(True)
-        self.scrolled.set_hexpand(True)
-        self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(750)
-        clamp.set_tightening_threshold(550)
-
-        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.list_box.set_margin_top(6)
-        self.list_box.set_margin_bottom(24)
-        self.list_box.set_margin_start(12)
-        self.list_box.set_margin_end(12)
-
-        clamp.set_child(self.list_box)
-        self.scrolled.set_child(clamp)
+        self.agenda.on_notice, self.agenda.routines = on_notice, routines
+        self.ongoing_provider = ongoing
 
     # --- time ---
 
@@ -162,158 +118,61 @@ class DayView(Gtk.Box):
             return now
         return None
 
-    def _current_index(self) -> int:
-        now = self.live_now()
-        block = self.day_plan.block_at(now) if now is not None else None
-        return block.index if block else -1
-
     # --- rendering ---
 
     def set_today(self, today: date) -> None:
         if today != self.today:
             self.today = today
-            if self.day_plan is not None:
-                self._update_title()
-
-    def _update_title(self) -> None:
-        today = self.today or date.today()
-        target = self.day_plan.target_date
-        if target == today:
-            date_str = f"Today — {target.strftime('%A, %B %d')}"
-        elif target == today - timedelta(days=1):
-            date_str = f"Yesterday — {target.strftime('%A, %B %d')}"
-        elif target == today + timedelta(days=1):
-            date_str = f"Tomorrow — {target.strftime('%A, %B %d')}"
-        else:
-            date_str = target.strftime("%A, %B %d, %Y")
-        self.date_title.set_text(date_str)
-
-    def _update_tallies(self) -> None:
-        # Today counts only the thirties still ahead; other days count them all.
-        counts = self.day_plan.availability(self.live_now())
-        self.daylight_pill.set_text(f"☼ Daylight: {counts['daylight_open']}/{counts['daylight_total']} available")
-        self.dark_pill.set_text(f"☾ Dark: {counts['dark_open']}/{counts['dark_total']} available")
+            self.timeline.today = today
 
     @staticmethod
     def _plan_signature(plan: DayPlan) -> tuple:
         return (plan.target_date, tuple(tuple(sorted(s.to_dict().items())) for s in plan.spans))
 
     def refresh_plan(self, day_plan: DayPlan, force: bool = False) -> None:
-        """Show a plan. Rebuilds the list only when the plan's content changed."""
-        same_day = self.day_plan is not None and self.day_plan.target_date == day_plan.target_date
-        if not same_day:
-            self._expanded.clear()
+        """Show a plan. Redraws only when the plan's content changed."""
         self.day_plan = day_plan
         self.solar_arc.set_day_plan(day_plan)
         self._update_title()
-
+        self._update_tallies()
         signature = self._plan_signature(day_plan)
         if not force and signature == self._signature:
+            self.timeline.sync_units()
             self.tick()
             return
         self._signature = signature
-        self._rebuild_list()
-        self.agenda.refresh(day_plan, self.live_now())
-        self._update_tallies()
+        self._read_kinds()
+        now = self.live_now()
+        self._now_thirty = thirty_of(now) if now else None
+        self.agenda.refresh(day_plan, now)
+        self.timeline.refresh(day_plan, self.today)
+
+    def _read_kinds(self) -> None:
+        if self.ongoing_provider is None:
+            return
+        try:
+            self._ongoing = self.ongoing_provider()
+        except Exception:  # the wording still reads the obvious cases
+            self._ongoing = lambda span: kind_by_wording(span.title) == ONGOING
+        self.agenda.ongoing = self._ongoing
+        self.timeline.ongoing = self._ongoing
 
     def tick(self) -> None:
-        """Advance the live "now": arc marker, gold highlight and remaining-time tallies."""
+        """The clock moved: the hour hand follows; a new thirty moves now and next on."""
         if self.day_plan is None:
             return
         self.solar_arc.queue_draw()
         self._update_tallies()
-        now_idx = self._current_index()
-        if now_idx != self._now_idx:
-            self._now_idx = now_idx
-            for row in self._rows:
-                row.update_now(now_idx)
-            self.agenda.refresh(self.day_plan, self.live_now())  # a new thirty: now and next move on
-
-    def _rebuild_list(self) -> None:
-        plan = self.day_plan
-        for row in self._rows:
-            self.list_box.remove(row)
-        self._rows = []
-        self._now_idx = self._current_index()
-
-        for seg in build_segments(plan):
-            row = self._build_row(plan, seg)
-            self._make_draggable(row, seg)
-            self._rows.append(row)
-            self.list_box.append(row)
-
-    # --- moving things by dragging them on the timeline ---
-
-    def _make_draggable(self, row: Gtk.Widget, seg: Segment) -> None:
-        movable = [s for s in seg.spans if not s.is_envelope and s.source != "calendar" and not s.tentative]
-        if len(movable) == 1:
-            source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
-            span_id = movable[0].id
-            source.connect("prepare", lambda *_: Gdk.ContentProvider.new_for_value(span_id))
-            row.add_controller(source)
-        target = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
-        start = seg.blocks[0].start_dt
-        target.connect("drop", lambda _t, value, _x, _y: self.move_to(value, start))
-        row.add_controller(target)
+        self.timeline.tick()
+        now = self.live_now()
+        thirty = thirty_of(now) if now else None
+        if thirty != self._now_thirty:
+            self._now_thirty = thirty
+            self.agenda.refresh(self.day_plan, now)
 
     def move_to(self, span_id: str, start: datetime) -> bool:
-        """Move an item to a thirty; what's there slides later, in order."""
-        if self.run_tool is None:
-            return False
-        self.run_tool("update_event", {"event": span_id, "start": format_clock(start), "push_later": True})
-        return True
-
-    def _build_row(self, plan: DayPlan, seg: Segment) -> Gtk.Widget:
-        first = seg.blocks[0]
-        if len(seg.blocks) == 1:
-            return BlockWidget(
-                first,
-                span=plan.display_span(first),
-                is_current=(first.index == self._now_idx),
-                display_index=first.number,
-                title=plan.display_title(first),
-            )
-
-        start = max(first.start_dt, min(s.start_dt for s in seg.spans))
-        end = min(seg.blocks[-1].end_dt, max(s.end_dt for s in seg.spans))
-        context = None
-        if len(seg.spans) == 1:
-            span = seg.spans[0]
-            if span.start_dt < start or span.end_dt > end:
-                context = f"Part of {span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)}"
-        key = seg.key
-        return GroupedBlockWidget(
-            plan.display_span(first),
-            [(b, b.number) for b in seg.blocks],
-            now_block_idx=self._now_idx,
-            title=plan.display_title(first),
-            start_dt=start,
-            end_dt=end,
-            context=context,
-            expanded=key in self._expanded,
-            on_expanded_changed=lambda _w, expanded, key=key: self._on_expanded_changed(key, expanded),
-        )
-
-    def _on_expanded_changed(self, key: tuple, expanded: bool) -> None:
-        if expanded:
-            self._expanded.add(key)
-        else:
-            self._expanded.discard(key)
+        """Move an item to a thirty (dragged on the timeline). What's there stays and shares the time (item 17)."""
+        return self.timeline.move_to(span_id, start)
 
     def scroll_to_now(self) -> None:
-        """Bring the current thirty into view once the list has been laid out (other days: the top)."""
-        attempts = [0]
-
-        def do_scroll() -> bool:
-            row = next((r for r in self._rows if r.is_current), None)
-            if row is None:
-                self.scrolled.get_vadjustment().set_value(0.0)
-                return False
-            attempts[0] += 1
-            adj = self.scrolled.get_vadjustment()
-            ok, point = row.compute_point(self.list_box, Graphene.Point())
-            if not ok or row.get_height() == 0 or adj.get_page_size() == 0:
-                return attempts[0] < 20  # not laid out yet; try again shortly
-            adj.set_value(max(0.0, min(point.y - 24, adj.get_upper() - adj.get_page_size())))
-            return False
-        GLib.timeout_add(100, do_scroll)
+        self.timeline.scroll_to_now()

@@ -55,6 +55,19 @@ class TestDirectiveParsing(unittest.TestCase):
 
 class TestTransports(unittest.TestCase):
 
+    def test_calls_written_other_ways_are_run_never_shown(self) -> None:
+        # 10-27: "CALL redraw()" reached Telegram; 10-29: a CALL update_event over several lines reached the app
+        text, calls = parse_model_directives("I've redrawn the evening.\nCALL redraw()\nHere it is.")
+        self.assertEqual((text, [c["name"] for c in calls]), ("I've redrawn the evening.\nHere it is.", ["redraw"]))
+        text, calls = parse_model_directives('Moving it.\nCALL update_event {"event": "08ca630c33e9",\n'
+                                             '  "start": "5:00 PM"}\nDone.')
+        self.assertEqual(text, "Moving it.\nDone.")
+        self.assertEqual(calls[0]["arguments"], {"event": "08ca630c33e9", "start": "5:00 PM"})
+        text, calls = parse_model_directives("OK.\nCALL remove_event <the 5 PM one>")
+        self.assertEqual(text, "OK.")
+        self.assertIn("_parse_error", calls[0]["arguments"])
+        self.assertEqual(parse_model_directives("I'll call you back")[0], "I'll call you back")
+
     def test_mock_engine_replays_queue_then_plain_text(self) -> None:
         engine = MockInferenceEngine([{"role": "assistant", "content": "first", "tool_calls": []}])
         self.assertEqual(engine.chat([{"role": "user", "content": "hi"}])["content"], "first")
