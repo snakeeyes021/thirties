@@ -185,7 +185,7 @@ def sun_marks(layout: "DayLayout") -> List[Tuple[str, datetime, float]]:
         return []
     noon = plan.sunrise + (plan.sunset - plan.sunrise) / 2
     lo, hi = slots[0].start.timestamp(), slots[-1].end.timestamp()
-    return [(name, t, _row_at(slots, t)) for name, t in (("sunrise", plan.sunrise), ("noon", noon),
+    return [(name, t, _row_at(slots, t)) for name, t in (("sunrise", plan.sunrise), ("solar midday", noon),
                                                           ("sunset", plan.sunset)) if lo <= t.timestamp() < hi]
 
 

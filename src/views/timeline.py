@@ -188,18 +188,28 @@ def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: 
     cr.restore()
 
 
+MARK_X = SKY_X + SKY_W + 5  # a time mark's words, right of the sky bar
+
+
 def draw_sun_mark(cr, y: float, name: str, t, fg: tuple) -> None:
-    """A time mark on the rail: a notch across the sky bar, and its name over its time beside it."""
+    """A time mark on the rail: a notch across the sky bar, and its name (a word a line) over its time beside it,
+    never wider than the rail: at a larger font it's drawn smaller rather than running into the cards (10-31)."""
     cr.set_source_rgba(*fg, 0.85)
     cr.rectangle(SKY_X - 3, y - 1, SKY_W + 6, 2)
     cr.fill()
     layout = PangoCairo.create_layout(cr)
     layout.set_font_description(Pango.FontDescription.from_string("Sans 7"))
-    layout.set_text(f"{name}\n{format_clock(t)}", -1)
-    _w, h = layout.get_pixel_size()
+    layout.set_text("\n".join(name.split() + [format_clock(t)]), -1)
+    w, h = layout.get_pixel_size()
+    room = RAIL - MARK_X - LANE_GAP
+    scale = min(1.0, room / w) if w else 1.0
+    cr.save()
     cr.set_source_rgba(*fg, 0.6)
-    cr.move_to(SKY_X + SKY_W + 5, y - h / 2)
+    cr.translate(MARK_X, y - h * scale / 2)
+    cr.scale(scale, scale)
+    cr.move_to(0, 0)
     PangoCairo.show_layout(cr, layout)
+    cr.restore()
 
 
 def draw_badge(cr, cx: float, cy: float, daylight: bool, bg: tuple) -> None:

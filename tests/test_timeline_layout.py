@@ -55,7 +55,7 @@ class TestTheDay(DayCase):
         plan = self.plan()
         d = day_layout(plan, at("19:10"))
         marks = sun_marks(d)
-        self.assertEqual([m[0] for m in marks], ["sunrise", "noon", "sunset"])
+        self.assertEqual([m[0] for m in marks], ["sunrise", "solar midday", "sunset"])
         noon = marks[1][1]
         self.assertEqual(noon - plan.sunrise, plan.sunset - noon)
         self.assertAlmostEqual(marks[2][2], d.sky[1].bottom)  # on the sky's own edge
