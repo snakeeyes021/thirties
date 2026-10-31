@@ -103,6 +103,13 @@ class TestOutcomes(ToolsTestCase):
         self.assertTrue(out.startswith("Marked Taxes call done"), out)
         self.assertEqual(next(s for s in self.t.day_plan.spans if s.title == "Taxes call").status, SpanStatus.DONE)
 
+    def test_something_done_that_was_never_planned_is_recorded(self) -> None:
+        # 10-30 sim: "refusing to log my litter box completion just because it wasn't pre-slotted"
+        out = self.t.execute("log_outcome", {"event": "Emptied the litter boxes", "status": "done"})
+        self.assertTrue(out.startswith("Recorded Emptied the litter boxes done (5:30 PM – 6:00 PM, estimated)"), out)
+        span = next(s for s in self.t.day_plan.spans if s.title == "Emptied the litter boxes")
+        self.assertEqual(span.status, SpanStatus.DONE)
+
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
@@ -119,7 +126,8 @@ class TestOutcomes(ToolsTestCase):
 
     def test_outcomes_not_for_work_or_unknown_items(self) -> None:
         self.assertTrue(self.t.execute("log_outcome", {"event": "Work", "status": "done"}).startswith(NOT_DONE))
-        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "done"}).startswith(NOT_DONE))
+        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "skipped"}).startswith(NOT_DONE))
+        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "done"}).startswith("Recorded"))
         self.assertTrue(self.t.execute("log_outcome", {"event": "Work", "status": "maybe"}).startswith(NOT_DONE))
 
     def test_review_day_lists_unreviewed_and_suggests_rollover(self) -> None:

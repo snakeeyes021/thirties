@@ -69,6 +69,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
             "finished_for_good": "true only when the user says an ongoing thing (project time, something worked on "
                                  "over many sessions) is finished for good; plain done on it means a session.",
             "note": "Optional note.",
+            "new": "true when it's not one of the similar items offered: it's recorded as something done that wasn't "
+                   "planned.",
         },
         "required": ["event", "status"],
     },
@@ -365,6 +367,10 @@ def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
     return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
 
 
+def _as_flag(value: Any) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes")
+
+
 class AssistantTools(KindTools):
     """Outcome, review, memory, profile, history and statistics tools."""
 
@@ -529,6 +535,27 @@ class AssistantTools(KindTools):
         if calendar not in (None, ""):
             refresh_calendar_spans(self.pt)
         return out
+
+    def _done_unplanned(self, title: str, started: Any, finished: Any, duration: Any, note: str = "") -> str:
+        """Something done that was never planned or listed ("emptied the litter boxes"): it goes on the record as done,
+        when it was said unless they said when (10-30 sim: "refusing to log my litter box completion just because it
+        wasn't pre-slotted")."""
+        now = self.pt._now()
+        start = self.pt._start(started) if started not in (None, "") else None
+        end = self.pt._end(finished, start or self.pt.day_plan.day_start) if finished not in (None, "") else None
+        minutes = parse_duration_minutes(duration) if duration not in (None, "") else 30
+        end = end or (start + timedelta(minutes=minutes) if start else now)
+        start = start or end - timedelta(minutes=minutes)
+        reported = started not in (None, "") and (finished not in (None, "") or duration not in (None, ""))
+        span = EventSpan(new_span_id(), title.strip(), start, end, SpanCategory.ACTIVITY, status=SpanStatus.DONE,
+                         actual_start=start, actual_end=end, notes=note or "",
+                         time_source="reported" if reported else "estimated")
+        self.pt.day_plan.spans.append(span)
+        self.pt.day_plan.spans.sort(key=lambda x: x.start_dt)
+        self.pt._persist(span)
+        self._tick_on_today(span.title)
+        return (f"Recorded {span.title} done ({format_clock(start)} – {format_clock(end)}, "
+                f"{span.time_source}); it wasn't planned.")
 
     def _tick_on_today(self, title: str) -> None:
         from thirties_core.today import note_items
@@ -941,7 +968,7 @@ class AssistantTools(KindTools):
     # --- outcomes ---
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
-                    estimated: Any = False, note: str = "", finished_for_good: Any = False, **_: Any) -> str:
+                    estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False, **_: Any) -> str:
         try:
             st = SpanStatus(str(status).strip().lower())
         except ValueError:
@@ -973,9 +1000,12 @@ class AssistantTools(KindTools):
             if span is not None:
                 task = None
         if span is None and task is None:
-            if rank_tasks(self.s.tasks, str(event), limit=1):
-                raise self._no_exact_match(str(event), "schedule item or list item")
-            raise ToolError(f"There is no schedule item or backlog task matching '{event}'.")
+            if st == SpanStatus.SKIPPED:
+                raise ToolError(f"There is no schedule item or backlog task matching '{event}'.")
+            if rank_tasks(self.s.tasks, str(event), limit=1) and not _as_flag(new):
+                raise ToolError(str(self._no_exact_match(str(event), "schedule item or list item"))
+                                + " If it's something else, call again with new=true to record it as done.")
+            return self._done_unplanned(str(event), started, finished, duration, note)
 
         start_dt = self.pt._start(started) if started not in (None, "") else None
         end_dt = self.pt._end(finished, start_dt or self.pt.day_plan.day_start) if finished not in (None, "") else None

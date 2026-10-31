@@ -200,12 +200,12 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(self.manager.send_user_message("what's pressing?"), text)  # 10-21: the list vanished
 
     def test_a_reply_claiming_a_failed_change_is_corrected(self) -> None:
-        self.engine.responses = [reply('CALL log_outcome {"event": "Put watch back on wrist", "status": "done"}'),
+        self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),
                                  reply("All set, noted!"),
-                                 reply("I couldn't find Put watch back on wrist on today's plan. Want me to add it?")]
-        out = self.manager.send_user_message("I put the watch back on")  # 10-24: three refusals, then "All set"
-        self.assertEqual(out, "I couldn't find Put watch back on wrist on today's plan. Want me to add it?")
-        self.engine.responses = [reply('CALL log_outcome {"event": "Nope", "status": "done"}'),
+                                 reply("I couldn't record that: Work isn't tracked that way.")]
+        out = self.manager.send_user_message("skipped work today")  # 10-24: three refusals, then "All set"
+        self.assertEqual(out, "I couldn't record that: Work isn't tracked that way.")
+        self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),
                                  reply("All set, noted!"), reply("All set!")]
         out = self.manager.send_user_message("done with nope")
         self.assertEqual(out, "All set, noted!\n\n(One part of that didn't go through, so it isn't recorded yet.)")
