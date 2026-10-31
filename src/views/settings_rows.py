@@ -905,12 +905,22 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                         "Quit (Ctrl+Q) stops it until you open Thirties again.",
                                active=bool(ctx.get("background.enabled", True)))
 
+    login = Adw.SwitchRow(title="Start at login",
+                          subtitle="Quietly, in the background, so nothing waits for you to open Thirties",
+                          active=bool(ctx.get("background.autostart", True)))
+    login.set_sensitive(background.get_active())
+
     def on_background(row, _p):
         ctx.set("background.enabled", row.get_active())
-        if row.get_active() and ctx.app is not None:
-            ctx.app.request_background_permission()
+        login.set_sensitive(row.get_active())
         if ctx.app is not None:
+            ctx.app.request_background_permission()  # off: out of the login items too
             ctx.app.run_in_background()
+
+    def on_login(row, _p):
+        ctx.set("background.autostart", row.get_active())
+        if ctx.app is not None:
+            ctx.app.request_background_permission()
 
     sunrise = Adw.SwitchRow(title="Tell me at sunrise", subtitle="Every day, at the real time: handy for the lights",
                             active=bool(ctx.get("assistant.sunrise_notice", False)))
@@ -918,9 +928,10 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                            active=bool(ctx.get("assistant.sunset_notice", False)))
     delay.connect("notify::value", lambda r, _p: ctx.set("assistant.checkin_after_minutes", int(r.get_value())))
     background.connect("notify::active", on_background)
+    login.connect("notify::active", on_login)
     sunrise.connect("notify::active", lambda r, _p: ctx.set("assistant.sunrise_notice", r.get_active()))
     sunset.connect("notify::active", lambda r, _p: ctx.set("assistant.sunset_notice", r.get_active()))
-    for row in (level, delay, sunrise, sunset, background):
+    for row in (level, delay, sunrise, sunset, background, login):
         group.add(row)
     return group
 

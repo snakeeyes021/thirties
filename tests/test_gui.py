@@ -89,6 +89,16 @@ def _blocks(group):
     return out
 
 
+def _rows_of_type(widget, cls):
+    """Every widget of a type under a widget, in order."""
+    out = [widget] if isinstance(widget, cls) else []
+    c = widget.get_first_child()
+    while c is not None:
+        out += _rows_of_type(c, cls)
+        c = c.get_next_sibling()
+    return out
+
+
 def _rows(widget):
     """The Adw.ActionRows under a widget, in order."""
     out = []
@@ -767,6 +777,22 @@ class SetupAndPreferencesTests(unittest.TestCase):
             group.switch.set_active(False)
             group.switch.set_active(True)
             self.assertEqual(self.core.settings.get("joplin.peer_token"), token)
+
+    def test_starting_at_login_can_be_switched_off(self):
+        # 10-31: an old copy started at login and there was no switch for it
+        from unittest import mock
+        app = mock.MagicMock()
+        ctx = settings_rows.SettingsContext(self.core, app=app)
+        group = settings_rows.messages_group(ctx)
+        switches = {r.get_title(): r for r in _rows_of_type(group, Adw.SwitchRow)}
+        login, background = switches["Start at login"], switches["Keep running in the background"]
+        self.assertTrue(login.get_active() and login.get_sensitive())
+        login.set_active(False)
+        self.assertFalse(self.core.settings.get("background.autostart"))
+        app.request_background_permission.assert_called_once()  # the portal takes it out of the login items
+        background.set_active(False)
+        self.assertFalse(login.get_sensitive())  # no background, no start at login
+        self.assertEqual(app.request_background_permission.call_count, 2)
 
     def test_each_weekday_can_differ_and_the_week_can_start_on_sunday(self):
         ctx = settings_rows.SettingsContext(self.core)
