@@ -509,6 +509,10 @@ class BackgroundService:
         text = manager.execute_tool("rollover_proposal", {})
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
             text = ""
+        if ahead and text and manager.tools.assistant is not None:  # yesterday's leftovers are said once
+            from thirties_core.day_lists import planned_ahead_text
+            offered = [line[2:].split(" – ", 1)[-1] for line in text.splitlines() if line.startswith("- ")]
+            ahead = planned_ahead_text(manager.tools.assistant, skip=offered)
         facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
         self.propose_the_day(now, facts)
 

@@ -424,8 +424,9 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
 
 MORNING_FACTS = (
     "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already; "
-    "keep any question in it, folded into your one question). Start with \"☀️ Good morning!\". Don't list the "
-    "routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
+    "keep any question in it, folded into your one question). Name each of yesterday's items in one short line, "
+    "unless your proposal already places it. Start with \"☀️ Good morning!\". Don't list the routines or meals: "
+    "they go on by themselves every day.\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
@@ -448,6 +449,7 @@ def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
             if reply.strip().upper().startswith("NOTHING"):
                 dp.db.set_sync_meta(dp._key(plan.target_date), json.dumps({"state": "nothing"}))
                 return "", True
+            _hide(manager, reply)  # no proposal behind it: Python's goes out instead, so the chat shows one
         except Exception as e:
             logger.warning("The morning proposal turn failed: %s", e)
     items = dp.default_items(plan)
@@ -461,6 +463,14 @@ def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
     week = week_line(manager.tools)
     return ((week + "\n" if week else "") + "For the free time today, how about:\n" + listed
             + "\nWant these on the plan?"), False
+
+
+def _hide(manager, reply: str) -> None:
+    """Take the model's morning reply out of the visible chat (the model keeps it as context)."""
+    for m in manager.messages:
+        if m.get("role") == "assistant" and str(m.get("content") or "").strip() == reply.strip():
+            m["hidden"] = True
+    manager._save()
 
 
 def week_line(pt) -> str:

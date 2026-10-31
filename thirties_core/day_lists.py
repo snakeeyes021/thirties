@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from thirties_core.clock import format_clock, thirty_of
 from thirties_core.joplin_engine import CHECKBOX_REGEX
@@ -211,8 +211,9 @@ def onto_today(assistant, day: date) -> List[str]:
     return done
 
 
-def planned_ahead_text(assistant) -> str:
-    """For the morning message: what's already planned for today, by block, and what's on the list with no time."""
+def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
+    """For the morning message: what's already planned for today, by block, and what's on the list with no time
+    (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
     pt = assistant.pt
     plan = pt.day_plan
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
@@ -222,7 +223,8 @@ def planned_ahead_text(assistant) -> str:
         when = format_clock(s.start_dt) if pt._is_fixed(s) else format_clock(thirty_of(s.start_dt))
         lines.append(f"- {when} – {s.title}")
     out = ("Already planned for today:\n" + "\n".join(lines)) if lines else ""
-    loose = pencilled_in(assistant, plan)
+    skip = {t.strip().lower() for t in skip}
+    loose = [t for t in pencilled_in(assistant, plan) if t.strip().lower() not in skip]
     if loose:
         out += ("\n" if out else "") + "On today's list, no time yet: " + ", ".join(loose) + "."
     return out

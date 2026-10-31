@@ -169,6 +169,8 @@ def find_scripts(dirs: List[Path], only: Optional[List[str]] = None) -> List[Day
         if not Path(d).exists():
             continue
         for path in sorted(Path(d).glob("*.json")) if Path(d).is_dir() else [Path(d)]:
+            if path == LEVELS_FILE:  # the levels kept for paired runs live beside the scripts
+                continue
             script = DayScript.load(path)
             if not only or script.id in only:
                 scripts.append(script)

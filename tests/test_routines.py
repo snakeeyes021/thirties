@@ -538,6 +538,15 @@ class TestTheMorningMessage(RoutineCase):
         self.assertTrue(text.endswith("For the free time today, how about:\n- 4:00 PM – Call the bank\n"
                                       "Want these on the plan?"), text)
 
+    def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
+        # 10-31 sim: the model wrote a plan but never called propose_day; Python's went out, and the app showed both
+        self.engine.responses = [{"role": "assistant", "content": "☀️ Good morning! How about the bank at 4?"}]
+        self.svc.rollover(at("08:00"))
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
+        visible = [h["content"] for h in self.m.history()]
+        self.assertFalse(any("the bank at 4" in v for v in visible))
+
     def test_the_first_message_of_the_day_sets_it_up_before_the_model_looks(self):
         self.engine.responses = [{"role": "assistant", "content": "Morning!"}]
         self.m.send_user_message("good morning")
