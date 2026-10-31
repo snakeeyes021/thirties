@@ -316,6 +316,7 @@ class PlanTools:
         self.assistant = AssistantTools(self, services) if services else None
         self._other_days: Dict[Any, DayPlan] = {}
         self.successful_changes = 0  # every tool call that changed something, on any day or store
+        self.outcomes_logged = 0  # successful log_outcome calls
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
         self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
@@ -1365,6 +1366,8 @@ class PlanTools:
                     self._learn_routine_move(args.get("event"))
             if name not in READ_ONLY_TOOLS:
                 self.successful_changes += 1
+            if name == "log_outcome":
+                self.outcomes_logged += 1  # "I've logged it as done" needs one of these (frontier.py)
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
             return result

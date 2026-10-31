@@ -966,6 +966,12 @@ class AssistantTools(KindTools):
                                 f"open on the day before ({self.pt.describe(older[0])} [id {older[0].id}, day "
                                 f"{yesterday.target_date.strftime('%b %d')}]). Which one? Use the id (and that day).")
         task = None if span else self._exact_task(str(event))
+        if span is None and task is not None:  # named by its list wording: it may be planned (10-30 sim: the choir
+            # email, named with quotes the plan's lookup missed, was ticked in Joplin but nagged for hours as unmarked)
+            span = next((s for s in self.pt.day_plan.spans if s.task_id == task.id
+                         and s.status == SpanStatus.PLANNED), None)
+            if span is not None:
+                task = None
         if span is None and task is None:
             if rank_tasks(self.s.tasks, str(event), limit=1):
                 raise self._no_exact_match(str(event), "schedule item or list item")
@@ -1076,6 +1082,8 @@ class AssistantTools(KindTools):
                 result += f"; it has now been put off {count} times"
         elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
             result += " (a session on it; it carries on)"
+        elif st == SpanStatus.DONE:  # not on any list (a routine's extra step, a meal): its Today line is ticked too
+            self._tick_on_today(span.title)
         return result + "."
 
     def _capture_context(self, span: EventSpan) -> None:

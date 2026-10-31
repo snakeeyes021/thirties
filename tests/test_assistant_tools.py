@@ -94,6 +94,15 @@ class TestOutcomes(ToolsTestCase):
         today = next(s for s in self.t.day_plan.spans if s.title == "Email back GitHub")
         self.assertEqual(today.status, SpanStatus.PLANNED)
 
+    def test_a_list_item_named_by_its_wording_marks_its_planned_copy(self) -> None:
+        # 10-30 sim: ticked in Joplin by its list wording, the planned copy stayed open and was nagged for hours
+        self.t.execute("add_event", {"title": "Taxes call", "start": "4:00 PM", "duration": "30 min",
+                                     "task_id": "t_taxes"})
+        task = next(t for t in self.services.tasks if t.id == "t_taxes")
+        out = self.t.execute("log_outcome", {"event": task.title, "status": "done"})
+        self.assertTrue(out.startswith("Marked Taxes call done"), out)
+        self.assertEqual(next(s for s in self.t.day_plan.spans if s.title == "Taxes call").status, SpanStatus.DONE)
+
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})

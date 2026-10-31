@@ -259,6 +259,14 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual(self.body("n_routine"), template)
         self.assertIn("    - [x] Caffeinate\n", self.body("n_today"))
 
+    def test_an_extra_step_done_is_ticked_on_today(self):
+        # 10-30 sim: Brush teeth (not in the routine note) was done, but its Today line stayed open
+        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+            {"start": "10:00 AM", "items": ["Shower", "Brush teeth"]}]})
+        teeth = next(s for s in self.t.day_plan.spans if s.title == "Brush teeth")
+        self.t.execute("log_outcome", {"event": teeth.id, "status": "done"})
+        self.assertIn("    - [x] Brush teeth\n", self.body("n_today"))
+
     def test_on_a_dark_morning_the_coming_day_is_the_one_on_today(self):
         set_debug_time(at("06:40"))  # before sunrise: the calendar day is still yesterday's diurnal day
         self.assertFalse(self.t.today() == DAY)

@@ -388,6 +388,13 @@ RULES
 
         return "\n\n".join(sections)
 
+    _OUTCOME_CLAIM_RE = re.compile(r"\b(marked|logged|recorded|checked (?:it |that |them )?off|ticked)\b[^.!?\n]*"
+                                   r"\b(done|finished|complete|skipped)\b|\b(logged|marked) (?:it|that|them|both)\b",
+                                   re.IGNORECASE)
+
+    def _claims_outcome(self, text: str) -> bool:
+        return bool(self._OUTCOME_CLAIM_RE.search(text or "")) and not self._ADMITS_RE.search(text or "")
+
     def _claims_change(self, text: str) -> bool:
         return bool(ACTION_CLAIM_PATTERN.search(text or ""))
 
@@ -405,6 +412,7 @@ RULES
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         changes_before = self.tools.successful_changes
+        outcomes_before = self.tools.outcomes_logged
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
@@ -432,6 +440,16 @@ RULES
 
             changed = self.tools.successful_changes - changes_before
             if not calls:
+                if (self._claims_outcome(content) and self.tools.outcomes_logged == outcomes_before
+                        and not reflected):  # 10-30 sim: "I've logged that session as done", with nothing logged
+                    reflected = True
+                    logger.warning("[FrontierBrain] Model claimed an outcome without log_outcome; asking it to correct.")
+                    self.messages.append({"role": "user", "content": (
+                        "[System check, not from the user] Your reply says something was marked done (or skipped), "
+                        "but no log_outcome went through this turn, so nothing was recorded. Call log_outcome now, "
+                        "or correct your reply."
+                    )})
+                    continue
                 if self._claims_change(content) and changed == 0 and not reflected:
                     reflected = True
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")

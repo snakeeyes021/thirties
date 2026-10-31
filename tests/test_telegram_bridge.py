@@ -268,12 +268,12 @@ class TestBridgeBursts(BridgeCase):
 
     def test_a_burst_gets_one_reply(self):
         from tests.test_conversation import reply
-        self.mock_inference.responses = [reply("Logged both.")]
+        self.mock_inference.responses = [reply("Got both.")]
         updates = [{"update_id": 1, "message": {"text": "cats are fed", "chat": {"id": 1001}}},
                    {"update_id": 2, "message": {"text": "and I showered", "chat": {"id": 1001}}}]
         self.bridge.handle_updates(updates)
         self.bridge.client.send_message.assert_called_once()
-        self.assertEqual(self.bridge.client.send_message.call_args[0][1], "Logged both.")
+        self.assertEqual(self.bridge.client.send_message.call_args[0][1], "Got both.")
         users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
         self.assertEqual(users, ["cats are fed", "and I showered"])
 

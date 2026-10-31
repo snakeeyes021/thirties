@@ -177,6 +177,17 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(db.get_sync_meta(f"rollover_offered:{DAY.isoformat()}"), "in_conversation")  # no ping later
         self.assertNotIn("System check", " ".join(m["content"] for m in self.manager.history()))
 
+    def test_a_claimed_outcome_without_log_outcome_is_asked_again(self) -> None:
+        # 10-30 sim: "I've logged that session as done", with nothing logged; the notices nagged about it later
+        self.manager.execute_tool("add_event", {"title": "Natalie piece", "start": "9:00 AM", "duration": "1 hour"})
+        self.engine.set_next_response(reply("I've logged that session on the Natalie piece as done!"))
+        self.engine.set_next_response(reply('CALL log_outcome {"event": "Natalie piece", "status": "done"}'))
+        self.engine.set_next_response(reply("Logged the Natalie piece as done."))
+        self.manager.send_user_message("great session on the natalie piece")
+        notes = [m["content"] for m in self.manager.brain.messages if m.get("role") == "user"]
+        self.assertTrue(any("no log_outcome went through" in n for n in notes), notes)
+        self.assertEqual(self.manager.tools.outcomes_logged, 1)
+
     def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
         self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
         self.engine.set_next_response(reply("You're free all afternoon."))
