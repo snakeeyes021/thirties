@@ -51,7 +51,7 @@ class TestDaySim(unittest.TestCase):
         ])
         live_day(run, sim)
         asked = [(t, x) for t, w, x in run.log if w == "app" and "For the record" in x]
-        self.assertEqual(asked, [("09:00", "☀️ For the record: when did you wake up?")])  # B6, an hour after 8:00
+        self.assertEqual(asked, [])  # waking isn't asked (10-31), and a day off has no work to ask about
         morning = [(t, x) for t, w, x in run.log if w == "app" and x.startswith("☀️ Good morning")]
         self.assertIn("Already planned for today", morning[0][1])  # what was planned ahead is said (O2)
         app = [(t, x) for t, w, x in run.log if w == "app" and "For the record" not in x

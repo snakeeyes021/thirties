@@ -259,6 +259,27 @@ class TestBubblingDown(PlannerCase):
         self.assertEqual((c["cards"].source, c["cards"].why), ("upper", "for this week"))
         self.assertIn("Call the ENT [Medical] (pinned to today) id=ent", c["ent"].line())
 
+    def test_a_week_plan_ending_tomorrow_is_pressing(self):
+        # 10-31: "make sure I see it this weekend", asked on Friday night, wasn't offered on Saturday
+        saturday = DAY + timedelta(days=2)
+        self.hp.pin(self.tasks[0], parse_period("this week", DAY))
+        set_debug_time(at("10:00").replace(day=saturday.day))
+        self.build(saturday)
+        c = self.by_id(candidates_for_day(self.t))
+        self.assertEqual((c["door"].source, c["door"].why), ("due", "from the plan for this week, which ends tomorrow"))
+
+    def test_a_pin_follows_its_item_moved_in_thirties_or_in_joplin(self):
+        from thirties_core.list_tools import rekey
+        self.hp.pin(self.tasks[0], parse_period("this week", DAY))
+        rekey(self.sched.state_db, [], self.tasks, self.tasks[0], "door2", "Fix the door", "n_other", "Other")
+        rows = HorizonPlans(self.sched.state_db).rows()
+        self.assertEqual([(r["item_id"], r["list_title"]) for r in rows], [("door2", "Other")])
+        self.assertIn("door2", self.ids(candidates_for_day(self.t)))
+        # moved in Joplin: the id changes with nothing told; the same wording, once, is the same item
+        self.tasks[0] = item("door3", "Fix the door", "n_third", "Third")
+        self.build()
+        self.assertIn("door3", self.ids(candidates_for_day(self.t)))
+
     def test_never_whats_done_scheduled_on_today_or_someday(self):
         self.hp.pin(self.tasks[1], parse_period("today", DAY))
         self.hp.pin(self.tasks[0], parse_period("this week", DAY))
@@ -477,7 +498,7 @@ class TestSessions(PlannerCase):
         svc.horizon_session(self.when)
         self.assertEqual(sent, [])  # the morning hasn't happened yet
         svc.rollover(self.when)  # nothing from yesterday; the day's own proposal may go out
-        sent[:] = [x for x in sent if x[0] != "proposal"]
+        sent[:] = [x for x in sent if x[0] != "rollover"]
         assistant = svc.manager().tools.assistant
         if assistant.proposals.pending():
             svc.horizon_session(self.when)

@@ -518,23 +518,25 @@ class TestTheMorningMessage(RoutineCase):
             {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one. "
                                              "Want that?"}]
         self.svc.rollover(at("08:00"))
-        kinds = [k for k, _ in self.sent]
-        self.assertEqual(kinds, ["rollover", "proposal"])
-        self.assertTrue(self.sent[0][1].startswith("☀️ Good morning! On today by themselves: Morning Routine at "
-                                                   "9:00 AM and 3:00 PM; Lunch at 12:00 PM."), self.sent[0][1])
-        self.assertIn("4:00 PM – Call the bank", self.sent[1][1])
+        self.assertEqual([k for k, _ in self.sent], ["rollover"])  # one message (10-31: three at sunrise)
+        self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
+        self.assertTrue(any(s.title == "Lunch" for s in self.m.day_plan.spans))  # set up, and not listed
+        self.assertNotIn("On today by themselves", self.sent[0][1])
         self.assertTrue(self.m.tools.assistant.proposals.pending())
         visible = [h["content"] for h in self.m.history()]
         self.assertFalse(any(v.startswith("[Morning") for v in visible))  # the instruction stays hidden
         self.assertTrue(any("Call the bank" in v for v in visible))
         self.svc.rollover(at("08:30"))
-        self.assertEqual(len(self.sent), 2)  # once a day
+        self.assertEqual(len(self.sent), 1)  # once a day
 
     def test_without_a_model_python_proposes(self):
         self.m.brain_name = "slm"
         self.svc.rollover(at("08:00"))
-        self.assertEqual(self.sent[-1], ("proposal", "For the free time today, how about:\n- 4:00 PM – Call the bank\n"
-                                                     "Want these on the plan?"))
+        self.assertEqual(len(self.sent), 1)
+        kind, text = self.sent[0]
+        self.assertTrue(text.startswith("☀️ Good morning! "), text)
+        self.assertTrue(text.endswith("For the free time today, how about:\n- 4:00 PM – Call the bank\n"
+                                      "Want these on the plan?"), text)
 
     def test_the_first_message_of_the_day_sets_it_up_before_the_model_looks(self):
         self.engine.responses = [{"role": "assistant", "content": "Morning!"}]

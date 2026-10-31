@@ -493,7 +493,7 @@ class BackgroundService:
         if now < wake:
             return
         db.set_sync_meta(key, "1")
-        set_up = ahead = ""
+        holiday = ahead = ""
         if manager.tools.assistant is not None:
             started = manager.tools.assistant.start_the_day()
             if started:
@@ -502,24 +502,36 @@ class BackgroundService:
             ahead = planned_ahead_text(manager.tools.assistant)  # planned for today beforehand (O2: make it visible),
             with manager.turn_lock:                              # before the day's routines go on by themselves
                 set_up = manager.tools.assistant.routines.set_up_day(manager.day_plan)
+            if set_up:
+                logger.info("Morning: %s", set_up)  # the routines go on by themselves, every day: not news
+            name = db.get_sync_meta(f"holiday:{day.isoformat()}")
+            holiday = f"It's {name}, so I've left Work off today; say if you're working." if name else ""
         text = manager.execute_tool("rollover_proposal", {})
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
             text = ""
-        if set_up or text or (ahead and self.level() != "off"):
-            self.send("☀️ Good morning! " + "\n\n".join(t for t in (ahead, set_up, text) if t), "rollover", now=now)
-        self.propose_the_day(now)
+        facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
+        self.propose_the_day(now, facts)
 
-    def propose_the_day(self, now: datetime) -> None:
-        """After the morning message: one short proposal for the free time (day_proposal.py)."""
+    def propose_the_day(self, now: datetime, facts: str = "") -> None:
+        """The morning's one message (10-31: three texts at sunrise, "two of them were so verbose"): what's
+        already planned, yesterday's leftovers and the holiday note (``facts``), with one short proposal for the
+        free time (day_proposal.py), and one question."""
         from thirties_core.day_proposal import morning_proposal
         manager = self.manager()
         try:
-            text, stored = morning_proposal(manager)
+            text, stored = morning_proposal(manager, facts)
         except Exception as e:
             logger.warning("The morning proposal failed: %s", e)
+            text, stored = "", False
+        if not text and not facts:
             return
-        if text:
-            self.send(text, "proposal", now=now, to_conversation=not stored)
+        if not text:  # nothing to propose: the facts alone
+            text, stored = facts, False
+        elif not stored and facts:
+            text = facts + "\n\n" + text
+        if not stored and not text.startswith("☀️"):  # the model's own message starts so (MORNING_FACTS)
+            text = "☀️ Good morning! " + text
+        self.send(text, "rollover", now=now, to_conversation=not stored)
 
     def day_times(self, now: datetime) -> None:
         """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),

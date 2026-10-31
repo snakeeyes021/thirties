@@ -343,6 +343,21 @@ class TestMorning(TodayTestCase):
         self.assertIn("Couldn't put Buy stamps on today's list", out)
         self.assertEqual(self.t.execute("apply_rollover", {}), "Yesterday's items were already rolled over.")
 
+    def test_a_rolled_over_item_isnt_added_again(self):
+        # 10-31: "yes to Jon's podcast" rolled yesterday's copy into today, then add_event made a second one: the
+        # move landed in a fresh copy of today, which the duplicate guard never saw.
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        y = DAY - timedelta(days=1)
+        self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour",
+                                     "day": y.isoformat()})
+        self.t.execute("rollover_proposal", {})
+        self.assertIn("Return the library books", self.t.execute("apply_rollover", {}))
+        out = self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour"})
+        self.assertIn("already planned", out)
+        today = [s for s in self.t.day_plan.spans if s.title == "Return the library books"]
+        self.assertEqual(len(today), 1)
+
     def test_daily_things_and_project_time_dont_carry_over(self):
         from datetime import timedelta
         from tests.fixtures import DAY

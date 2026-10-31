@@ -11,6 +11,7 @@ logged with the message that caused it.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -20,6 +21,8 @@ from thirties_core.scheduler import utc_now_iso
 
 if TYPE_CHECKING:
     from thirties_core.assistant_tools import AssistantTools
+
+logger = logging.getLogger(__name__)
 
 LIST_TOOL_SPECS: List[Dict[str, Any]] = [
     {
@@ -114,7 +117,7 @@ def rekey(db, plans, tasks: List[TaskItem], old: TaskItem, new_id: str, new_titl
         return
     if db is not None:
         with db._get_connection() as conn:
-            _rekey_rows(conn, old, new_id, new_title, new_note_id)
+            _rekey_rows(conn, old, new_id, new_title, new_note_id, new_note_title)
     for plan in plans:
         for span in plan.spans:
             if span.task_id == old.id:
@@ -122,7 +125,7 @@ def rekey(db, plans, tasks: List[TaskItem], old: TaskItem, new_id: str, new_titl
     old.id, old.title, old.parent_note_id, old.parent_note_title = new_id, new_title, new_note_id, new_note_title
 
 
-def _rekey_rows(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: str) -> None:
+def _rekey_rows(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: str, new_note_title: str = "") -> None:
     for row in conn.execute("SELECT id, data FROM spans WHERE data LIKE ?", (f'%"{old.id}"%',)).fetchall():
         data = json.loads(row["data"])
         if data.get("task_id") == old.id:
@@ -139,6 +142,29 @@ def _rekey_rows(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: s
             conn.execute(sql, args)
         except Exception:
             pass
+    try:
+        _rekey_horizons(conn, old, new_id, new_title, new_note_id, new_note_title)
+    except Exception as e:  # the move itself is done; say so in the log, not to the user
+        logger.warning("Couldn't carry %s's horizon plans to its new id: %s", old.title, e)
+
+
+def _rekey_horizons(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: str, new_note_title: str) -> None:
+    """Pins and horizons follow a moved item (10-31: "this weekend" was pinned to the Nathan Fielder documentary in
+    Self; moved to Media Queue, the pin pointed at nothing and it was never offered). The old rows go 'out' and new
+    ones come in, so the change syncs (rows merge by id, newest wins)."""
+    now = utc_now_iso()
+    for r in conn.execute("SELECT * FROM horizon_plan WHERE item_id = ? AND state = 'in'", (old.id,)).fetchall():
+        row_id = r["id"][:-len(old.id)] + new_id if r["id"].endswith(old.id) else f"{r['id']}>{new_id}"
+        conn.execute("""INSERT OR REPLACE INTO horizon_plan (id, item_id, title, note_id, list_title, level, period,
+                        slot, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'in', ?)""",
+                     (row_id, new_id, new_title, new_note_id, new_note_title or r["list_title"], r["level"],
+                      r["period"], r["slot"], now))
+        conn.execute("UPDATE horizon_plan SET state = 'out', updated_at = ? WHERE id = ?", (now, r["id"]))
+    mark = conn.execute("SELECT * FROM horizon_marks WHERE ref = ?", (f"item:{old.id}",)).fetchone()
+    if mark is not None:
+        conn.execute("""INSERT OR REPLACE INTO horizon_marks (ref, kind, note_id, title, horizon, source, updated_at)
+                        VALUES (?, 'item', ?, ?, ?, ?, ?)""",
+                     (f"item:{new_id}", new_note_id, new_title, mark["horizon"], mark["source"], now))
 
 
 class ListTools:

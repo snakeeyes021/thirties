@@ -422,10 +422,17 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
     return out[:MAX_CANDIDATES]
 
 
-def morning_proposal(manager) -> Tuple[str, bool]:
+MORNING_FACTS = (
+    "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already; "
+    "keep any question in it, folded into your one question). Start with \"☀️ Good morning!\". Don't list the "
+    "routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
+
+
+def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
     """The morning proposal as a message: (text, already_in_the_conversation). The Frontier brain picks in a turn of
-    its own; otherwise (or if that fails) Python proposes the obvious few. ('', False) when there's nothing to
-    propose."""
+    its own, and its message also says ``facts`` (what's planned, yesterday's leftovers: one message, 10-31);
+    otherwise (or if that fails) Python proposes the obvious few, and the caller adds the facts. ('', False) when
+    there's nothing to propose."""
     assistant = manager.tools.assistant
     if assistant is None:
         return "", False
@@ -435,7 +442,7 @@ def morning_proposal(manager) -> Tuple[str, bool]:
         return "", False
     if getattr(manager, "brain_name", "") == "frontier":
         try:
-            reply = manager.assistant_turn(MORNING_INSTRUCTION)
+            reply = manager.assistant_turn(MORNING_INSTRUCTION + (MORNING_FACTS.format(facts=facts) if facts else ""))
             if dp.state(plan.target_date).get("state") == "offered":
                 return reply, True
             if reply.strip().upper().startswith("NOTHING"):

@@ -106,7 +106,7 @@ class TestAsking(DayTimesCase):
         plan, history = self.fresh(), self.history()
         self.assertIsNone(due_question(plan, at("08:30"), {}, history))
         key, text = due_question(plan, at("09:00"), {}, history)
-        self.assertEqual(text, "☀️ For the record: when did you wake up, and when did you start work?")
+        self.assertEqual(text, "💼 For the record: when did you start work?")  # waking isn't asked (10-31)
         self.assertIsNone(due_question(plan, at("09:05"), {key: "x"}, history))  # once a day
 
     def test_what_is_known_isnt_asked(self):
@@ -123,11 +123,11 @@ class TestAsking(DayTimesCase):
         self.assertEqual(key, "work_end:2026-10-15")
         self.assertIn("Done with work?", text)
 
-    def test_a_day_off_only_asks_about_waking(self):
+    def test_a_day_off_asks_nothing(self):
+        # 10-31: "I thought it wasn't supposed to ask me when I woke up" (told, or from a tracker in 0.3)
         self.t.execute("remove_event", {"event": "Work"})
         plan = self.fresh()
-        self.assertEqual(due_question(plan, at("08:00"), {}, self.history())[1],
-                         "☀️ For the record: when did you wake up?")
+        self.assertIsNone(due_question(plan, at("08:00"), {}, self.history()))
         self.assertIsNone(due_question(plan, at("16:00"), {"morning:2026-10-15": "x"}, self.history()))
 
     def test_the_background_service_asks_once_at_heavy(self):

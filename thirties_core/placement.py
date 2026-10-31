@@ -186,16 +186,17 @@ def slot_options_text(tools: "PlanTools", plan: DayPlan, minutes: int, now: Opti
 # --- push everything back (S4) ---
 
 def push_back(tools: "PlanTools", by: int, since: Optional[datetime] = None) -> str:
-    """Move every flexible item still to do ``by`` minutes later. Without ``since``, that's everything that started
-    no more than ``by`` ago, plus what's happening now: items past their time that weren't marked didn't happen, and
-    pushing back is how the user says so. Items that shared time still do; fixed things, work and sleep stay, and an
+    """Move every flexible item still to do ``by`` minutes later. Without ``since``, that's everything from the
+    thirty that was ``by`` ago on (whole blocks: 10-31, "I woke at 8:49, push everything back" an hour left Feed
+    kitties at 8:00 behind Caffeinate at 8:06), plus what's happening now: items past their time that weren't marked
+    didn't happen, and pushing back is how the user says so. Items that shared time still do; fixed things, work and sleep stay, and an
     item that would land on a fixed thing goes right after it (and so does what follows it). What would run into
     bedtime stays where it was and is named, never dropped."""
     plan = tools.day_plan
     now = tools._now()
     live = plan.day_start <= now < plan.day_end
     delta = timedelta(minutes=by)
-    lo = since if since is not None else ((now - delta) if live else plan.day_start)
+    lo = since if since is not None else (thirty_of(now - delta) if live else plan.day_start)
     facts = tools._facts() if tools._state_db is not None else None
 
     def daylight(span: EventSpan) -> bool:

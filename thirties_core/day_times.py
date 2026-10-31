@@ -197,7 +197,8 @@ def due_question(plan: DayPlan, now: datetime, asked: Dict[str, str],
     ask_at = wake + MORNING_ASK_AFTER_WAKE
     if work_start and work_start - wake <= WORK_START_NEAR_WAKE:
         ask_at = max(ask_at, work_start + MORNING_ASK_AFTER_WORK_START)
-    need_wake = sleep is not None and not _known(sleep, end=True)
+    need_wake = False  # not asked (10-31: "I thought it wasn't supposed to ask me when I woke up"); told, or from
+    # a tracker (0.3), it's used
     need_start = work is not None and work_start is not None and not _known(work, end=False) \
         and work_start <= ask_at
     if key not in asked and (need_wake or need_start) and ask_at <= now < ask_at + ASK_WINDOW:

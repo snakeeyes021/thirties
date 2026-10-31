@@ -404,18 +404,29 @@ Reported 10-31 (Sat, day 1). The causes were checked in the user's data and the 
 2. **What the assistant is keeping track of, visibly** (Next), and **a promise that was silently lost** (Blocker). At 12:48 AM the user asked to "make sure I see the new Nathan Fielder documentary this weekend". It was pinned to the week (horizon_plan, week of 10-26), but the morning proposal never offered it.
    - **Cause:** the pin points to the item's id, and the id hashes the note. When the item moved from Self to the new Media Queue, the pin pointed nowhere, and `HorizonPlanner.candidates` skips it without a word (`tasks.get(item_id)` is None).
    - **Also:** Media Queue was guessed "someday", and candidates never include someday.
-   - **The fixes:** a move carries its pins (and item facts, Today links) to the new id. A pin whose item can't be found is said, not dropped. A list made to hold "up next" items isn't someday. A pin "this weekend" is a pin to the weekend's days, so on its last day it's a must-offer.
+   - **Fixed in 0.2:**
+     - A move carries its pins and horizon to the new id (`list_tools._rekey_horizons`; the old rows go out and new ones come in, so it syncs).
+     - A pin whose id is gone (moved in Joplin) finds its item by the same wording, if exactly one item has it; otherwise it's logged, not dropped silently.
+     - On a week's last two days, its unplaced items are pressing ("from the plan for this week, which ends tomorrow"), like something due.
+     - The user's own pin now resolves to Media Queue by its wording, with no data repair.
+   - **Someday is never proposed: wrong** (the user, 10-31; Next, part of horizons in 0.3). A someday item with a clear "maybe this year" should be worked into the long horizons: spread over the year for as long as it'll take, then trickled down into a month, a week and a day, so that on that day, months later, it's reliably offered. Add a horizon above year, **"beyond"** ("decade is too big and lifetime is morose"): everything on the backlog the user wants to get done someday.
    - **The feature (0.3):** a visible place for what the assistant is tracking but hasn't scheduled ("penciled in": pinned to the day, the week, the weekend). It shows in the Agenda, so the user can tell "tracked but not mentioned" from "never tracked". If the user turns it down on Saturday, Sunday gets it without asking again.
 3. **Timeline month and year views** (Next), with the items' names on them. Week has no names; rethink that a little too. Move the Day/Week switch: it sits in an awkward place.
 4. **PT is blue (one-off) on the Timeline** (Polish). The other routine steps are green (daily). `timeline_layout.look_of` colours by wording (`kind_by_wording`), and "PT" matches no daily word. A routine step is daily because it's in a routine, whatever its wording.
 5. **Jon podcast twice at 8:30 PM** (Blocker: ghost copies again). After "yes to Jon's podcast", `apply_rollover` moved yesterday's copy to today, and then the model's add_event made a second one (plan_changes 42 and 46). The user deleted one from the Day page.
    - **Cause:** apply_rollover calls `update_event` with `day=yesterday`. `execute` swaps `day_plan` to yesterday's, so `plan_for("today")` in `_move_to_day` builds a fresh copy of today instead of returning the one in use. The moved span lands only in that copy, and add_event's duplicate guard checks the one in use.
-   - **The fix:** `plan_for` returns the plan in use for its own date.
-6. **Found in the transcript, not reported** (Blocker unless noted):
-   - **Push back stranded Feed kitties.** "I woke at 8:49. Push everything back" moved every routine step except Feed kitties, which stayed at 8:00 (its 6 minutes were over). The user's note: "even if it was passed, it wasn't done". Push back must take everything not marked yet.
-   - **One reply stored two or three times.** This happened at 12:48 AM (with a "System check" retry) and at 9:05, 9:05:58 and 9:07 AM. Each attempt's reply was kept, not only the last. If the retries reached Telegram too, that's the same bug on the phone.
-   - **An empty reply was stored at 9:02** (Polish).
-   - **The morning message called the waking routine "passed" at 7:34 AM, before the user was up** (Polish). It placed the routine from a guessed wake time.
+   - **Fixed in 0.2:** `plan_for` returns the plan in use for its own date, even while a call works on another day.
+6. **Found in the transcript, not reported:**
+   - **Push back stranded Feed kitties** (Blocker). "I woke at 8:49. Push everything back" moved every routine step except Feed kitties, which stayed at 8:00 (its 6 minutes were over). The user's note: "even if it was passed, it wasn't done". **Fixed in 0.2:** push back works in whole blocks (from the thirty that was `by` ago).
+   - **Not a bug: "one reply stored two or three times", and the empty reply.** These are hidden drafts. The chat shows only the final reply (`_show_only`). I misread a dump of the history that included the drafts.
+   - **The morning message called the waking routine "passed" at 7:34 AM, before the user was up** (gone with the next item).
+7. **Triple texted at sunrise** (the user, 10-31; Blocker). Three messages arrived at once: the morning message, the day's proposal, and "when did you wake up?". The first two were "so verbose". The user expected the wake question to wait for a tracker (0.3).
+   - **Fixed in 0.2:**
+     - The morning is one message. The model's proposal turn also says what's already planned, yesterday's leftovers and a holiday, with one question.
+     - The routines and anchors put on by themselves are no longer listed; they're logged.
+     - Waking time isn't asked any more; it's used when the user says it. The work start and end questions stay, at the "heavy" level.
+8. **Double outlines at the Timeline's notches** (Polish). Where a card's dimple is drawn, the outline doubles: on both sides of free stretches, and on the right side of scheduled cards.
+9. **Clock times under the hood are still too exposed** (to discuss for 0.3). The user only ever wanted them to keep a block of small items from being overstuffed and to order them within it. The week Timeline's "cascading" morning routines are a granularity nobody needs, for routines especially, and maybe for every item. Revisit when planning 0.3, together with item 1.
 
 ## Soon, not today (from the user, 2026-10-30)
 - **Benchmark local models on other devices:** the user's 8 GB GPU desktop (a likely home-base machine, not set up yet) and their phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.

@@ -290,6 +290,17 @@ class TestPushBack(ScheduleCase):
         t.execute("undo_redraw", {})
         self.assertEqual(times(t, "Laundry"), ("3:00 PM", "3:30 PM"))
 
+    def test_push_back_takes_whole_blocks(self):
+        # 10-31: at 9:02, "push everything back" an hour moved Caffeinate (8:06) and left Feed kitties (8:00) behind.
+        t = tools_for([], now="15:02")
+        t.execute("remove_event", {"event": "Work"})
+        for title, start in (("Feed kitties", "2:00 PM"), ("Caffeinate", "2:06 PM"), ("Lunch", "1:30 PM")):
+            t.execute("add_event", {"title": title, "start": start, "duration": "6 min", "again": True})
+        t.execute("push_back", {"by": "1 hour"})
+        self.assertEqual(times(t, "Feed kitties")[0], "3:00 PM")
+        self.assertEqual(times(t, "Caffeinate")[0], "3:06 PM")
+        self.assertEqual(times(t, "Lunch")[0], "1:30 PM")  # the block before: behind, not pushed
+
     def test_push_back_from_a_time_and_bad_amounts(self):
         t = self.day()
         t.execute("push_back", {"by": "1 hour", "since": "6:00 PM"})

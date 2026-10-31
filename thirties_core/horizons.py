@@ -788,6 +788,19 @@ class HorizonPlanner:
         rows = self.plans.rows()
         pinned_ids = {r["item_id"] for r in rows}
         tasks = {t.id: t for t in self.tasks if not t.id.startswith("media:") or t.id in pinned_ids}
+        by_title: Dict[str, List[TaskItem]] = {}
+        for t in tasks.values():
+            by_title.setdefault(t.title.strip().lower(), []).append(t)
+        for r in rows:
+            if r["item_id"] not in tasks:
+                # Moved or reworded outside Thirties (in Joplin): the same wording, once, is the same item. Else
+                # it's said in the log, never dropped silently (10-31: the weekend's documentary).
+                same = by_title.get((r["title"] or "").strip().lower(), [])
+                if len(same) == 1:
+                    tasks[r["item_id"]] = same[0]
+                else:
+                    logger.warning("A plan item can't be found on any list: %s (%s %s)", r["title"], r["level"],
+                                   r["period"])
         # Done lately (since the week before this period, or this week's): an item done long ago and open again
         # in the list is a new round of it (backlog.DONE_HIDES_DAYS hides the recent ones the same way).
         done = self._done_since(min(p.start, period_of("week", today, self.week_start).start) - timedelta(days=7))
@@ -856,7 +869,14 @@ class HorizonPlanner:
                     continue  # a week plan's item for another day, or a year's item for another quarter
                 if p.level == "day" and slot is not None:
                     continue  # pinned to this very day: step 1
-                add(t, "from_plan", f"from the plan for {self.label(row_period(r, self.week_start))}")
+                where = row_period(r, self.week_start)
+                if p.level == "day" and where.end <= p.end + timedelta(days=1):
+                    # The plan's period ends today or tomorrow ("this weekend", asked on Friday night): there's
+                    # still room only now, so it's pressing, like something due (10-31)
+                    left = "today" if where.end <= p.end else "tomorrow"
+                    add(t, "due", f"from the plan for {self.label(where)}, which ends {left}")
+                else:
+                    add(t, "from_plan", f"from the plan for {self.label(where)}")
 
         # 5. what belongs at this horizon now, then at the one above
         here = "day" if p.level == "day" else p.level

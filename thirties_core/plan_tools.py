@@ -315,6 +315,7 @@ class PlanTools:
         self.services = services
         self.assistant = AssistantTools(self, services) if services else None
         self._other_days: Dict[Any, DayPlan] = {}
+        self._home_plan: Optional[DayPlan] = None  # the plan in use while a call works on another day (execute)
         self.successful_changes = 0  # every tool call that changed something, on any day or store
         self.outcomes_logged = 0  # successful log_outcome calls
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
@@ -350,8 +351,12 @@ class PlanTools:
         if day in (None, ""):
             return self.day_plan
         target = parse_day(day, self.today())
-        if target == self.day_plan.target_date:
-            return self.day_plan
+        for plan in (self.day_plan, self._home_plan):
+            # The plan in use, even while a call is on another day: apply_rollover moves yesterday's item "to
+            # today", and a fresh copy of today would hide it from add_event's duplicate guard (10-31: Jon
+            # podcast twice).
+            if plan is not None and target == plan.target_date:
+                return plan
         if self.scheduler is None:
             raise ToolError("Other days are not available here.")
         if target not in self._other_days:
@@ -1357,6 +1362,9 @@ class PlanTools:
         if "_parse_error" in args:
             return f"{NOT_DONE}: {name} {args['_parse_error']}. Write the arguments as a JSON object."
         saved = self.day_plan
+        outermost = self._home_plan is None
+        if outermost:
+            self._home_plan = saved
         from thirties_core.plan_log import tool_call
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
@@ -1377,6 +1385,8 @@ class PlanTools:
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
         finally:
             self.day_plan = saved
+            if outermost:
+                self._home_plan = None
 
     def _learn_routine_move(self, event: Any) -> None:
         """A routine step moved by itself is where it usually goes now (routines.RoutineTools.learn_move)."""
