@@ -37,6 +37,15 @@ class JoplinConfig:
     launch_when_needed: bool = False  # start Joplin (minimized) when a write-back needs it and it isn't running
     reset_routines: bool = True       # with write-back: untick routine notes each morning
     file_done: bool = True            # with write-back: done items move to the month's Done note (done_log.py)
+    # The headless sync peer (joplin_peer.py): Thirties' own copy of Joplin, for when the Joplin app is closed or
+    # not installed. It syncs with the same sync target as the user's Joplin apps.
+    peer_enabled: bool = False
+    peer_port: int = 41210            # its Data API; clear of the desktop app's 41184-41194
+    peer_token: str = ""              # its Data API token (made by Thirties; a secret)
+    peer_target: int = 0              # Joplin's sync.target id; 0: the one the desktop app uses
+    peer_target_values: Dict[str, str] = field(default_factory=dict)  # sync.N.* the user typed (path, username…)
+    peer_password: str = ""           # the sync target's password (a secret)
+    peer_master_password: str = ""    # the end-to-end encryption master password, if the notes are encrypted
     # Notebooks to read tasks from (empty: all of them except the excluded ones), and single notes to add.
     allowed_notebooks: List[str] = field(default_factory=list)
     excluded_notebooks: List[str] = field(default_factory=lambda: ["Archive"])
@@ -134,8 +143,15 @@ class ThirtiesConfig:
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
 
-    def resolve_joplin_db_path(self) -> Optional[Path]:
-        """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths."""
+    def resolve_joplin_db_path(self, desktop_only: bool = False) -> Optional[Path]:
+        """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths.
+
+        With the sync peer on, this is whichever copy is current (the desktop app's while it runs, else the
+        peer's once it has synced since): every reader goes through here. ``desktop_only``: the desktop app's own.
+        """
+        if not desktop_only and self.joplin.peer_enabled:
+            from thirties_core.joplin_peer import reading_db_path
+            return reading_db_path(self, self.resolve_joplin_db_path(desktop_only=True))
         candidates: List[Path] = []
 
         if self.joplin.db_path:

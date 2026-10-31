@@ -70,6 +70,13 @@ _ALL = [
     Setting("inference.gemini_api_key", "device", secret=True),
     Setting("joplin.api_token", "device", secret=True),
     Setting("joplin.launch_when_needed", "device"),
+    # the headless sync peer (joplin_peer.py): per machine, since each computer runs its own
+    Setting("joplin.peer_enabled", "device"),
+    Setting("joplin.peer_target", "device"),
+    Setting("joplin.peer_target_values", "device"),
+    Setting("joplin.peer_token", "device", secret=True),
+    Setting("joplin.peer_password", "device", secret=True),
+    Setting("joplin.peer_master_password", "device", secret=True),
     Setting("sync.mode", "device"),
     Setting("sync.folder", "device"),
     Setting("telegram.enabled", "device"),

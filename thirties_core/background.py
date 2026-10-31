@@ -75,6 +75,7 @@ class BackgroundService:
     LISTS_EVERY = 1800
     TODAY_EVERY = 120
     MOOT_EVERY = 60
+    PRESENCE_EVERY = 600  # how often the Joplin app's being open is sampled (for offering the sync peer)
 
     def __init__(self, config, desktop_notify: Optional[DesktopNotify] = None, *, scheduler=None, joplin_engine=None,
                  inference_engine=None, sync_engine=None) -> None:
@@ -98,6 +99,8 @@ class BackgroundService:
         self._last_lists = 0.0
         self._last_today = 0.0
         self._last_moot = 0.0
+        self._last_presence = 0.0
+        self.peer = None  # the headless Joplin sync peer's duty, when it's on (joplin_peer.py)
         self._sorting = False
         self.sort_lists_enabled = not os.environ.get("THIRTIES_OFFLINE")  # off in tests and evals
         self._threads: List[threading.Thread] = []
@@ -588,6 +591,20 @@ class BackgroundService:
         if offer:
             self.send(offer, "dropbox", now=now)
 
+    def joplin_presence(self, now: datetime) -> None:
+        """While write-back is on and the sync peer is off: note every ten minutes whether the Joplin app is open,
+        and offer the peer once if it's often closed (changes wait for it then)."""
+        cfg = self.config.joplin
+        if not cfg.write_back or cfg.peer_enabled or time.time() - self._last_presence < self.PRESENCE_EVERY:
+            return
+        self._last_presence = time.time()
+        from thirties_core.joplin_peer import OFFER_TEXT, Presence
+        presence = Presence(self.scheduler.state_db)
+        presence.sample(bool(self.joplin_engine.api_client.ping()), now.date())
+        if presence.should_offer(self.config):
+            presence.offered()
+            self.send(OFFER_TEXT, "joplin_peer", now=now)
+
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
             return
@@ -653,7 +670,7 @@ class BackgroundService:
             logger.warning("Reloading the day failed: %s", e)
         for duty in (self.moot, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
-                     self.answer_lost_turns, self.dropbox):
+                     self.answer_lost_turns, self.dropbox, self.joplin_presence):
             try:
                 duty(now)
             except Exception as e:
@@ -682,10 +699,27 @@ class BackgroundService:
         if self.bridge is not None:
             from thirties_core.turns import add_mirror
             add_mirror(self._mirror)
+        self._start_peer()
         t = threading.Thread(target=self._loop, daemon=True, name="ThirtiesBackground")
         t.start()
         self._threads.append(t)
         logger.info("Background service started (Telegram %s).", "on" if self.bridge else "off")
+
+    def _start_peer(self) -> None:
+        """The headless Joplin sync peer runs in its own thread (a sync can take minutes); off, its server stops."""
+        from thirties_core import joplin_peer
+        if not self.config.joplin.peer_enabled:
+            joplin_peer.shutdown_all()
+            return
+        if not self.run_in_threads:
+            return  # tests drive the peer themselves
+        self.peer = joplin_peer.peer_for(self.config)
+
+        def ready() -> None:
+            self._last_outbox = 0.0  # the queued changes go now, not in a minute
+        self.peer.on_ready = ready
+        self.peer.notify = lambda text: self.send(text, "joplin_peer")
+        self.peer.start()
 
     def _loop(self) -> None:
         while self.running:
@@ -697,6 +731,9 @@ class BackgroundService:
 
     def stop(self) -> None:
         self.running = False
+        if self.peer is not None:  # its server stays up across a settings reload; quitting stops it (atexit)
+            self.peer.stop()
+            self.peer = None
         from thirties_core.turns import remove_mirror
         remove_mirror(self._mirror)
         if self.bridge is not None:

@@ -330,7 +330,20 @@ class JoplinWriter:
 
     @property
     def allowed(self) -> bool:
-        return bool(self.cfg.write_back and self.cfg.api_token)
+        # The desktop app's token, or the sync peer (joplin_peer.py), which has its own and needs no desktop app.
+        return bool(self.cfg.write_back and (self.cfg.api_token or self.cfg.peer_enabled))
+
+    def _held(self, op: Dict[str, Any]) -> bool:
+        """A note of this change was last changed through the other copy of Joplin (the desktop app or the sync
+        peer), which hasn't caught up yet: it waits in the outbox rather than make Joplin keep two versions."""
+        holds = getattr(self.api, "holds", None)
+        if holds is None:
+            return False
+        try:
+            return holds([n for n in (op.get("note_id"), op.get("to_note_id")) if n]) is True
+        except Exception as e:
+            logger.warning("Couldn't check the Joplin write fence: %s", e)
+            return False
 
     def submit(self, op: Dict[str, Any]) -> Tuple[str, str]:
         """("done" | "queued" | "failed" | "not_allowed", message). Never blocks long."""
@@ -338,11 +351,13 @@ class JoplinWriter:
             return "not_allowed", "Thirties isn't allowed to change Joplin (Preferences → Tasks)."
         if current_turn.get() and "_turn" not in op:
             op = {**op, "_turn": current_turn.get()[:500]}
-        if self.api.ping():
+        if self.api.ping() and not self._held(op):
             ok, msg = self._apply(op)
             if ok or msg.startswith("gone:"):
                 return ("done", msg) if ok else ("failed", msg[5:])
         self.db.outbox_add(json.dumps(op), datetime.now(timezone.utc).isoformat())
+        if self.cfg.peer_enabled:
+            return "queued", "Joplin isn't reachable this moment; it'll be updated in a minute or two."
         return "queued", "Joplin isn't running; it'll be updated as soon as Joplin is open."
 
     def flush(self, launch: bool = True, wait_seconds: float = 45.0) -> int:
@@ -351,6 +366,8 @@ class JoplinWriter:
         if not pending or not self.allowed:
             return 0
         if not self.api.ping():
+            if self.cfg.peer_enabled:  # the sync peer brings itself up (joplin_peer.py): no need to open the app
+                return 0
             if not (launch and self.cfg.launch_when_needed) or time.time() - self._launched_at < 600:
                 return 0
             if not launch_joplin():
@@ -363,7 +380,10 @@ class JoplinWriter:
                 return 0
         delivered = 0
         for row in pending:
-            ok, msg = self._apply(json.loads(row["op"]))
+            op = json.loads(row["op"])
+            if self._held(op):
+                break  # the other copy of Joplin hasn't synced this note yet: wait, keeping the order
+            ok, msg = self._apply(op)
             if ok:
                 self.db.outbox_done(row["id"])
                 delivered += 1

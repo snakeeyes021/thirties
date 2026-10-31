@@ -267,11 +267,10 @@ class JoplinEngine:
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
         self.config = config or ThirtiesConfig()
         self.joplin_cfg: JoplinConfig = self.config.joplin
-        self.api_client = JoplinAPIClient(
-            host=self.joplin_cfg.api_host,
-            port=self.joplin_cfg.api_port,
-            token=self.joplin_cfg.api_token,
-        )
+        # The desktop app's Data API; with the sync peer on, a router to the desktop app or the peer, whichever is
+        # live (joplin_peer.py). Reads below go through config.resolve_joplin_db_path, which picks the same way.
+        from thirties_core.joplin_peer import api_client_for
+        self.api_client = api_client_for(self.config)
 
     def _open_db(self, db_path: Path) -> sqlite3.Connection:
         """Open SQLite database in immutable read-only mode with timeout."""
@@ -407,7 +406,7 @@ class JoplinEngine:
         For checkboxes: Read-Modify-Write pattern on live note body via API.
         For todo notes: Sets todo_completed via API.
         """
-        if not self.joplin_cfg.api_token:
+        if not (self.joplin_cfg.api_token or self.joplin_cfg.peer_enabled):  # the desktop app, or the sync peer
             return False, "Joplin API token is not configured in config.toml"
 
         if task.is_checkbox_item:
@@ -457,7 +456,7 @@ class JoplinEngine:
     def get_sync_note_body(self, notebook_name: str, subfolder_name: str, note_title: str) -> Optional[Dict[str, Any]]:
         """Fetch sync note body from Joplin, checking API first, then local SQLite DB fallback."""
         # 1. API search
-        if self.joplin_cfg.api_token:
+        if self.joplin_cfg.api_token or self.joplin_cfg.peer_enabled:
             results = self.api_client.search_notes(note_title)
             for item in results:
                 if item.get("title") == note_title:
@@ -499,7 +498,7 @@ class JoplinEngine:
         note_body: str,
     ) -> Tuple[bool, str]:
         """Create or update the sync note via Joplin Local API."""
-        if not self.joplin_cfg.api_token:
+        if not (self.joplin_cfg.api_token or self.joplin_cfg.peer_enabled):  # the desktop app, or the sync peer
             return False, "Joplin API token is not configured in config.toml"
 
         if not self.api_client.ping():

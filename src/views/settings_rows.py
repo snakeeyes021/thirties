@@ -490,6 +490,221 @@ def joplin_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     return group
 
 
+def joplin_peer_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """The headless Joplin sync peer (thirties_core/joplin_peer.py): the switch, its status, and whatever it
+    couldn't read from the Joplin app (the sync target's details, a password, a sign-in, the master password).
+    Everything slow (finding Node, installing, syncing, signing in) runs off the UI thread."""
+    from thirties_core import joplin_peer as jp
+    group = Adw.PreferencesGroup(
+        title="Without the Joplin app",
+        description="Thirties can run its own copy of Joplin in the background (Joplin's terminal app), synced "
+                    "with the same sync target as your Joplin apps. Then your notes, and your other devices, get "
+                    "Thirties' changes even when the Joplin app is closed or isn't installed.")
+    cfg = ctx.config()
+    peer = jp.peer_for(ctx.core.config)
+    switch = Adw.SwitchRow(title="Keep Joplin in sync without the Joplin app", active=bool(cfg.joplin.peer_enabled))
+    status = Adw.ActionRow(title="Status", subtitle="…")
+    setup = Gtk.Button(label="Set up", valign=Gtk.Align.CENTER)
+    sync_now = Gtk.Button(label="Sync now", valign=Gtk.Align.CENTER)
+    status.add_suffix(setup)
+    status.add_suffix(sync_now)
+    labels = ["As in the Joplin app"] + [t.label for t in jp.SYNC_TARGETS.values()]
+    ids = [0] + list(jp.SYNC_TARGETS)
+    target = Adw.ComboRow(title="Sync target", model=Gtk.StringList.new(labels))
+    target.set_selected(ids.index(cfg.joplin.peer_target) if cfg.joplin.peer_target in ids else 0)
+    details = Adw.ExpanderRow(title="Sync target details", subtitle="What Thirties couldn't read from Joplin")
+    password = Adw.PasswordEntryRow(title="Sync password")
+    password.set_text(ctx.get("joplin.peer_password", "") or "")
+    master = Adw.PasswordEntryRow(title="Encryption master password (if your notes are encrypted)")
+    master.set_text(ctx.get("joplin.peer_master_password", "") or "")
+    sign_in = Adw.ActionRow(title="Sign in", subtitle="Thirties' copy of Joplin signs in on its own, once")
+    sign_btn = Gtk.Button(label="Sign in", valign=Gtk.Align.CENTER)
+    sign_in.add_suffix(sign_btn)
+    code = Adw.EntryRow(title="Code from the sign-in page", show_apply_button=True)
+    for row in (switch, status, target, details, sign_in, code):
+        group.add(row)
+    field_rows = []
+    state = {"busy": False, "sign_in": None}
+
+    def build_fields():
+        for row in field_rows:
+            details.remove(row)
+        field_rows.clear()
+        tid, values, desk = peer.target()
+        info = jp.SYNC_TARGETS.get(tid)
+        target.set_subtitle(f"{desk.label}, as in your Joplin app" if desk.target and tid == desk.target
+                            else (info.label if info else "Choose where your Joplin apps sync"))
+        for suffix, label, _required in (info.fields if info else ()):
+            row = Adw.EntryRow(title=label)
+            row.set_text(str(values.get(suffix, "") or ""))
+
+            def save(text, suffix=suffix):
+                typed = dict(ctx.get("joplin.peer_target_values", {}) or {})
+                if typed.get(suffix, "") != text:
+                    typed[suffix] = text
+                    ctx.set("joplin.peer_target_values", typed)
+            save_as_you_type(row, save)
+            field_rows.append(row)
+        if info and info.secret:
+            field_rows.append(password)
+        field_rows.append(master)
+        for row in field_rows:
+            details.add_row(row)
+        sign_in.set_visible(bool(info and info.sign_in))
+        sign_in.set_title(f"Sign in to {info.label}" if info else "Sign in")
+
+    def show(snapshot, _error=None):
+        if snapshot is None:
+            return False
+        state_, installed, needs, desktop, st = snapshot
+        status.set_subtitle(
+            {"no_node": "Needs Node.js (Set up offers to download it)", "not_installed": "Not installed yet"}.get(
+                state_) or jp.describe(st, peer.clock(), installed, desktop, needs))
+        setup.set_visible(state_ != "ready")
+        sync_now.set_visible(state_ == "ready" and switch.get_active())
+        details.set_subtitle("Needs: " + ", ".join(jp.NEED_LABELS.get(n, n) for n in needs) if needs
+                             else "Read from your Joplin app")
+        code.set_visible(bool(state["sign_in"]) and state["sign_in"].kind == "code")
+        return False
+
+    def refresh():
+        def look():
+            return (peer.install_state(), peer.installed_version(), peer.needs(), peer.desktop_up(), peer.status)
+        ctx.run_async(look, show)
+
+    def on_switch(row, _p):
+        jp.enable(ctx, row.get_active())  # a Data API token is made the first time
+        if row.get_active() and setup.get_visible():
+            on_setup(setup)  # switched on and not installed: set it up straight away
+        else:
+            refresh()
+
+    def on_target(row, _p):
+        ctx.set("joplin.peer_target", ids[row.get_selected()])
+        GLib.timeout_add(800, lambda: build_fields() or refresh() or False)
+
+    def on_setup(_btn):
+        if state["busy"]:
+            return
+        state["busy"] = True
+        setup.set_sensitive(False)
+        status.set_subtitle("Looking for Node.js…")
+
+        def install(download):
+            def work():
+                if download:
+                    ok, msg = peer.download_node()
+                    if not ok:
+                        return msg
+                return peer.install()[1]
+
+            def done(msg, error):
+                state["busy"] = False
+                setup.set_sensitive(True)
+                ctx.toast(str(error or msg))
+                refresh()
+            status.set_subtitle("Installing Joplin's terminal app (a few minutes)…")
+            ctx.run_async(work, done)
+
+        def found(result, error):
+            node, why = result if result else (None, str(error))
+            if node is not None:
+                install(False)
+                return
+            dialog = Adw.AlertDialog(heading="Node.js is needed",
+                                     body=f"{why} Joplin's terminal app runs on Node.js. Thirties can download its "
+                                          "own copy (about 30 MB, from nodejs.org) into ~/.local/share/thirties, "
+                                          "used only for this.")
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("download", "Download Node.js")
+            dialog.set_response_appearance("download", Adw.ResponseAppearance.SUGGESTED)
+
+            def answered(_d, response):
+                if response == "download":
+                    install(True)
+                else:
+                    state["busy"] = False
+                    setup.set_sensitive(True)
+                    refresh()
+            dialog.connect("response", answered)
+            dialog.present(ctx.parent)
+        ctx.run_async(peer.node, found)
+
+    def on_sync(_btn):
+        sync_now.set_sensitive(False)
+        status.set_subtitle("Syncing…")
+
+        def done(outcome, error):
+            sync_now.set_sensitive(True)
+            ctx.toast(str(error) if error else ("Synced" if outcome.ok else outcome.message))
+            refresh()
+        ctx.flush()
+        ctx.run_async(peer.sync_now, done)
+
+    def on_sign_in(_btn):
+        ctx.flush()
+        sign_btn.set_sensitive(False)
+
+        def started(result, error):
+            run, msg = result if result else (None, str(error))
+            if run is None:
+                sign_btn.set_sensitive(True)
+                ctx.toast(msg)
+                return
+            state["sign_in"] = run
+
+            def poll():
+                if run.url and not getattr(run, "_opened", False):
+                    run._opened = True
+                    Gtk.UriLauncher.new(run.url).launch(ctx.parent, None, None, None)
+                    if run.kind == "code":
+                        code.set_visible(True)
+                        sign_in.set_subtitle("Paste the code the page shows below")
+                    elif run.kind == "confirm":
+                        sign_in.set_subtitle("Sign in in the browser, then press Done")
+                        sign_btn.set_label("Done")
+                        sign_btn.set_sensitive(True)
+                    else:
+                        sign_in.set_subtitle("Finish signing in in the browser")
+                if run.done.is_set():
+                    state["sign_in"] = None
+                    sign_btn.set_label("Sign in")
+                    sign_btn.set_sensitive(True)
+                    code.set_visible(False)
+                    outcome = run.outcome
+                    sign_in.set_subtitle("Signed in" if outcome and outcome.ok else
+                                         (outcome.message if outcome else "The sign-in didn't finish"))
+                    refresh()
+                    return False
+                return True
+            GLib.timeout_add(500, poll)
+        ctx.run_async(peer.begin_sign_in, started)
+
+    def on_sign_btn(btn):
+        run = state["sign_in"]
+        if run is not None and run.kind == "confirm":
+            run.answer("y")
+            btn.set_sensitive(False)
+        elif run is None:
+            on_sign_in(btn)
+
+    switch.connect("notify::active", on_switch)
+    target.connect("notify::selected", on_target)
+    setup.connect("clicked", on_setup)
+    sync_now.connect("clicked", on_sync)
+    sign_btn.connect("clicked", on_sign_btn)
+    code.connect("apply", lambda row: state["sign_in"] and state["sign_in"].answer(row.get_text().strip()))
+    save_as_you_type(password, lambda text: ctx.set("joplin.peer_password", text)
+                     if text != (ctx.get("joplin.peer_password", "") or "") else None)
+    save_as_you_type(master, lambda text: ctx.set("joplin.peer_master_password", text)
+                     if text != (ctx.get("joplin.peer_master_password", "") or "") else None)
+    code.set_visible(False)
+    build_fields()
+    refresh()
+    group.switch, group.status, group.target, group.details = switch, status, target, details  # for tests
+    return group
+
+
 def notebooks_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     group = Adw.PreferencesGroup(title="What to read")
     cfg = ctx.config()
