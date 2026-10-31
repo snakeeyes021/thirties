@@ -49,6 +49,9 @@ def _day_text(d: Optional[date], today: Optional[date] = None) -> str:
     return d.strftime("%a %b %-d")
 
 
+GUTTER = 60  # px: the block times' column, to the left of the cards
+
+
 def short_clock(dt: datetime) -> str:
     """'11 AM', '5:15 PM': the minutes only when there are some (the user, 10-31: the times were too busy)."""
     return format_clock(dt).replace(":00 ", " ")
@@ -56,19 +59,6 @@ def short_clock(dt: datetime) -> str:
 
 def _block_end(span: EventSpan) -> datetime:
     return thirty_ceil(span.end_dt)
-
-
-def _rows_by_thirty(spans: List[EventSpan]) -> List[tuple]:
-    """(start of thirty, [spans]) with short items sharing a thirty on one row, in order."""
-    out: List[tuple] = []
-    for s in sorted(spans, key=lambda s: s.start_dt):
-        block = thirty_of(s.start_dt)
-        short = s.duration_minutes < 30 and not s.is_envelope
-        if short and out and out[-1][0] == block and all(x.duration_minutes < 30 for x in out[-1][1]):
-            out[-1][1].append(s)
-        else:
-            out.append((block, [s]))
-    return out
 
 
 class AgendaPage(Gtk.ScrolledWindow):
@@ -159,49 +149,71 @@ class AgendaPage(Gtk.ScrolledWindow):
 
     def _fill(self, group: Adw.PreferencesGroup, spans: List[EventSpan], now: Optional[datetime],
               current: bool = False, behind: bool = False, ahead: bool = False) -> None:
-        """Rows by thirty (short items sharing one); items you can mark (now, behind, or next: done early) get a
-        row each."""
+        """A card per block, its time once in a gutter on the left (the user's pick, 10-31: "Next" read as one
+        monolith of separate items); items you can mark (now, behind, or next: done early) get ✓ and ✗."""
         markable = current or behind or ahead
-        rows = _rows_by_thirty(spans) if not markable else \
-            [(thirty_of(s.start_dt), [s]) for s in sorted(spans, key=lambda s: s.start_dt)]
-        for block, items in rows:
-            title = ", then ".join(s.title for s in items)
-            first = items[0]
-            when = short_clock(self._when(first))  # the block's start, no range (10-31: "too busy")
-            row = Adw.ActionRow(title=title, subtitle=when)
-            if first.tentative:
-                row.set_subtitle(f"{when} · invite, not answered yet")
-            elif first.shown_only:
-                row.set_subtitle(f"{when} · not yours (shown only)")
+        entries = []
+        for s in sorted(spans, key=lambda s: (self._when(s), s.start_dt)):
+            row = Adw.ActionRow(title=s.title)
+            if s.tentative:
+                row.set_subtitle("invite, not answered yet")
+            elif s.shown_only:
+                row.set_subtitle("not yours (shown only)")
                 row.add_css_class("dim-label")
-            if markable and _markable(first):
+            if markable and _markable(s):
                 # done now: it finished at the click; done early (ahead): Thirties picks the times, on blocks (soak 3);
                 # a calendar event happened at its calendar time
-                row.add_suffix(self._outcome_button(first, "done", now if current and _flexible(first) else None))
-                row.add_suffix(self._outcome_button(first, "skipped", None))  # now is a block: skip one of it too
-            group.add(row)
+                row.add_suffix(self._outcome_button(s, "done", now if current and _flexible(s) else None))
+                row.add_suffix(self._outcome_button(s, "skipped", None))  # now is a block: skip one of it too
+            entries.append((self._when(s), row))
+        self._add_blocks(group, entries)
         if not spans:
             group.add(Adw.ActionRow(title="Nothing"))
+
+    def _add_blocks(self, group: Adw.PreferencesGroup, entries: List[tuple]) -> None:
+        """(time, row) pairs, in order, as one card per time with the time in the gutter."""
+        blocks: List[tuple] = []
+        for when, row in entries:
+            if blocks and blocks[-1][0] == when:
+                blocks[-1][1].append(row)
+            else:
+                blocks.append((when, [row]))
+        for when, rows in blocks:
+            box = Gtk.Box(spacing=10, margin_bottom=6)
+            box.add_css_class("agenda-block")
+            label = Gtk.Label(label=short_clock(when) if when else "", xalign=1, yalign=0, margin_top=15)
+            label.set_size_request(GUTTER, -1)
+            label.add_css_class("caption-heading")
+            label.add_css_class("dim-label")
+            box.append(label)
+            card = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, hexpand=True)
+            card.add_css_class("boxed-list")
+            for row in rows:
+                card.append(row)
+            box.append(card)
+            box.when_text, box.rows = label.get_label(), rows  # read by the tests
+            group.add(box)
 
     def _fill_done(self, spans: List[EventSpan]) -> None:
         done = [s for s in spans if s.status != SpanStatus.PLANNED and _markable(s)]
         if not done:
             return
         group = self._group("done", "Done today", "What actually happened, and when.")
+        entries = []
         for s in sorted(done, key=lambda s: s.actual_start or s.start_dt):
+            note = ""
             if s.status == SpanStatus.SKIPPED:
-                subtitle = "skipped"
+                note = "skipped"
             elif s.status == SpanStatus.UNKNOWN:  # gone moot with nothing said: not known to have happened
-                subtitle = "not reported"
-            else:
-                subtitle = short_clock(thirty_of(s.actual_start or s.start_dt))
-                if s.status == SpanStatus.PARTIAL:
-                    subtitle += " · partly"
-                elif self._ongoing(s):  # a session: the thing itself carries on (B2)
-                    subtitle = "worked on · " + subtitle
-            row = Adw.ActionRow(title=s.title, subtitle=subtitle)
+                note = "not reported"
+            elif s.status == SpanStatus.PARTIAL:
+                note = "partly"
+            elif self._ongoing(s):  # a session: the thing itself carries on (B2)
+                note = "worked on"
+            row = Adw.ActionRow(title=s.title, subtitle=note)
             row.add_css_class("dim-label")
-            group.add(row)
+            entries.append((thirty_of(s.actual_start or s.start_dt), row))
+        self._add_blocks(group, entries)
 
     def _when(self, span: EventSpan) -> datetime:
         """Where an item shows: a fixed thing at its own time, everything else at its block's start."""

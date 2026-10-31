@@ -1,4 +1,4 @@
-"""Render the Timeline page to PNGs (light and dark, Day and Week) for review, with a made-up day on a temp database.
+"""Render the Timeline page (Day and Week) and the Agenda to PNGs (light and dark) for review, with a made-up day on a temp database.
 
     /usr/bin/python3 -m tests.timeline_screenshot [out_dir]   (default docs/eval_reports/ui/, gitignored)
 
@@ -44,6 +44,10 @@ def _day():
         ("email", "Email back GitHub", "08:00", "08:30", SpanStatus.UNKNOWN),
         ("lunch", "Lunch", "12:00", "12:30", SpanStatus.DONE),
         ("call", "Call the ENT", "12:00", "12:30", SpanStatus.PLANNED),
+        ("throne", "Throne", "15:30", "15:37", SpanStatus.PLANNED),
+        ("shower2", "Shower", "15:37", "15:45", SpanStatus.PLANNED),
+        ("pt", "PT", "15:45", "15:52", SpanStatus.PLANNED),
+        ("teeth", "Brush teeth", "15:52", "16:00", SpanStatus.PLANNED),
         ("dev", "Torquio dev", "16:00", "17:30", SpanStatus.PLANNED),
         ("cats", "Cats' dinner", "17:00", "17:30", SpanStatus.PLANNED),
         ("dinner", "Dinner", "18:30", "19:30", SpanStatus.PLANNED),
@@ -77,7 +81,7 @@ def main() -> int:
     try:
         for scheme, name in ((Adw.ColorScheme.FORCE_LIGHT, "light"), (Adw.ColorScheme.FORCE_DARK, "dark")):
             Adw.StyleManager.get_default().set_color_scheme(scheme)
-            for tab, height in (("day", 1640), ("week", 760)):
+            for tab, height in (("day", 1640), ("week", 760), ("agenda", 1300)):
                 view = DayView()
                 view.set_actions(lambda *_: "", None)
                 page = view.timeline
@@ -89,8 +93,11 @@ def main() -> int:
                      {"item_id": "tax", "title": "File the taxes", "list": "Admin"}])
                 view.set_today(DAY)
                 view.refresh_plan(plan)
-                view.stack.set_visible_child_name("timeline")
-                page.stack.set_visible_child_name(tab)
+                if tab == "agenda":
+                    view.stack.set_visible_child_name("day")
+                else:
+                    view.stack.set_visible_child_name("timeline")
+                    page.stack.set_visible_child_name(tab)
                 win = Adw.ApplicationWindow(content=view, default_width=640, default_height=height)
                 win.present()
                 _pump()
@@ -105,7 +112,7 @@ def main() -> int:
                 paintable.snapshot(snap, w, h)
                 node = snap.to_node()
                 texture = win.get_renderer().render_texture(node, None)
-                path = out / f"timeline_{tab}_{name}.png"
+                path = out / (f"agenda_{name}.png" if tab == "agenda" else f"timeline_{tab}_{name}.png")
                 texture.save_to_png(str(path))
                 written.append(path)
                 win.destroy()

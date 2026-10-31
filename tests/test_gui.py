@@ -73,6 +73,22 @@ def _iterate_until(predicate, timeout=5.0):
     return predicate()
 
 
+def _blocks(group):
+    """The Agenda's blocks under a group: (the gutter's time, [titles])."""
+    out = []
+
+    def walk(w):
+        if hasattr(w, "when_text"):
+            out.append((w.when_text, [r.get_title() for r in w.rows]))
+            return
+        c = w.get_first_child()
+        while c is not None:
+            walk(c)
+            c = c.get_next_sibling()
+    walk(group)
+    return out
+
+
 def _rows(widget):
     """The Adw.ActionRows under a widget, in order."""
     out = []
@@ -116,7 +132,7 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(rows("now"), ["Throne", "Shower", "PT", "Brush teeth"])
         self.assertEqual(rows("next")[0], "Dishes")
         self.assertEqual(rows("behind"), [])
-        self.assertEqual({r.get_subtitle() for r in _rows(page.groups["now"])}, {"7 PM"})
+        self.assertEqual(_blocks(page.groups["now"]), [("7 PM", ["Throne", "Shower", "PT", "Brush teeth"])])
         page.refresh(plan, at("19:31"))
         self.assertEqual(rows("behind"), ["Throne", "Shower", "PT", "Brush teeth"])
         self.assertEqual(rows("now"), ["Dishes"])
@@ -147,9 +163,10 @@ class DayViewTests(unittest.TestCase):
             return [(r.get_title(), r.get_subtitle() or "") for r in rows]
         self.assertEqual(titles(groups["now"]), [("Free until 8 PM", "")])
         # the block's start only: no "planned", no range, no ":00" (10-31: "too busy")
-        self.assertEqual(titles(groups["behind"]), [("Dinner", "6 PM"), ("Audiobook", "6 PM")])
-        self.assertIn(("Movie", "8 PM"), titles(groups["next"]))
-        self.assertEqual(titles(groups["done"]), [("Research", "1 PM")])  # when it really happened
+        # a card per block, its start once in the gutter (10-31: option B)
+        self.assertEqual(_blocks(groups["behind"]), [("6 PM", ["Dinner", "Audiobook"])])
+        self.assertIn(("8 PM", ["Movie"]), _blocks(groups["next"]))
+        self.assertEqual(_blocks(groups["done"]), [("1 PM", ["Research"])])  # when it really happened
         early = []
 
         def find(w):
@@ -213,11 +230,13 @@ class DayViewTests(unittest.TestCase):
                                          source="calendar", shown_only=True))
         view = DayView(self.plan)  # the timeline drew no card for a moot item before (KeyError)
         done = dict(self.action_rows(view.agenda.groups["done"]))
-        self.assertEqual(done["Torquio dev"], "worked on · 1 PM")
+        self.assertEqual(done["Torquio dev"], "worked on")
+        self.assertIn(("1 PM", ["Torquio dev"]), _blocks(view.agenda.groups["done"]))
         self.assertEqual(done["Dinner"], "not reported")
         now = self.action_rows(view.agenda.groups["now"])
         self.assertEqual(now[0], ("Free until 8 PM", ""))  # someone else's event doesn't make the user busy
-        self.assertEqual(now[1], ("Rehearsal", "7 PM · not yours (shown only)"))
+        self.assertEqual(now[1], ("Rehearsal", "not yours (shown only)"))
+        self.assertEqual(_blocks(view.agenda.groups["now"]), [("7 PM", ["Rehearsal"])])
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Torquio dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Torquio dev"].title_label.get_label())  # a session isn't struck through
