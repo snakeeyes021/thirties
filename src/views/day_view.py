@@ -1,13 +1,13 @@
-"""The schedule pane: the Agenda (where the day stands: agenda.py) and the Timeline page (timeline.py).
+"""The schedule pane: the solar arc header (the day's date, the sun's arc and the daylight/dark tallies), then the
+Agenda (where the day stands: agenda.py) and the Timeline page (timeline.py).
 
-The old timeline (a solar arc over a list of block cards) was replaced by the Timeline page on 10-30 ("fugly and
-confusing, not very GNOME HIG"); its header (the arc and the daylight/dark tallies) went with it: the Timeline's sky
-rail and free pips say the same thing, and the window's subtitle names the day.
+The old block-card timeline was replaced by the Timeline page on 10-30; the solar arc header stays ("put that
+back. That was beautiful.", the user, 10-30).
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from gi.repository import Adw, Gtk
 
@@ -15,6 +15,7 @@ from thirties_core.astronomy import get_current_time
 from thirties_core.kinds import ONGOING, kind_by_wording
 from thirties_core.models import DayPlan
 from thirties_core.clock import thirty_of
+from thirties.widgets.solar_arc import SolarArcWidget
 
 
 class DayView(Gtk.Box):
@@ -32,9 +33,50 @@ class DayView(Gtk.Box):
         self._ongoing = lambda span: kind_by_wording(span.title) == ONGOING
         self.set_hexpand(True)
         self.set_vexpand(True)
+        self._build_header()
         self._build_pages()
         if self.day_plan:
             self.refresh_plan(self.day_plan)
+
+    def _build_header(self) -> None:
+        """The date, the sun's arc over the day, and how much daylight and dark is still open."""
+        header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=16, margin_end=16,
+                              margin_top=10, margin_bottom=6)
+        header_card.add_css_class("card")
+        self.date_title = Gtk.Label(label="Today", margin_top=8, halign=Gtk.Align.CENTER)
+        self.date_title.add_css_class("title-3")
+        header_card.append(self.date_title)
+        self.solar_arc = SolarArcWidget(self.day_plan)
+        header_card.append(self.solar_arc)
+        tallies = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16, halign=Gtk.Align.CENTER,
+                          margin_bottom=8)
+        self.daylight_pill = Gtk.Label(label="☼ Daylight: 0/0 available")
+        self.daylight_pill.add_css_class("badge-daylight")
+        self.dark_pill = Gtk.Label(label="☾ Dark: 0/0 available")
+        self.dark_pill.add_css_class("badge-dark")
+        tallies.append(self.daylight_pill)
+        tallies.append(self.dark_pill)
+        header_card.append(tallies)
+        self.append(header_card)
+
+    def _update_title(self) -> None:
+        today = self.today or date.today()
+        target = self.day_plan.target_date
+        if target == today:
+            text = f"Today — {target.strftime('%A, %B %d')}"
+        elif target == today - timedelta(days=1):
+            text = f"Yesterday — {target.strftime('%A, %B %d')}"
+        elif target == today + timedelta(days=1):
+            text = f"Tomorrow — {target.strftime('%A, %B %d')}"
+        else:
+            text = target.strftime("%A, %B %d, %Y")
+        self.date_title.set_text(text)
+
+    def _update_tallies(self) -> None:
+        # Today counts only the thirties still ahead; other days count them all.
+        counts = self.day_plan.availability(self.live_now())
+        self.daylight_pill.set_text(f"☼ Daylight: {counts['daylight_open']}/{counts['daylight_total']} available")
+        self.dark_pill.set_text(f"☾ Dark: {counts['dark_open']}/{counts['dark_total']} available")
 
     def _build_pages(self) -> None:
         """Day (where things stand: now and next, not reported, done) and Timeline (the day and the week)."""
@@ -90,6 +132,9 @@ class DayView(Gtk.Box):
     def refresh_plan(self, day_plan: DayPlan, force: bool = False) -> None:
         """Show a plan. Redraws only when the plan's content changed."""
         self.day_plan = day_plan
+        self.solar_arc.set_day_plan(day_plan)
+        self._update_title()
+        self._update_tallies()
         signature = self._plan_signature(day_plan)
         if not force and signature == self._signature:
             self.timeline.sync_units()
@@ -116,6 +161,8 @@ class DayView(Gtk.Box):
         """The clock moved: the hour hand follows; a new thirty moves now and next on."""
         if self.day_plan is None:
             return
+        self.solar_arc.queue_draw()
+        self._update_tallies()
         self.timeline.tick()
         now = self.live_now()
         thirty = thirty_of(now) if now else None
