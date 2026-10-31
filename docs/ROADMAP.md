@@ -439,6 +439,7 @@ Reported 10-31 (Sat, day 1). The causes were checked in the user's data and the 
    - The sunrise notice comes at sunrise, as its switch says.
    - The user can set the planned wake to sunrise, or relative to it ("half an hour before sunrise"), as a standing choice in Your usual week and Your week, and by saying so. Today it's only a clock time.
    - When the planned wake is sunrise itself and the sunrise notice is on, the two are one message: the morning message, opening with the sunrise.
+18. **A day's conversation is titled "[Morning, not from the user]…"** (the user, 10-31; Polish). `ConversationStore.save` (memory.py) titles a conversation with its first user message once, and the first one is now the hidden instruction for the morning proposal turn. The title should come from the first message the user actually wrote (skip hidden ones; leave it untitled until there is one).
 
 ## Soon, not today (from the user, 2026-10-30)
 - **Benchmark local models on other devices:** the user's 8 GB GPU desktop (a likely home-base machine, not set up yet) and their phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.
