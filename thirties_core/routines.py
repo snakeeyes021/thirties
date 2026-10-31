@@ -283,9 +283,23 @@ def _hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
 
+WAKE_RE = re.compile(r"^\s*(?:on |when (?:i |they )?|right )?(?:wak(?:e|ing)(?: up)?|get(?:ting)? up)\s*$", re.I)
+NEXT_RE = re.compile(r"^\s*(?:right |straight )?after (?:that|the (?:first|previous|last) (?:part|one|chunk|thirty))"
+                     r"\s*$|^\s*then\s*$", re.I)
+
+
 def _clock_of(hhmm: str) -> str:
-    """A stored 'HH:MM' (24-hour) as the user reads it: '3:00 PM'."""
+    """A stored 'HH:MM' (24-hour) as the user reads it: '3:00 PM'; 'wake' / 'wake+N' as said."""
+    if hhmm.startswith("wake"):
+        n = int(hhmm[5:] or 0) if "+" in hhmm else 0
+        return "on waking" if n == 0 else ("right after the part before" if n == 1 else f"{n} thirties after waking")
     return format_clock(datetime.strptime(hhmm, "%H:%M"))
+
+
+def _next_after(at: str) -> str:
+    if at.startswith("wake"):
+        return f"wake+{(int(at[5:]) if '+' in at else 0) + 1}"
+    return (datetime.strptime(at, "%H:%M") + timedelta(minutes=30)).strftime("%H:%M")
 
 
 def _at(hhmm: str, day_start: datetime) -> datetime:
@@ -501,8 +515,15 @@ class RoutineTools:
             when = part.get("start") or part.get("at")
             if when in (None, "") or not items:
                 continue
-            if re.fullmatch(r"\d{2}:\d{2}", str(when).strip()):
-                when = _clock_of(str(when).strip())  # a stored part's "15:00"
+            text = str(when).strip()
+            if text.startswith("wake") or WAKE_RE.match(text) or (NEXT_RE.match(text) and out):
+                # relative to the day's waking (10-30: "the two blocks go immediately after waking up"): late
+                # risers get them when they're up, through the missed-part rule
+                at = text if text.startswith("wake") else ("wake" if WAKE_RE.match(text) else _next_after(out[-1]["at"]))
+                out.append({"items": items, "at": at, "fallback": str(part.get("fallback") or "")})
+                continue
+            if re.fullmatch(r"\d{2}:\d{2}", text):
+                when = _clock_of(text)  # a stored part's "15:00"
             try:
                 start = thirty_of(self.pt._start(when))
             except (ClockError, ValueError) as e:
@@ -607,7 +628,9 @@ class RoutineTools:
             self.db.set_sync_meta(key, json.dumps(state))
         if state["placed"]:
             logger.info("Set up %s: %s", plan.target_date, "; ".join(state["placed"]))
-        return self.summary(state)
+        holiday = self.db.get_sync_meta(f"holiday:{plan.target_date.isoformat()}")
+        note = f"It's {holiday}, so I've left Work off today; say if you're working." if holiday else ""
+        return " ".join(t for t in (note, self.summary(state)) if t)
 
     @staticmethod
     def summary(state: Dict[str, Any]) -> str:
@@ -621,8 +644,15 @@ class RoutineTools:
     def _spot(self, plan: "DayPlan", at: str, now: datetime, minutes: int = 30) -> Tuple[Optional[datetime], str]:
         """Where a part (or anchor) goes today: its usual time; past a sleep-in, when sleep ends; once its time has
         passed, the first free thirty from now (None if nothing's free before bed)."""
-        start = _at(at, plan.day_start)
         bed = self._bedtime(plan)
+        if at.startswith("wake"):  # the day's waking (its night's Sleep ending, or the time recorded), plus N thirties
+            from thirties_core.day_times import wake_time
+            history = (self.db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+                       if self.db is not None else [])
+            woke = wake_time(plan, history) or plan.day_start
+            start = thirty_ceil(woke) + timedelta(minutes=30 * (int(at[5:]) if "+" in at else 0))
+        else:
+            start = _at(at, plan.day_start)
         if start >= bed and start.hour < 12 and start.date() > plan.day_start.date():
             start = thirty_ceil(plan.day_start)  # before sunrise (6:30 AM in winter): the day's first thirty
         for s in plan.spans:  # sleeping in (a weekend): when this morning's sleep ends
@@ -668,7 +698,7 @@ class RoutineTools:
                 times.append(format_clock(start))
                 if why == "missed":
                     state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
-                                          f"usually goes at {_clock_of(part['at'])}; that's passed, so it's at "
+                                          f"usually goes {'' if part['at'].startswith('wake') else 'at '}{_clock_of(part['at'])}; that's passed, so it's at "
                                           f"{format_clock(start)}.)")
             if times:
                 state["placed"].append(f"{note['title']} at " + " and ".join(times))

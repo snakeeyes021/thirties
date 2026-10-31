@@ -398,6 +398,32 @@ class TestWeeklyPatterns(RoutineCase):
         self.assertTrue(out.startswith(NOT_DONE), out)
 
 
+class TestPlacedOnWaking(RoutineCase):
+    """10-30: "the two morning routine blocks go immediately after waking up"; a late riser does the first chunk on
+    waking and the second right after (or after work: their call)."""
+
+    def test_parts_follow_waking(self):
+        out = self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+            {"start": "on waking", "items": ["Feed kitties", "Caffeinate"]},
+            {"start": "right after that", "items": ["Shower", "PT"]}]})
+        self.assertIn("on waking: Feed kitties, Caffeinate", out)
+        self.assertIn("right after the part before: Shower, PT", out)
+        book = self.t.assistant.routines.book()
+        note = self.t.assistant._routines()[0]
+        self.assertEqual([p["at"] for p in book.get(note["id"], note["title"]).parts], ["wake", "wake+1"])
+        from thirties_core.clock import thirty_ceil
+        from thirties_core.day_times import wake_time
+        plan = self.t.day_plan
+        history = self.sched.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        sleep_end = wake_time(plan, history) or plan.day_start  # this morning's waking (the night before's Sleep)
+        set_debug_time(sleep_end - timedelta(minutes=5))
+        self.sched.state_db.set_sync_meta(f"routines_set_up:{plan.target_date.isoformat()}", "")
+        self.t.assistant.routines.set_up_day(plan)
+        start = {s.title: s.start_dt for s in self.t.day_plan.spans}
+        self.assertEqual(start["Feed kitties"], thirty_ceil(sleep_end))
+        self.assertEqual(start["Shower"], thirty_ceil(sleep_end) + timedelta(minutes=30))
+
+
 class TestProposingTheDay(RoutineCase):
 
     def setUp(self):

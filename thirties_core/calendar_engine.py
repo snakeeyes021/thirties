@@ -57,7 +57,9 @@ class CalendarEvent:
 # Per-calendar choices (Preferences, keyed by the calendar's display name, lowercased: EDS uids differ between
 # computers, names don't). Unset: "mine" for the user's own calendars, ask about each event (once per series)
 # for anyone else's.
-CALENDAR_MODES = ("mine", "show", "ignore")
+CALENDAR_MODES = ("mine", "show", "ignore", "holidays")  # holidays: shown only, and one on a work day means no work
+                                                        # (the user, 10-30: "federal holidays almost always mean
+                                                        # I don't have work that day")
 
 # What "not mine" on a recurring series does to the rest of it: dropped from the day entirely. "show" would keep
 # the events visible on the Agenda as someone else's, taking no time (the per-calendar "show only"). Dropped is
@@ -89,6 +91,12 @@ def calendar_mode(event: CalendarEvent, modes: Optional[Dict[str, str]]) -> str:
     return ""
 
 
+def holidays_on(events: List[CalendarEvent], day: date, modes: Optional[Dict[str, str]]) -> List[str]:
+    """The names of the day's holidays: events on a calendar the user marked "holidays" that fall on ``day``."""
+    return [e.summary for e in events if calendar_mode(e, modes) == "holidays"
+            and e.start_dt.date() <= day <= (e.end_dt - timedelta(seconds=1)).date()]
+
+
 def events_to_spans(
     events: List[CalendarEvent],
     decisions: Optional[Dict[str, str]] = None,
@@ -116,7 +124,7 @@ def events_to_spans(
             mode = "show" if NOT_MINE_SERIES_BECOMES == "show" else mode
         if mode == "ignore" or event.response_status == "declined" or decision == "decline":
             continue
-        shown_only = mode == "show" and decision != "attend"
+        shown_only = mode in ("show", "holidays") and decision != "attend"
         if mode == "mine":  # the user said the calendar is theirs: only a real RSVP question makes it an invite
             is_invite = event.response_status in ("tentative", "needsAction")
         else:

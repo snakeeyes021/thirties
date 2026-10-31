@@ -620,6 +620,7 @@ class DeterministicScheduler:
         calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
                                                   getattr(self.config.calendar, "modes", None))
         calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]
+        self._holiday_off(plan, events)
         from thirties_core.calendar_outcomes import CalendarOutcomes
         CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar
         plan.spans.extend(calendar_spans)
@@ -629,6 +630,26 @@ class DeterministicScheduler:
         plan.is_finalized = meta.is_finalized
         plan.notes = meta.notes
         return plan, pending
+
+    def _holiday_off(self, plan: DayPlan, events: List[CalendarEvent]) -> None:
+        """A holiday (on a calendar marked "holidays") on a work day: the day's default Work comes off, once, and the
+        morning message says so ("holiday:<date>" in sync meta) so the user can put it back. Work the user set by
+        hand stays."""
+        from thirties_core.calendar_engine import holidays_on
+        key = f"holiday:{plan.target_date.isoformat()}"
+        if self.state_db.get_sync_meta(key):
+            return
+        names = holidays_on(events, plan.target_date, getattr(self.config.calendar, "modes", None))
+        work = [s for s in plan.spans if s.category == SpanCategory.WORK and s.source == "routine"
+                and s.start_dt.date() == plan.target_date]
+        if not names or not work:
+            return
+        from thirties_core.plan_log import caused_by
+        with caused_by(f"holiday: {names[0]}"):
+            for s in work:
+                self.state_db.delete_span(s.id)
+        plan.spans = [s for s in plan.spans if s not in work]
+        self.state_db.set_sync_meta(key, names[0])
 
     def build_rolling_schedule(self, start_date: date, days: int = 7) -> List[DayPlan]:
         """Generate plans for several consecutive days."""

@@ -26,7 +26,7 @@ CALENDAR_MODE_TOOL_SPECS: List[Dict[str, Any]] = [{
                    "event (the default for someone else's calendar); show: show only, takes no time; ignore: never "
                    "read. Use the calendar's exact name; leave calendar out to list them.",
     "parameters": {"calendar": "The calendar's exact name (leave out to list the calendars and their choices).",
-                   "mode": "mine, ask, show or ignore."},
+                   "mode": "mine, ask, show, ignore, or holidays (shown only; one on a work day means no work)."},
     "required": [],
 }]
 
@@ -37,9 +37,11 @@ _MODE_WORDS = {
     "show": "show", "show only": "show", "show-only": "show", "shown only": "show", "show_only": "show",
     "not mine": "show", "view only": "show",
     "ignore": "ignore", "hide": "ignore", "ignored": "ignore", "never": "ignore", "off": "ignore",
+    "holidays": "holidays", "holiday": "holidays", "days off": "holidays",
 }
 
-_LABEL = {"mine": "mine", "": "ask about its events", "show": "show only", "ignore": "ignored"}
+_LABEL = {"mine": "mine", "": "ask about its events", "show": "show only", "ignore": "ignored",
+          "holidays": "holidays (no work on them)"}
 
 
 class CalendarModeError(ValueError):

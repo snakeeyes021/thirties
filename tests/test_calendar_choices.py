@@ -148,3 +148,25 @@ class CalendarModeToolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHolidays(unittest.TestCase):
+    """10-30: "federal holidays are almost always an indication that I don't have work that day"."""
+
+    def test_a_holiday_on_a_work_day_takes_work_off_once(self):
+        from tests.fixtures import DAY, at, make_scheduler
+        from thirties_core.calendar_engine import CalendarEvent
+        from thirties_core.models import SpanCategory
+        day_off = CalendarEvent(id="vets", summary="Veterans Day", start_dt=at("00:00"), end_dt=at("23:59"),
+                                calendar_name="Holidays in United States")
+        sched = make_scheduler([day_off])
+        sched.config.calendar.modes = {"holidays in united states": "holidays"}
+        plan, _ = sched.build_day_plan(DAY)
+        self.assertFalse([s for s in plan.spans if s.category == SpanCategory.WORK])
+        holiday = next(s for s in plan.spans if s.title == "Veterans Day")
+        self.assertTrue(holiday.shown_only)
+        self.assertEqual(sched.state_db.get_sync_meta(f"holiday:{DAY.isoformat()}"), "Veterans Day")
+        from thirties_core.models import EventSpan
+        sched.state_db.upsert_span(EventSpan("w", "Work", at("09:00"), at("13:00"), SpanCategory.WORK, source="user"))
+        plan, _ = sched.build_day_plan(DAY)  # they said they're working: it stays
+        self.assertTrue([s for s in plan.spans if s.category == SpanCategory.WORK])
