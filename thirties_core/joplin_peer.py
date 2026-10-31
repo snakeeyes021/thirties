@@ -70,6 +70,9 @@ RETRY_NEEDS_USER = 3600     # after a failure only the user can fix (a password,
 START_TIMEOUT = 30          # for the server to answer after it's started
 SYNC_TIMEOUT = 1800         # a first sync of a big notebook takes a while
 TICK_SECONDS = 15
+# Encrypted notes need a newer Node: on Node 20.18 Joplin's encryption crashes inside Node's WebCrypto ("Assertion
+# failed: errors->Empty()", seen 2026-10-30); Node 22.23 worked. 22.12 is a guess at the first good one.
+E2EE_NODE_MIN = (22, 12)
 
 
 def peer_home() -> Path:
@@ -703,8 +706,13 @@ class JoplinPeer:
         st = self.status
         if info.sign_in and not (st.get("signed_in") and st.get("signed_in_target") == target):
             out.append("sign_in")
-        if (desk.e2ee or st.get("result") == "password") and not self.cfg.peer_master_password:
+        encrypted = desk.e2ee or st.get("result") == "password" or bool(st.get("encrypted"))
+        if encrypted and not self.cfg.peer_master_password:
             out.append("master_password")
+        if encrypted:
+            node, _ = self.node()
+            if node is not None and tuple(node.version[:2]) < E2EE_NODE_MIN:
+                out.append("newer_node")
         return out
 
     def _settings_to_import(self) -> Dict[str, Any]:
@@ -724,7 +732,7 @@ class JoplinPeer:
     def configure(self, force: bool = False) -> Tuple[bool, str]:
         """Set the peer's profile to the sync target (again only when something changed). The settings go through
         a 0600 file deleted straight after; only a hash of them is kept."""
-        missing = [n for n in self.needs() if n != "sign_in"]
+        missing = [n for n in self.needs() if n not in ("sign_in", "newer_node")]
         if missing:
             return False, "Thirties needs more to sync: " + ", ".join(missing)
         if not self.cfg.peer_token:
@@ -825,6 +833,21 @@ class JoplinPeer:
         except sqlite3.Error:
             return {}
 
+    def _encrypted_items(self) -> int:
+        """Items still encrypted in the peer's copy (synced from an encrypted target, not decrypted yet). Only then
+        is ``e2ee decrypt`` run: with nothing to decrypt it fails ("no master key is currently loaded")."""
+        if not self.db_path.is_file():
+            return 0
+        try:
+            conn = sqlite3.connect(f"file:{self.db_path.resolve()}?mode=ro", uri=True, timeout=5.0)
+            try:
+                return sum(conn.execute(f"SELECT COUNT(*) FROM {table} WHERE encryption_applied = 1").fetchone()[0]
+                           for table in ("notes", "folders"))
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return 0
+
     def sync(self, serve_after: bool = True) -> SyncOutcome:
         """Stop the server, sync (and decrypt), start the server again. Blocking; call from the peer's thread."""
         with self._cli_lock:
@@ -840,11 +863,17 @@ class JoplinPeer:
     def _after_sync(self, result: CliResult, signed_in: bool = False) -> SyncOutcome:
         outcome = classify(result)
         target = self.status.get("target")
-        if outcome.ok and (self.cfg.peer_master_password or self.desktop_target().e2ee):
+        if outcome.ok and self._encrypted_items():
+            self._set(encrypted=True)
             decrypt = self.cli(["e2ee", "decrypt", "--force"], timeout=SYNC_TIMEOUT)  # the CLI doesn't by itself
             if decrypt.rc != 0 or re.search(r"invalid password|password is needed|masterkeynotloaded|"
                                              r"master key is not loaded", decrypt.out.lower()):
                 outcome = SyncOutcome("password", _MESSAGES["password"])
+                node, _ = self.node()
+                if node is not None and tuple(node.version[:2]) < E2EE_NODE_MIN and self.cfg.peer_master_password:
+                    outcome = SyncOutcome("password", f"Your notes are encrypted, and this computer's {node.label} "
+                                                      "can't decrypt them. Download Thirties' own Node.js "
+                                                      "(Preferences → Tasks).")
         now = self.clock()
         st = self.status
         if outcome.ok:
@@ -1258,7 +1287,7 @@ def describe(status: Dict[str, Any], now: float, installed: str = "", desktop_up
 NEED_LABELS = {"target": "a sync target", "unsupported": "a sync target the terminal app supports",
                "path": "the address or folder", "username": "the username", "password": "the password",
                "sign_in": "a sign-in", "master_password": "the encryption master password",
-               "url": "the URL", "region": "the region"}
+               "url": "the URL", "region": "the region", "newer_node": "a newer Node.js (for encrypted notes)"}
 
 
 __all__ = ["JoplinPeer", "JoplinRouter", "WriteFence", "Presence", "SyncTarget", "SYNC_TARGETS", "DesktopTarget",

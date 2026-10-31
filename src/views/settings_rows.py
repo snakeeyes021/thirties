@@ -560,7 +560,9 @@ def joplin_peer_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         status.set_subtitle(
             {"no_node": "Needs Node.js (Set up offers to download it)", "not_installed": "Not installed yet"}.get(
                 state_) or jp.describe(st, peer.clock(), installed, desktop, needs))
-        setup.set_visible(state_ != "ready")
+        state["newer"] = "newer_node" in needs
+        setup.set_visible(state_ != "ready" or state["newer"])
+        setup.set_label("Download Node.js" if state_ == "ready" and state["newer"] else "Set up")
         sync_now.set_visible(state_ == "ready" and switch.get_active())
         details.set_subtitle("Needs: " + ", ".join(jp.NEED_LABELS.get(n, n) for n in needs) if needs
                              else "Read from your Joplin app")
@@ -608,9 +610,11 @@ def joplin_peer_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
         def found(result, error):
             node, why = result if result else (None, str(error))
-            if node is not None:
+            if node is not None and not state.get("newer"):
                 install(False)
                 return
+            if node is not None:
+                why = f"Your notes are encrypted, and {node.label} can't decrypt them."
             dialog = Adw.AlertDialog(heading="Node.js is needed",
                                      body=f"{why} Joplin's terminal app runs on Node.js. Thirties can download its "
                                           "own copy (about 30 MB, from nodejs.org) into ~/.local/share/thirties, "

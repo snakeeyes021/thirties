@@ -637,7 +637,8 @@ class SetupAndPreferencesTests(unittest.TestCase):
         from unittest import mock
         from thirties_core.app_core import AppCore
         from thirties_core.config import ThirtiesConfig
-        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tempfile.mkdtemp(prefix="thirties_gui_data_")})
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tempfile.mkdtemp(prefix="thirties_gui_data_"),
+                                           "THIRTIES_JOPLIN_PEER_HOME": tempfile.mkdtemp(prefix="thirties_gui_peer_")})
         env.start()
         self.addCleanup(env.stop)
         self.core = AppCore(use_keyring=False, config=ThirtiesConfig())
@@ -683,6 +684,28 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertIsNotNone(dialog)
         group = settings_rows.schedule_group(settings_rows.SettingsContext(self.core))
         self.assertIsNotNone(group)
+
+    def test_the_joplin_sync_peer_switch_status_and_details(self):
+        from unittest import mock
+        from thirties_core import joplin_peer as jp
+        desk = jp.DesktopTarget(target=6, values={"path": "https://dav.example.com"}, found=True)
+        with mock.patch.object(jp.JoplinPeer, "install_state", return_value="ready"), \
+                mock.patch.object(jp.JoplinPeer, "installed_version", return_value="3.7.1"), \
+                mock.patch.object(jp.JoplinPeer, "desktop_target", return_value=desk), \
+                mock.patch.object(jp.JoplinPeer, "desktop_up", return_value=False), \
+                mock.patch.object(jp.JoplinPeer, "node", return_value=(None, "")):
+            ctx = settings_rows.SettingsContext(self.core)
+            group = settings_rows.joplin_peer_group(ctx)
+            self.assertEqual(group.target.get_subtitle(), "WebDAV, as in your Joplin app")
+            self.assertTrue(_iterate_until(lambda: group.status.get_subtitle().startswith("Joplin 3.7.1")))
+            self.assertEqual(group.status.get_subtitle(), "Joplin 3.7.1; not synced yet; needs the username, the password")
+            group.switch.set_active(True)
+            self.assertTrue(self.core.settings.get("joplin.peer_enabled"))
+            self.assertEqual(len(self.core.settings.get("joplin.peer_token")), 48)  # its Data API token, made once
+            token = self.core.settings.get("joplin.peer_token")
+            group.switch.set_active(False)
+            group.switch.set_active(True)
+            self.assertEqual(self.core.settings.get("joplin.peer_token"), token)
 
     def test_each_weekday_can_differ_and_the_week_can_start_on_sunday(self):
         ctx = settings_rows.SettingsContext(self.core)

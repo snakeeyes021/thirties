@@ -216,6 +216,9 @@ class PeerCase(unittest.TestCase):
         home = unittest.mock.patch.object(Path, "home", return_value=self.tmp / "home")  # never the real Joplin
         home.start()
         self.addCleanup(home.stop)
+        env = unittest.mock.patch.dict(os.environ, {"THIRTIES_JOPLIN_PEER_HOME": str(self.tmp / "peer-default")})
+        env.start()
+        self.addCleanup(env.stop)
         self.desktop_db = make_desktop_profile(self.tmp / "joplin-desktop")
         self.cfg = ThirtiesConfig()
         self.cfg.joplin.db_path = str(self.desktop_db)
@@ -236,11 +239,14 @@ class PeerCase(unittest.TestCase):
     def install(self):
         self.assertEqual(self.peer.install(), (True, "Installed Joplin 3.7.1."))
 
-    def peer_db(self, conflicts=()):
+    def peer_db(self, conflicts=(), encrypted=0):
         self.peer.profile.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.peer.db_path)
-        conn.execute("CREATE TABLE IF NOT EXISTS notes (id TEXT, title TEXT, is_conflict INT)")
-        conn.executemany("INSERT INTO notes VALUES (?, ?, 1)", list(conflicts))
+        conn.execute("CREATE TABLE IF NOT EXISTS notes (id TEXT, title TEXT, is_conflict INT, "
+                     "encryption_applied INT DEFAULT 0)")
+        conn.execute("CREATE TABLE IF NOT EXISTS folders (id TEXT, encryption_applied INT DEFAULT 0)")
+        conn.executemany("INSERT INTO notes (id, title, is_conflict) VALUES (?, ?, 1)", list(conflicts))
+        conn.executemany("INSERT INTO folders VALUES (?, 1)", [(f"e{i}",) for i in range(encrypted)])
         conn.commit()
         conn.close()
 
@@ -529,6 +535,41 @@ class TestFailures(PeerCase):
         self.peer.stop_server()
         self.assertEqual(self.runner.killed, [4242])
         self.assertFalse(self.peer_api.up)
+
+    def test_encrypted_notes_need_the_master_password(self):
+        decrypts = []
+        self.runner.syncs = [CliResult(0, SYNC_OK + "\n/!\\ Your password is needed to decrypt some of your data.")]
+        self.runner.on_sync = lambda: self.peer_db(encrypted=2)
+        self.clock.advance(jp.SYNC_EVERY)
+        self.assertEqual(self.peer.tick(), "password")
+        self.assertEqual(self.peer.needs(), ["master_password"])
+        self.assertIn("master password", self.told[0])
+        self.cfg.joplin.peer_master_password = "sesame"  # given in Preferences: set up again, synced at once
+        orig = self.runner.run
+
+        def run(cmd, **kw):
+            if "e2ee" in cmd:
+                decrypts.append(cmd)
+                return CliResult(0, "Decrypted items: 2\nCompleted decryption.")
+            return orig(cmd, **kw)
+        self.runner.run = run
+        self.runner.on_sync = None
+        self.assertEqual(self.peer.tick(), "synced")
+        self.assertEqual(self.runner.imports[-1][0]["encryption.masterPassword"], "sesame")
+        self.assertEqual(len(decrypts), 1)
+
+    def test_nothing_encrypted_nothing_to_decrypt(self):
+        self.cfg.joplin.peer_master_password = "sesame"
+        self.clock.advance(jp.SYNC_EVERY)
+        self.assertEqual(self.peer.tick(), "synced")
+        self.assertFalse(any("e2ee" in c for c in self.runner.calls))  # it would fail: no master key loaded
+
+    def test_encrypted_notes_on_an_old_node_ask_for_a_newer_one(self):
+        self.runner.node_version = "v20.18.0"
+        self.peer._node = None
+        self.peer._set(encrypted=True)
+        self.cfg.joplin.peer_master_password = "sesame"
+        self.assertEqual(self.peer.needs(), ["newer_node"])
 
     def test_stale_after_long_without_a_sync(self):
         self.assertTrue(self.peer.fresh())
