@@ -176,6 +176,19 @@ def _row_at(slots: Sequence[Slot], t: datetime) -> float:
     return float(len(slots))
 
 
+def sun_marks(layout: "DayLayout") -> List[Tuple[str, datetime, float]]:
+    """The day's time marks on the Day tab's rail (the user, 10-31: "at least solar midday, and maybe sunset and
+    sunrise"): (name, time, row) for the ones on the waking day shown. Solar noon is halfway from sunrise to
+    sunset."""
+    plan, slots = layout.plan, layout.slots
+    if not slots:
+        return []
+    noon = plan.sunrise + (plan.sunset - plan.sunrise) / 2
+    lo, hi = slots[0].start.timestamp(), slots[-1].end.timestamp()
+    return [(name, t, _row_at(slots, t)) for name, t in (("sunrise", plan.sunrise), ("noon", noon),
+                                                          ("sunset", plan.sunset)) if lo <= t.timestamp() < hi]
+
+
 def _shown_as_note(span: EventSpan) -> bool:
     """Someone else's event, or an invite not answered: shown, but the user isn't busy with it (stream I's rule)."""
     return span.shown_only or span.tentative

@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from gi.repository import Adw, GLib, Gtk
 
-from thirties_core.clock import format_clock, thirty_of
+from thirties_core.clock import format_clock, thirty_ceil, thirty_of
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
 from thirties_core.plan_tools import NOT_DONE
 
@@ -49,6 +49,15 @@ def _day_text(d: Optional[date], today: Optional[date] = None) -> str:
     return d.strftime("%a %b %-d")
 
 
+def short_clock(dt: datetime) -> str:
+    """'11 AM', '5:15 PM': the minutes only when there are some (the user, 10-31: the times were too busy)."""
+    return format_clock(dt).replace(":00 ", " ")
+
+
+def _block_end(span: EventSpan) -> datetime:
+    return thirty_ceil(span.end_dt)
+
+
 def _rows_by_thirty(spans: List[EventSpan]) -> List[tuple]:
     """(start of thirty, [spans]) with short items sharing a thirty on one row, in order."""
     out: List[tuple] = []
@@ -71,6 +80,8 @@ class AgendaPage(Gtk.ScrolledWindow):
         # plan -> [{"title", "state", "choices": [{"how", "label", "back"}]}] (RoutineTools.day_routines)
         self.routines: Optional[Callable[[DayPlan], List[Dict[str, Any]]]] = None
         self.ongoing: Callable[[EventSpan], bool] = lambda span: False
+        # span -> bool: set by someone else's clock (shown at its own time; the rest by their block's start)
+        self.fixed: Callable[[EventSpan], bool] = lambda span: span.source == "calendar" or span.is_firm
         self.skip_menus: Dict[str, Gtk.MenuButton] = {}  # routine title -> its Skip menu (tests reach it here)
         self.read_tool: Optional[Tool] = None  # a read-only tool, run without refreshing (set by the window)
         self.page = Adw.PreferencesPage()
@@ -103,22 +114,27 @@ class AgendaPage(Gtk.ScrolledWindow):
             self._fill_routines(plan)
             self._fill_done(spans)
             return
-        behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and s.end_dt <= now]
+        # In blocks, as the cards say (10-31: one 11:00 block was split across Now and Next, and a 9:00 item was
+        # "past" at 9:06): an item is now through its whole last thirty, and past only once that's over.
+        block = thirty_of(now)
+        behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and _block_end(s) <= block]
         if behind:  # first: being behind is common, and these are what to sort out
             self._fill(self._group("behind", "Not marked yet", "Past their time with nothing said: not assumed done."),
                        behind, now, behind=True)
-        current = [s for s in spans if s.start_dt <= now < s.end_dt and s.status == SpanStatus.PLANNED]
+        current = [s for s in spans if thirty_of(s.start_dt) <= block < _block_end(s) and s.status == SpanStatus.PLANNED
+                   and not (s.is_envelope and not s.start_dt <= now < s.end_dt)]
         group = self._group("now", "Now")
         group.set_header_suffix(self.replan_btn)
         if any(_takes_time(s) for s in current):
             self._fill(group, current, now, current=True)
         else:
-            following = [s for s in spans if s.start_dt > now and s.status == SpanStatus.PLANNED and _takes_time(s)]
-            until = f" until {format_clock(min(s.start_dt for s in following))}" if following else ""
+            following = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED
+                         and _takes_time(s)]
+            until = f" until {short_clock(min(self._when(s) for s in following))}" if following else ""
             group.add(Adw.ActionRow(title=f"Free{until}"))
             if current:  # someone else's event, or an invite, happening now: shown under "Free", dimmed
                 self._fill(group, current, now)
-        upcoming = [s for s in spans if s.start_dt > now and s.status == SpanStatus.PLANNED]
+        upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
         self._fill_pencilled(None)
@@ -151,11 +167,8 @@ class AgendaPage(Gtk.ScrolledWindow):
         for block, items in rows:
             title = ", then ".join(s.title for s in items)
             first = items[0]
-            if first.is_envelope or first.duration_minutes >= 30:
-                when = f"{format_clock(block)} – {format_clock(thirty_of(first.end_dt - timedelta(seconds=1)) + timedelta(minutes=30))}"
-            else:
-                when = format_clock(block)
-            row = Adw.ActionRow(title=title, subtitle=("planned " + when) if behind else when)
+            when = short_clock(self._when(first))  # the block's start, no range (10-31: "too busy")
+            row = Adw.ActionRow(title=title, subtitle=when)
             if first.tentative:
                 row.set_subtitle(f"{when} · invite, not answered yet")
             elif first.shown_only:
@@ -165,8 +178,7 @@ class AgendaPage(Gtk.ScrolledWindow):
                 # done now: it finished at the click; done early (ahead): Thirties picks the times, on blocks (soak 3);
                 # a calendar event happened at its calendar time
                 row.add_suffix(self._outcome_button(first, "done", now if current and _flexible(first) else None))
-                if behind or ahead:
-                    row.add_suffix(self._outcome_button(first, "skipped", None))
+                row.add_suffix(self._outcome_button(first, "skipped", None))  # now is a block: skip one of it too
             group.add(row)
         if not spans:
             group.add(Adw.ActionRow(title="Nothing"))
@@ -182,8 +194,7 @@ class AgendaPage(Gtk.ScrolledWindow):
             elif s.status == SpanStatus.UNKNOWN:  # gone moot with nothing said: not known to have happened
                 subtitle = "not reported"
             else:
-                start, end = s.actual_start or s.start_dt, s.actual_end or s.end_dt
-                subtitle = f"{format_clock(thirty_of(start))} – {format_clock(thirty_of(end - timedelta(seconds=1)) + timedelta(minutes=30))}"
+                subtitle = short_clock(thirty_of(s.actual_start or s.start_dt))
                 if s.status == SpanStatus.PARTIAL:
                     subtitle += " · partly"
                 elif self._ongoing(s):  # a session: the thing itself carries on (B2)
@@ -191,6 +202,14 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = Adw.ActionRow(title=s.title, subtitle=subtitle)
             row.add_css_class("dim-label")
             group.add(row)
+
+    def _when(self, span: EventSpan) -> datetime:
+        """Where an item shows: a fixed thing at its own time, everything else at its block's start."""
+        try:
+            fixed = bool(self.fixed(span))
+        except Exception:
+            fixed = span.source == "calendar"
+        return span.start_dt if fixed else thirty_of(span.start_dt)
 
     def _ongoing(self, span: EventSpan) -> bool:
         try:

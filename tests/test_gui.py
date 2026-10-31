@@ -74,6 +74,18 @@ def _iterate_until(predicate, timeout=5.0):
 
 
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+
+def _rows(widget):
+    """The Adw.ActionRows under a widget, in order."""
+    out = []
+    if isinstance(widget, Adw.ActionRow):
+        out.append(widget)
+    c = widget.get_first_child()
+    while c is not None:
+        out += _rows(c)
+        c = c.get_next_sibling()
+    return out
+
 class DayViewTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sched = make_scheduler([event("lunch", "12:00", "12:30", "Lunch with Sam")])
@@ -86,6 +98,28 @@ class DayViewTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         set_debug_time(None)
+
+    def test_now_is_the_whole_block(self) -> None:
+        # 10-31: Throne (11:00) was Now and Shower (11:07), PT and Brush teeth were Next; Feed kitties (9:00 – 9:06)
+        # was past at 9:06. A block is one: all of it is now, and nothing in it is past until it's over.
+        from thirties_core.models import EventSpan, SpanCategory
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.spans = [s for s in plan.spans if s.category != SpanCategory.TASK and s.category != SpanCategory.ACTIVITY]
+        for i, title in enumerate(("Throne", "Shower", "PT", "Brush teeth")):
+            plan.spans.append(EventSpan(f"r{i}", title, at("19:00") + timedelta(minutes=7 * i),
+                                        at("19:07") + timedelta(minutes=7 * i), SpanCategory.TASK))
+        plan.spans.append(EventSpan("late", "Dishes", at("19:30"), at("20:00"), SpanCategory.TASK))
+        page = AgendaPage()
+        page.refresh(plan, at("19:20"))  # Throne and Shower are over by the minute, not by the block
+        rows = lambda key: [r.get_title() for r in _rows(page.groups[key])] if key in page.groups else []
+        self.assertEqual(rows("now"), ["Throne", "Shower", "PT", "Brush teeth"])
+        self.assertEqual(rows("next")[0], "Dishes")
+        self.assertEqual(rows("behind"), [])
+        self.assertEqual({r.get_subtitle() for r in _rows(page.groups["now"])}, {"7 PM"})
+        page.refresh(plan, at("19:31"))
+        self.assertEqual(rows("behind"), ["Throne", "Shower", "PT", "Brush teeth"])
+        self.assertEqual(rows("now"), ["Dishes"])
 
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
@@ -111,11 +145,11 @@ class DayViewTests(unittest.TestCase):
                     c = c.get_next_sibling()
             walk(group)
             return [(r.get_title(), r.get_subtitle() or "") for r in rows]
-        self.assertEqual(titles(groups["now"]), [("Free until 8:00 PM", "")])
-        self.assertEqual(titles(groups["behind"]), [("Dinner", "planned 6:00 PM – 7:00 PM"),
-                                                    ("Audiobook", "planned 6:00 PM – 7:00 PM")])
-        self.assertIn(("Movie", "8:00 PM – 9:30 PM"), titles(groups["next"]))
-        self.assertEqual(titles(groups["done"]), [("Research", "1:00 PM – 2:30 PM")])  # when it really happened
+        self.assertEqual(titles(groups["now"]), [("Free until 8 PM", "")])
+        # the block's start only: no "planned", no range, no ":00" (10-31: "too busy")
+        self.assertEqual(titles(groups["behind"]), [("Dinner", "6 PM"), ("Audiobook", "6 PM")])
+        self.assertIn(("Movie", "8 PM"), titles(groups["next"]))
+        self.assertEqual(titles(groups["done"]), [("Research", "1 PM")])  # when it really happened
         early = []
 
         def find(w):
@@ -179,11 +213,11 @@ class DayViewTests(unittest.TestCase):
                                          source="calendar", shown_only=True))
         view = DayView(self.plan)  # the timeline drew no card for a moot item before (KeyError)
         done = dict(self.action_rows(view.agenda.groups["done"]))
-        self.assertEqual(done["Torquio dev"], "worked on · 1:00 PM – 2:00 PM")
+        self.assertEqual(done["Torquio dev"], "worked on · 1 PM")
         self.assertEqual(done["Dinner"], "not reported")
         now = self.action_rows(view.agenda.groups["now"])
-        self.assertEqual(now[0], ("Free until 8:00 PM", ""))  # someone else's event doesn't make the user busy
-        self.assertEqual(now[1], ("Rehearsal", "7:00 PM – 9:00 PM · not yours (shown only)"))
+        self.assertEqual(now[0], ("Free until 8 PM", ""))  # someone else's event doesn't make the user busy
+        self.assertEqual(now[1], ("Rehearsal", "7 PM · not yours (shown only)"))
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Torquio dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Torquio dev"].title_label.get_label())  # a session isn't struck through

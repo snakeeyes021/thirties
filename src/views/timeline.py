@@ -32,8 +32,8 @@ from thirties_core.clock import format_clock
 from thirties_core.plan_tools import NOT_DONE
 from thirties_core.timeline_layout import (DEFAULT_UNITS, Card, DayLayout, FreeStretch, WeekLayout, amount_text,
                                            day_layout, delete_call, free_text, movable, move_call, move_target,
-                                           normalise_units, resize_call, resize_extent, restore_call, week_days,
-                                           week_layout)
+                                           normalise_units, resize_call, resize_extent, restore_call, sun_marks,
+                                           week_days, week_layout)
 
 Tool = Callable[[str, dict], str]
 
@@ -186,6 +186,20 @@ def draw_hand(cr, x: float, y: float, rgb: tuple, scale: float = 1.0, mirrored: 
         else:
             cr.fill()
     cr.restore()
+
+
+def draw_sun_mark(cr, y: float, name: str, t, fg: tuple) -> None:
+    """A time mark on the rail: a notch across the sky bar, and its name over its time beside it."""
+    cr.set_source_rgba(*fg, 0.85)
+    cr.rectangle(SKY_X - 3, y - 1, SKY_W + 6, 2)
+    cr.fill()
+    layout = PangoCairo.create_layout(cr)
+    layout.set_font_description(Pango.FontDescription.from_string("Sans 7"))
+    layout.set_text(f"{name}\n{format_clock(t)}", -1)
+    _w, h = layout.get_pixel_size()
+    cr.set_source_rgba(*fg, 0.6)
+    cr.move_to(SKY_X + SKY_W + 5, y - h / 2)
+    PangoCairo.show_layout(cr, layout)
 
 
 def draw_badge(cr, cx: float, cy: float, daylight: bool, bg: tuple) -> None:
@@ -642,7 +656,10 @@ class DayCanvas(Gtk.Widget):
             cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.9)
             cr.set_line_width(2)
             cr.stroke()
-        # now: the badge on the sky bar and the hour hand into the day
+        # the day's time marks on the rail: sunrise, solar noon, sunset (a notch across the sky bar, name and time)
+        for name, t, row in sun_marks(layout):
+            draw_sun_mark(cr, self.y_of(row), name, t, fg)
+        # now: the badge on the sky bar and the hour hand into the day (over a mark it's passing)
         if layout.now_row is not None:
             cy = self.y_of(layout.now_row)
             cx = SKY_X + SKY_W / 2

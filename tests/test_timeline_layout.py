@@ -50,6 +50,16 @@ class TestTheDay(DayCase):
         self.assertEqual((d.start, d.end), (at("07:00"), at("23:00")))
         self.assertTrue(all(not s.sleep for s in d.slots))
 
+    def test_sunrise_noon_and_sunset_are_marked(self):
+        from thirties_core.timeline_layout import sun_marks
+        plan = self.plan()
+        d = day_layout(plan, at("19:10"))
+        marks = sun_marks(d)
+        self.assertEqual([m[0] for m in marks], ["sunrise", "noon", "sunset"])
+        noon = marks[1][1]
+        self.assertEqual(noon - plan.sunrise, plan.sunset - noon)
+        self.assertAlmostEqual(marks[2][2], d.sky[1].bottom)  # on the sky's own edge
+
     def test_the_sky_is_to_the_minute(self):
         plan = self.plan()
         d = day_layout(plan, at("19:10"))
