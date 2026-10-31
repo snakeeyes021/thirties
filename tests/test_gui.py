@@ -73,8 +73,6 @@ def _iterate_until(predicate, timeout=5.0):
     return predicate()
 
 
-@unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
-
 def _rows(widget):
     """The Adw.ActionRows under a widget, in order."""
     out = []
@@ -86,6 +84,8 @@ def _rows(widget):
         c = c.get_next_sibling()
     return out
 
+
+@unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
 class DayViewTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sched = make_scheduler([event("lunch", "12:00", "12:30", "Lunch with Sam")])
