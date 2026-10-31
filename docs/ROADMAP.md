@@ -392,6 +392,8 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 28. **Stale goals** (A7), and **memory notes that paper over fixed bugs get deleted** (D).
 29. **The eval counts only minute times Thirties picked itself** (gate write-up, docs/SLM_BRAIN.md).
 
+**0.2 soak** (AGENTS.md §6.3): the user switched to 0.2 on Fri Oct 30 at about 11:45 PM (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
+
 ## 0.3 (not started; the next version after 0.2)
 - **Rethink the Profile** (the user, 10-30): it overlaps with other stores. Its "preferences" section held near-copies of memory notes (the user removed two), and it also overlaps with lasting item facts, routines and anchors, Your week, calendar choices and list roles, which now hold the same kinds of things in structured, enforced form. Decide what the Profile is still for (probably the free-text "who you are": goals, life context, what matters), what moves into the structured stores, whether memory notes and the Profile merge, and how the assistant uses whatever remains. Audit the overlap first: list every place a fact about the user can live.
 - **Sleep and wake from a tracker** (the user, 10-30): read when they fell asleep and woke from Google Health / Fitbit (or Health Connect on the phone) instead of asking, which "will get old fast". The Sleep span and the routine's "on waking" placement then follow the real times.
