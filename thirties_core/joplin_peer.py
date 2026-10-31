@@ -990,21 +990,24 @@ class JoplinPeer:
         finally:
             self._cli_lock.release()
 
-    def run(self) -> None:
-        while not self._stop.is_set():
+    def run(self, stop: Optional[threading.Event] = None) -> None:
+        stop = stop or self._stop
+        while not stop.is_set():
             try:
                 did = self.tick()
                 if did not in ("idle", "desktop", "off", "busy"):
                     logger.info("Joplin peer: %s", did)
             except Exception as e:
                 logger.exception("The Joplin peer's round failed: %s", e)
-            self._stop.wait(TICK_SECONDS)
+            stop.wait(TICK_SECONDS)
 
     def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        """A thread of its own with its own stop signal: a settings reload stops the old one and starts a new one
+        at once, and the old one may still be finishing a sync (the lock keeps them from overlapping)."""
+        if self._thread is not None and self._thread.is_alive() and not self._stop.is_set():
             return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self.run, daemon=True, name="JoplinPeer")
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self.run, args=(self._stop,), daemon=True, name="JoplinPeer")
         self._thread.start()
 
     def stop(self, server: bool = False) -> None:

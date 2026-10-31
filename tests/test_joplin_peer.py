@@ -464,6 +464,20 @@ class TestSyncSchedule(PeerCase):
         self.assertEqual(self.peer.tick(), "synced")
         self.assertTrue(self.peer_api.up)
 
+    def test_a_settings_reload_restarts_the_duty_and_the_old_loop_ends(self):
+        self.peer.tick = lambda: "idle"
+        with unittest.mock.patch.object(jp, "TICK_SECONDS", 0.01):
+            self.peer.start()
+            first = self.peer._thread
+            self.peer.stop()
+            self.peer.start()  # at once, as AppCore.reload does
+            self.assertIsNot(self.peer._thread, first)
+            first.join(1)
+            self.assertFalse(first.is_alive())
+            self.assertTrue(self.peer._thread.is_alive())
+            self.peer.stop()
+            self.peer._thread.join(1)
+
     def test_switched_off_the_server_stops(self):
         self.peer.tick()
         self.cfg.joplin.peer_enabled = False

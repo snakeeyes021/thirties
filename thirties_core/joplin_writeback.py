@@ -357,7 +357,7 @@ class JoplinWriter:
                 return ("done", msg) if ok else ("failed", msg[5:])
         self.db.outbox_add(json.dumps(op), datetime.now(timezone.utc).isoformat())
         if self.cfg.peer_enabled:
-            return "queued", "Joplin isn't reachable this moment; it'll be updated in a minute or two."
+            return "queued", "Joplin isn't reachable right now; the change goes through as soon as it is."
         return "queued", "Joplin isn't running; it'll be updated as soon as Joplin is open."
 
     def flush(self, launch: bool = True, wait_seconds: float = 45.0) -> int:
