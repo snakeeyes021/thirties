@@ -32,6 +32,7 @@ import json
 import os
 import random
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -201,7 +202,7 @@ class LlamaServer:
         lines = out.stdout.strip().splitlines()
         if out.returncode != 0 or not lines:
             return None
-        fitted = lines[-1].split()
+        fitted = shlex.split(lines[-1])  # its -ot value comes quoted; .split() kept the quotes ("unknown buffer type")
         self.info["fitted"] = " ".join(fitted)
         layers = [int(n) for n in re.findall(r"n_layer=\s*(\d+)", out.stderr)]
         if layers:
