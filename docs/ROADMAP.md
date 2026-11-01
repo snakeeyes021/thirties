@@ -444,6 +444,8 @@ Reported 10-31 (Sat, day 1). The causes were checked in the user's data and the 
 
 ## Soon, not today (from the user, 2026-10-30)
 - **Benchmark local models on other devices:** the user's 8 GB GPU desktop (a likely home-base machine, not set up yet) and their phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.
+- **People to keep in touch with** (the user, 11-01, from their notes): a list of friends and family with when each was last seen in person, texted, called, or spent quality time with (the categories can overlap). It can be one more list, and the assistant suggests "you haven't talked to so-and-so in a while; maybe send them a text".
+- **LocalTickets as a feature** (the user, 11-01, from their notes): check Signature Theatre for ticket availability and send a daily notification when rush tickets are available. The user's older `rennfest_ticket_crawler` repo does the same kind of check.
 
 ## After 0.1
 
