@@ -386,9 +386,36 @@ class FreshEngineRuntime:
         return self.rt.open_conversation(system)
 
 
+def shared_repair(text: str) -> Optional[Dict[str, Any]]:
+    """The same format help for every model (the fair comparison, 11-02), applied before Python's reading: a reply
+    one to three closing brackets short is closed (LiteRT drops Qwen's last "}"), and a value of the wrong type for
+    a true/false or number field is read as meant ("alongside": "workout" is alongside=true)."""
+    raw = extract_json(text)
+    if raw is None or "actions" not in raw:
+        for tail in ("}", "]}", "}]}"):
+            fixed = extract_json((text or "").rstrip() + tail)
+            if fixed is not None and "actions" in fixed:
+                raw = fixed
+                break
+    if not isinstance(raw, dict) or not isinstance(raw.get("actions"), list):
+        return raw
+    props = ACTION_SCHEMA["properties"]["actions"]["items"]["properties"]
+    for action in raw["actions"]:
+        if not isinstance(action, dict):
+            continue
+        for key, value in list(action.items()):
+            kind = props.get(key, {}).get("type")
+            if kind == "boolean" and not isinstance(value, bool):
+                action[key] = str(value).strip().lower() not in ("", "false", "no", "0", "none", "null")
+            elif kind == "integer" and isinstance(value, str) and value.strip().isdigit():
+                action[key] = int(value.strip())
+    return raw
+
+
 def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool = False,
-                retry: bool = True, offset: int = 0) -> Dict[str, Any]:
-    """tests/slm_parse_eval.py's benchmark against any runtime: model alone, and after Python's reading."""
+                retry: bool = True, offset: int = 0, repair: bool = False) -> Dict[str, Any]:
+    """tests/slm_parse_eval.py's benchmark against any runtime: model alone, and after Python's reading.
+    ``repair``: shared_repair before Python's reading, the same for every model."""
     from tests.slm_parse_eval import SCHEDULE, all_cases, check, interpret, make_interpreter
     cases = all_cases()
     random.Random(0).shuffle(cases)  # the same order as slm_parse_eval
@@ -409,7 +436,7 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
             text = json.dumps(raw)
         else:
             text = session.ask(context)
-            raw = extract_json(text)
+            raw = shared_repair(text) if repair else extract_json(text)
         times.append(time.time() - start)
         bad = raw is None or "actions" not in raw
         unparsed += bad
@@ -419,8 +446,8 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
                                      c["context"])
         if bad and not constrained and retry:
             # what the brain does next (SlmBrain._parse): ask again with JSON-schema decoding
-            retry = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
-            brain_ok, _ = check(interpret(brain, retry, c["message"], c["context"]), c["types"], c["fields"],
+            again = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
+            brain_ok, _ = check(interpret(brain, again, c["message"], c["context"]), c["types"], c["fields"],
                                 c["context"])
         else:
             brain_ok = final_ok
@@ -519,7 +546,7 @@ def cmd_run(args) -> None:
             print(json.dumps(report["probe"]), flush=True)
         report["memory"] = server.memory()
         if args.parse or args.parse_only:
-            report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained)
+            report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained, repair=args.repair)
             print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
         report["calls"] = rt.calls[-50:]
     print("Saved", save(report, report_name(model, args)))
@@ -547,7 +574,7 @@ def cmd_litert(args) -> None:
         report["vram_used_mib_after_probe"] = now["used"] - before["used"]
     report["memory"] = proc_memory(os.getpid())
     if args.parse:
-        report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained)
+        report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained, repair=args.repair)
         print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
     print("Saved", save(report, report_name(model, args)))
 
@@ -561,7 +588,7 @@ def cmd_litert_fresh(model: Path, args) -> None:
                               "load_seconds": round(rt.load_seconds, 2), "ctx": rt.context_tokens,
                               "note": "fresh engine per session: conversations leak into each other in this runtime; "
                                       "no probe (it keeps two conversations open) and no constrained retries"}
-    report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, retry=False, offset=args.offset)
+    report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, retry=False, offset=args.offset, repair=args.repair)
     report["reloads"], report["reload_seconds"] = rt.reloads, round(rt.reload_seconds, 1)
     report["memory"] = proc_memory(os.getpid())
     print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
@@ -600,6 +627,8 @@ def main() -> None:
         p.add_argument("--parse", action="store_true", help="also run the 546-case parse benchmark")
         p.add_argument("--parse-only", action="store_true", help="only the parse benchmark (one slot)")
         p.add_argument("--constrained", action="store_true", help="benchmark with JSON-schema decoding on every case")
+        p.add_argument("--repair", action="store_true",
+                       help="the shared format help before Python's reading (shared_repair), for a fair comparison")
         p.add_argument("--limit", type=int, default=0, help="only the first N benchmark cases")
         p.add_argument("--offset", type=int, default=0, help="skip the first N benchmark cases (with --limit: a part)")
         p.add_argument("--ctx", type=int, default=0, help="context per slot (default 4096; 8192 for --parse-only); for litert, the tokens the model holds")

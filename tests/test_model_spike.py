@@ -157,3 +157,22 @@ class HarnessHelpersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSharedRepair(unittest.TestCase):
+    """The fair comparison's format help: the same for every model (11-02)."""
+
+    def test_closes_a_reply_a_bracket_short(self):
+        from tests.model_spike import shared_repair
+        self.assertEqual(shared_repair('{"actions":[{"type":"reject"}]'), {"actions": [{"type": "reject"}]})
+        self.assertEqual(shared_repair('{"actions":[{"type":"reject"}'), {"actions": [{"type": "reject"}]})
+
+    def test_reads_values_of_the_wrong_type_as_meant(self):
+        from tests.model_spike import shared_repair
+        out = shared_repair('{"actions":[{"type":"add","alongside":"workout","push":"no","option":"2"}]}')
+        self.assertEqual(out["actions"][0], {"type": "add", "alongside": True, "push": False, "option": 2})
+
+    def test_leaves_what_it_cant_mend(self):
+        from tests.model_spike import shared_repair
+        self.assertIsNone(shared_repair("</think>"))
+
