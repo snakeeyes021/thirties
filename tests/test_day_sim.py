@@ -67,6 +67,7 @@ class TestDaySim(unittest.TestCase):
     def test_measuring_a_day(self):
         run = start_day(SCRIPT, "frontier", [], [], MockInferenceEngine())
         walk = next(s for s in run.manager.day_plan.spans if s.title == "Walk")
+        set_debug_time(walk.start_dt.replace(hour=10, minute=40))  # reported after it happened, as in the log
         run.manager.execute_tool("log_outcome", {"event": walk.id, "status": "done", "started": "10:15 AM",
                                                  "finished": "10:35 AM"})
         run.log += [("10:40", "user", "done"), ("10:40", "assistant", "Logged it, 10:15 to 10:35. CALL x {}"),

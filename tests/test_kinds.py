@@ -168,6 +168,8 @@ class TestGoingMoot(KindsTestCase):
         lunch = self.add("Lunch", "12:00 PM")
         self.add("Dinner", "6:00 PM", "1 hour")
         self.t.assistant.settle_moot(now=at("18:05"))
+        set_debug_time(at("18:05"))
+        self.addCleanup(set_debug_time, None)
         out = self.t.execute("log_outcome", {"event": lunch.id, "status": "done", "started": "1:00 PM",
                                              "finished": "1:30 PM"})
         self.assertIn("Marked Lunch done", out)

@@ -191,6 +191,12 @@ class StateDatabase:
                          (updated_at or utc_now_iso(), span_id))
             record_span_change(self, conn, old, None)
 
+    def get_span(self, span_id: str) -> Optional[EventSpan]:
+        """One live span by id, on whatever day it is."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT data FROM spans WHERE id = ? AND deleted = 0", (span_id,)).fetchone()
+        return EventSpan.from_dict(json.loads(row["data"])) if row else None
+
     def get_spans_between(self, start: datetime, end: datetime) -> List[EventSpan]:
         """Live spans overlapping [start, end)."""
         with self._get_connection() as conn:

@@ -94,6 +94,39 @@ class TestOutcomes(ToolsTestCase):
         today = next(s for s in self.t.day_plan.spans if s.title == "Email back GitHub")
         self.assertEqual(today.status, SpanStatus.PLANNED)
 
+    def test_an_id_from_another_day_is_logged_on_that_day(self) -> None:
+        # 11-02: "I watched the documentary last night", logged with yesterday's id and no day, became a new
+        # activity titled "14d911095040", done at 9:50 PM that evening
+        self.t.execute("add_event", {"title": "Watch the documentary", "start": "9:30 PM", "duration": "2 hours",
+                                     "day": "yesterday"})
+        old = next(s for s in self.t.plan_for("yesterday").spans if s.title == "Watch the documentary")
+        out = self.t.execute("log_outcome", {"event": old.id, "status": "done", "started": "9:50 PM",
+                                             "finished": "2 AM"})
+        self.assertTrue(out.startswith("[") and "Marked Watch the documentary done" in out, out)
+        self.assertFalse(any(s.title == old.id for s in self.t.day_plan.spans))
+        stored = self.sched.state_db.get_span(old.id)
+        self.assertEqual((stored.status, stored.actual_start.date(), stored.actual_end.date()),
+                         (SpanStatus.DONE, DAY - timedelta(days=1), DAY))
+        out = self.t.execute("update_event", {"event": old.id, "title": "Watch the documentary!"})
+        self.assertTrue(out.startswith("NOT_DONE") and "day='" in out, out)  # other tools say which day
+
+    def test_an_unknown_id_is_never_a_title(self) -> None:
+        out = self.t.execute("log_outcome", {"event": "14d911095040", "status": "done", "started": "1:00 PM",
+                                             "finished": "2:00 PM"})
+        self.assertTrue(out.startswith("NOT_DONE") and "has the id" in out, out)
+        self.assertFalse(any(s.title == "14d911095040" for s in self.t.day_plan.spans))
+
+    def test_done_cant_be_later_than_now(self) -> None:
+        out = self.t.execute("log_outcome", {"event": "Emptied the litter boxes", "status": "done",
+                                             "started": "9:50 PM", "finished": "10:20 PM", "new": True})
+        self.assertTrue(out.startswith("NOT_DONE") and "later than now" in out and "day=" in out, out)
+        self.t.execute("add_event", {"title": "Reading", "start": "8:00 PM", "duration": "1 hour"})
+        out = self.t.execute("log_outcome", {"event": "Reading", "status": "done", "finished": "9:00 PM"})
+        self.assertTrue(out.startswith("NOT_DONE") and "later than now" in out, out)
+        out = self.t.execute("log_outcome", {"event": "Emptied the litter boxes", "status": "done",
+                                             "finished": "6:05 PM", "new": True})  # a few minutes' slack
+        self.assertTrue(out.startswith("Recorded"), out)
+
     def test_a_list_item_named_by_its_wording_marks_its_planned_copy(self) -> None:
         # 10-30 sim: ticked in Joplin by its list wording, the planned copy stayed open and was nagged for hours
         self.t.execute("add_event", {"title": "Taxes call", "start": "4:00 PM", "duration": "30 min",

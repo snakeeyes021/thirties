@@ -170,6 +170,7 @@ class TestDayLayout(ScheduleCase):
         t = tools_for(now="20:06")
         t.execute("add_event", {"title": "Clip cat nails", "start": "9:00 PM", "duration": "1 hour"})
         t.execute("add_event", {"title": "Water plants", "start": "9:00 PM", "duration": "1 hour"})
+        set_debug_time(at("22:06"))  # reported once it's happened
         t.execute("log_outcome", {"event": "Water plants", "status": "done", "started": "9:00 PM",
                                   "finished": "10:00 PM"})
         plan = t.day_plan

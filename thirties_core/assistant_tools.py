@@ -36,6 +36,20 @@ class ToolError(Exception):
     """A tool call that cannot be carried out; nothing was changed."""
 
 
+class OtherDaySpan(ToolError):
+    """An item named by its id that is on another day's plan (``plan``), not the one the call is on."""
+
+    def __init__(self, message: str, plan: Any) -> None:
+        super().__init__(message)
+        self.plan = plan
+
+
+# An id, not a name: a plan item's (models.new_span_id, 12 hex) or a list item's (joplin_engine.item_id, 16 hex).
+# 11-02: "the documentary last night", logged with yesterday's item id and no day, became an unplanned activity
+# titled "14d911095040", done at 9:50 PM that evening.
+ITEM_ID = re.compile(r"(cal:)?[0-9a-f]{12}([0-9a-f]{4})?")
+
+
 @dataclass
 class Services:
     """Everything beyond the day plan that tools and brains read or write."""
@@ -546,6 +560,7 @@ class AssistantTools(KindTools):
         minutes = parse_duration_minutes(duration) if duration not in (None, "") else 30
         end = end or (start + timedelta(minutes=minutes) if start else now)
         start = start or end - timedelta(minutes=minutes)
+        self._not_in_future(start, end)
         reported = started not in (None, "") and (finished not in (None, "") or duration not in (None, ""))
         span = EventSpan(new_span_id(), title.strip(), start, end, SpanCategory.ACTIVITY, status=SpanStatus.DONE,
                          actual_start=start, actual_end=end, notes=note or "",
@@ -556,6 +571,16 @@ class AssistantTools(KindTools):
         self._tick_on_today(span.title)
         return (f"Recorded {span.title} done ({format_clock(start)} – {format_clock(end)}, "
                 f"{span.time_source}); it wasn't planned.")
+
+    def _not_in_future(self, start: Optional[datetime], end: Optional[datetime]) -> None:
+        """Something done can't have finished, or started, later than now (a few minutes' slack for "done at 5"
+        said at 4:58). Said of last night with no day, the times land on this day's evening (11-02)."""
+        now = self.pt._now()
+        late = next((t for t in (start, end) if t is not None and t > now + timedelta(minutes=10)), None)
+        if late is not None:
+            raise ToolError(f"{format_clock(late)} on {late.strftime('%A')} is later than now ({format_clock(now)}): "
+                            "something done can't end in the future. If it happened on another day, give that day "
+                            "(day='yesterday').")
 
     def _tick_on_today(self, title: str) -> None:
         from thirties_core.today import note_items
@@ -980,6 +1005,16 @@ class AssistantTools(KindTools):
         span = None
         try:
             span = self.pt._find_span(event)
+        except OtherDaySpan as e:
+            # Named by an id that's on another day's plan ("last night"): ids are unique, so that's where it goes
+            saved = self.pt.day_plan
+            self.pt.day_plan = e.plan
+            try:
+                result = self.log_outcome(event, status, started, finished, duration, estimated, note,
+                                          finished_for_good, new)
+            finally:
+                self.pt.day_plan = saved
+            return f"[{e.plan.target_date.strftime('%A, %B %d')}] {result}"
         except Exception:
             span = None
         if span is not None and str(event).strip() != span.id and span.source != "calendar":
@@ -1000,6 +1035,9 @@ class AssistantTools(KindTools):
             if span is not None:
                 task = None
         if span is None and task is None:
+            if ITEM_ID.fullmatch(str(event).strip()):
+                raise ToolError(f"No item on any day's plan or list has the id {event}. Name it by its title, or "
+                                "use an id from the schedule.")
             if st == SpanStatus.SKIPPED:
                 raise ToolError(f"There is no schedule item or backlog task matching '{event}'.")
             if rank_tasks(self.s.tasks, str(event), limit=1) and not _as_flag(new):
@@ -1014,6 +1052,8 @@ class AssistantTools(KindTools):
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        if st != SpanStatus.SKIPPED:
+            self._not_in_future(start_dt, end_dt)
         if span is not None and span.source == "calendar" and not span.tentative:
             # An event is something you'd mark done (soak 1): the outcome is Thirties', the calendar is untouched.
             from thirties_core.calendar_outcomes import log_calendar_outcome

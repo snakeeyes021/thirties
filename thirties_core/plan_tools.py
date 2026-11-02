@@ -21,6 +21,7 @@ from thirties_core.assistant_tools import (
     ASSISTANT_READ_ONLY,
     ASSISTANT_TOOL_SPECS,
     AssistantTools,
+    OtherDaySpan,
     Services,
     ToolError,
 )
@@ -503,7 +504,29 @@ class PlanTools:
         if exact or partial:
             options = "; ".join(f"{self.describe(s)} [id {s.id}]" for s in (exact or partial))
             raise ToolError(f"'{ref_str}' matches several items: {options}. Use the id.")
+        other = self._plan_holding(ref_str)
+        if other is not None:
+            raise OtherDaySpan(f"{ref_str} is on the plan for {other.target_date.strftime('%A, %B %d')}, not this "
+                               f"day's: call again with day='{other.target_date.isoformat()}'.", other)
         raise ToolError(f"There is no item '{ref_str}' on this day's schedule.")
+
+    def _plan_holding(self, span_id: str) -> Optional[DayPlan]:
+        """The other day's plan an item id is on (its start's date, or the day before for one after midnight)."""
+        db = self._state_db
+        span = db.get_span(span_id) if db is not None and hasattr(db, "get_span") else None
+        if span is None:
+            return None
+        local = span.start_dt.astimezone(self.day_plan.day_start.tzinfo).date()
+        for d in (local, local - timedelta(days=1)):
+            if d == self.day_plan.target_date:
+                continue
+            try:
+                plan = self.plan_for(d)
+            except ToolError:
+                return None
+            if any(s.id == span_id for s in plan.spans_in_view()):
+                return plan
+        return None
 
     def _conflicts(self, span: EventSpan) -> List[EventSpan]:
         """The hard conflicts: active spans this span may not overlap.
