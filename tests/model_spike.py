@@ -338,7 +338,7 @@ def prime(rt: Any, messages: int = 6) -> Dict[str, Any]:
     return {"seconds": round(time.time() - start, 2)}
 
 
-def litert_runtime(model: Path, ctx: int = 0):
+def litert_runtime(model: Path, ctx: int = 0, cpu: bool = False):
     """GemmaRuntime on any .litertlm file, with its compile cache kept apart from the app's.
 
     ``ctx`` is the context the model really holds; ParserSession budgets against it. Past it a model doesn't fail,
@@ -348,7 +348,18 @@ def litert_runtime(model: Path, ctx: int = 0):
     os.environ["XDG_CACHE_HOME"] = str(SPIKE / "cache")
     from thirties_core.brains.slm.runtime import GemmaRuntime
     kv = re.search(r"ekv(\d+)", Path(model).name)
-    return GemmaRuntime(Path(model), max_tokens=ctx or (min(8192, int(kv.group(1))) if kv else 8192))
+    tokens = ctx or (min(8192, int(kv.group(1))) if kv else 8192)
+    if not cpu:
+        return GemmaRuntime(Path(model), max_tokens=tokens)
+    import litert_lm  # --cpu: LiteRT on the CPU, as on a phone without a usable GPU (GemmaRuntime tries the GPU first)
+    gpu = litert_lm.Backend.GPU
+    litert_lm.Backend.GPU = litert_lm.Backend.CPU
+    try:
+        rt = GemmaRuntime(Path(model), max_tokens=tokens)
+    finally:
+        litert_lm.Backend.GPU = gpu
+    rt.backend = "cpu"
+    return rt
 
 
 
@@ -558,7 +569,7 @@ def cmd_litert(args) -> None:
         cmd_litert_fresh(model, args)
         return
     before = gpu_memory()
-    rt = litert_runtime(model, args.ctx)
+    rt = litert_runtime(model, args.ctx, args.cpu)
     after = gpu_memory()
     report: Dict[str, Any] = {"model": model.name, "runtime": "litert", "backend": rt.backend,
                               "size_gb": round(model.stat().st_size / 1e9, 2), "when": time.strftime("%Y-%m-%d %H:%M"),
@@ -598,7 +609,7 @@ def cmd_probe(args) -> None:
     """The device probe on its own: what the app would run to say how long each message takes here."""
     model = Path(os.path.expanduser(args.model))
     if model.suffix == ".litertlm":
-        result = probe(litert_runtime(model, args.ctx))
+        result = probe(litert_runtime(model, args.ctx, args.cpu))
     else:
         with LlamaServer(model, vram_gb=args.vram, device=args.device) as server:
             result = probe(server.runtime())
@@ -635,6 +646,7 @@ def main() -> None:
         p.add_argument("--slots", type=int, default=3)
         p.add_argument("--extra", default="", help="extra llama-server arguments")
         p.add_argument("--tag", default="")
+        p.add_argument("--cpu", action="store_true", help="litert: run on the CPU (as a phone without a usable GPU)")
         p.add_argument("--reload-per-session", action="store_true",
                        help="litert: a fresh engine per conversation, for exports whose conversations leak")
     p = sub.add_parser("table")
