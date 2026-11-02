@@ -338,20 +338,61 @@ def prime(rt: Any, messages: int = 6) -> Dict[str, Any]:
     return {"seconds": round(time.time() - start, 2)}
 
 
-def litert_runtime(model: Path):
-    """GemmaRuntime on any .litertlm file, with its compile cache kept apart from the app's."""
+def litert_runtime(model: Path, ctx: int = 0):
+    """GemmaRuntime on any .litertlm file, with its compile cache kept apart from the app's.
+
+    ``ctx`` is the context the model really holds; ParserSession budgets against it. Past it a model doesn't fail,
+    it returns garbage and then nothing (Phi-4-mini's export says ekv4096 but breaks at ~2048 tokens: --ctx 2048).
+    The default is the ekv size in the file name, if any, else Gemma's 8192.
+    """
     os.environ["XDG_CACHE_HOME"] = str(SPIKE / "cache")
     from thirties_core.brains.slm.runtime import GemmaRuntime
-    return GemmaRuntime(Path(model))
+    kv = re.search(r"ekv(\d+)", Path(model).name)
+    return GemmaRuntime(Path(model), max_tokens=ctx or (min(8192, int(kv.group(1))) if kv else 8192))
 
 
-def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool = False) -> Dict[str, Any]:
+
+class FreshEngineRuntime:
+    """A LiteRT runtime that reloads its engine before every conversation after the first.
+
+    For exports whose conversations leak into each other (Qwen3.5-4B in LiteRT-LM 0.18 and 0.19: the first
+    conversation after a load answers well; later ones drift, then repeat "</think>" to the token limit or come back
+    empty; a reload clears it, a unique system prompt doesn't). Only ParserSession's sequential use fits: anything
+    that opens a second conversation (json_call, the probe's voice session) would reload under the first.
+    """
+
+    def __init__(self, model: Path, ctx: int = 0) -> None:
+        self._model, self._ctx = model, ctx
+        self.rt = litert_runtime(model, ctx)
+        self.reloads, self.reload_seconds, self._opened = 0, 0.0, False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.rt, name)
+
+    def parser(self, system: str) -> Any:
+        from thirties_core.brains.slm.runtime import ParserSession
+        return ParserSession(self, system)
+
+    def open_conversation(self, system: str) -> Any:
+        if self._opened:
+            start = time.time()
+            calls = self.rt.calls
+            self.rt.engine.close()
+            self.rt = litert_runtime(self._model, self._ctx)
+            self.rt.calls = calls
+            self.reloads += 1
+            self.reload_seconds += time.time() - start
+        self._opened = True
+        return self.rt.open_conversation(system)
+
+
+def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool = False,
+                retry: bool = True, offset: int = 0) -> Dict[str, Any]:
     """tests/slm_parse_eval.py's benchmark against any runtime: model alone, and after Python's reading."""
     from tests.slm_parse_eval import SCHEDULE, all_cases, check, interpret, make_interpreter
     cases = all_cases()
     random.Random(0).shuffle(cases)  # the same order as slm_parse_eval
-    if limit:
-        cases = cases[:limit]
+    cases = cases[offset:offset + limit] if limit else cases[offset:]  # --offset/--limit split a long run into parts
     session = rt.parser(SYSTEM_PROMPT)
     brain = make_interpreter()
     by_cat: Dict[str, List[bool]] = defaultdict(list)
@@ -376,7 +417,7 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
         ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
         final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"],
                                      c["context"])
-        if bad and not constrained:
+        if bad and not constrained and retry:
             # what the brain does next (SlmBrain._parse): ask again with JSON-schema decoding
             retry = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
             brain_ok, _ = check(interpret(brain, retry, c["message"], c["context"]), c["types"], c["fields"],
@@ -403,6 +444,7 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
         "unparsed": unparsed, "median_seconds": round(statistics.median(times), 2),
         "p90_seconds": round(sorted(times)[int(0.9 * (n - 1))], 2),
         "by_category": {k: f"{sum(v)}/{len(v)}" for k, v in sorted(final_cat.items())},
+        "seconds": [round(t, 2) for t in times], "offset": offset,
         "failures": failures,
     }
 
@@ -485,12 +527,15 @@ def cmd_run(args) -> None:
 
 def cmd_litert(args) -> None:
     model = Path(os.path.expanduser(args.model))
+    if args.reload_per_session:
+        cmd_litert_fresh(model, args)
+        return
     before = gpu_memory()
-    rt = litert_runtime(model)
+    rt = litert_runtime(model, args.ctx)
     after = gpu_memory()
     report: Dict[str, Any] = {"model": model.name, "runtime": "litert", "backend": rt.backend,
                               "size_gb": round(model.stat().st_size / 1e9, 2), "when": time.strftime("%Y-%m-%d %H:%M"),
-                              "load_seconds": round(rt.load_seconds, 2)}
+                              "load_seconds": round(rt.load_seconds, 2), "ctx": rt.context_tokens}
     if before and after:
         report["vram_used_mib"] = after["used"] - before["used"]
     report["first_pass"] = prime(rt, args.probe_messages)
@@ -507,11 +552,26 @@ def cmd_litert(args) -> None:
     print("Saved", save(report, report_name(model, args)))
 
 
+
+def cmd_litert_fresh(model: Path, args) -> None:
+    """The parse benchmark alone, on a fresh engine per session (see FreshEngineRuntime); no probe, no retries."""
+    rt = FreshEngineRuntime(model, args.ctx)
+    report: Dict[str, Any] = {"model": model.name, "runtime": "litert", "backend": rt.backend,
+                              "size_gb": round(model.stat().st_size / 1e9, 2), "when": time.strftime("%Y-%m-%d %H:%M"),
+                              "load_seconds": round(rt.load_seconds, 2), "ctx": rt.context_tokens,
+                              "note": "fresh engine per session: conversations leak into each other in this runtime; "
+                                      "no probe (it keeps two conversations open) and no constrained retries"}
+    report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, retry=False, offset=args.offset)
+    report["reloads"], report["reload_seconds"] = rt.reloads, round(rt.reload_seconds, 1)
+    report["memory"] = proc_memory(os.getpid())
+    print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
+    print("Saved", save(report, report_name(model, args)))
+
 def cmd_probe(args) -> None:
     """The device probe on its own: what the app would run to say how long each message takes here."""
     model = Path(os.path.expanduser(args.model))
     if model.suffix == ".litertlm":
-        result = probe(litert_runtime(model))
+        result = probe(litert_runtime(model, args.ctx))
     else:
         with LlamaServer(model, vram_gb=args.vram, device=args.device) as server:
             result = probe(server.runtime())
@@ -541,10 +601,13 @@ def main() -> None:
         p.add_argument("--parse-only", action="store_true", help="only the parse benchmark (one slot)")
         p.add_argument("--constrained", action="store_true", help="benchmark with JSON-schema decoding on every case")
         p.add_argument("--limit", type=int, default=0, help="only the first N benchmark cases")
-        p.add_argument("--ctx", type=int, default=0, help="context per slot (default 4096; 8192 for --parse-only)")
+        p.add_argument("--offset", type=int, default=0, help="skip the first N benchmark cases (with --limit: a part)")
+        p.add_argument("--ctx", type=int, default=0, help="context per slot (default 4096; 8192 for --parse-only); for litert, the tokens the model holds")
         p.add_argument("--slots", type=int, default=3)
         p.add_argument("--extra", default="", help="extra llama-server arguments")
         p.add_argument("--tag", default="")
+        p.add_argument("--reload-per-session", action="store_true",
+                       help="litert: a fresh engine per conversation, for exports whose conversations leak")
     p = sub.add_parser("table")
     p.add_argument("reports", nargs="*")
     args = ap.parse_args()
