@@ -19,3 +19,4 @@ acc:Mistral-Small-3.2-24B-Instruct-2506-IQ4_XS,Mistral-Small-3.2-24B-Instruct-25
 acc:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,561,84.8,84.5,85.0,1,1.16,,,14322,1558,909,11.9,70.0,132.16,2026-11-03 10:21,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL_all_fair.json,1400
 acc:Qwen3.8-27B-UD-IQ4_XS,Qwen3.8-27B-UD-IQ4_XS.gguf,llama.cpp,,561,87.9,89.1,88.2,3,2.73,,,13968,1635,837,29.7,90.0,141.44,2026-11-03 10:38,Qwen3.8-27B-UD-IQ4_XS_all_fair.json,1400
 acc:LFM2.5-24B-A2B-UD-Q4_K_XL,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,llama.cpp,,561,13.0,3.4,13.0,541,6.41,,,14545,645,157,91.9,90.0,136.74,2026-11-03 11:13,LFM2.5-24B-A2B-UD-Q4_K_XL_all_fair.json,1200
+acc:gemma-4-31B-it-Q3_K_M,gemma-4-31B-it-Q3_K_M.gguf,llama.cpp,,561,88.2,88.2,89.1,5,18.21,,,14616,5259,2897,203.1,60.0,130.25,2026-11-03 12:51,gemma-4-31B-it-Q3_K_M_all_fair.json,1000
