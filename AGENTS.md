@@ -296,3 +296,7 @@ The **heavy** ones settle design questions. The **light** ones are a direction o
 - **Small models get helpers.** Don't ask the on-device model to understand a whole turn and produce every tool call at once. Break the work into small steps (separate the requests, then act on each) with Python, or smaller helpers, in between.
 - **Record context for learning later.** Statistics should capture what surrounded an outcome (how full the day was, nearby events, time since waking) as well as durations, so later analysis has something to work with.
 - **The bar for the Frontier brain** is a frontier model handed the raw backlog and asked to plan the day. Our harness should beat that.
+
+## Prior notes and pre-existing code are drafts
+
+Notes, backlog and roadmap entries, past chat logs, and pre-existing code (anything written before the current piece of work and not explicitly confirmed since) are drafts: ideas to look into, not decisions. Don't treat a library, format, name or approach as settled just because it appears there. Only explicit, current decisions by the project owner are settled. When unsure, ask.
