@@ -172,6 +172,11 @@ class TestSharedRepair(unittest.TestCase):
         out = shared_repair('{"actions":[{"type":"add","alongside":"workout","push":"no","option":"2"}]}')
         self.assertEqual(out["actions"][0], {"type": "add", "alongside": True, "push": False, "option": 2})
 
+    def test_wraps_bare_actions(self):
+        from tests.model_spike import shared_repair
+        self.assertEqual(shared_repair('```json\n[{"type": "reject"}]\n```'), {"actions": [{"type": "reject"}]})
+        self.assertEqual(shared_repair('{"type": "reject"}'), {"actions": [{"type": "reject"}]})
+
     def test_leaves_what_it_cant_mend(self):
         from tests.model_spike import shared_repair
         self.assertIsNone(shared_repair("</think>"))

@@ -397,11 +397,32 @@ class FreshEngineRuntime:
         return self.rt.open_conversation(system)
 
 
+def _bare_actions(text: str) -> Optional[Dict[str, Any]]:
+    """A reply that's the actions without their wrapper: a list of actions, or one action ({"type": ...})."""
+    cleaned = re.sub(r"```(?:json)?", "", text or "").strip()
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start, end = cleaned.find(opener), cleaned.rfind(closer)
+        if start < 0 or end <= start:
+            continue
+        try:
+            value = json.loads(cleaned[start:end + 1])
+        except ValueError:
+            continue
+        if isinstance(value, dict) and "type" in value and "actions" not in value:
+            value = [value]
+        if isinstance(value, list) and value and all(isinstance(a, dict) and "type" in a for a in value):
+            return {"actions": value}
+    return None
+
+
 def shared_repair(text: str) -> Optional[Dict[str, Any]]:
-    """The same format help for every model (the fair comparison, 11-02), applied before Python's reading: a reply
-    one to three closing brackets short is closed (LiteRT drops Qwen's last "}"), and a value of the wrong type for
-    a true/false or number field is read as meant ("alongside": "workout" is alongside=true)."""
+    """The same format help for every model (the fair comparison, 11-02), applied before Python's reading: the
+    actions without their {"actions": ...} wrapper are wrapped (Gemma E2B answers with a bare list), a reply one to
+    three closing brackets short is closed (LiteRT drops Qwen's last "}"), and a value of the wrong type for a
+    true/false or number field is read as meant ("alongside": "workout" is alongside=true)."""
     raw = extract_json(text)
+    if raw is None or "actions" not in raw:
+        raw = _bare_actions(text) or raw
     if raw is None or "actions" not in raw:
         for tail in ("}", "]}", "}]}"):
             fixed = extract_json((text or "").rstrip() + tail)
