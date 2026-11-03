@@ -14,3 +14,4 @@ acc:NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL,NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K
 acc:Ornith-1.0-9B-Q4_K_M,Ornith-1.0-9B-Q4_K_M.gguf,llama.cpp,,561,77.2,77.5,77.5,3,1.4,,,5443,1096,354,15.3,,,2026-11-02 21:15,Ornith-1.0-9B-Q4_K_M_all_fair.json
 acc:gemma-4-12B-it-qat-UD-Q4_K_XL,gemma-4-12B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,561,85.9,85.6,85.9,1,2.67,,,7461,1913,1178,27.6,,,2026-11-02 21:30,gemma-4-12B-it-qat-UD-Q4_K_XL_all_fair.json
 acc:Qwen3-14B-Q4_K_M,Qwen3-14B-Q4_K_M.gguf,llama.cpp,,561,83.2,83.2,83.2,0,1.69,,,9685,771,152,17.6,92.0,223.23,2026-11-03 01:35,Qwen3-14B-Q4_K_M_all_fair.json
+acc:phi-4-Q4_K_M,phi-4-Q4_K_M.gguf,llama.cpp,,561,81.1,81.3,81.1,0,3.23,,,10340,664,156,34.8,92.0,226.52,2026-11-03 01:57,phi-4-Q4_K_M_all_fair.json
