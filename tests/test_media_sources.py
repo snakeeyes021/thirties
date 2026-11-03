@@ -1,14 +1,11 @@
 """Unit tests for thirties_core.media_sources.
 
-Fixtures in tests/fixtures_media/ (no network access in tests):
-- goodreads_*.xml: trimmed live responses (Oct 2026) of
-  https://www.goodreads.com/review/list_rss/1?shelf=to-read[&page=2]
-  (user 1 is Goodreads co-founder Otis Chandler, a public account).
-- letterboxd_watchlist_*.html: trimmed live pages 1 and 22 of
-  https://letterboxd.com/dave/watchlist/ (Letterboxd co-founder Dave Vis, public).
-- letterboxd_film_*.html: <meta> tags of https://letterboxd.com/film/a-ghost-story-2017/.
-- serializd_*.json: hand-written in the exact shape returned by
-  https://serializd.onrender.com/api/user/<user>/watchlistpage_v2/<n> and /api/show/<id>.
+Fixtures in tests/fixtures_media/ (no network access in tests) are synthetic: made-up titles, people and ids, written
+in the shape of each source's responses:
+- goodreads_*.xml: a shelf's RSS feed, pages 1 and 2 (/review/list_rss/<user>?shelf=to-read[&page=2]).
+- letterboxd_watchlist_*.html: a watchlist's poster grid, the first and the last page (/<user>/watchlist/).
+- letterboxd_film_*.html: the <meta> tags of a film page.
+- serializd_*.json: /api/user/<user>/watchlistpage_v2/<n> and /api/show/<id>.
 """
 
 import json
@@ -61,36 +58,36 @@ def failing_opener(url: str) -> bytes:
 GR1 = "https://www.goodreads.com/review/list_rss/1?shelf=to-read&page=1"
 GR2 = "https://www.goodreads.com/review/list_rss/1?shelf=to-read&page=2"
 GR3 = "https://www.goodreads.com/review/list_rss/1?shelf=to-read&page=3"
-LB1 = "https://letterboxd.com/dave/watchlist/"
-LB2 = "https://letterboxd.com/dave/watchlist/page/2/"
-LB_GHOST = "https://letterboxd.com/film/a-ghost-story-2017/"
+LB1 = "https://letterboxd.com/samplefan/watchlist/"
+LB2 = "https://letterboxd.com/samplefan/watchlist/page/2/"
+LB_FILM = "https://letterboxd.com/film/a-quiet-orchard-2017/"
 SZ1 = "https://serializd.onrender.com/api/user/tvfan/watchlistpage_v2/1?sort_by=date_added_desc"
 SZ2 = "https://serializd.onrender.com/api/user/tvfan/watchlistpage_v2/2?sort_by=date_added_desc"
-SZ_SHOW = "https://serializd.onrender.com/api/show/1274"
+SZ_SHOW = "https://serializd.onrender.com/api/show/7001"
 
 
 class TestGoodreads(unittest.TestCase):
 
     def test_parses_shelf_rss(self) -> None:
         opener = FakeOpener({GR1: fixture("goodreads_to_read_page1.xml")})
-        src = GoodreadsShelf("1-otis-chandler", opener=opener)
+        src = GoodreadsShelf("1-sample-reader", opener=opener)
         items = src.fetch()
         self.assertTrue(src.ok)
         self.assertEqual(len(items), 3)
         first = items[0]
         self.assertEqual(first.source, "goodreads")
         self.assertEqual(first.kind, "book")
-        self.assertEqual(first.title, "Tender Is the Night")
-        self.assertEqual(first.creator, "F. Scott Fitzgerald")
+        self.assertEqual(first.title, "The Lantern Almanac")
+        self.assertEqual(first.creator, "Mara Ellingsen")
         self.assertEqual(first.year, 1934)
-        self.assertEqual(first.url, "https://www.goodreads.com/book/show/46164")
+        self.assertEqual(first.url, "https://www.goodreads.com/book/show/900101")
         self.assertEqual(first.list_name, "to-read")
-        self.assertEqual(first.item_id, "46164")
+        self.assertEqual(first.item_id, "900101")
         self.assertEqual(first.added_at, datetime(2026, 10, 8, 22, 19, 5,
                                                   tzinfo=timezone(timedelta(hours=-7))))
         # CDATA titles and XML entities in author names are decoded.
-        self.assertEqual(items[1].title, "A Thousand Brains: A New Theory of Intelligence")
-        self.assertEqual(items[2].creator, "Colin O'Brady")
+        self.assertEqual(items[1].title, "A Field Guide to Quiet Machines: Notes on Thinking")
+        self.assertEqual(items[2].creator, "Rowan O'Dell")
         # Fewer than a full page (100) means no second request.
         self.assertEqual(opener.calls, [GR1])
 
@@ -102,7 +99,7 @@ class TestGoodreads(unittest.TestCase):
         # Page 2 has only 2 items (< per_page), so pagination stops there.
         self.assertEqual(len(items), 5)
         self.assertEqual(opener.calls, [GR1, GR2])
-        self.assertEqual(items[3].title.split(":")[0], "Food Fix")
+        self.assertEqual(items[3].title.split(":")[0], "Pantry Reset")
 
         capped = FakeOpener(routes)
         items = GoodreadsShelf("1", opener=capped, per_page=3, max_pages=1).fetch()
@@ -139,13 +136,13 @@ class TestLetterboxd(unittest.TestCase):
 
     def test_parses_watchlist_page(self) -> None:
         opener = FakeOpener({LB1: fixture("letterboxd_watchlist_last_page.html")})
-        src = LetterboxdWatchlist("Dave", opener=opener)
+        src = LetterboxdWatchlist("SampleFan", opener=opener)
         items = src.fetch()
         self.assertTrue(src.ok)
-        self.assertEqual([i.title for i in items], ["An Autumn Afternoon", "Nashville"])
+        self.assertEqual([i.title for i in items], ["A Winter Harbour", "Millbrook"])
         self.assertEqual([i.year for i in items], [1962, 1975])
-        self.assertEqual(items[1].url, "https://letterboxd.com/film/nashville/")
-        self.assertEqual(items[1].item_id, "nashville")
+        self.assertEqual(items[1].url, "https://letterboxd.com/film/millbrook/")
+        self.assertEqual(items[1].item_id, "millbrook")
         self.assertEqual(items[1].kind, "film")
         self.assertEqual(items[1].list_name, "watchlist")
         self.assertEqual(items[1].creator, "")
@@ -156,40 +153,40 @@ class TestLetterboxd(unittest.TestCase):
         routes = {LB1: fixture("letterboxd_watchlist_page1.html"),
                   LB2: fixture("letterboxd_watchlist_last_page.html")}
         opener = FakeOpener(routes)
-        items = LetterboxdWatchlist("dave", opener=opener).fetch()
+        items = LetterboxdWatchlist("samplefan", opener=opener).fetch()
         self.assertEqual(opener.calls, [LB1, LB2])
         self.assertEqual([i.item_id for i in items],
-                         ["the-history-of-concrete", "a-ghost-story-2017", "naza",
-                          "an-autumn-afternoon", "nashville"])
-        self.assertEqual(items[1].title, "A Ghost Story")
+                         ["the-paper-lighthouse", "a-quiet-orchard-2017", "vela",
+                          "a-winter-harbour", "millbrook"])
+        self.assertEqual(items[1].title, "A Quiet Orchard")
         self.assertEqual(items[1].year, 2017)
 
         capped = FakeOpener(routes)
-        items = LetterboxdWatchlist("dave", opener=capped, max_pages=1).fetch()
+        items = LetterboxdWatchlist("samplefan", opener=capped, max_pages=1).fetch()
         self.assertEqual(len(items), 3)
         self.assertEqual(capped.calls, [LB1])
 
     def test_director_lookups_are_capped_and_reuse_known(self) -> None:
         routes = {LB1: fixture("letterboxd_watchlist_page1.html"),
                   LB2: fixture("letterboxd_watchlist_last_page.html"),
-                  LB_GHOST: fixture("letterboxd_film_a-ghost-story-2017.html")}
+                  LB_FILM: fixture("letterboxd_film_a-quiet-orchard-2017.html")}
         opener = FakeOpener(routes)
-        src = LetterboxdWatchlist("dave", opener=opener, detail_lookups=2)
-        src.known = {"https://letterboxd.com/film/the-history-of-concrete/":
-                     MediaItem("letterboxd", "film", "The History of Concrete",
-                               creator="John Wilson", url="https://letterboxd.com/film/the-history-of-concrete/")}
+        src = LetterboxdWatchlist("samplefan", opener=opener, detail_lookups=2)
+        src.known = {"https://letterboxd.com/film/the-paper-lighthouse/":
+                     MediaItem("letterboxd", "film", "The Paper Lighthouse",
+                               creator="Theo Marsh", url="https://letterboxd.com/film/the-paper-lighthouse/")}
         with self.assertLogs("thirties_core.media_sources", logging.WARNING):
-            items = src.fetch()  # the naza page is missing: logged, not raised
+            items = src.fetch()  # the vela page is missing: logged, not raised
         self.assertTrue(src.ok)
-        self.assertEqual(items[0].creator, "John Wilson")   # from known, no request
-        self.assertEqual(items[1].creator, "David Lowery")  # looked up
+        self.assertEqual(items[0].creator, "Theo Marsh")   # from known, no request
+        self.assertEqual(items[1].creator, "Ines Calder")  # looked up
         self.assertEqual(items[2].creator, "")              # lookup failed
         film_calls = [c for c in opener.calls if "/film/" in c]
-        self.assertEqual(film_calls, [LB_GHOST, "https://letterboxd.com/film/naza/"])
+        self.assertEqual(film_calls, [LB_FILM, "https://letterboxd.com/film/vela/"])
 
     def test_network_failure(self) -> None:
         with self.assertLogs("thirties_core.media_sources", logging.WARNING):
-            src = LetterboxdWatchlist("dave", opener=failing_opener)
+            src = LetterboxdWatchlist("samplefan", opener=failing_opener)
             self.assertEqual(src.fetch(), [])
             self.assertFalse(src.ok)
 
@@ -203,12 +200,12 @@ class TestSerializd(unittest.TestCase):
         items = src.fetch()
         self.assertTrue(src.ok)
         self.assertEqual(opener.calls, [SZ1, SZ2])
-        self.assertEqual([i.title for i in items], ["Six Feet Under", "The Wire", "Sherlock"])
+        self.assertEqual([i.title for i in items], ["Harbor Lights", "The Long Shift", "Quayside"])
         first = items[0]
         self.assertEqual(first.source, "serializd")
         self.assertEqual(first.kind, "show")
-        self.assertEqual(first.item_id, "1274")
-        self.assertEqual(first.url, "https://www.serializd.com/show/Six-Feet-Under-1274")
+        self.assertEqual(first.item_id, "7001")
+        self.assertEqual(first.url, "https://www.serializd.com/show/Harbor-Lights-7001")
         self.assertEqual(first.added_at, datetime(2024, 5, 20, 3, 57, 9, tzinfo=timezone.utc))
         self.assertIsNone(first.year)
 
@@ -221,7 +218,7 @@ class TestSerializd(unittest.TestCase):
     def test_year_lookup(self) -> None:
         opener = FakeOpener({SZ1: fixture("serializd_watchlist_page1.json"),
                              SZ2: fixture("serializd_watchlist_page2.json"),
-                             SZ_SHOW: fixture("serializd_show_1274.json")})
+                             SZ_SHOW: fixture("serializd_show_7001.json")})
         items = SerializdWatchlist("tvfan", opener=opener, detail_lookups=1).fetch()
         self.assertEqual(items[0].year, 2001)
         self.assertIsNone(items[1].year)
@@ -245,7 +242,7 @@ class TestFetchAllMediaAndCache(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.cache_dir = Path(self.tmp.name)
         self.config = ThirtiesConfig(media=MediaConfig(
-            goodreads_user_id="1", letterboxd_username="dave", serializd_username="tvfan",
+            goodreads_user_id="1", letterboxd_username="samplefan", serializd_username="tvfan",
             cache_hours=12.0, detail_lookups_per_refresh=0))
         self.routes = {GR1: fixture("goodreads_to_read_page1.xml"),
                        LB1: fixture("letterboxd_watchlist_last_page.html"),
@@ -262,11 +259,11 @@ class TestFetchAllMediaAndCache(unittest.TestCase):
         self.assertEqual([i.source for i in items],
                          ["goodreads"] * 3 + ["letterboxd"] * 2 + ["serializd"] * 3)
         files = sorted(p.name for p in self.cache_dir.iterdir())
-        self.assertEqual(files, ["goodreads-1-to-read.json", "letterboxd-dave-watchlist.json",
+        self.assertEqual(files, ["goodreads-1-to-read.json", "letterboxd-samplefan-watchlist.json",
                                  "serializd-tvfan-watchlist.json"])
         payload = json.loads((self.cache_dir / "goodreads-1-to-read.json").read_text())
         self.assertEqual(payload["fetched_at"], self.now.isoformat())
-        self.assertEqual(payload["items"][0]["title"], "Tender Is the Night")
+        self.assertEqual(payload["items"][0]["title"], "The Lantern Almanac")
 
     def test_cache_hit_and_expiry(self) -> None:
         fetch_all_media(self.config, opener=FakeOpener(self.routes), now=self.now,
@@ -296,7 +293,7 @@ class TestFetchAllMediaAndCache(unittest.TestCase):
                                     cache_dir=self.cache_dir)
         self.assertEqual(stale, fresh)
         # The stale cache was not overwritten, so the next attempt retries.
-        payload = json.loads((self.cache_dir / "letterboxd-dave-watchlist.json").read_text())
+        payload = json.loads((self.cache_dir / "letterboxd-samplefan-watchlist.json").read_text())
         self.assertEqual(payload["fetched_at"], self.now.isoformat())
 
     def test_network_failure_without_cache_returns_empty(self) -> None:
@@ -307,20 +304,20 @@ class TestFetchAllMediaAndCache(unittest.TestCase):
         self.assertEqual(list(self.cache_dir.iterdir()), [])
 
     def test_known_details_carry_forward_after_expiry(self) -> None:
-        cfg = ThirtiesConfig(media=MediaConfig(letterboxd_username="dave",
+        cfg = ThirtiesConfig(media=MediaConfig(letterboxd_username="samplefan",
                                                detail_lookups_per_refresh=5))
         routes = {LB1: fixture("letterboxd_watchlist_page1.html"),
                   LB2: fixture("letterboxd_watchlist_last_page.html"),
-                  LB_GHOST: fixture("letterboxd_film_a-ghost-story-2017.html")}
+                  LB_FILM: fixture("letterboxd_film_a-quiet-orchard-2017.html")}
         with self.assertLogs("thirties_core.media_sources", logging.WARNING):
             fetch_all_media(cfg, opener=FakeOpener(routes), now=self.now, cache_dir=self.cache_dir)
         later = FakeOpener(routes)
         with self.assertLogs("thirties_core.media_sources", logging.WARNING):
             items = fetch_all_media(cfg, opener=later, now=self.now + timedelta(days=1),
                                     cache_dir=self.cache_dir)
-        ghost = next(i for i in items if i.item_id == "a-ghost-story-2017")
-        self.assertEqual(ghost.creator, "David Lowery")
-        self.assertNotIn(LB_GHOST, later.calls)
+        orchard = next(i for i in items if i.item_id == "a-quiet-orchard-2017")
+        self.assertEqual(orchard.creator, "Ines Calder")
+        self.assertNotIn(LB_FILM, later.calls)
 
     def test_nothing_configured(self) -> None:
         opener = FakeOpener({})
@@ -360,7 +357,7 @@ class TestMediaConfig(unittest.TestCase):
 [media]
 goodreads_user_id = "12345"
 goodreads_shelves = ["to-read", "currently-reading"]
-letterboxd_username = "dave"
+letterboxd_username = "samplefan"
 serializd_username = "tvfan"
 cache_hours = 6.0
 """
@@ -373,7 +370,7 @@ cache_hours = 6.0
             path.unlink()
         self.assertEqual(cfg.media.goodreads_user_id, "12345")
         self.assertEqual(cfg.media.goodreads_shelves, ["to-read", "currently-reading"])
-        self.assertEqual(cfg.media.letterboxd_username, "dave")
+        self.assertEqual(cfg.media.letterboxd_username, "samplefan")
         self.assertEqual(cfg.media.serializd_username, "tvfan")
         self.assertEqual(cfg.media.cache_hours, 6.0)
 
@@ -387,36 +384,36 @@ class TestMediaItemsAsTasks(unittest.TestCase):
 
     def test_formatting(self) -> None:
         items = [
-            MediaItem("letterboxd", "film", "Shine", creator="Scott Hicks", year=1996,
-                      url="https://letterboxd.com/film/shine/", list_name="watchlist", item_id="shine"),
-            MediaItem("goodreads", "book", "Tender Is the Night", creator="F. Scott Fitzgerald",
-                      year=1934, url="https://www.goodreads.com/book/show/46164",
-                      list_name="to-read", item_id="46164"),
-            MediaItem("serializd", "show", "Six Feet Under", year=2001,
-                      url="https://www.serializd.com/show/Six-Feet-Under-1274",
-                      list_name="watchlist", item_id="1274"),
-            MediaItem("letterboxd", "film", "NAZA", url="https://letterboxd.com/film/naza/",
-                      list_name="watchlist", item_id="naza"),
+            MediaItem("letterboxd", "film", "Low Tide", creator="Ada Brook", year=1996,
+                      url="https://letterboxd.com/film/low-tide/", list_name="watchlist", item_id="low-tide"),
+            MediaItem("goodreads", "book", "The Lantern Almanac", creator="Mara Ellingsen",
+                      year=1934, url="https://www.goodreads.com/book/show/900101",
+                      list_name="to-read", item_id="900101"),
+            MediaItem("serializd", "show", "Harbor Lights", year=2001,
+                      url="https://www.serializd.com/show/Harbor-Lights-7001",
+                      list_name="watchlist", item_id="7001"),
+            MediaItem("letterboxd", "film", "VELA", url="https://letterboxd.com/film/vela/",
+                      list_name="watchlist", item_id="vela"),
             # Duplicate id is dropped.
-            MediaItem("letterboxd", "film", "Shine", list_name="watchlist", item_id="shine"),
+            MediaItem("letterboxd", "film", "Low Tide", list_name="watchlist", item_id="low-tide"),
         ]
         tasks = media_items_as_tasks(items)
         self.assertEqual(len(tasks), 4)
-        shine, book, show, naza = tasks
-        self.assertEqual(shine.id, "media:letterboxd:shine")
-        self.assertEqual(shine.source_notebook, "Media > Letterboxd watchlist")
-        self.assertEqual(shine.title, "Watch: Shine (1996, Scott Hicks)")
-        self.assertEqual(shine.description, "https://letterboxd.com/film/shine/")
-        self.assertEqual(shine.estimated_thirties, 4)
-        self.assertIn("read-only", shine.tags)
-        self.assertEqual(book.id, "media:goodreads:46164")
+        tide, book, show, vela = tasks
+        self.assertEqual(tide.id, "media:letterboxd:low-tide")
+        self.assertEqual(tide.source_notebook, "Media > Letterboxd watchlist")
+        self.assertEqual(tide.title, "Watch: Low Tide (1996, Ada Brook)")
+        self.assertEqual(tide.description, "https://letterboxd.com/film/low-tide/")
+        self.assertEqual(tide.estimated_thirties, 4)
+        self.assertIn("read-only", tide.tags)
+        self.assertEqual(book.id, "media:goodreads:900101")
         self.assertEqual(book.source_notebook, "Media > Goodreads to-read")
-        self.assertEqual(book.title, "Read: Tender Is the Night (1934, F. Scott Fitzgerald)")
-        self.assertEqual(show.id, "media:serializd:1274")
+        self.assertEqual(book.title, "Read: The Lantern Almanac (1934, Mara Ellingsen)")
+        self.assertEqual(show.id, "media:serializd:7001")
         self.assertEqual(show.source_notebook, "Media > Serializd watchlist")
-        self.assertEqual(show.title, "Watch: Six Feet Under (2001)")
-        self.assertEqual(naza.title, "Watch: NAZA")
-        self.assertFalse(shine.is_checkbox_item)
+        self.assertEqual(show.title, "Watch: Harbor Lights (2001)")
+        self.assertEqual(vela.title, "Watch: VELA")
+        self.assertFalse(tide.is_checkbox_item)
 
 
 if __name__ == "__main__":

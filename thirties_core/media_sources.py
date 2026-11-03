@@ -673,7 +673,7 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
 
 
 def media_task_title(item: MediaItem) -> str:
-    """'Watch: Shine (1996, Scott Hicks)' / 'Read: Dune (1965, Frank Herbert)'."""
+    """'Watch: Low Tide (1996, Ada Brook)' / 'Read: The Lantern Almanac (1934, Mara Ellingsen)'."""
     details = [str(item.year)] if item.year else []
     if item.creator:
         details.append(item.creator)
