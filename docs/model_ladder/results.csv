@@ -78,3 +78,4 @@ igpu:NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL,NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_
 igpu:Qwen3.5-9B-Q4_K_M,Qwen3.5-9B-Q4_K_M.gguf,llama.cpp,,,,,,,,12.75,10.92,80,1560,1459,4.0,49.0,15.05,2026-11-04 03:36,Qwen3.5-9B-Q4_K_M_all_igpu.json,
 igpu:Ornith-1.0-9B-Q4_K_M,Ornith-1.0-9B-Q4_K_M.gguf,llama.cpp,,,,,,,,18.66,10.67,92,1708,1609,4.7,50.0,31.17,2026-11-04 03:43,Ornith-1.0-9B-Q4_K_M_all_igpu.json,
 igpu:gemma-4-12B-it-qat-UD-Q4_K_XL,gemma-4-12B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,22.14,12.93,80,3848,3741,7.4,50.0,15.69,2026-11-04 03:51,gemma-4-12B-it-qat-UD-Q4_K_XL_all_igpu.json,
+igpu:LFM2.5-24B-A2B-UD-Q4_K_XL,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,59.02,19.49,80,541,433,10.0,49.0,15.09,2026-11-04 04:04,LFM2.5-24B-A2B-UD-Q4_K_XL_all_igpu.json,
