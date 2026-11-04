@@ -28,6 +28,7 @@ Reports go to docs/eval_reports/models/ (gitignored).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -42,7 +43,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -338,6 +339,20 @@ def prime(rt: Any, messages: int = 6) -> Dict[str, Any]:
     return {"seconds": round(time.time() - start, 2)}
 
 
+LITERT_CACHE = "shared"  # --litert-cache: shared (the spike's cache), fresh (a new empty one per load), off (none)
+
+
+def _litert_cache_home() -> str:
+    """Where this load's compile cache goes. fresh: a new empty directory per load, the previous one deleted (Qwen3.5-4B's
+    WebGPU program cache failed to deserialize, DATA_LOSS, on every load and was rewritten each time, 11-04)."""
+    if LITERT_CACHE != "fresh":
+        return str(SPIKE / "cache")
+    root = SPIKE / "cache" / "fresh"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    return str(root)
+
+
 def litert_runtime(model: Path, ctx: int = 0, cpu: bool = False):
     """GemmaRuntime on any .litertlm file, with its compile cache kept apart from the app's.
 
@@ -345,17 +360,18 @@ def litert_runtime(model: Path, ctx: int = 0, cpu: bool = False):
     it returns garbage and then nothing (Phi-4-mini's export says ekv4096 but breaks at ~2048 tokens: --ctx 2048).
     The default is the ekv size in the file name, if any, else Gemma's 8192.
     """
-    os.environ["XDG_CACHE_HOME"] = str(SPIKE / "cache")
+    os.environ["XDG_CACHE_HOME"] = _litert_cache_home()
     from thirties_core.brains.slm.runtime import GemmaRuntime
     kv = re.search(r"ekv(\d+)", Path(model).name)
     tokens = ctx or (min(8192, int(kv.group(1))) if kv else 8192)
+    cache = LITERT_CACHE != "off"
     if not cpu:
-        return GemmaRuntime(Path(model), max_tokens=tokens)
+        return GemmaRuntime(Path(model), max_tokens=tokens, cache=cache)
     import litert_lm  # --cpu: LiteRT on the CPU, as on a phone without a usable GPU (GemmaRuntime tries the GPU first)
     gpu = litert_lm.Backend.GPU
     litert_lm.Backend.GPU = litert_lm.Backend.CPU
     try:
-        rt = GemmaRuntime(Path(model), max_tokens=tokens)
+        rt = GemmaRuntime(Path(model), max_tokens=tokens, cache=cache)
     finally:
         litert_lm.Backend.GPU = gpu
     rt.backend = "cpu"
@@ -444,68 +460,165 @@ def shared_repair(text: str) -> Optional[Dict[str, Any]]:
     return raw
 
 
-def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool = False,
-                retry: bool = True, offset: int = 0, repair: bool = False) -> Dict[str, Any]:
-    """tests/slm_parse_eval.py's benchmark against any runtime: model alone, and after Python's reading.
-    ``repair``: shared_repair before Python's reading, the same for every model."""
-    from tests.slm_parse_eval import SCHEDULE, all_cases, check, interpret, make_interpreter
+SMOKE_CASES = 5           # --smoke: one case from each of the first five request types, on one load
+SMOKE_LOAD_SECONDS = 300  # a smoke run aborts on a load slower than this,
+SMOKE_CASE_SECONDS = 60   # on a case slower than this, or when no reply can be read at all
+PROJECT_AFTER = 10        # a sized run projects its total after this many cases, and stops if it won't fit the budget
+
+
+class BenchAbort(RuntimeError):
+    """A run stopped early on purpose (smoke failure, over budget): its finished cases are kept."""
+
+
+def case_id(c: Dict[str, Any]) -> str:
+    return f"{c['category']}:{hashlib.sha1(c['message'].encode()).hexdigest()[:10]}"
+
+
+def bench_cases(limit: int = 0, offset: int = 0, sample: int = 0, smoke: bool = False) -> List[Dict[str, Any]]:
+    """The benchmark's cases in slm_parse_eval's order. sample: the same number from every request type (96 = 3 of
+    each of 32), the first ones in that order, so every model gets the same set; smoke: one each from five types."""
+    from tests.slm_parse_eval import all_cases
     cases = all_cases()
     random.Random(0).shuffle(cases)  # the same order as slm_parse_eval
-    cases = cases[offset:offset + limit] if limit else cases[offset:]  # --offset/--limit split a long run into parts
-    session = rt.parser(SYSTEM_PROMPT)
-    brain = make_interpreter()
-    by_cat: Dict[str, List[bool]] = defaultdict(list)
+    if smoke or sample:
+        kinds = list(dict.fromkeys(c["category"] for c in cases))
+        per = 1 if smoke else max(1, sample // len(kinds))
+        wanted = set(kinds[:SMOKE_CASES]) if smoke else set(kinds)
+        taken: Dict[str, int] = defaultdict(int)
+        picked = []
+        for c in cases:
+            if c["category"] in wanted and taken[c["category"]] < per:
+                taken[c["category"]] += 1
+                picked.append(c)
+        cases = picked
+    return cases[offset:offset + limit] if limit else cases[offset:]  # --offset/--limit split a long run into parts
+
+
+def _load_records(path: Optional[Path]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if path and path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                r = json.loads(line)
+                out[r["id"]] = r
+            except (ValueError, KeyError):
+                continue  # a line cut short by a crash
+    return out
+
+
+def summarize(records: List[Dict[str, Any]], offset: int = 0) -> Dict[str, Any]:
+    """The report's parse section, from per-case records (finished cases only, in run order)."""
+    n = len(records)
+    if not n:
+        return {"cases": 0, "offset": offset, "failures": []}
     final_cat: Dict[str, List[bool]] = defaultdict(list)
-    brain_cat: Dict[str, List[bool]] = defaultdict(list)  # after Python, with the brain's constrained retry
-    failures, times, unparsed = [], [], 0
-    for c in cases:
-        extra = c["context"]
-        context = build_context("Thursday 3:00 PM", SCHEDULE, extra.get("assistant", ""), extra.get("pending"),
-                                [], c["message"], last_item=extra.get("last_item", ""))
-        start = time.time()
-        if constrained:
-            raw = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
-            text = json.dumps(raw)
-        else:
-            text = session.ask(context)
-            raw = shared_repair(text) if repair else extract_json(text)
-        times.append(time.time() - start)
-        bad = raw is None or "actions" not in raw
-        unparsed += bad
-        raw = raw or {}
-        ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
-        final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"],
-                                     c["context"])
-        if bad and not constrained and retry:
-            # what the brain does next (SlmBrain._parse): ask again with JSON-schema decoding
-            again = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
-            brain_ok, _ = check(interpret(brain, again, c["message"], c["context"]), c["types"], c["fields"],
-                                c["context"])
-        else:
-            brain_ok = final_ok
-        by_cat[c["category"]].append(ok)
-        final_cat[c["category"]].append(final_ok)
-        brain_cat[c["category"]].append(brain_ok)
-        if not ok or not final_ok:
-            failures.append({**c, "why": why, "final_why": final_why, "final_ok": final_ok, "got": text[:600]})
-        if not quiet or not final_ok:
-            print(f"{'PASS' if final_ok else 'FAIL'} {times[-1]:.1f}s [{c['category']}] {c['message'][:100]}"
-                  + ("" if final_ok else f"  -> {final_why}"), flush=True)
-    session.close()
-    n = len(cases)
-    model_alone = sum(sum(v) for v in by_cat.values())
-    after = sum(sum(v) for v in final_cat.values())
-    with_retry = sum(sum(v) for v in brain_cat.values())
+    for r in records:
+        final_cat[r["category"]].append(r["final_ok"])
+    times = [r["seconds"] for r in records]
+    model_alone, after = sum(r["ok"] for r in records), sum(r["final_ok"] for r in records)
+    with_retry = sum(r["brain_ok"] for r in records)
     return {
         "cases": n, "model_alone": model_alone, "after_python": after, "with_retry": with_retry,
         "model_alone_pct": round(100 * model_alone / n, 1), "after_python_pct": round(100 * after / n, 1),
         "with_retry_pct": round(100 * with_retry / n, 1),
-        "unparsed": unparsed, "median_seconds": round(statistics.median(times), 2),
+        "unparsed": sum(r["unparsed"] for r in records), "median_seconds": round(statistics.median(times), 2),
         "p90_seconds": round(sorted(times)[int(0.9 * (n - 1))], 2),
         "by_category": {k: f"{sum(v)}/{len(v)}" for k, v in sorted(final_cat.items())},
         "seconds": [round(t, 2) for t in times], "offset": offset,
-        "failures": failures,
+        "failures": [{k: v for k, v in r.items() if k not in ("ok", "brain_ok", "unparsed", "seconds")}
+                     for r in records if not r["ok"] or not r["final_ok"]],
     }
+
+
+def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool = False,
+                retry: bool = True, offset: int = 0, repair: bool = False, sample: int = 0, smoke: bool = False,
+                records: Optional[Path] = None, budget_minutes: float = 0) -> Dict[str, Any]:
+    """tests/slm_parse_eval.py's benchmark against any runtime: model alone, and after Python's reading.
+    ``repair``: shared_repair before Python's reading, the same for every model. ``records``: each case's result is
+    appended there (JSONL) as it finishes, and a rerun skips the cases already in it, so nothing finished is lost.
+    ``smoke`` raises BenchAbort on a case slower than SMOKE_CASE_SECONDS or when no reply can be read; a
+    ``budget_minutes`` run raises it once its projected total won't fit. Either way the finished cases are kept."""
+    from tests.slm_parse_eval import SCHEDULE, check, interpret, make_interpreter
+    cases = bench_cases(limit, offset, sample, smoke)
+    done = _load_records(records)
+    todo = [c for c in cases if case_id(c) not in done]
+    session = rt.parser(SYSTEM_PROMPT)
+    brain = make_interpreter()
+    started, new = time.time(), 0
+    out = open(records, "a") if records else None
+    try:
+        for c in todo:
+            extra = c["context"]
+            context = build_context("Thursday 3:00 PM", SCHEDULE, extra.get("assistant", ""), extra.get("pending"),
+                                    [], c["message"], last_item=extra.get("last_item", ""))
+            start = time.time()
+            if constrained:
+                raw = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
+                text = json.dumps(raw)
+            else:
+                text = session.ask(context)
+                raw = shared_repair(text) if repair else extract_json(text)
+            seconds = time.time() - start
+            bad = raw is None or "actions" not in raw
+            raw = raw or {}
+            ok, why = check(parse_actions(raw), c["types"], c["fields"], c["context"])
+            final_ok, final_why = check(interpret(brain, raw, c["message"], c["context"]), c["types"], c["fields"],
+                                         c["context"])
+            if bad and not constrained and retry:
+                # what the brain does next (SlmBrain._parse): ask again with JSON-schema decoding
+                again = rt.json_call(SYSTEM_PROMPT, context, ACTION_SCHEMA)
+                brain_ok, _ = check(interpret(brain, again, c["message"], c["context"]), c["types"], c["fields"],
+                                    c["context"])
+            else:
+                brain_ok = final_ok
+            rec = {**c, "id": case_id(c), "ok": ok, "final_ok": final_ok, "brain_ok": brain_ok, "unparsed": bad,
+                   "seconds": round(seconds, 2), "why": why, "final_why": final_why, "got": text[:600]}
+            done[rec["id"]] = rec
+            new += 1
+            if out:
+                out.write(json.dumps(rec, default=str) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
+            if not quiet or not final_ok:
+                print(f"{'PASS' if final_ok else 'FAIL'} {seconds:.1f}s [{c['category']}] {c['message'][:100]}"
+                      + ("" if final_ok else f"  -> {final_why}"), flush=True)
+            if smoke and seconds > SMOKE_CASE_SECONDS:
+                raise BenchAbort(f"smoke: a case took {seconds:.0f} s (limit {SMOKE_CASE_SECONDS} s)")
+            if budget_minutes and new == PROJECT_AFTER and len(todo) > new:
+                total = (time.time() - started) / new * len(todo) / 60  # wall time, reloads included
+                print(f"PROJECTION {total:.0f} min for {len(todo)} cases (budget {budget_minutes:g} min)", flush=True)
+                if total > budget_minutes:
+                    raise BenchAbort(f"projected {total:.0f} min for {len(todo)} cases, over the "
+                                     f"{budget_minutes:g} min budget")
+        if smoke:
+            ran = [done[case_id(c)] for c in cases if case_id(c) in done]
+            if ran and all(r["unparsed"] for r in ran):
+                raise BenchAbort("smoke: no reply could be read")
+    finally:
+        if out:
+            out.close()
+        session.close()
+    return summarize([done[case_id(c)] for c in cases if case_id(c) in done], offset)
+
+
+def run_bench(rt: Any, args, name: str, retry: bool = True) -> Tuple[Dict[str, Any], str]:
+    """parse_bench with the command's options, its per-case records next to the report; (parse section, status)."""
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    records = REPORTS / f"{name}.cases.jsonl"
+    try:
+        parse = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained, repair=args.repair,
+                            retry=retry, offset=args.offset, sample=args.sample, smoke=args.smoke, records=records,
+                            budget_minutes=args.budget_min)
+        return parse, "ok"
+    except BenchAbort as e:
+        print("ABORTED", e, flush=True)
+        return summarize(list(_load_records(records).values()), args.offset), f"aborted: {e}"
+
+
+def finish(report: Dict[str, Any], name: str) -> None:
+    print("Saved", save(report, name))
+    if report.get("status", "ok") != "ok":
+        raise SystemExit(3)  # stopped on purpose; the runner reads the reason from the report
 
 
 # --- reports ---
@@ -569,6 +682,10 @@ def cmd_run(args) -> None:
         report["server"] = server.info
         print(json.dumps({k: v for k, v in server.info.items() if k != "command"}, default=str), flush=True)
         rt = server.runtime()
+        report["status"] = "ok"
+        if args.smoke and (server.info.get("load_seconds") or 0) > SMOKE_LOAD_SECONDS:
+            report["status"] = f"aborted: smoke: loading took {server.info['load_seconds']:.0f} s"
+            finish(report, report_name(model, args))
         report["first_pass"] = prime(rt, args.probe_messages)
         if not args.parse_only:
             report["speed"] = raw_speed(rt)
@@ -578,10 +695,10 @@ def cmd_run(args) -> None:
             print(json.dumps(report["probe"]), flush=True)
         report["memory"] = server.memory()
         if args.parse or args.parse_only:
-            report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained, repair=args.repair)
-            print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
+            report["parse"], report["status"] = run_bench(rt, args, report_name(model, args))
+            print({k: v for k, v in report["parse"].items() if k not in ("failures", "seconds")}, flush=True)
         report["calls"] = rt.calls[-50:]
-    print("Saved", save(report, report_name(model, args)))
+    finish(report, report_name(model, args))
 
 
 def cmd_litert(args) -> None:
@@ -597,18 +714,23 @@ def cmd_litert(args) -> None:
                               "load_seconds": round(rt.load_seconds, 2), "ctx": rt.context_tokens}
     if before and after:
         report["vram_used_mib"] = after["used"] - before["used"]
-    report["first_pass"] = prime(rt, args.probe_messages)
-    report["probe"] = probe(rt, messages=PROBE_MESSAGES[:args.probe_messages])
-    report["probe"]["describe"] = describe(report["probe"])
-    print(json.dumps(report["probe"]), flush=True)
+    report["status"] = "ok"
+    if args.smoke and rt.load_seconds > SMOKE_LOAD_SECONDS:
+        report["status"] = f"aborted: smoke: loading took {rt.load_seconds:.0f} s"
+        finish(report, report_name(model, args))
+    if not args.parse_only:
+        report["first_pass"] = prime(rt, args.probe_messages)
+        report["probe"] = probe(rt, messages=PROBE_MESSAGES[:args.probe_messages])
+        report["probe"]["describe"] = describe(report["probe"])
+        print(json.dumps(report["probe"]), flush=True)
     now = gpu_memory()
     if before and now:
         report["vram_used_mib_after_probe"] = now["used"] - before["used"]
     report["memory"] = proc_memory(os.getpid())
-    if args.parse:
-        report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, constrained=args.constrained, repair=args.repair)
-        print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
-    print("Saved", save(report, report_name(model, args)))
+    if args.parse or args.parse_only:
+        report["parse"], report["status"] = run_bench(rt, args, report_name(model, args))
+        print({k: v for k, v in report["parse"].items() if k not in ("failures", "seconds")}, flush=True)
+    finish(report, report_name(model, args))
 
 
 
@@ -620,11 +742,15 @@ def cmd_litert_fresh(model: Path, args) -> None:
                               "load_seconds": round(rt.load_seconds, 2), "ctx": rt.context_tokens,
                               "note": "fresh engine per session: conversations leak into each other in this runtime; "
                                       "no probe (it keeps two conversations open) and no constrained retries"}
-    report["parse"] = parse_bench(rt, quiet=True, limit=args.limit, retry=False, offset=args.offset, repair=args.repair)
+    report["status"] = "ok"
+    if args.smoke and rt.load_seconds > SMOKE_LOAD_SECONDS:
+        report["status"] = f"aborted: smoke: loading took {rt.load_seconds:.0f} s"
+        finish(report, report_name(model, args))
+    report["parse"], report["status"] = run_bench(rt, args, report_name(model, args), retry=False)
     report["reloads"], report["reload_seconds"] = rt.reloads, round(rt.reload_seconds, 1)
     report["memory"] = proc_memory(os.getpid())
-    print({k: v for k, v in report["parse"].items() if k != "failures"}, flush=True)
-    print("Saved", save(report, report_name(model, args)))
+    print({k: v for k, v in report["parse"].items() if k not in ("failures", "seconds")}, flush=True)
+    finish(report, report_name(model, args))
 
 def cmd_probe(args) -> None:
     """The device probe on its own: what the app would run to say how long each message takes here."""
@@ -656,8 +782,8 @@ def main() -> None:
                                                                "read back from disk through mmap)")
         p.add_argument("--probe-messages", type=int, default=6, help="messages in the probe (fewer for slow setups)")
         p.add_argument("--device", default="", help="llama.cpp device id (default: the largest discrete GPU)")
-        p.add_argument("--parse", action="store_true", help="also run the 546-case parse benchmark")
-        p.add_argument("--parse-only", action="store_true", help="only the parse benchmark (one slot)")
+        p.add_argument("--parse", action="store_true", help="also run the parse benchmark (561 cases)")
+        p.add_argument("--parse-only", action="store_true", help="only the parse benchmark (llama.cpp: one slot; litert: no probe)")
         p.add_argument("--constrained", action="store_true", help="benchmark with JSON-schema decoding on every case")
         p.add_argument("--repair", action="store_true",
                        help="the shared format help before Python's reading (shared_repair), for a fair comparison")
@@ -668,13 +794,24 @@ def main() -> None:
         p.add_argument("--extra", default="", help="extra llama-server arguments")
         p.add_argument("--tag", default="")
         p.add_argument("--cpu", action="store_true", help="litert: run on the CPU (as a phone without a usable GPU)")
+        p.add_argument("--sample", type=int, default=0,
+                       help="a stratified sample: the same number of cases from every request type (96 = 3 x 32)")
+        p.add_argument("--smoke", action="store_true",
+                       help=f"{SMOKE_CASES} cases on one load; stop (exit 3) on a slow load or case, or no readable reply")
+        p.add_argument("--budget-min", type=float, default=0,
+                       help=f"after {PROJECT_AFTER} cases, stop (exit 3) if the projected total exceeds this many minutes")
+        p.add_argument("--litert-cache", choices=["shared", "fresh", "off"], default="shared",
+                       help="litert: the compile cache (fresh: a new empty one per engine load; off: none)")
         p.add_argument("--reload-per-session", action="store_true",
                        help="litert: a fresh engine per conversation, for exports whose conversations leak")
     p = sub.add_parser("table")
     p.add_argument("reports", nargs="*")
     args = ap.parse_args()
-    if getattr(args, "ctx", None) == 0:
+    if args.cmd == "run" and args.ctx == 0:
         args.ctx = 8192 if args.parse_only else 4096  # parse-only matches ParserSession's 8192-token window
+    # (litert keeps 0: litert_runtime's default, the file's ekv size or 8192. Until 11-04 litert got 4096 here too.)
+    global LITERT_CACHE
+    LITERT_CACHE = getattr(args, "litert_cache", "shared")
     if args.cmd == "inventory":
         print(json.dumps(inventory(), indent=1))
     elif args.cmd == "run":

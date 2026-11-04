@@ -119,7 +119,7 @@ class LiteRtRuntime(ConversationRuntime):
     _shared: Optional["LiteRtRuntime"] = None
     _shared_lock = threading.Lock()
 
-    def __init__(self, model_path: Path, max_tokens: int = 8192) -> None:
+    def __init__(self, model_path: Path, max_tokens: int = 8192, cache: bool = True) -> None:
         super().__init__()
         try:
             import litert_lm
@@ -130,15 +130,16 @@ class LiteRtRuntime(ConversationRuntime):
         self.context_tokens = max_tokens
         cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "thirties" / "litert"
         cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_arg = str(cache_dir) if cache else None  # cache=False: no compile cache (the model spike's --litert-cache off)
         start = time.time()
         try:
             self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.GPU(),
-                                           max_num_tokens=max_tokens, cache_dir=str(cache_dir))
+                                           max_num_tokens=max_tokens, cache_dir=cache_arg)
             self.device = "gpu"
         except Exception as gpu_error:
             logger.warning("Gemma on GPU failed (%s); using CPU.", gpu_error)
             self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.CPU(),
-                                           max_num_tokens=max_tokens, cache_dir=str(cache_dir))
+                                           max_num_tokens=max_tokens, cache_dir=cache_arg)
             self.device = "cpu"
         self.load_seconds = time.time() - start
         logger.info("Gemma loaded from %s on %s in %.1fs", model_path, self.device, self.load_seconds)

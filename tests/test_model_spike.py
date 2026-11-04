@@ -218,3 +218,74 @@ class RawChatFallbackTest(unittest.TestCase):
         with self.assertRaises(LlamaServerError):
             rt.chat([{"role": "user", "content": "no"}])
 
+
+class _FakeSession:
+    def __init__(self, reply, delay=0.0):
+        self.reply, self.delay, self.asked = reply, delay, 0
+
+    def ask(self, context):
+        import time as _t
+        self.asked += 1
+        if self.delay:
+            _t.sleep(self.delay)
+        return self.reply
+
+    def close(self):
+        pass
+
+
+class _FakeRuntime:
+    def __init__(self, reply='{"actions": [{"type": "chat"}]}', delay=0.0):
+        self.session = _FakeSession(reply, delay)
+
+    def parser(self, system):
+        return self.session
+
+    def json_call(self, *a, **k):
+        return {}
+
+
+class FailFastTest(unittest.TestCase):
+    """The exploratory ladder's rules (11-04): smoke first, project before committing, save as you go, sample."""
+
+    def test_sample_and_smoke_sets(self):
+        from collections import Counter
+        from tests.model_spike import bench_cases, case_id
+        sample = bench_cases(sample=96)
+        counts = Counter(c["category"] for c in sample)
+        self.assertEqual(len(sample), 96)
+        self.assertEqual(set(counts.values()), {3})
+        self.assertEqual([case_id(c) for c in sample], [case_id(c) for c in bench_cases(sample=96)])  # same set
+        smoke = bench_cases(smoke=True)
+        self.assertEqual(len({c["category"] for c in smoke}), 5)
+
+    def test_records_are_appended_and_a_rerun_resumes(self):
+        import tempfile
+        from pathlib import Path
+        from tests.model_spike import parse_bench
+        with tempfile.TemporaryDirectory() as d:
+            records = Path(d) / "run.cases.jsonl"
+            first = _FakeRuntime()
+            parse_bench(first, limit=4, records=records, retry=False)
+            self.assertEqual(len(records.read_text().splitlines()), 4)
+            records.write_text(records.read_text() + '{"id": "cut sho')  # a line cut short by a crash
+            again = _FakeRuntime()
+            out = parse_bench(again, limit=6, records=records, retry=False)
+            self.assertEqual(again.session.asked, 2)  # only the two not yet done
+            self.assertEqual(out["cases"], 6)
+
+    def test_smoke_stops_when_no_reply_can_be_read(self):
+        from tests.model_spike import BenchAbort, parse_bench
+        with self.assertRaisesRegex(BenchAbort, "no reply could be read"):
+            parse_bench(_FakeRuntime(reply=""), smoke=True, retry=False)
+
+    def test_projection_stops_a_run_that_wont_fit(self):
+        import tempfile
+        from pathlib import Path
+        from tests.model_spike import PROJECT_AFTER, BenchAbort, parse_bench
+        with tempfile.TemporaryDirectory() as d:
+            records = Path(d) / "run.cases.jsonl"
+            with self.assertRaisesRegex(BenchAbort, "over the"):
+                parse_bench(_FakeRuntime(delay=0.02), sample=96, records=records, retry=False, budget_minutes=0.001)
+            self.assertEqual(len(records.read_text().splitlines()), PROJECT_AFTER)  # what ran is kept
+
