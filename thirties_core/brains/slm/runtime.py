@@ -60,6 +60,20 @@ def slm_unavailable_reason(config: Any = None) -> Optional[str]:
     return model_unavailable_reason(selected_model(config), configured)
 
 
+def generic_name(model_path: Path) -> str:
+    """The generic (CPU-capable) LiteRT build's file name for a "-gpu" build: gemma-4-E4B-it-gpu -> gemma-4-E4B-it."""
+    return model_path.name.replace("-gpu.litertlm", ".litertlm")
+
+
+def cpu_build(model_path: Path) -> Optional[Path]:
+    """The file to run on LiteRT's CPU backend: the model itself, unless it's a "-gpu" build (those don't run on the
+    CPU), then the generic build beside it if it's there."""
+    if not model_path.name.endswith("-gpu.litertlm"):
+        return model_path
+    generic = model_path.with_name(generic_name(model_path))
+    return generic if generic.exists() else None
+
+
 class SlmUnavailable(RuntimeError):
     """The on-device model can't run here (no runtime package or no model file)."""
 
@@ -137,9 +151,22 @@ class LiteRtRuntime(ConversationRuntime):
                                            max_num_tokens=max_tokens, cache_dir=cache_arg)
             self.device = "gpu"
         except Exception as gpu_error:
-            logger.warning("Gemma on GPU failed (%s); using CPU.", gpu_error)
-            self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.CPU(),
-                                           max_num_tokens=max_tokens, cache_dir=cache_arg)
+            # A "-gpu" LiteRT build doesn't run on the CPU backend at all (the engine can't be created, 11-04); the
+            # generic build next to it does. Without one there's no CPU fallback: say so instead of failing oddly.
+            cpu_path = cpu_build(model_path)
+            if cpu_path is None:
+                raise SlmUnavailable(
+                    f"Gemma couldn't start on this computer's GPU ({gpu_error}), and the downloaded model "
+                    f"({model_path.name}) only runs on a GPU. Gemma's CPU build ({generic_name(model_path)}) would "
+                    "run here.") from gpu_error
+            logger.warning("Gemma on GPU failed (%s); using CPU with %s.", gpu_error, cpu_path.name)
+            try:
+                self.engine = litert_lm.Engine(str(cpu_path), backend=litert_lm.Backend.CPU(),
+                                               max_num_tokens=max_tokens, cache_dir=cache_arg)
+            except Exception as cpu_error:
+                raise SlmUnavailable(f"Gemma couldn't start on this computer's GPU ({gpu_error}) or its CPU "
+                                     f"({cpu_error}).") from cpu_error
+            self.model_path = cpu_path
             self.device = "cpu"
         self.load_seconds = time.time() - start
         logger.info("Gemma loaded from %s on %s in %.1fs", model_path, self.device, self.load_seconds)
