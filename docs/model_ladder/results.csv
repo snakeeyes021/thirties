@@ -54,3 +54,4 @@ s16:Qwen3.6-35B-A3B-UD-IQ4_XS,Qwen3.6-35B-A3B-UD-IQ4_XS.gguf,llama.cpp,,,,,,,,3.
 s16:Muse-Glimmer-30B-UD-Q4_K_XL,Muse-Glimmer-30B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,44.04,19.91,14898,2564,845,9.7,63.0,88.84,2026-11-04 00:45,Muse-Glimmer-30B-UD-Q4_K_XL_all_s16.json,1200
 s16:gpt-oss-20b-Q4_K_M,gpt-oss-20b-Q4_K_M.gguf,llama.cpp,,,,,,,,7.16,16.91,11695,918,317,1.6,71.0,110.46,2026-11-04 00:57,gpt-oss-20b-Q4_K_M_all_s16.json,1200
 s8:gemma-4-E4B-it-Q4_K_M,gemma-4-E4B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,1.38,6.08,3651,3170,753,0.6,55.0,93.23,2026-11-04 01:02,gemma-4-E4B-it-Q4_K_M_vram8_s8.json,1200
+s8:gemma-4-E4B-it-qat-UD-Q4_K_XL,gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,1.19,4.07,3260,2864,783,0.5,61.0,86.56,2026-11-04 01:06,gemma-4-E4B-it-qat-UD-Q4_K_XL_vram8_s8.json,1200
