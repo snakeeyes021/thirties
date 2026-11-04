@@ -67,3 +67,4 @@ s8:gpt-oss-20b-Q4_K_M,gpt-oss-20b-Q4_K_M.gguf,llama.cpp,,,,,,,,65.38,15.02,7346,
 s8:gemma-4-26B-A4B-it-UD-IQ4_XS,gemma-4-26B-A4B-it-UD-IQ4_XS.gguf,llama.cpp,,,,,,,,19.09,17.68,7241,15605,2361,5.3,56.0,38.32,2026-11-04 02:15,gemma-4-26B-A4B-it-UD-IQ4_XS_vram8_s8.json,1200
 s8:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,12.66,21.21,7207,16425,2361,4.0,56.0,35.32,2026-11-04 02:26,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL_vram8_s8.json,1200
 s8:LFM2.5-24B-A2B-UD-Q4_K_XL,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,59.55,16.16,7344,14849,223,9.6,57.0,51.97,2026-11-04 02:35,LFM2.5-24B-A2B-UD-Q4_K_XL_vram8_s8.json,1200
+igpu:gemma-4-E2B-it-Q4_K_M,gemma-4-E2B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,6.66,7.6,308,2199,2097,2.7,50.0,18.7,2026-11-04 02:47,gemma-4-E2B-it-Q4_K_M_all_igpu.json,
