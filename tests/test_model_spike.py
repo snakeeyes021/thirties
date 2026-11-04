@@ -277,7 +277,7 @@ class FailFastTest(unittest.TestCase):
     def test_smoke_stops_when_no_reply_can_be_read(self):
         from tests.model_spike import BenchAbort, parse_bench
         with self.assertRaisesRegex(BenchAbort, "no reply could be read"):
-            parse_bench(_FakeRuntime(reply=""), smoke=True, retry=False)
+            parse_bench(_FakeRuntime(reply="sure, happy to help"), smoke=True, retry=False)
 
     def test_empty_replies_in_a_row_stop_any_run(self):
         from tests.model_spike import BenchAbort, parse_bench
