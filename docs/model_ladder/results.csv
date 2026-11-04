@@ -57,3 +57,4 @@ s8:gemma-4-E4B-it-Q4_K_M,gemma-4-E4B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,1.38,6.08,3
 s8:gemma-4-E4B-it-qat-UD-Q4_K_XL,gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,1.19,4.07,3260,2864,783,0.5,61.0,86.56,2026-11-04 01:06,gemma-4-E4B-it-qat-UD-Q4_K_XL_vram8_s8.json,1200
 s8:NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL,NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,1.19,8.17,4097,2956,789,0.9,64.0,88.32,2026-11-04 01:09,NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL_vram8_s8.json,1200
 s8:Qwen3.5-4B-Q4_K_M,Qwen3.5-4B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.12,3.07,3395,1713,993,0.5,65.0,107.93,2026-11-04 01:13,Qwen3.5-4B-Q4_K_M_vram8_s8.json,1200
+s8:Qwen3.5-9B-Q4_K_M,Qwen3.5-9B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.57,12.89,5739,1775,1027,0.8,65.0,95.78,2026-11-04 01:17,Qwen3.5-9B-Q4_K_M_vram8_s8.json,1200
