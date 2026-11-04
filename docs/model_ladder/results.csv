@@ -51,3 +51,4 @@ s16:Qwen3.8-27B-UD-IQ4_XS,Qwen3.8-27B-UD-IQ4_XS.gguf,llama.cpp,,,,,,,,4.39,23.32
 s16:LFM2.5-24B-A2B-UD-Q4_K_XL,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,9.75,16.93,14874,672,184,2.0,61.0,88.06,2026-11-04 00:19,LFM2.5-24B-A2B-UD-Q4_K_XL_all_s16.json,1200
 s16:gemma-4-31B-it-Q3_K_M,gemma-4-31B-it-Q3_K_M.gguf,llama.cpp,,,,,,,,24.62,19.17,14665,14021,9725,6.9,56.0,77.52,2026-11-04 00:26,gemma-4-31B-it-Q3_K_M_all_s16.json,1200
 s16:Qwen3.6-35B-A3B-UD-IQ4_XS,Qwen3.6-35B-A3B-UD-IQ4_XS.gguf,llama.cpp,,,,,,,,3.82,23.8,14949,18105,1501,2.1,53.0,60.48,2026-11-04 00:37,Qwen3.6-35B-A3B-UD-IQ4_XS_all_s16.json,1200
+s16:Muse-Glimmer-30B-UD-Q4_K_XL,Muse-Glimmer-30B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,44.04,19.91,14898,2564,845,9.7,63.0,88.84,2026-11-04 00:45,Muse-Glimmer-30B-UD-Q4_K_XL_all_s16.json,1200
