@@ -279,6 +279,13 @@ class FailFastTest(unittest.TestCase):
         with self.assertRaisesRegex(BenchAbort, "no reply could be read"):
             parse_bench(_FakeRuntime(reply=""), smoke=True, retry=False)
 
+    def test_empty_replies_in_a_row_stop_any_run(self):
+        from tests.model_spike import BenchAbort, parse_bench
+        rt = _FakeRuntime(reply="  ")
+        with self.assertRaisesRegex(BenchAbort, "empty replies in a row"):
+            parse_bench(rt, sample=96, retry=False)
+        self.assertEqual(rt.session.asked, 5)
+
     def test_projection_stops_a_run_that_wont_fit(self):
         import tempfile
         from pathlib import Path

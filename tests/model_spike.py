@@ -464,6 +464,7 @@ SMOKE_CASES = 5           # --smoke: one case from each of the first five reques
 SMOKE_LOAD_SECONDS = 300  # a smoke run aborts on a load slower than this,
 SMOKE_CASE_SECONDS = 60   # on a case slower than this, or when no reply can be read at all
 PROJECT_AFTER = 10        # a sized run projects its total after this many cases, and stops if it won't fit the budget
+EMPTY_STREAK = 5          # any run stops after this many empty replies in a row (Qwen LiteRT past its real context, 11-04)
 
 
 class BenchAbort(RuntimeError):
@@ -537,14 +538,15 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
     ``repair``: shared_repair before Python's reading, the same for every model. ``records``: each case's result is
     appended there (JSONL) as it finishes, and a rerun skips the cases already in it, so nothing finished is lost.
     ``smoke`` raises BenchAbort on a case slower than SMOKE_CASE_SECONDS or when no reply can be read; a
-    ``budget_minutes`` run raises it once its projected total won't fit. Either way the finished cases are kept."""
+    ``budget_minutes`` run raises it once its projected total won't fit; any run raises it after EMPTY_STREAK empty
+    replies in a row. Either way the finished cases are kept."""
     from tests.slm_parse_eval import SCHEDULE, check, interpret, make_interpreter
     cases = bench_cases(limit, offset, sample, smoke)
     done = _load_records(records)
     todo = [c for c in cases if case_id(c) not in done]
     session = rt.parser(SYSTEM_PROMPT)
     brain = make_interpreter()
-    started, new = time.time(), 0
+    started, new, empty = time.time(), 0, 0
     out = open(records, "a") if records else None
     try:
         for c in todo:
@@ -582,6 +584,9 @@ def parse_bench(rt: Any, quiet: bool = True, limit: int = 0, constrained: bool =
             if not quiet or not final_ok:
                 print(f"{'PASS' if final_ok else 'FAIL'} {seconds:.1f}s [{c['category']}] {c['message'][:100]}"
                       + ("" if final_ok else f"  -> {final_why}"), flush=True)
+            empty = empty + 1 if not (text or "").strip() else 0
+            if empty >= EMPTY_STREAK:
+                raise BenchAbort(f"{EMPTY_STREAK} empty replies in a row")
             if smoke and seconds > SMOKE_CASE_SECONDS:
                 raise BenchAbort(f"smoke: a case took {seconds:.0f} s (limit {SMOKE_CASE_SECONDS} s)")
             if budget_minutes and new == PROJECT_AFTER and len(todo) > new:
