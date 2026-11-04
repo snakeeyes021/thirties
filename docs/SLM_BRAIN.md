@@ -272,7 +272,7 @@ Would a fair per-model pass close the gap?
 - **Phi-4 mini: no.** Neither a bigger-context build nor prompt tuning closes 30 points that are there on llama.cpp with a full context.
 - **Gemma E4B stays the default.** At this size nothing beats it. Only bigger models (Gemma 26B-A4B at 92.1%, Qwen3.8 27B at 95.4%) do better, at 2–5 times the time per message.
 
-Kept for a possible Qwen pass: `Qwen3.5-4B-Q4_K_M.gguf`, `gemma-4-E4B-it-Q4_K_M.gguf` and llama-server, under `~/.local/share/thirties/spike/`. The other spike models and LiteRT's spike-only compile caches (about 115 GB) were deleted 11-02. They can be downloaded again (`tests/model_spike.py`).
+The fair comparison that followed (11-02 to 11-04, every model on the same build, prompt, cases and format repair, plus a ladder by device class) is in `docs/MODEL_LADDER.md`.
 
 ---
 
