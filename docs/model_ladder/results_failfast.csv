@@ -8,3 +8,4 @@ smoke:Muse-Glimmer-30B-UD-Q4_K_XL:b12017-reasoning-none,Muse-Glimmer-30B-UD-Q4_K
 smoke:litert:Qwen3.5-4B:ctx4096,Qwen3.5-4B_mixed_int4.litertlm,ok,,5,80.0,80.0,0,2.01,163.5,,3.4,0.0,1200,Qwen3.5-4B_mixed_int4_litert_smoke_ctx4096.json,2026-11-04 12:12
 sample:litert:Qwen3.5-4B:ctx4096,Qwen3.5-4B_mixed_int4.litertlm,ok,,96,75.0,75.0,0,1.23,160.4,,42.3,0.0,1200,Qwen3.5-4B_mixed_int4_litert_sample96_ctx4096.json,2026-11-04 12:58
 smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12110-chatml,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,ok,,5,60.0,40.0,2,5.44,19.69,14722,1.4,0.0,1000,LFM2.5-24B-A2B-UD-Q4_K_XL_all_smoke_b12110_chatml.json,2026-11-04 13:02
+smoke:litert-cpu:gemma-4-E4B-it.litertlm,gemma-4-E4B-it.litertlm,ok,,5,80.0,80.0,0,4.61,1.64,0,0.8,0.0,0,gemma-4-E4B-it_litert_cpu_smoke.json,2026-11-04 13:06
