@@ -6,3 +6,4 @@ smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12110,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,aborted,ab
 smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12110-reasoning-none,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,exit 1,exit 1,,,,,,,,0.9,0.0,1000,,2026-11-04 11:56
 smoke:Muse-Glimmer-30B-UD-Q4_K_XL:b12017-reasoning-none,Muse-Glimmer-30B-UD-Q4_K_XL.gguf,ok,,5,80.0,80.0,0,19.23,23.21,15205,4.2,2.5,1000,Muse-Glimmer-30B-UD-Q4_K_XL_all_smoke_b12017-reasoning-none.json,2026-11-04 12:03
 smoke:litert:Qwen3.5-4B:ctx4096,Qwen3.5-4B_mixed_int4.litertlm,ok,,5,80.0,80.0,0,2.01,163.5,,3.4,0.0,1200,Qwen3.5-4B_mixed_int4_litert_smoke_ctx4096.json,2026-11-04 12:12
+sample:litert:Qwen3.5-4B:ctx4096,Qwen3.5-4B_mixed_int4.litertlm,ok,,96,75.0,75.0,0,1.23,160.4,,42.3,0.0,1200,Qwen3.5-4B_mixed_int4_litert_sample96_ctx4096.json,2026-11-04 12:58
