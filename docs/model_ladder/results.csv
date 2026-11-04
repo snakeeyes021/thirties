@@ -46,3 +46,4 @@ s16:gemma-4-12B-it-qat-UD-Q4_K_XL,gemma-4-12B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,
 s16:Qwen3-14B-Q4_K_M,Qwen3-14B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.52,17.49,10874,832,189,0.8,62.0,122.52,2026-11-03 23:47,Qwen3-14B-Q4_K_M_all_s16.json,1200
 s16:phi-4-Q4_K_M,phi-4-Q4_K_M.gguf,llama.cpp,,,,,,,,2.43,12.93,11410,658,172,0.9,68.0,129.85,2026-11-03 23:53,phi-4-Q4_K_M_all_s16.json,1200
 s16:Mistral-Small-3.2-24B-Instruct-2506-IQ4_XS,Mistral-Small-3.2-24B-Instruct-2506-IQ4_XS.gguf,llama.cpp,,,,,,,,2.71,26.57,14447,779,195,1.5,70.0,129.96,2026-11-03 23:59,Mistral-Small-3.2-24B-Instruct-2506-IQ4_XS_all_s16.json,1200
+s16:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,3.29,26.49,15183,15964,2349,1.7,53.0,79.45,2026-11-04 00:05,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL_all_s16.json,1200
