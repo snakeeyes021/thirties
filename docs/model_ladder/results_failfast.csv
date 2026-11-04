@@ -1,3 +1,4 @@
 job,file,status,reason,cases,after_python_pct,model_alone_pct,unparsed,parse_s_median,load_s,gpu_mib,minutes,minutes_at_85c,gpu_clock_cap_mhz,report,when
 smoke:litert:Qwen3.5-4B:fresh-cache,Qwen3.5-4B_mixed_int4.litertlm,ok,,5,80.0,80.0,0,2.01,166.8,,3.5,0.0,1200,Qwen3.5-4B_mixed_int4_litert_smoke_fresh.json,2026-11-04 11:31
 sample:litert:Qwen3.5-4B:fresh-cache,Qwen3.5-4B_mixed_int4.litertlm,ok,,96,32.3,29.2,59,0.01,162.74,,9.6,0.0,1200,Qwen3.5-4B_mixed_int4_litert_sample96_fresh.json,2026-11-04 11:43
+smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12017-reasoning-none,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,exit 1,exit 1,,,,,,,,1.1,0.0,1000,,2026-11-04 11:47
