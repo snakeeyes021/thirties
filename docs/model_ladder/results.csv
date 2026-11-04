@@ -61,3 +61,4 @@ s8:Qwen3.5-9B-Q4_K_M,Qwen3.5-9B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.57,12.89,5739,177
 s8:Ornith-1.0-9B-Q4_K_M,Ornith-1.0-9B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.36,10.38,5972,2015,1248,0.6,68.0,97.89,2026-11-04 01:20,Ornith-1.0-9B-Q4_K_M_vram8_s8.json,1200
 s8:gemma-4-12b-it-Q4_K_M,gemma-4-12b-it-Q4_K_M.gguf,llama.cpp,,,,,,,,9.21,12.16,6978,6026,3899,2.7,60.0,45.15,2026-11-04 01:24,gemma-4-12b-it-Q4_K_M_vram8_s8.json,1200
 s8:gemma-4-12B-it-qat-UD-Q4_K_XL,gemma-4-12B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,13.14,6.31,6983,5763,3859,2.9,63.0,70.79,2026-11-04 01:30,gemma-4-12B-it-qat-UD-Q4_K_XL_vram8_s8.json,1200
+s8:Qwen3-14B-Q4_K_M,Qwen3-14B-Q4_K_M.gguf,llama.cpp,,,,,,,,21.62,11.87,7657,4064,833,3.9,60.0,53.13,2026-11-04 01:38,Qwen3-14B-Q4_K_M_vram8_s8.json,1200
