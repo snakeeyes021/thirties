@@ -90,3 +90,4 @@ cpu4:NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_K_XL,NVIDIA-Nemotron-3.5-Bolt-E4B-UD-Q4_
 acc:gpt-oss-20b-Q4_K_M,gpt-oss-20b-Q4_K_M.gguf,llama.cpp,,561,66.7,62.4,66.3,13,1.15,,,11228,767,198,13.6,77.0,110.79,2026-11-04 10:10,gpt-oss-20b-Q4_K_M_all_fair.json,1000
 litertcpu:gemma-4-E4B-it.litertlm,gemma-4-E4B-it.litertlm,litert,cpu,,,,,,,7.32,8.43,0,4245,1622,2.4,49.0,15.12,2026-11-04 10:27,gemma-4-E4B-it_litert_cpu.json,
 acc:litert:gemma-4-E4B-it.litertlm,gemma-4-E4B-it.litertlm,litert,litert,561,67.6,65.4,69.9,25,0.46,5.11,16.92,3092,1902,1204,9.9,69.0,90.01,2026-11-04 10:32,gemma-4-E4B-it_litert_fair.json,1200
+litertcpu:gemma-4-E2B-it.litertlm,gemma-4-E2B-it.litertlm,litert,cpu,,,,,,,4.08,5.88,0,2510,1261,1.3,50.0,15.13,2026-11-04 10:45,gemma-4-E2B-it_litert_cpu.json,
