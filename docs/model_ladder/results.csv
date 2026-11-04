@@ -27,3 +27,4 @@ rerun:Phi-4-mini-instruct-Q4_K_M,Phi-4-mini-instruct-Q4_K_M.gguf,llama.cpp,,561,
 rerun:Qwen3.5-4B-Q4_K_M,Qwen3.5-4B-Q4_K_M.gguf,llama.cpp,,561,81.6,79.1,81.8,2,0.87,,,3431,1033,338,8.8,64.0,79.18,2026-11-03 21:09,Qwen3.5-4B-Q4_K_M_all_fair.json,1200
 acc:litert:gemma-4-E4B-it-gpu.litertlm,gemma-4-E4B-it-gpu.litertlm,litert,litert,561,83.6,82.9,83.6,0,0.83,1.77,7.23,2610,1183,657,9.3,64.0,95.59,2026-11-03 21:21,gemma-4-E4B-it-gpu_litert_fair.json,1200
 acc:litert:gemma-4-E2B-it-gpu.litertlm,gemma-4-E2B-it-gpu.litertlm,litert,litert,561,61.1,54.9,61.3,5,1.05,1.8,3.94,1093,1174,641,11.9,54.0,61.81,2026-11-03 21:33,gemma-4-E2B-it-gpu_litert_fair.json,1200
+acc:litert:gemma-4-12B-it-gpu.litertlm,gemma-4-12B-it-gpu.litertlm,litert,litert,561,83.8,83.1,83.8,0,1.33,2.08,4.0,7627,995,755,17.0,91.0,143.71,2026-11-03 21:48,gemma-4-12B-it-gpu_litert_fair.json,1200
