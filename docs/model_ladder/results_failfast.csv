@@ -3,3 +3,4 @@ smoke:litert:Qwen3.5-4B:fresh-cache,Qwen3.5-4B_mixed_int4.litertlm,ok,,5,80.0,80
 sample:litert:Qwen3.5-4B:fresh-cache,Qwen3.5-4B_mixed_int4.litertlm,ok,,96,32.3,29.2,59,0.01,162.74,,9.6,0.0,1200,Qwen3.5-4B_mixed_int4_litert_sample96_fresh.json,2026-11-04 11:43
 smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12017-reasoning-none,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,exit 1,exit 1,,,,,,,,1.1,0.0,1000,,2026-11-04 11:47
 smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12110,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,aborted,aborted: smoke: no reply could be read,5,40.0,0.0,5,5.44,6.59,14682,1.4,0.0,1000,LFM2.5-24B-A2B-UD-Q4_K_XL_all_smoke_b12110.json,2026-11-04 11:52
+smoke:LFM2.5-24B-A2B-UD-Q4_K_XL:b12110-reasoning-none,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,exit 1,exit 1,,,,,,,,0.9,0.0,1000,,2026-11-04 11:56
