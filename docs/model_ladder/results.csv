@@ -83,3 +83,4 @@ cpu4:gemma-4-E2B-it-Q4_K_M,gemma-4-E2B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,14.69,6.3
 cpu4:Qwen3.5-2B-Q4_K_M,Qwen3.5-2B-Q4_K_M.gguf,llama.cpp,,,,,,,,9.35,3.81,80,2567,1269,4.6,49.0,15.04,2026-11-04 04:27,Qwen3.5-2B-Q4_K_M_vram0_cpu4.json,
 cpu4:Qwen3.5-4B-Q4_K_M,Qwen3.5-4B-Q4_K_M.gguf,llama.cpp,,,,,,,,22.33,6.08,80,5445,2750,10.1,49.0,14.94,2026-11-04 04:34,Qwen3.5-4B-Q4_K_M_vram0_cpu4.json,
 cpu4:Qwen3-4B-Instruct-2507-Q4_K_M,Qwen3-4B-Instruct-2507-Q4_K_M.gguf,llama.cpp,,,,,,,,24.42,8.85,80,6026,3576,10.8,50.0,15.03,2026-11-04 04:48,Qwen3-4B-Instruct-2507-Q4_K_M_vram0_cpu4.json,
+cpu4:Phi-4-mini-instruct-Q4_K_M,Phi-4-mini-instruct-Q4_K_M.gguf,llama.cpp,,,,,,,,17.66,9.61,80,5379,2947,8.9,50.0,14.93,2026-11-04 05:02,Phi-4-mini-instruct-Q4_K_M_vram0_cpu4.json,
