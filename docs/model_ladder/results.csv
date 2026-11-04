@@ -91,3 +91,4 @@ acc:gpt-oss-20b-Q4_K_M,gpt-oss-20b-Q4_K_M.gguf,llama.cpp,,561,66.7,62.4,66.3,13,
 litertcpu:gemma-4-E4B-it.litertlm,gemma-4-E4B-it.litertlm,litert,cpu,,,,,,,7.32,8.43,0,4245,1622,2.4,49.0,15.12,2026-11-04 10:27,gemma-4-E4B-it_litert_cpu.json,
 acc:litert:gemma-4-E4B-it.litertlm,gemma-4-E4B-it.litertlm,litert,litert,561,67.6,65.4,69.9,25,0.46,5.11,16.92,3092,1902,1204,9.9,69.0,90.01,2026-11-04 10:32,gemma-4-E4B-it_litert_fair.json,1200
 litertcpu:gemma-4-E2B-it.litertlm,gemma-4-E2B-it.litertlm,litert,cpu,,,,,,,4.08,5.88,0,2510,1261,1.3,50.0,15.13,2026-11-04 10:45,gemma-4-E2B-it_litert_cpu.json,
+acc:litert:gemma-4-E2B-it.litertlm,gemma-4-E2B-it.litertlm,litert,litert,561,35.7,29.1,46.7,227,0.84,1.96,6.99,1275,1487,813,26.3,62.0,65.51,2026-11-04 10:49,gemma-4-E2B-it_litert_fair.json,1200
