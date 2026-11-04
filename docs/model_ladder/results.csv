@@ -68,3 +68,4 @@ s8:gemma-4-26B-A4B-it-UD-IQ4_XS,gemma-4-26B-A4B-it-UD-IQ4_XS.gguf,llama.cpp,,,,,
 s8:gemma-4-26B-A4B-it-qat-UD-Q4_K_XL,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,12.66,21.21,7207,16425,2361,4.0,56.0,35.32,2026-11-04 02:26,gemma-4-26B-A4B-it-qat-UD-Q4_K_XL_vram8_s8.json,1200
 s8:LFM2.5-24B-A2B-UD-Q4_K_XL,LFM2.5-24B-A2B-UD-Q4_K_XL.gguf,llama.cpp,,,,,,,,59.55,16.16,7344,14849,223,9.6,57.0,51.97,2026-11-04 02:35,LFM2.5-24B-A2B-UD-Q4_K_XL_vram8_s8.json,1200
 igpu:gemma-4-E2B-it-Q4_K_M,gemma-4-E2B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,6.66,7.6,308,2199,2097,2.7,50.0,18.7,2026-11-04 02:47,gemma-4-E2B-it-Q4_K_M_all_igpu.json,
+igpu:Qwen3.5-2B-Q4_K_M,Qwen3.5-2B-Q4_K_M.gguf,llama.cpp,,,,,,,,3.55,3.57,308,1070,969,1.3,50.0,18.98,2026-11-04 02:53,Qwen3.5-2B-Q4_K_M_all_igpu.json,
