@@ -122,12 +122,37 @@ class LlamaServerRuntime:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "reply", "schema": schema}}
         if slot is not None:
             body["id_slot"] = slot
-        reply = self.request("/v1/chat/completions", body)
+        try:
+            reply = self.request("/v1/chat/completions", body)
+        except LlamaServerError as e:
+            if "peg-native" not in str(e):
+                raise
+            return self._raw_chat(body, schema)
         try:
             text = reply["choices"][0]["message"].get("content") or ""
         except (KeyError, IndexError, TypeError) as e:
             raise LlamaServerError(f"unexpected reply: {str(reply)[:300]}") from e
         return text, reply.get("timings") or {}
+
+    def _raw_chat(self, body: Dict[str, Any], schema: Optional[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+        """The same request without llama-server's reply parser, which rejects some well-formed gpt-oss replies
+        ("<|channel|>final <|constrain|>JSON<|message|>{...}" is "not the expected peg-native format", 11-03): the
+        prompt from /apply-template, a plain /completion, and the text of the final message."""
+        prompt = self.request("/apply-template", {"messages": body["messages"],
+                                                  "chat_template_kwargs": body.get("chat_template_kwargs", {})})["prompt"]
+        raw: Dict[str, Any] = {"prompt": prompt, "n_predict": body.get("max_tokens", 256),
+                               "temperature": body.get("temperature", 0.0), "top_k": body.get("top_k", 1),
+                               "cache_prompt": body.get("cache_prompt", True)}
+        if "id_slot" in body:
+            raw["id_slot"] = body["id_slot"]
+        if schema is not None:
+            raw["json_schema"] = schema
+        out = self.request("/completion", raw)
+        text = out.get("content") or ""
+        text = text.rsplit("<|message|>", 1)[-1]
+        for end in ("<|return|>", "<|end|>", "<|call|>"):
+            text = text.split(end, 1)[0]
+        return text.strip(), out.get("timings") or {}
 
     def healthy(self) -> bool:
         try:

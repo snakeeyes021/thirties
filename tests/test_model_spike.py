@@ -181,3 +181,40 @@ class TestSharedRepair(unittest.TestCase):
         from tests.model_spike import shared_repair
         self.assertIsNone(shared_repair("</think>"))
 
+
+class RawChatFallbackTest(unittest.TestCase):
+    """llama-server's reply parser rejects some well-formed gpt-oss replies; the same request goes through raw."""
+
+    def test_peg_native_error_falls_back_to_the_final_message(self):
+        from thirties_core.brains.slm.llama_server import LlamaServerError, LlamaServerRuntime
+        rt = LlamaServerRuntime("http://127.0.0.1:9", timeout=1)
+        calls = []
+
+        def request(path, body=None, timeout=None):
+            calls.append(path)
+            if path == "/v1/chat/completions":
+                raise LlamaServerError('llama-server /v1/chat/completions: HTTP 500 b\'{"error":{"message":"The model '
+                                       'produced output that does not match the expected peg-native format"}}\'')
+            if path == "/apply-template":
+                return {"prompt": "<|start|>assistant"}
+            return {"content": '<|channel|>analysis<|message|>Think.<|end|><|start|>assistant<|channel|>final '
+                               '<|constrain|>JSON<|message|>{"actions":[{"type":"reject"}]}<|return|>',
+                    "timings": {"predicted_n": 12}}
+
+        rt.request = request
+        text, timings = rt.chat([{"role": "user", "content": "no"}], slot=0)
+        self.assertEqual(text, '{"actions":[{"type":"reject"}]}')
+        self.assertEqual(timings, {"predicted_n": 12})
+        self.assertEqual(calls, ["/v1/chat/completions", "/apply-template", "/completion"])
+
+    def test_other_errors_still_raise(self):
+        from thirties_core.brains.slm.llama_server import LlamaServerError, LlamaServerRuntime
+        rt = LlamaServerRuntime("http://127.0.0.1:9", timeout=1)
+
+        def request(path, body=None, timeout=None):
+            raise LlamaServerError("llama-server /v1/chat/completions: HTTP 500 b'decode() failed'")
+
+        rt.request = request
+        with self.assertRaises(LlamaServerError):
+            rt.chat([{"role": "user", "content": "no"}])
+
