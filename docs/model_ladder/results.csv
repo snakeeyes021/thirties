@@ -31,3 +31,4 @@ acc:litert:gemma-4-12B-it-gpu.litertlm,gemma-4-12B-it-gpu.litertlm,litert,litert
 acc:litert:Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm,Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm,litert,litert,561,40.6,34.8,41.5,24,1.91,76.3,28.03,5349,8669,8359,41.0,90.0,143.69,2026-11-03 22:09,Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096_litert_fair.json,1200
 s16:gemma-4-E4B-it-Q4_K_M,gemma-4-E4B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,1.32,5.6,3731,3221,782,0.6,53.0,82.69,2026-11-03 22:52,gemma-4-E4B-it-Q4_K_M_all_s16.json,1200
 s16:Qwen3.5-4B-Q4_K_M,Qwen3.5-4B-Q4_K_M.gguf,llama.cpp,,,,,,,,1.43,2.31,3421,1753,1038,0.5,49.0,70.88,2026-11-03 22:56,Qwen3.5-4B-Q4_K_M_all_s16.json,1200
+s16:gemma-4-E2B-it-Q4_K_M,gemma-4-E2B-it-Q4_K_M.gguf,llama.cpp,,,,,,,,0.94,3.82,2218,2373,415,0.5,47.0,74.69,2026-11-03 22:59,gemma-4-E2B-it-Q4_K_M_all_s16.json,1200
