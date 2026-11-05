@@ -223,8 +223,8 @@ class BackgroundService:
             return False
 
     def _up(self, now: datetime) -> bool:
-        """The user has started the day (wake.user_is_up): until then nothing is set up or sent, apart from
-        reminders they asked for, sunrise/sunset if switched on, and one heads-up about a fixed calendar event."""
+        """The user has started the day (wake.user_is_up): until then nothing is set up or sent, apart from the
+        first message of the day (morning_hello), reminders they asked for, and sunrise/sunset if switched on."""
         from thirties_core.wake import user_is_up
         return user_is_up(self.scheduler.state_db, self.manager().day_plan, now)
 
@@ -254,15 +254,9 @@ class BackgroundService:
         told = self._remembered("heads_up")
         soon = [s for s in plan.active_spans() if s.category == SpanCategory.CALENDAR and not s.tentative
                 and s.id not in told and now < s.start_dt <= now + timedelta(minutes=15)]
-        up = self._up(now)
-        if not up:  # before the user is up: one heads-up a morning, and only for a fixed event
-            prewake_key = f"prewake_heads_up:{plan.target_date.isoformat()}"
-            soon = [s for s in soon if s.is_firm][:1] if not self.scheduler.state_db.get_sync_meta(prewake_key) else []
-            if soon:
-                self.scheduler.state_db.set_sync_meta(prewake_key, soon[0].id)
         for event in soon:
             told[event.id] = now.date().isoformat()
-            behind = [s.title for s in plan.active_spans() if self._unreported(s) and up
+            behind = [s.title for s in plan.active_spans() if self._unreported(s)
                       and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
             on_thirty = event.start_dt == thirty_of(event.start_dt)
             text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else  # its real time, and block
@@ -494,6 +488,49 @@ class BackgroundService:
             with manager.turn_lock:
                 manager.tools.assistant.settle_moot(now=now)
 
+    def morning_hello(self, now: datetime) -> None:
+        """The first message of the day, once, at sunrise or the scheduled wake-up (assistant.morning_message_at):
+        "let me know when you're up", with the day's items and no times if assistant.morning_message_items is on.
+        Nothing is built until the user replies (wake.py)."""
+        from thirties_core.wake import hello_text, hello_time
+        if self.level() == "off" or self._up(now):
+            return
+        db = self.scheduler.state_db
+        plan = self.manager().day_plan
+        key = f"morning_hello:{plan.target_date.isoformat()}"
+        if db.get_sync_meta(key) or db.get_sync_meta(f"rollover_offered:{plan.target_date.isoformat()}"):
+            return
+        history = db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        at = hello_time(self.config, plan, history)
+        bed = min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start),
+                  default=plan.day_end)
+        if at is None or not at <= now < bed - timedelta(hours=2):  # never a "good morning" at bedtime
+            return
+        db.set_sync_meta(key, now.isoformat())
+        titles = self._plate(plan) if getattr(self.config.assistant, "morning_message_items", True) else []
+        self.send(hello_text(titles), "morning", now=now)
+
+    def _plate(self, plan) -> List[str]:
+        """What's on the plate today, without times and without changing anything: fixed calendar events and
+        things planned ahead, then yesterday's leftovers and today's list as they'd carry over (carry.py), never
+        routines, meals or anchors."""
+        from thirties_core.assistant_tools import _short
+        assistant = self.manager().tools.assistant
+        daily = assistant.routines.daily_titles() if assistant is not None else set()
+        out = [s.title for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
+               if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
+               and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
+        if assistant is not None:
+            try:
+                from thirties_core.carry import DROP, CarryLedger
+                left = [p["title"] for p in assistant.rollover_plan()] + assistant.today_carryover()["keep"]
+                gone = {t.lower() for t in CarryLedger(self.scheduler.state_db).sort(
+                    left, plan.target_date, save=False)[DROP]}
+                out += [t for t in left if t.lower() not in gone]
+            except Exception as e:
+                logger.warning("Listing the day's items for the first message failed: %s", e)
+        return [_short(t) for t in out]
+
     def rollover(self, now: datetime) -> None:
         """Once a day, after waking: the morning reset, the day's routines and anchors put on by themselves (R1),
         the offer to roll yesterday's unfinished items into today, and a proposal for the free time (A6)."""
@@ -703,9 +740,9 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
-        waits = {self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+        waits = {self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
-        for duty in (self.moot, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+        for duty in (self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
             if not up and duty in waits:

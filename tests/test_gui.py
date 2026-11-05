@@ -794,6 +794,20 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertFalse(login.get_sensitive())  # no background, no start at login
         self.assertEqual(app.request_background_permission.call_count, 2)
 
+    def test_the_morning_message_settings(self):
+        # 11-05: one "let me know when you're up" message, at sunrise or the wake-up time, with or without the items
+        ctx = settings_rows.SettingsContext(self.core)
+        group = settings_rows.messages_group(ctx)
+        combos = {r.get_title(): r for r in _rows_of_type(group, Adw.ComboRow)}
+        switches = {r.get_title(): r for r in _rows_of_type(group, Adw.SwitchRow)}
+        first, items = combos["Morning message"], switches["List the day's items in it"]
+        self.assertEqual(first.get_selected(), 0)  # default: at the wake-up time
+        self.assertTrue(items.get_active())  # default: with the items
+        first.set_selected(1)
+        items.set_active(False)
+        self.assertEqual(self.core.settings.get("assistant.morning_message_at"), "sunrise")
+        self.assertFalse(self.core.settings.get("assistant.morning_message_items"))
+
     def test_each_weekday_can_differ_and_the_week_can_start_on_sunday(self):
         ctx = settings_rows.SettingsContext(self.core)
         group = settings_rows.week_group(ctx)

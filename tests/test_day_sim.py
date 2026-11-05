@@ -55,14 +55,15 @@ class TestDaySim(unittest.TestCase):
         asked = [(t, x) for t, w, x in run.log if w == "app" and "For the record" in x]
         self.assertEqual(asked, [])  # waking isn't asked (10-31), and a day off has no work to ask about
         morning = [(t, x) for t, w, x in run.log if w == "app" and x.startswith("☀️ Good morning")]
-        self.assertIn("Already planned for today", morning[0][1])  # what was planned ahead is said (O2)
+        self.assertIn("Let me know when you're up", morning[0][1])  # the first message, at the wake-up time
+        self.assertIn("Already planned for today", morning[1][1])  # after the reply: what was planned ahead (O2)
         app = [(t, x) for t, w, x in run.log if w == "app" and "For the record" not in x
                and not x.startswith("☀️ Good morning")]
         self.assertEqual(app[0][0], "10:00")
         self.assertIn("Walk", app[0][1])
         self.assertIn("Walk", app[1][1])  # the check-in, after the walk's thirty ended
         self.assertGreaterEqual(app[1][0], "10:30")
-        self.assertLess(morning[0][0], "09:30")  # right after the first message
+        self.assertLess(morning[1][0], "09:30")  # right after the user's first message
         self.assertIn("[10:00] App:", sim.prompts[3])  # the user saw the start message before deciding again
         self.assertNotIn("back from my walk", [x for _, w, x in run.log if w == "user"])  # dropped: interrupted
         self.assertEqual(run.end_reason, "end of day")

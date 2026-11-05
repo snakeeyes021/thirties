@@ -383,19 +383,37 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
             self.svc.tick(t)
             t += timedelta(minutes=5)
 
-    def test_nothing_but_one_heads_up_until_the_first_message(self):
+    def test_one_first_message_then_nothing_until_the_reply(self):
         from thirties_core.memory import ReminderStore
         ReminderStore(self.sched.state_db).add(at("08:00"), "Take the pills")
-        self.run_until("10:20")
+        self.run_until("10:20", start="07:30")  # after the test day's sunrise: before it, it's still yesterday
         kinds = [k for k, _ in self.sent]
-        self.assertEqual(kinds, ["reminder", "heads_up"], self.sent)  # the call's heads-up isn't sent: one a morning
-        self.assertIn("Dentist", self.sent[1][1])
-        self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing rolled over
+        self.assertEqual(kinds, ["morning", "reminder"], self.sent)  # no heads-up, check-in or block notice
+        first = self.sent[0][1]
+        self.assertTrue(first.startswith("☀️ Good morning! Let me know when you're up and I'll put your schedule "
+                                         "together."), first)
+        self.assertIn("On the plate today:\n- PT\n- Dentist\n- Call\n- Taxes", first)  # yesterday's too; no times
+        self.assertNotRegex(first, r"\d:\d\d")
+        self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built
         from tests.fixtures import mark_up
-        mark_up(self.sched.state_db, at("10:22"))
+        mark_up(self.sched.state_db, at("10:22"))  # the reply
         self.run_until("10:30", start="10:25")
-        self.assertIn("rollover", [k for k, _ in self.sent])  # the morning follows the first message
-        self.assertEqual([k for k, _ in self.sent].count("rollover"), 1)
+        self.assertIn("rollover", [k for k, _ in self.sent])  # the day is built after it
+        self.assertEqual([k for k, _ in self.sent].count("morning"), 1)
+
+    def test_the_first_message_at_sunrise_and_without_the_items(self):
+        self.sched.config.assistant.morning_message_at = "sunrise"
+        self.sched.config.assistant.morning_message_items = False
+        plan = self.svc.manager().day_plan
+        before = plan.sunrise - timedelta(minutes=1)
+        set_debug_time(before)
+        self.svc.morning_hello(before)
+        self.assertEqual(self.sent, [])
+        set_debug_time(plan.sunrise)
+        self.svc.morning_hello(plan.sunrise)
+        self.svc.morning_hello(plan.sunrise + timedelta(minutes=5))
+        self.assertEqual(self.sent, [("morning", "☀️ Good morning! Let me know when you're up and I'll put your "
+                                                 "schedule together.")])
 
 
 class TestRollover(unittest.TestCase):

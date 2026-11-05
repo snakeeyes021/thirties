@@ -922,6 +922,17 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         if ctx.app is not None:
             ctx.app.request_background_permission()
 
+    # The first message of the day (wake.py): nothing else is sent, and nothing is planned, until you reply.
+    firsts = [("wake", "At your wake-up time"), ("sunrise", "At sunrise")]
+    first = Adw.ComboRow(title="Morning message",
+                         subtitle="One “let me know when you're up” message; your day is planned when you reply",
+                         model=Gtk.StringList.new([name for _, name in firsts]))
+    first_now = getattr(cfg.assistant, "morning_message_at", "wake")
+    first.set_selected(next((i for i, (k, _) in enumerate(firsts) if k == first_now), 0))
+    first.connect("notify::selected", lambda r, _p: ctx.set("assistant.morning_message_at", firsts[r.get_selected()][0]))
+    items = Adw.SwitchRow(title="List the day's items in it", subtitle="What's on your plate, without times",
+                          active=bool(getattr(cfg.assistant, "morning_message_items", True)))
+    items.connect("notify::active", lambda r, _p: ctx.set("assistant.morning_message_items", r.get_active()))
     sunrise = Adw.SwitchRow(title="Tell me at sunrise", subtitle="Every day, at the real time: handy for the lights",
                             active=bool(ctx.get("assistant.sunrise_notice", False)))
     sunset = Adw.SwitchRow(title="Tell me at sunset", subtitle="Every day, at the real time",
@@ -931,7 +942,7 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     login.connect("notify::active", on_login)
     sunrise.connect("notify::active", lambda r, _p: ctx.set("assistant.sunrise_notice", r.get_active()))
     sunset.connect("notify::active", lambda r, _p: ctx.set("assistant.sunset_notice", r.get_active()))
-    for row in (level, delay, sunrise, sunset, background, login):
+    for row in (level, first, items, delay, sunrise, sunset, background, login):
         group.add(row)
     return group
 

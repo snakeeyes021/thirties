@@ -41,7 +41,7 @@ class CarryLedger:
             self.db.set_sync_meta(KEY, json.dumps(data, sort_keys=True))
 
     def sort(self, titles: Iterable[str], today: date,
-             first_seen: Optional[Callable[[str], Optional[date]]] = None) -> Dict[str, List[str]]:
+             first_seen: Optional[Callable[[str], Optional[date]]] = None, save: bool = True) -> Dict[str, List[str]]:
         """Which of the open ``titles`` carry over quietly, which are asked about, and which go. Recorded, so
         the same morning gives the same answer, and anything no longer open is forgotten."""
         data = self._load()
@@ -65,7 +65,8 @@ class CarryLedger:
             else:
                 out[CARRY].append(title)
             seen[key] = rec
-        self._save(seen)
+        if save:
+            self._save(seen)
         return out
 
     def since(self, title: str) -> Optional[date]:

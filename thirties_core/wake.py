@@ -42,3 +42,36 @@ def user_is_up(db, plan, now: datetime) -> bool:
     sleep = morning_sleep(plan, history)
     woke = sleep.actual_end if sleep is not None else None
     return woke is not None and woke >= plan.day_start - timedelta(hours=6) and woke <= now
+
+
+HELLO = "☀️ Good morning! Let me know when you're up and I'll put your schedule together."
+MAX_HELLO_ITEMS = 12
+
+
+def hello_time(config, plan, history=None) -> Optional[datetime]:
+    """When the first message of the day goes out (assistant.morning_message_at): at sunrise, or at the
+    scheduled wake-up, the end of the night's planned Sleep (default). Both are worked out offline: sunrise from
+    the location in the settings (NOAA equations, astronomy.py)."""
+    when = getattr(config.assistant, "morning_message_at", "wake") or "wake"
+    if when == "sunrise":
+        return getattr(plan, "sunrise", None)
+    from thirties_core.day_times import morning_sleep
+    sleep = morning_sleep(plan, history or [])
+    if sleep is None:
+        return plan.day_start
+    return sleep.planned_end or sleep.end_dt  # planned, even if a wake was recorded since
+
+
+def hello_text(titles) -> str:
+    """The one message before the user is up: the wake-up line, and (if the setting is on) the day's items as a
+    plain list with no times: what's on the plate, not a schedule yet."""
+    items = []
+    for t in titles:
+        if t and t.lower() not in {i.lower() for i in items}:
+            items.append(t)
+    if not items:
+        return HELLO
+    shown = items[:MAX_HELLO_ITEMS]
+    more = len(items) - len(shown)
+    return (HELLO + "\n\nOn the plate today:\n" + "\n".join(f"- {t}" for t in shown)
+            + (f"\n…and {more} more" if more else ""))
