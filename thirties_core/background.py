@@ -417,6 +417,12 @@ class BackgroundService:
             announced[s.id] = now.date().isoformat()
             announced["title:" + s.title.strip().lower()] = f"{now.date().isoformat()}|" + " ".join(ids_titled(s) + [s.id])
         self._remember("starts_announced", announced, now)
+        try:  # the morning message just said what's on: no block notice on top of it (11-02 replay)
+            morning = self.scheduler.state_db.get_sync_meta("morning_sent_at")
+            if morning and timedelta(0) <= now - datetime.fromisoformat(morning) < timedelta(minutes=10):
+                return
+        except ValueError:
+            pass
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
         if rest:
@@ -566,6 +572,7 @@ class BackgroundService:
             ahead = planned_ahead_text(manager.tools.assistant, skip=offered)
         facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
         self.propose_the_day(now, facts)
+        db.set_sync_meta("morning_sent_at", now.isoformat())
 
     def propose_the_day(self, now: datetime, facts: str = "") -> None:
         """The morning's one message (10-31: three texts at sunrise, "two of them were so verbose"): what's
