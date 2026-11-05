@@ -43,7 +43,13 @@
   <releases>
     <release version="0.2.0" date="2026-10-30" type="development">
       <description>
-        <p>In progress.</p>
+        <p>In progress. Stabilized for daily use:</p>
+        <ul>
+          <li>One morning message ("let me know when you're up"), at your wake-up time or at sunrise, optionally with the day's items; nothing else is sent and nothing is planned until you reply</li>
+          <li>The morning routine goes on from when you're actually up, a part per half hour, alongside work</li>
+          <li>An unfinished item carries over once, is asked about once, then leaves today's list (it stays on its own list)</li>
+          <li>The assistant no longer says it can't make changes ("text-only mode")</li>
+        </ul>
       </description>
     </release>
     <release version="0.1.0" date="2026-10-30" type="development">
