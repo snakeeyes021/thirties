@@ -441,6 +441,15 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
         self.assertEqual((work.start_dt, work.end_dt), (at("08:30"), at("16:00")))  # alongside, never moved
 
 
+    def test_parts_whose_clock_times_passed_follow_each_other_from_now(self):
+        # Matt's stored placement on 11-05: 6:30 and 7:00; his first message at 9:45
+        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+            {"start": "6:30 AM", "items": FIRST}, {"start": "7:00 AM", "items": SECOND}]})
+        set_debug_time(at("09:45"))
+        self.t.assistant.routines.set_up_current()
+        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("09:30"))
+        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:00"))
+
 class TestProposingTheDay(RoutineCase):
 
     def setUp(self):

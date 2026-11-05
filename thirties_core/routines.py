@@ -692,9 +692,12 @@ class RoutineTools:
             ahead = [(p, self._spot(plan, p["at"], now)) for p in parts]
             ahead.sort(key=lambda x: x[1][1] == "missed")  # parts still ahead first: missed ones fill in after
             times = []
+            last_missed: Optional[datetime] = None
             for part, (start, why) in ahead:
-                if why == "missed":
-                    start, why = self._spot(plan, part["at"], now)  # what's free now that the others are on
+                if why == "missed":  # missed parts follow each other, a thirty apart, in their usual order
+                    later = last_missed + timedelta(minutes=30) if last_missed else now
+                    start, why = self._spot(plan, part["at"], max(now, later))
+                    last_missed = start or last_missed
                 if start is None:
                     state["unplaced"].append(f"{note['title']} ({', '.join(part['items'])}): no free time left")
                     continue
