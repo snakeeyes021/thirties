@@ -396,6 +396,54 @@ class TestMorning(TodayTestCase):
         self.assertNotIn(NOT_DONE, out)  # done as the later copy: the earlier one isn't still open
         self.assertNotIn("Read the text", [p["title"] for p in self.t.assistant.rollover_plan()])
 
+    def test_each_item_carries_over_once_is_asked_about_once_then_leaves(self):
+        # 11-04, 11-05: every open line on Today came back every morning, a week's worth piling up
+        import json
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        from thirties_core.carry import KEY
+        db = self.sched.state_db
+        self.t.assistant.start_the_day()
+        out = self.t.execute("rollover_proposal", {})
+        self.assertIn("From yesterday, still open:\n- Call the bank\n- Clip cat nails", out)  # carried, once
+        self.assertNotIn("keep or drop", out)
+
+        two_days = (DAY - timedelta(days=2)).isoformat()  # the next morning: they've been open since the day before
+        db.set_sync_meta(KEY, json.dumps({"call the bank": {"since": two_days}, "clip cat nails": {"since": two_days}}))
+        out = self.t.execute("rollover_proposal", {})
+        self.assertNotIn("From yesterday", out)
+        self.assertIn("Still open for a few days now (keep or drop?", out)
+        self.assertIn("- Call the bank (since ", out)
+        out = self.t.execute("apply_rollover", {"skip": "nails"})
+        self.assertNotIn("Call the bank", out)  # kept: it stays, and starts again from today
+        self.assertEqual(json.loads(db.get_sync_meta(KEY))["call the bank"], {"since": DAY.isoformat(), "asked": ""})
+
+        yesterday = (DAY - timedelta(days=1)).isoformat()  # asked yesterday and not answered: it goes
+        db.set_sync_meta(KEY, json.dumps({"call the bank": {"since": two_days, "asked": yesterday}}))
+        db.set_sync_meta(f"rollover:{DAY.isoformat()}", "")
+        out = self.t.execute("rollover_proposal", {})
+        self.assertIn("Off today's list after a few days (still on their own lists): Call the bank.", out)
+        self.assertNotIn("Call the bank", self.body("n_today"))
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # never lost
+
+    def test_an_item_with_no_other_list_isnt_lost_when_it_leaves(self):
+        import json
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        from thirties_core.carry import KEY
+        self.t.assistant.start_the_day()
+        old = {"since": (DAY - timedelta(days=3)).isoformat(), "asked": (DAY - timedelta(days=1)).isoformat()}
+        self.sched.state_db.set_sync_meta(KEY, json.dumps({"clip cat nails": old}))
+        self.t.execute("rollover_proposal", {})
+        self.assertIn("Clip cat nails", self.body("n_today"))  # no drop box: it stays where it is
+
+    def test_a_group_is_offered_by_its_name(self):
+        self.api.notes["n_today"]["body"] += "- [ ] Lab\n    - [ ] Check the scores\n    - [ ] Merge the PR\n"
+        self.t.assistant.start_the_day()
+        out = self.t.execute("rollover_proposal", {})
+        self.assertIn("- Lab\n", out)
+        self.assertNotIn("Merge the PR", out)
+
     def test_the_morning_proposal_keeps_drops_and_adds(self):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})

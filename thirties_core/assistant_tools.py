@@ -326,6 +326,17 @@ def _stem(word: str) -> str:
     return word
 
 
+def _short(title: str, limit: int = 80) -> str:
+    """A long list line said in brief (11-05: whole paragraphs, with links and markup, in the morning's "Also
+    pressing"): its markup dropped, cut at its first aside, and at a word under ``limit``."""
+    text = re.sub(r"\*\*|`|\s*⚠\s*", " ", str(title)).strip()
+    text = re.split(r"\s+\(|\s+·\s+|(?<=[.!?])\s", text, maxsplit=1)[0].strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return text
+
+
 def _stem_words(text: str) -> set:
     return {_stem(w) for w in _words(text)}
 
@@ -1296,6 +1307,9 @@ class AssistantTools(KindTools):
         keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
                 and text.lower() not in done_on_plan and text.lower() not in moot
                 and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
+        from thirties_core.today import group_items
+        children = {c.lower() for k in keep for c in (group_items(note, k) or [])}
+        keep = [k for k in keep if k.lower() not in children]  # 11-05: a group and each of its steps, as five lines
         on = {k.lower() for k in keep}
         today = self._today()
 
@@ -1382,32 +1396,89 @@ class AssistantTools(KindTools):
     def rollover_proposal(self, **_: Any) -> str:
         """The proposal, as text; it's remembered so a 'yes' can apply exactly this. With a Today note it's the
         start of today's list: yesterday's planned items with no outcome, what's still on the Today note, and
-        anything pressing."""
+        anything pressing. Each item carries over once by itself, is asked about once after that, and then leaves
+        today's list (carry.py)."""
+        from thirties_core.carry import ASK, CARRY, DROP, CarryLedger, link_day, weekday
+        from thirties_core.today import TodayLinks
         plan = self.rollover_plan()
         carry = self.today_carryover()
         planned = {p["title"].lower() for p in plan}
         carry["keep"] = [k for k in carry["keep"] if k.lower() not in planned]
         tasks = {t.id: t for t in self.s.tasks}
         carry["add"] = [tid for tid in carry["add"] if tid in tasks and tasks[tid].title.lower() not in planned]
+        dropped: List[str] = []
+        asked: List[str] = []
+        if self._db:
+            links = TodayLinks(self._db)
+            ledger = CarryLedger(self._db)
+            sorted_ = ledger.sort([p["title"] for p in plan] + carry["keep"], self._today(),
+                                  lambda t: link_day(links, t))
+            gone = {t.lower() for t in sorted_[DROP]}
+            asked = sorted_[ASK]
+            plan = [p for p in plan if p["title"].lower() not in gone]
+            dropped = self._off_today([k for k in carry["keep"] if k.lower() in gone])
+            carry["keep"] = [k for k in carry["keep"] if k.lower() not in gone]
+        ask_set = {t.lower() for t in asked}
         if not plan and not carry["keep"] and not carry["add"]:
+            if dropped:
+                return "Off today's list after a few days (still on their own lists): " + ", ".join(dropped) + "."
             return "Nothing from yesterday is waiting: everything has an outcome."
         if self._db:
             import json
             self._db.set_sync_meta(self._rollover_key(), json.dumps({"plan": plan, "today": carry, "state": "offered",
+                                                                     "asked": asked,
                                                                      "offered_at": self.pt._now().isoformat()}))
         from datetime import datetime as _dt
         from thirties_core.lists import urgency_label
         lines = []
-        if plan or carry["keep"]:
+        fresh_plan = [p for p in plan if p["title"].lower() not in ask_set]
+        fresh_keep = [k for k in carry["keep"] if k.lower() not in ask_set]
+        if fresh_plan or fresh_keep:
             lines.append("From yesterday, still open:")
-            lines += [f"- {format_clock(_dt.fromisoformat(p['start']))} – {p['title']}" for p in plan if p["start"]]
-            lines += [f"- {p['title']} (no room today: back to your lists)" for p in plan if not p["start"]]
-            lines += [f"- {k}" for k in carry["keep"]]
+            lines += [f"- {format_clock(_dt.fromisoformat(p['start']))} – {p['title']}" for p in fresh_plan if p["start"]]
+            lines += [f"- {p['title']} (no room today: back to your lists)" for p in fresh_plan if not p["start"]]
+            lines += [f"- {k}" for k in fresh_keep]
+        if asked:
+            ledger = CarryLedger(self._db)
+            lines.append("Still open for a few days now (keep or drop? anything not kept leaves today's list "
+                         "tomorrow):")
+            lines += [f"- {t} (since {weekday(ledger.since(t))})" for t in asked]
+        if dropped:
+            lines.append("Off today's list after a few days (still on their own lists): " + ", ".join(dropped) + ".")
         if carry["add"]:
             lines.append("Also pressing: " + ", ".join(
-                f"{tasks[t].title} ({urgency_label(tasks[t])})" for t in carry["add"]) + ".")
+                f"{_short(tasks[t].title)} ({urgency_label(tasks[t])})" for t in carry["add"]) + ".")
         lines.append(rollover_question(plan, carry))
         return "\n".join(lines)
+
+    def _off_today(self, titles: List[str]) -> List[str]:
+        """Items not kept after their one question leave the Today note. One with no other list goes to the drop
+        box; with no drop box it stays (nothing is ever lost). Returns the titles taken off."""
+        from thirties_core.carry import CarryLedger
+        from thirties_core.today import TodayLinks
+        note = self._today_note() if titles else None
+        writer = self._writer() if note else None
+        if writer is None or not getattr(writer, "allowed", True):
+            return []
+        links, out = TodayLinks(self._db), []
+        box = None
+        for title in titles:
+            if not links.home_of(title):
+                if box is None:
+                    from thirties_core.placement_lists import Placement
+                    try:
+                        box = Placement.for_assistant(self).dropbox_for() or {}
+                    except Exception:
+                        box = {}
+                if not box.get("id"):
+                    continue  # nowhere else to keep it: it stays on today's list
+                writer.submit({"op": "add_task", "note_id": box["id"], "title": title})
+            writer.submit({"op": "remove", "note_id": note["id"], "title": title})
+            self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == note["id"] and t.title == title)]
+            links.unlink(title)
+            out.append(title)
+        CarryLedger(self._db).forget(out)
+        return out
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
@@ -1455,6 +1526,10 @@ class AssistantTools(KindTools):
             added = self.add_to_today(add) if add else ""
         except ToolError as e:  # the plan part is done already: say why the list part isn't
             added = f"(Couldn't put {', '.join(add)} on today's list: {e})"
+        from thirties_core.carry import CarryLedger
+        asked = data.get("asked") or []
+        CarryLedger(self._db).kept([t for t in asked if not skipped(t)], self._today())
+        CarryLedger(self._db).forget([t for t in asked if skipped(t)])
         self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
         parts = []
         if moved:
