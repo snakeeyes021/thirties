@@ -497,6 +497,8 @@ class TestSessions(PlannerCase):
         svc.bridge = MagicMock()
         svc.horizon_session(self.when)
         self.assertEqual(sent, [])  # the morning hasn't happened yet
+        from tests.fixtures import mark_up
+        mark_up(self.sched.state_db, self.when)  # the user's first message of the day
         svc.rollover(self.when)  # nothing from yesterday; the day's own proposal may go out
         sent[:] = [x for x in sent if x[0] != "rollover"]
         assistant = svc.manager().tools.assistant

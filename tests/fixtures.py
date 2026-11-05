@@ -94,3 +94,8 @@ class FakeJoplinAPI:
         nid = f"new{len(self.notes) + 1}"
         self.notes[nid] = {"id": nid, "title": title, "body": body, "parent_id": parent_id or ""}
         return {"id": nid, "title": title}
+
+
+def mark_up(db: StateDatabase, when: datetime) -> None:
+    """The user wrote at ``when``: their day has started (wake.user_is_up), so the morning and check-ins can go."""
+    db.set_sync_meta("last_user_message_at", when.isoformat())

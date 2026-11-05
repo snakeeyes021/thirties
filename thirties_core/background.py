@@ -221,6 +221,19 @@ class BackgroundService:
         except ValueError:
             return False
 
+    def _up(self, now: datetime) -> bool:
+        """The user has started the day (wake.user_is_up): until then nothing is set up or sent, apart from
+        reminders they asked for, sunrise/sunset if switched on, and one heads-up about a fixed calendar event."""
+        from thirties_core.wake import user_is_up
+        return user_is_up(self.scheduler.state_db, self.manager().day_plan, now)
+
+    def _turn_running(self) -> bool:
+        lock = self.manager().turn_lock
+        if lock.acquire(blocking=False):
+            lock.release()
+            return False
+        return True
+
     def _talked_since(self, since: datetime) -> bool:
         raw = self.scheduler.state_db.get_sync_meta("last_user_message_at")
         try:
@@ -240,9 +253,15 @@ class BackgroundService:
         told = self._remembered("heads_up")
         soon = [s for s in plan.active_spans() if s.category == SpanCategory.CALENDAR and not s.tentative
                 and s.id not in told and now < s.start_dt <= now + timedelta(minutes=15)]
+        up = self._up(now)
+        if not up:  # before the user is up: one heads-up a morning, and only for a fixed event
+            prewake_key = f"prewake_heads_up:{plan.target_date.isoformat()}"
+            soon = [s for s in soon if s.is_firm][:1] if not self.scheduler.state_db.get_sync_meta(prewake_key) else []
+            if soon:
+                self.scheduler.state_db.set_sync_meta(prewake_key, soon[0].id)
         for event in soon:
             told[event.id] = now.date().isoformat()
-            behind = [s.title for s in plan.active_spans() if self._unreported(s)
+            behind = [s.title for s in plan.active_spans() if self._unreported(s) and up
                       and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
             on_thirty = event.start_dt == thirty_of(event.start_dt)
             text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else  # its real time, and block
@@ -477,21 +496,14 @@ class BackgroundService:
     def rollover(self, now: datetime) -> None:
         """Once a day, after waking: the morning reset, the day's routines and anchors put on by themselves (R1),
         the offer to roll yesterday's unfinished items into today, and a proposal for the free time (A6)."""
-        from thirties_core.week import day_hours
         db = self.scheduler.state_db
         manager = self.manager()
         day = manager.day_plan.target_date
         key = f"rollover_offered:{day.isoformat()}"
         if db.get_sync_meta(key):
             return
-        wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
-            timedelta(minutes=30 * day_hours(self.config.general, day).sleep_end + 30)  # that weekday's wake time
-        from thirties_core.day_times import wake_time
-        history = db.get_spans_between(manager.day_plan.day_start - timedelta(hours=18), manager.day_plan.day_start)
-        woke = wake_time(manager.day_plan, history)  # the night as planned or recorded ("sleeping in")
-        wake = woke + timedelta(minutes=30) if woke else wake  # half an hour after waking, as before
-        if now < wake:
-            return
+        if not self._up(now) or self._turn_running():  # the user's first message of the day starts it (wake.py);
+            return  # the proposal follows their reply
         db.set_sync_meta(key, "1")
         holiday = ahead = ""
         if manager.tools.assistant is not None:
@@ -684,9 +696,18 @@ class BackgroundService:
                 manager.reload_plan()  # 10:53 were listed as "not marked yet" at 11:00
         except Exception as e:
             logger.warning("Reloading the day failed: %s", e)
+        try:
+            up = self._up(now)
+        except Exception as e:
+            logger.warning("Checking whether the user is up failed: %s", e)
+            up = True
+        waits = {self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+                 self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
         for duty in (self.moot, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
+            if not up and duty in waits:
+                continue
             try:
                 duty(now)
             except Exception as e:

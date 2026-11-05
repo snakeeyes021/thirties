@@ -45,6 +45,8 @@ class TestDaySim(unittest.TestCase):
         run.scheduler.config.assistant.message_level = "heavy"  # a message per item, to test the mechanics
         sim = scripted([
             {"wait_minutes": 0, "message": "morning!"},
+            {"wait_minutes": 180, "message": None},                  # interrupted by the morning message, which
+            # follows the user's first message (wake.py: nothing is sent before they're up)
             {"wait_minutes": 180, "message": "back from my walk"},  # interrupted at 10:00 by the start message
             {"wait_minutes": 120, "message": None},                  # interrupted by the check-in
             {"wait_minutes": 0, "message": None, "end_of_day": True},
@@ -60,7 +62,8 @@ class TestDaySim(unittest.TestCase):
         self.assertIn("Walk", app[0][1])
         self.assertIn("Walk", app[1][1])  # the check-in, after the walk's thirty ended
         self.assertGreaterEqual(app[1][0], "10:30")
-        self.assertIn("[10:00] App:", sim.prompts[2])  # the user saw the start message before deciding again
+        self.assertLess(morning[0][0], "09:30")  # right after the first message
+        self.assertIn("[10:00] App:", sim.prompts[3])  # the user saw the start message before deciding again
         self.assertNotIn("back from my walk", [x for _, w, x in run.log if w == "user"])  # dropped: interrupted
         self.assertEqual(run.end_reason, "end of day")
 

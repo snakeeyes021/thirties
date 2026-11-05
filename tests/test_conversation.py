@@ -162,21 +162,6 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(work.end_dt.strftime("%H:%M"), "15:55")
         self.assertIsNone(self.manager.tools.user_message)  # a drag in the Day page later isn't judged by it
 
-    def test_the_morning_offer_comes_with_the_first_message(self) -> None:
-        # 10-30 sim: planned at 6:30, then pinged at 7:30 about yesterday's items as if nothing had been said
-        from datetime import timedelta
-        from thirties_core.models import EventSpan, SpanCategory
-        from tests.fixtures import at
-        db = self.manager.scheduler.state_db
-        db.upsert_span(EventSpan("y1", "Email back GitHub", at("19:00") - timedelta(days=1),
-                                 at("19:30") - timedelta(days=1), SpanCategory.ACTIVITY))
-        self.engine.set_next_response(reply("Morning! Want Email back GitHub today too?"))
-        self.manager.send_user_message("morning! let's plan")
-        notes = [m["content"] for m in self.manager.brain.messages if m.get("role") == "user"]
-        self.assertTrue(any(n.startswith("[System check") and "Email back GitHub" in n for n in notes), notes)
-        self.assertEqual(db.get_sync_meta(f"rollover_offered:{DAY.isoformat()}"), "in_conversation")  # no ping later
-        self.assertNotIn("System check", " ".join(m["content"] for m in self.manager.history()))
-
     def test_a_claimed_outcome_without_log_outcome_is_asked_again(self) -> None:
         # 10-30 sim: "I've logged that session as done", with nothing logged; the notices nagged about it later
         self.manager.execute_tool("add_event", {"title": "Natalie piece", "start": "9:00 AM", "duration": "1 hour"})

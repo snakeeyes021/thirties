@@ -45,6 +45,8 @@ class TestBackground(unittest.TestCase):
 
     def test_the_morning_message_says_what_was_planned_ahead(self):
         # O2 (10-24): something set for tomorrow should be seen the next morning
+        from tests.fixtures import mark_up
+        mark_up(self.sched.state_db, at("08:30"))  # the user's first message of the day
         self.svc.rollover(at("09:00"))
         self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n- 5:00 PM – Taxes")])
 
@@ -191,6 +193,8 @@ class TestMessageLevels(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("sh", "Shower", at("16:30"), at("17:00"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("fd", "Food", at("17:00"), at("18:00"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("lu", "Lunch", at("14:00"), at("14:30"), SpanCategory.ACTIVITY))
+        from tests.fixtures import mark_up
+        mark_up(self.sched.state_db, at("07:00"))  # up and talking early; these tests are about the day after
 
     def run_day(self, start, end):
         t = at(start)
@@ -349,6 +353,51 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestBeforeTheUserIsUp(unittest.TestCase):
+    """11-04, 11-05: a proposal at 7:00, a block notice, "when did you start work?" at 7:30 and a check-in at 7:40,
+    all before the user woke at 9. Until their first message nothing is sent, except reminders they asked for and
+    one heads-up about a fixed calendar event."""
+
+    def setUp(self):
+        set_debug_time(at("07:00"))
+        self.addCleanup(set_debug_time, None)
+        self.sched = make_scheduler([event("dentist", "09:00", "09:30", "Dentist"),
+                                     event("call", "10:00", "10:30", "Call")])
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        self.sent = []
+        self.svc = BackgroundService(self.sched.config, lambda t, b, k: self.sent.append((k, b)),
+                                     scheduler=self.sched, joplin_engine=joplin,
+                                     inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        self.svc.today = lambda: DAY
+        self.svc.sort_lists_enabled = False
+        self.sched.config.assistant.message_level = "heavy"
+        y = lambda hhmm: at(hhmm, -1)
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", y("17:00"), y("18:00"), SpanCategory.TASK))
+        self.sched.state_db.upsert_span(EventSpan("pt", "PT", at("07:00"), at("07:30"), SpanCategory.ACTIVITY))
+
+    def run_until(self, end, start="07:00"):
+        t = at(start)
+        while t <= at(end):
+            set_debug_time(t)
+            self.svc.tick(t)
+            t += timedelta(minutes=5)
+
+    def test_nothing_but_one_heads_up_until_the_first_message(self):
+        from thirties_core.memory import ReminderStore
+        ReminderStore(self.sched.state_db).add(at("08:00"), "Take the pills")
+        self.run_until("10:20")
+        kinds = [k for k, _ in self.sent]
+        self.assertEqual(kinds, ["reminder", "heads_up"], self.sent)  # the call's heads-up isn't sent: one a morning
+        self.assertIn("Dentist", self.sent[1][1])
+        self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing rolled over
+        from tests.fixtures import mark_up
+        mark_up(self.sched.state_db, at("10:22"))
+        self.run_until("10:30", start="10:25")
+        self.assertIn("rollover", [k for k, _ in self.sent])  # the morning follows the first message
+        self.assertEqual([k for k, _ in self.sent].count("rollover"), 1)
+
+
 class TestRollover(unittest.TestCase):
 
     def setUp(self):
@@ -384,9 +433,12 @@ class TestRollover(unittest.TestCase):
         svc = BackgroundService(self.sched.config, lambda t, b, k: sent.append((k, b)), scheduler=self.sched,
                                 joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         svc.today = lambda: DAY
-        svc.rollover(at("07:10"))  # before waking (7:00) + 30 minutes
-        self.assertEqual(sent, [])
+        svc.rollover(at("07:10"))  # the planned wake (7:00) has passed, but the user hasn't said anything yet
         svc.rollover(at("08:00"))
+        self.assertEqual(sent, [])  # 11-04, 11-05: nothing before the user is up
+        from tests.fixtures import mark_up
+        mark_up(self.sched.state_db, at("08:10"))  # their first message of the day
         svc.rollover(at("08:15"))
+        svc.rollover(at("08:30"))
         self.assertEqual([k for k, _ in sent], ["rollover"])
         self.assertTrue(sent[0][1].startswith("☀️ Good morning! From yesterday, still open:"))

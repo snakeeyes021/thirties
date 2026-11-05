@@ -8,7 +8,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, FakeJoplinAPI, at, event, make_scheduler
+from tests.fixtures import mark_up, DAY, FakeJoplinAPI, at, event, make_scheduler
 from thirties_core.assistant_tools import Services, _checkbox_id
 from thirties_core.astronomy import set_debug_time
 from thirties_core.lists import ListCatalog
@@ -171,8 +171,10 @@ class TestTheMorningSetUp(RoutineCase):
             {"start": "9:00 AM", "items": FIRST}, {"start": "3:00 PM", "items": SECOND}]})
         out = self.t.assistant.routines.set_up_current()
         self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("15:00"))  # still ahead: its usual time
-        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("16:00"))  # missed: after work
-        self.assertIn("usually goes at 9:00 AM; that's passed, so it's at 4:00 PM", out)
+        # missed: from now, alongside Work (11-03: "the morning routine can overlap work!!!"; 11-05: it went
+        # after work, to 3 PM)
+        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("13:00"))
+        self.assertIn("usually goes at 9:00 AM; that's passed, so it's at 1:00 PM", out)
 
     def test_planning_before_sunrise_sets_up_the_coming_day(self):
         self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [{"start": "9:00 AM", "items": FIRST}]})
@@ -424,6 +426,21 @@ class TestPlacedOnWaking(RoutineCase):
         self.assertEqual(start["Shower"], thirty_ceil(sleep_end) + timedelta(minutes=30))
 
 
+class TestSetUpWhenTheUserIsUp(RoutineCase):
+    """11-05: the routine was laid out for a 6:30 wake, and its first part pushed to after work; the user woke at
+    9. The day is set up with the user's first message, and a part "on waking" goes in the thirty they're in."""
+
+    def test_a_late_first_message_puts_the_waking_part_now_and_the_next_right_after(self):
+        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+            {"start": "on waking", "items": FIRST}, {"start": "right after that", "items": SECOND}]})
+        set_debug_time(at("09:45"))  # in the middle of Work (8:30 to 4)
+        self.t.assistant.routines.set_up_current()
+        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("09:30"))
+        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:00"))
+        work = self.spans(self.t, "Work")[0]
+        self.assertEqual((work.start_dt, work.end_dt), (at("08:30"), at("16:00")))  # alongside, never moved
+
+
 class TestProposingTheDay(RoutineCase):
 
     def setUp(self):
@@ -517,6 +534,7 @@ class TestTheMorningMessage(RoutineCase):
                 {"name": "propose_day", "arguments": {"items": [{"item": "t_bank", "start": "4:00 PM"}]}}]},
             {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one. "
                                              "Want that?"}]
+        mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual([k for k, _ in self.sent], ["rollover"])  # one message (10-31: three at sunrise)
         self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
@@ -531,6 +549,7 @@ class TestTheMorningMessage(RoutineCase):
 
     def test_without_a_model_python_proposes(self):
         self.m.brain_name = "slm"
+        mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
@@ -541,6 +560,7 @@ class TestTheMorningMessage(RoutineCase):
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
         # 10-31 sim: the model wrote a plan but never called propose_day; Python's went out, and the app showed both
         self.engine.responses = [{"role": "assistant", "content": "☀️ Good morning! How about the bank at 4?"}]
+        mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
         self.assertIn("4:00 PM – Call the bank", self.sent[0][1])

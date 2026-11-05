@@ -650,7 +650,11 @@ class RoutineTools:
             history = (self.db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
                        if self.db is not None else [])
             woke = wake_time(plan, history) or plan.day_start
-            start = thirty_ceil(woke) + timedelta(minutes=30 * (int(at[5:]) if "+" in at else 0))
+            # The day is set up when the user is up (wake.py): if that's later than the wake on the record (they
+            # slept past the planned 6:30), waking is now: the first part goes in the current thirty (11-05: woke
+            # at 9, the routine was laid out from 6:30 and its first part pushed to after work).
+            base = max(thirty_ceil(woke), thirty_of(now)) if plan.day_start <= now < bed else thirty_ceil(woke)
+            start = base + timedelta(minutes=30 * (int(at[5:]) if "+" in at else 0))
         else:
             start = _at(at, plan.day_start)
         if start >= bed and start.hour < 12 and start.date() > plan.day_start.date():
@@ -661,10 +665,17 @@ class RoutineTools:
                 start = thirty_ceil(s.end_dt)
         if start + timedelta(minutes=minutes) > now:
             return start, ""
-        for a, b in self.pt.open_windows(after=now):
-            a = max(a, thirty_ceil(now)) if a < now else a
-            if b - a >= timedelta(minutes=30) and a + timedelta(minutes=30) <= bed:
-                return a, "missed"
+        # Its time has passed: from the current thirty on, the first one without a fixed calendar event or sleep
+        # in it. Routine steps sit alongside Work and other items (11-03: "the morning routine can overlap
+        # work!!!"; 11-05: a missed 6:30 part went to 3 PM, after work).
+        t = thirty_of(now)
+        while t + timedelta(minutes=30) <= bed:
+            blocked = any(s.start_dt < t + timedelta(minutes=30) and t < s.end_dt and s.status != SpanStatus.SKIPPED
+                          and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))
+                          for s in plan.spans)
+            if not blocked:
+                return t, "missed"
+            t += timedelta(minutes=30)
         return None, "missed"
 
     def _place_routines(self, plan: "DayPlan", now: datetime, state: Dict[str, Any]) -> None:
