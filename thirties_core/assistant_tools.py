@@ -329,8 +329,9 @@ def _stem(word: str) -> str:
 def _short(title: str, limit: int = 80) -> str:
     """A long list line said in brief (11-05: whole paragraphs, with links and markup, in the morning's "Also
     pressing"): its markup dropped, cut at its first aside, and at a word under ``limit``."""
-    text = re.sub(r"\*\*|`|\s*⚠\s*", " ", str(title)).strip()
-    text = re.split(r"\s+\(|\s+·\s+|(?<=[.!?])\s", text, maxsplit=1)[0].strip()
+    text = re.sub(r"\s*⚠\s*", " ", re.sub(r"\*\*|`", "", str(title))).strip()
+    text = re.sub(r"^(?:[a-z]|\d{1,2})[.)]\s+(?=\S)", "", text)  # "b. READY: ..." (a lettered list line)
+    text = re.split(r"\s+\(|\s+·\s+|(?<=.{12}[.!?])\s", text, maxsplit=1)[0].strip()
     text = re.sub(r"\s+", " ", text)
     if len(text) > limit:
         text = text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"

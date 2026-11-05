@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+def _short(title: str, limit: int = 80) -> str:
+    from thirties_core.assistant_tools import _short as short
+    return short(title, limit)
+
+
 MAX_CANDIDATES = 8   # what the model chooses from: enough to choose, never the backlog
 MAX_DEFAULT = 3      # Python's own proposal (no model): a few things, not a full day
 DEFERRED_OFTEN = 3   # put off this many times: offered as a 30-minute start
@@ -243,7 +248,7 @@ class DayProposal:
         lines = ["Pressing and possible (most pressing first):"]
         for c in cands:
             ref = f" task_id={c['task'].id}" if c["task"] is not None else ""
-            lines.append(f"- {c['title']} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}){ref}")
+            lines.append(f"- {_short(c['title'], 120)} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}){ref}")
         lines.append("Free time:")
         saved, self.pt.day_plan = self.pt.day_plan, plan
         try:
@@ -277,7 +282,8 @@ class DayProposal:
 
     @staticmethod
     def _lines(items: List[Dict[str, Any]]) -> List[str]:
-        return [f"- {format_clock(datetime.fromisoformat(i['start']))} – {i['title']}" for i in items]
+        from thirties_core.assistant_tools import _short  # a list line said in brief (11-05: whole paragraphs)
+        return [f"- {format_clock(datetime.fromisoformat(i['start']))} – {_short(i['title'])}" for i in items]
 
     def _store(self, items: List[Dict[str, Any]], why: str = "") -> str:
         day = self.pt.day_plan.target_date
@@ -373,7 +379,7 @@ class DayProposal:
             if out.startswith(NOT_DONE):
                 failed.append(f"{item['title']} ({out[len(NOT_DONE):].lstrip(': ')})")
             else:
-                placed.append(f"- {format_clock(thirty_of(start))} – {item['title']}")
+                placed.append(f"- {format_clock(thirty_of(start))} – {_short(item['title'])}")
         self.db.set_sync_meta(self._key(key_day), json.dumps({**data, "state": "applied"}))
         parts = []
         if placed:

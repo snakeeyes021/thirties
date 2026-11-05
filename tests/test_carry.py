@@ -37,3 +37,9 @@ class TestShort(unittest.TestCase):
         self.assertEqual(_short(line), "NAS: change the pm-agent password")
         self.assertEqual(_short("Buy stamps"), "Buy stamps")
         self.assertTrue(len(_short("word " * 40)) <= 81)
+
+
+class TestShortLettered(unittest.TestCase):
+
+    def test_a_lettered_line_keeps_its_words(self):
+        self.assertEqual(_short("b. **Hotfix for stable**. It only adds 51 to the list."), "Hotfix for stable.")

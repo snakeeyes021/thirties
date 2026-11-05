@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -523,7 +524,8 @@ class BackgroundService:
             text = ""
         if ahead and text and manager.tools.assistant is not None:  # yesterday's leftovers are said once
             from thirties_core.day_lists import planned_ahead_text
-            offered = [line[2:].split(" – ", 1)[-1] for line in text.splitlines() if line.startswith("- ")]
+            offered = [re.sub(r" \(since [^)]*\)$", "", line[2:].split(" – ", 1)[-1])  # said once (11-06 replay:
+                       for line in text.splitlines() if line.startswith("- ")]  # asked about, then listed again)
             ahead = planned_ahead_text(manager.tools.assistant, skip=offered)
         facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
         self.propose_the_day(now, facts)
