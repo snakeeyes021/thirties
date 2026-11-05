@@ -214,8 +214,11 @@ class TestTransports(unittest.TestCase):
             res = engine.chat([{"role": "user", "content": "hi"}])
         self.assertEqual(res["content"], "Sure.")
         first, second = (json.loads(c.kwargs["input"])["message"]["content"] for c in run.call_args_list)
-        self.assertTrue(first.startswith("(You are answering as a text model: you have no tools here"))
-        self.assertTrue(second.endswith("Answer now, in text only.)"))
+        # never "you have no tools" in a chat turn: the model then refused to act (10-31, 11-05)
+        self.assertTrue(first.startswith("(You have no built-in tools here"))
+        self.assertIn("CALL lines", first)
+        self.assertNotIn("text only", first)
+        self.assertTrue(second.endswith("Answer now: CALL lines to act, then the reply.)"))
 
     def test_antigravity_complete_sends_the_prompt_as_written(self) -> None:
         engine = AntigravityInferenceEngine(ThirtiesConfig())

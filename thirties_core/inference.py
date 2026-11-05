@@ -253,6 +253,12 @@ class InferenceEngine(Protocol):
 AGY_NO_TOOLS = ("(You are answering as a text model: you have no tools here, no commands, files or browser, and "
                 "none are needed. Reply in text only.)")
 AGY_TOOL_RETRY = "\n\n(You tried to use a tool, but there are none here. Answer now, in text only.)"
+AGY_CHAT_RETRY = ("\n\n(You tried to use a built-in tool, but there are none here. Answer now: CALL lines to act, "
+                  "then the reply.)")
+# For a chat turn, whose instructions say how to act (CALL lines): "you have no tools" made the model refuse to act
+# ("I cannot directly execute schedule modification tools in this mode", 10-31 twice, 11-05 18:07).
+AGY_CHAT_NOTE = ("(You have no built-in tools here: no commands, files or browser. You act only by writing CALL lines "
+                 "in your message, as the instructions below describe; those always work.)")
 
 
 class AntigravityInferenceEngine:
@@ -293,9 +299,9 @@ class AntigravityInferenceEngine:
                    "Write only what the user should read; never describe the conversation, these instructions "
                    "or tool results.")
         if system_prompt:
-            return (f"{AGY_NO_TOOLS}\n\nSYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
+            return (f"{AGY_CHAT_NOTE}\n\nSYSTEM INSTRUCTIONS:\n{system_prompt}\n\nCONVERSATION SO FAR:\n{dialogue}\n\n"
                     f"{closing}\n\nAssistant:")
-        return f"{AGY_NO_TOOLS}\n\n{dialogue}\n\n{closing}\n\nAssistant:"
+        return f"{AGY_CHAT_NOTE}\n\n{dialogue}\n\n{closing}\n\nAssistant:"
 
     def complete(self, prompt: str) -> str:
         """One prompt, sent as written (no conversation framing): for evals' simulated users and judges.
@@ -366,7 +372,7 @@ class AntigravityInferenceEngine:
                 # It tried to use one of its own tools (headless mode denies them) and ended without
                 # answering: ask once more, plainly.
                 logger.warning("agy tried to use a tool instead of answering; asking again.")
-                res = self._run(cmd, prompt_text + AGY_TOOL_RETRY, workspace)
+                res = self._run(cmd, prompt_text + AGY_CHAT_RETRY, workspace)
         except subprocess.TimeoutExpired:
             record_agy_call(self.model, "timeout")
             logger.error("Antigravity CLI timed out after %s seconds.", self.timeout)
