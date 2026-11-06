@@ -217,7 +217,9 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         low = title.lower()
         if put_on_today_today(title):
             continue
-        has_home = home_of(title) is not None or low in listed
+        link = home_of(title)  # leaves Today only if its home item is really still open on its list
+        has_home = bool(link and link.get("home_id") in tasks and tasks[link["home_id"]].list_role != "today") \
+            or low in listed
         if low in done_titles:
             off_today.append(title)  # done on the plan: the morning reset takes it off
             continue
