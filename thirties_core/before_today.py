@@ -115,10 +115,11 @@ class BeforeToday:
                    "at": None}
             if rec.get("end") and rec["end"] < day.isoformat():  # its day went by: say which, not "today"
                 row["when"] = "from " + date.fromisoformat(rec["end"]).strftime("%a")  # copy-madlibs T3-040
-            if rec.get("horizon") == DROPPED:
-                if rec.get("dropped_by") == "app":
-                    archive.setdefault(rec.get("dropped_on") or "", []).append(row)
+            if rec.get("horizon") == DROPPED:  # every applied drop, the app's or the user's (11-06)
+                archive.setdefault(rec.get("dropped_on") or "", []).append(row)
                 continue
+            if rec.get("settled"):
+                continue  # acted on (accepted, kept, undropped, moved): it's where it goes, not in Keep any more
             if rec.get("since", "") < (day - timedelta(days=14)).isoformat() and not rec.get("pending_drop"):
                 continue  # two weeks waiting: it's still on its list, just not shown here
             if rec.get("pending_drop"):
@@ -151,7 +152,7 @@ class BeforeToday:
         if action == "accept":
             if rec.get("pending_drop"):
                 return self._drop(rec, by="user")
-            pool.set(title, placed_by="user")
+            pool.set(title, placed_by="user", settled=True)  # leaves Keep (11-06: Accept left rows standing)
             return f"{title}: stays {rec.get('when') or 'as proposed'}."  # copy-madlibs T3-020
         if action == "drop":
             return self._drop(rec, by="user")
@@ -171,7 +172,7 @@ class BeforeToday:
         window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
                               self._week_start())
         pool.set(title, horizon="week" if window["end"] != self._today().isoformat() else "today",
-                 pending_drop=False, dropped_on="", dropped_by="", placed_by="user", **window)
+                 pending_drop=False, dropped_on="", dropped_by="", placed_by="user", settled=True, **window)
         rec = pool.all()[title.strip().lower()]
         placed, overflow = self.place_today([rec])
         if placed:

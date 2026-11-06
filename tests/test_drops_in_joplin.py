@@ -71,8 +71,8 @@ class TestDropsInJoplin(TodayTestCase):
         self.assertEqual([r["title"] for r in archive[DAY.isoformat()]], ["Call the bank"])
         self.t.execute("leftover_action", {"item": "Call the bank", "action": "undrop"})
         self.assertIn("- [ ] Call the bank", self.body("n_errands"))
-        self.assertFalse(self.t.assistant.before.rows()["archive"])  # back in Keep
-        self.assertIn("Call the bank", [r["title"] for r in self.t.assistant.before.rows()["keep"]])
+        self.assertFalse(self.t.assistant.before.rows()["archive"])  # out of the archive, settled at its horizon
+        self.assertIn("call the bank", OpenPool(self.sched.state_db).all(DAY))
 
     def test_done_goes_the_normal_done_way(self):
         self.pool.set("Call the bank", pending_drop=False)
@@ -98,3 +98,65 @@ class TestDropsInJoplin(TodayTestCase):
         self.api.notes["n_errands"]["body"] = ERRANDS.replace("- [ ] Call the bank\n", "")
         self.t.assistant.before.reconcile()
         self.assertNotIn("Call the bank", [r["title"] for r in self.t.assistant.before.rows()["keep"]])
+
+
+class TestEveryActionSettlesTheRow(TestDropsInJoplin):
+    """11-06, Matt: he clicked Accept on a bunch of rows and they stayed there. Every action settles the item and
+    takes it out of the group it was in, from the tab and from the chat alike."""
+
+    def setUp(self):
+        super().setUp()
+        self.pool.add([{"title": "Buy stamps", "task_id": "t_stamps", "horizon": "week", "when": "this week",
+                        "why": "a week old"}], DAY - timedelta(days=1))
+
+    def groups(self):
+        rows = self.t.assistant.before.rows()
+        return ({r["title"] for r in rows["keep"]}, {r["title"] for r in rows["drop"]},
+                {r["title"] for _, rs in rows["archive"] for r in rs})
+
+    def act(self, item, action):
+        return self.t.execute("leftover_action", {"item": item, "action": action})
+
+    def test_accept_on_a_keep_row(self):
+        self.assertIn("Buy stamps", self.groups()[0])
+        self.act("Buy stamps", "accept")
+        self.assertNotIn("Buy stamps", self.groups()[0])
+        self.assertIn("buy stamps", OpenPool(self.sched.state_db).all(DAY))  # still waits at its horizon
+
+    def test_done_on_a_keep_row(self):
+        self.act("Buy stamps", "done")
+        self.assertFalse(any("Buy stamps" in g for g in self.groups()))
+
+    def test_drop_on_a_keep_row_goes_to_the_archive(self):
+        self.act("Buy stamps", "drop")
+        keep, drop, archive = self.groups()
+        self.assertNotIn("Buy stamps", keep)
+        self.assertIn("Buy stamps", archive)
+
+    def test_accept_on_a_drop_row_goes_to_the_archive(self):
+        self.assertIn("Call the bank", self.groups()[1])
+        self.act("Call the bank", "accept")
+        keep, drop, archive = self.groups()
+        self.assertNotIn("Call the bank", drop)
+        self.assertIn("Call the bank", archive)
+
+    def test_keep_on_a_drop_row_places_it(self):
+        self.act("Call the bank", "keep")
+        keep, drop, archive = self.groups()
+        self.assertNotIn("Call the bank", drop | keep | archive)
+        self.assertEqual(OpenPool(self.sched.state_db).all(DAY)["call the bank"]["when"], "this week")
+
+    def test_undrop_leaves_the_archive(self):
+        self.act("Call the bank", "accept")
+        self.act("Call the bank", "undrop")
+        self.assertNotIn("Call the bank", self.groups()[2])
+
+    def test_a_yes_in_the_chat_settles_them_too(self):
+        import json
+        self.sched.state_db.set_sync_meta(f"rollover:{DAY.isoformat()}", json.dumps({
+            "plan": [], "today": {"keep": [], "add": []}, "state": "offered",
+            "leftovers": {"keep": [{"title": "Buy stamps"}], "drop": [{"title": "Call the bank"}]}}))
+        self.t.execute("apply_rollover", {})
+        keep, drop, archive = self.groups()
+        self.assertEqual((keep, drop), (set(), set()))
+        self.assertIn("Call the bank", archive)

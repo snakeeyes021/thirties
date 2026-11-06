@@ -1598,6 +1598,9 @@ class AssistantTools(KindTools):
         if "leftovers" in data or (not data.get("plan") and not (data.get("today") or {}).get("keep")
                                    and not (data.get("today") or {}).get("add")):
             dropped = self._drop_leftovers((data.get("leftovers") or {}).get("drop", []))
+            from thirties_core.carry import OpenPool  # a yes accepts the rest as they stand: settled, not re-offered
+            for k in (data.get("leftovers") or {}).get("keep", []):
+                OpenPool(self._db).set(k["title"], settled=True, placed_by="user")
             self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
             return (("Dropped: " + ", ".join(_short(t) for t in dropped) + ". " if dropped else "") +
                     "The rest wait where proposed.")  # copy-madlibs T3-009, T3-010

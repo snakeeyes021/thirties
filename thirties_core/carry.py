@@ -129,7 +129,7 @@ class OpenPool:
         rec = data.get(key) or next((v for k, v in data.items() if key in k), None)
         if rec is None:
             return None
-        rec["horizon"], rec["placed_by"] = horizon, "user"
+        rec["horizon"], rec["placed_by"], rec["settled"] = horizon, "user", True  # the user's word: settled
         rec.pop("pending_drop", None)
         if window is not None:
             rec.update(window)

@@ -19,7 +19,7 @@ from thirties.views.agenda import GUTTER, short_clock
 # copy-madlibs T3-027 to T3-038 (button labels, section titles and hints, empty state)
 KEEP_TITLE, KEEP_HINT = "Keep", "Waiting for a day they fit; today's are on the schedule."
 DROP_TITLE, DROP_HINT = "Drop", "Proposed. Applied by itself after today unless you say otherwise."
-ARCHIVE_TITLE, ARCHIVE_HINT = "Archive", "Dropped by Thirties, never confirmed. Nothing is deleted."
+ARCHIVE_TITLE, ARCHIVE_HINT = "Archive", "Let go. Nothing is deleted: undrop brings one back."
 EMPTY = "Nothing left from before."
 LABELS = {"accept": "Accept", "done": "Done", "drop": "Drop", "keep": "Keep", "undrop": "Undrop"}
 
