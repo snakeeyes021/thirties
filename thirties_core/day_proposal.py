@@ -361,6 +361,13 @@ class DayProposal:
             if not ref:
                 raise ToolError("Each item needs item (a task_id or title).")
             task = self.a._exact_task(ref)
+            from thirties_core.titles import is_raw_id, resolve_raw
+            if task is None and is_raw_id(ref):  # an old id (11-06: it became the item's title): find its words
+                words = resolve_raw(self.db, ref, self.a.s.tasks)
+                if not words:
+                    raise ToolError(f"'{ref}' is an item id Thirties doesn't know any more: use the item's words.")
+                task = self.a._exact_task(words)
+                ref = words
             title = task.title if task is not None else ref
             try:
                 start = self.pt._start(raw.get("start"))

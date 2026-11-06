@@ -311,7 +311,8 @@ class CardWidget(Gtk.Box):
                        valign=Gtk.Align.START if multi else Gtk.Align.CENTER, margin_top=10 if multi else 0)
         self.title_label = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
         self.title_label.add_css_class("tl-title")
-        title = GLib.markup_escape_text(span.title)
+        from thirties_core.titles import title_of
+        title = GLib.markup_escape_text(title_of(span.title))  # the short title (11-06: no raw lines on cards)
         if card.state == "done" and card.status != "Worked on":
             title = f"<s>{title}</s>"  # done and finished; a session on something ongoing isn't struck through
         elif card.state == "moot":
@@ -330,7 +331,8 @@ class CardWidget(Gtk.Box):
         self.append(text)
         self.append(Gtk.Box(width_request=PIP_INSET + PIP))  # room for the pip column the canvas draws
 
-        tip = [span.title, card.times]
+        from thirties_core.titles import title_of
+        tip = [title_of(span.title), card.times]
         if card.status:
             tip.append(card.status)
         tip += card.notes
@@ -423,8 +425,9 @@ class DayCanvas(Gtk.Widget):
             b.set_parent(self)
             self.frees.append((b, f))
         for w in layout.work:
-            lbl = Gtk.Label(label=w.span.title, xalign=0, valign=Gtk.Align.START, can_target=True,
-                            tooltip_text=f"{w.span.title}\n{w.times}")
+            from thirties_core.titles import title_of
+            lbl = Gtk.Label(label=title_of(w.span.title), xalign=0, valign=Gtk.Align.START, can_target=True,
+                            tooltip_text=f"{title_of(w.span.title)}\n{w.times}")
             lbl.add_css_class("tl-work-label")
             lbl.set_parent(self)
             self.work.append((lbl, w))

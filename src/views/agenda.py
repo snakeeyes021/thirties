@@ -74,6 +74,11 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.fixed: Callable[[EventSpan], bool] = lambda span: span.source == "calendar" or span.is_firm
         self.skip_menus: Dict[str, Gtk.MenuButton] = {}  # routine title -> its Skip menu (tests reach it here)
         self.read_tool: Optional[Tool] = None  # a read-only tool, run without refreshing (set by the window)
+        # an item's short title and its description (11-06: no raw lines, markdown or ids on screen); the window
+        # sets these to read the user's own notes and known ids too
+        from thirties_core.titles import split_title
+        self.title_for: Callable[[EventSpan], str] = lambda span: split_title(span.title)[0]
+        self.describe: Callable[[EventSpan], str] = lambda span: split_title(span.title)[1]
         self.page = Adw.PreferencesPage()
         self.set_child(self.page)
         self.groups: dict[str, Adw.PreferencesGroup] = {}
@@ -161,7 +166,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         markable = current or behind or ahead
         entries = []
         for s in sorted(spans, key=lambda s: (self._when(s), s.start_dt)):
-            row = Adw.ActionRow(title=s.title)
+            row = self._item_row(s)
             if s.tentative:
                 row.set_subtitle("invite, not answered yet")
             elif s.shown_only:
@@ -176,6 +181,22 @@ class AgendaPage(Gtk.ScrolledWindow):
         self._add_blocks(group, entries)
         if not spans:
             group.add(Adw.ActionRow(title="Nothing"))
+
+    def _item_row(self, s: EventSpan):
+        """An item's row: its short title; with a long description, a row that expands to show it (11-06)."""
+        title = GLib.markup_escape_text(self.title_for(s))
+        description = self.describe(s)
+        if not description:
+            return Adw.ActionRow(title=title)
+        row = Adw.ExpanderRow(title=title)
+        detail = Adw.ActionRow(title=GLib.markup_escape_text(description))
+        detail.add_css_class("dim-label")
+        try:
+            detail.set_title_lines(0)  # wraps: the whole description
+        except AttributeError:
+            pass
+        row.add_row(detail)
+        return row
 
     def _add_blocks(self, group: Adw.PreferencesGroup, entries: List[tuple]) -> None:
         """(time, row) pairs, in order, as one card per time with the time in the gutter."""
@@ -217,7 +238,8 @@ class AgendaPage(Gtk.ScrolledWindow):
                 note = "partly"
             elif self._ongoing(s):  # a session: the thing itself carries on (B2)
                 note = "worked on"
-            row = Adw.ActionRow(title=s.title, subtitle=note)
+            row = self._item_row(s)
+            row.set_subtitle(note)
             row.add_css_class("dim-label")
             entries.append((thirty_of(s.actual_start or s.start_dt), row))
         self._add_blocks(group, entries)

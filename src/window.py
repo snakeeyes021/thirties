@@ -78,6 +78,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
         self.day_view.before.rows_provider = self._before_today  # the same records as the chat (11-06)
+        self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
+        self.day_view.agenda.describe = self._describe
         self.content_toolbar.set_content(self.day_view)
         self._wire_timeline(self.day_view.timeline)
 
@@ -218,6 +220,21 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                     assistant.routines._refresh_envelopes()
             except Exception as e:
                 logger.warning("Updating Work and Sleep to the new hours failed: %s", e)
+
+    def _title_for(self, span):
+        from thirties_core.titles import is_raw_id, resolve_raw, title_of
+        if is_raw_id(span.title) and self.conv_manager is not None:
+            tools = self.conv_manager.tools
+            words = resolve_raw(tools.scheduler.state_db if tools.scheduler else None, span.title,
+                                tools.services.tasks if tools.services is not None else [])
+            return title_of(words) if words else "(an item)"
+        return title_of(span.title)
+
+    def _describe(self, span):
+        from thirties_core.titles import description_for
+        tools = self.conv_manager.tools if self.conv_manager else None
+        return description_for(tools.scheduler.state_db if tools and tools.scheduler else None, span.title,
+                               span.task_id or "")
 
     def _before_today(self):
         assistant = self.conv_manager.tools.assistant if self.conv_manager else None

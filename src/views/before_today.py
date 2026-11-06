@@ -75,7 +75,10 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
         return short_clock(at) if isinstance(at, datetime) else (r.get("when") or "")
 
     def _row(self, r: Dict[str, Any], actions: tuple) -> Adw.ActionRow:
-        row = Adw.ActionRow(title=r["title"], subtitle=r.get("why") or "")
+        from gi.repository import GLib
+        from thirties_core.titles import title_of
+        row = Adw.ActionRow(title=GLib.markup_escape_text(title_of(r["title"])),  # short title; actions use the item
+                            subtitle=GLib.markup_escape_text(r.get("why") or ""))
         for action in actions:
             b = Gtk.Button(label=LABELS[action], valign=Gtk.Align.CENTER)
             b.add_css_class("flat")

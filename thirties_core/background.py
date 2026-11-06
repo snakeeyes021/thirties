@@ -123,6 +123,16 @@ class BackgroundService:
             if self._manager is None or today != self._day:
                 tasks, notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
                 plan, pending = self.scheduler.build_day_plan(today)
+                if not getattr(self, "_titles_repaired", False):  # once per run: records with a raw id as a title
+                    self._titles_repaired = True                     # get their real title back (11-06)
+                    try:
+                        from thirties_core.titles import repair_raw_titles
+                        fixed = repair_raw_titles(self.scheduler.state_db, tasks)
+                        if fixed:
+                            logger.info("Gave %d item(s) their title back (they showed an id).", fixed)
+                            plan, pending = self.scheduler.build_day_plan(today)
+                    except Exception as e:
+                        logger.warning("Repairing titles failed: %s", e)
                 self._manager = ConversationManager(plan, tasks, pending, self.scheduler, joplin_engine=self.joplin_engine,
                                                     inference_engine=self.inference_engine, active_notes=notes)
                 self._day = today

@@ -41,7 +41,7 @@ class TestShort(unittest.TestCase):
         self.assertTrue(len(_short("word " * 40)) <= 81)
 
     def test_a_lettered_line_keeps_its_words(self):
-        self.assertEqual(_short("b. **Hotfix for stable**. It only adds 51 to the list."), "Hotfix for stable.")
+        self.assertEqual(_short("b. **Hotfix for stable**. It only adds 51 to the list."), "Hotfix for stable")
 
 
 class TestWhere(unittest.TestCase):

@@ -223,6 +223,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["item", "horizon"],
     },
     {
+        "name": "set_item_note",
+        "description": "Set the longer description of an item (\"add a note to X: ...\"): kept by Thirties, shown "
+                       "when the item is expanded in the app, never in the item's title. Joplin isn't changed.",
+        "parameters": {"item": "The item (its title or id).", "note": "The description; empty to clear it."},
+        "required": ["item", "note"],
+    },
+    {
         "name": "leftover_action",
         "description": "Act on something left from before, as the user says (the same as the app's Before today "
                        "tab): accept (stands as proposed), done (it got done), drop, keep (a proposed drop kept "
@@ -357,13 +364,8 @@ def _stem(word: str) -> str:
 def _short(title: str, limit: int = 80) -> str:
     """A long list line said in brief (11-05: whole paragraphs, with links and markup, in the morning's "Also
     pressing"): its markup dropped, cut at its first aside, and at a word under ``limit``."""
-    text = re.sub(r"\s*⚠\s*", " ", re.sub(r"\*\*|`", "", str(title))).strip()
-    text = re.sub(r"^(?:[a-z]|\d{1,2})[.)]\s+(?=\S)", "", text)  # "b. READY: ..." (a lettered list line)
-    text = re.split(r"\s+\(|\s+·\s+|(?<=.{12}[.!?])\s", text, maxsplit=1)[0].strip()
-    text = re.sub(r"\s+", " ", text)
-    if len(text) > limit:
-        text = text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
-    return text
+    from thirties_core.titles import title_of  # one headline logic for the chat and the app (11-06)
+    return title_of(title, limit)
 
 
 def _stem_words(text: str) -> set:
@@ -1757,6 +1759,20 @@ class AssistantTools(KindTools):
             writer.submit({"op": "move", "note_id": task.parent_note_id, "title": task.title, "section": "",
                            "open_only": True})
 
+    def set_item_note(self, item: str = "", note: str = "", **_: Any) -> str:
+        """A description the user gives an item (11-06): in Thirties' records, by the item's id when it's on a list
+        (so it follows the item), else by its wording."""
+        from thirties_core.titles import ItemNotes, title_of
+        if self._db is None:
+            raise ToolError("Notes can't be kept here.")
+        task = self._exact_task(str(item)) or next((t for t in self.s.tasks if t.id == str(item)), None)
+        span = next((s for s in self.pt.day_plan.spans if s.id == str(item) or s.title.strip().lower()
+                     == str(item).strip().lower()), None)
+        title = task.title if task is not None else (span.title if span is not None else str(item))
+        ItemNotes(self._db).set(note, task.id if task is not None else (span.task_id if span is not None and
+                                                                          span.task_id else ""), title)
+        return f"Noted for {title_of(title)}." if str(note).strip() else f"Cleared the note on {title_of(title)}."
+
     def _undrop_in_joplin(self, rec: Dict[str, Any]) -> str:
         """An applied drop taken back: the item goes back to its list, where it was, open again."""
         writer = self._writer()
@@ -2143,6 +2159,7 @@ class AssistantTools(KindTools):
             "apply_rollover": self.apply_rollover,
             "place_leftover": self.place_leftover,
             "propose_leftovers": self.propose_leftovers,
+            "set_item_note": self.set_item_note,
             "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,

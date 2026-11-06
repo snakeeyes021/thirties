@@ -729,6 +729,14 @@ class PlanTools:
     ) -> str:
         if not str(title or "").strip():
             raise ToolError("The item needs a title.")
+        from thirties_core.titles import is_raw_id, resolve_raw
+        if is_raw_id(title):  # 11-06: "Thank yous" went on the plan as 31a1d3808b2c9b79: never a raw id as a title
+            known = resolve_raw(self.scheduler.state_db if self.scheduler else None, str(title),
+                                self.services.tasks if self.services is not None else [])
+            if not known:
+                raise ToolError(f"'{title}' is an item id Thirties doesn't know any more: use the item's words.")
+            task_id = task_id or str(title)
+            title = known
         try:
             cat = SpanCategory((category or "activity").lower())
         except ValueError:
@@ -1293,7 +1301,7 @@ class PlanTools:
                     continue
                 lo, hi = min(x.start_dt for x in group), max(x.end_dt for x in group)
                 lines.append(f"- {when(lo, hi)}: " + " + ".join(
-                    f"{x.title}" + ("" if (x.start_dt, x.end_dt) == (lo, hi) else f" ({when(x.start_dt, x.end_dt)})")
+                    f"{self._title(x)}" + ("" if (x.start_dt, x.end_dt) == (lo, hi) else f" ({when(x.start_dt, x.end_dt)})")
                     + f" [{', '.join(self._flags(x, upcoming_from))}] id={x.id}" for x in group)
                     + " (sharing this time: one entry)")
                 continue
@@ -1306,10 +1314,10 @@ class PlanTools:
                 group = [x for x in in_view if x.duration_minutes < 30 and not x.is_envelope and x.id not in shared
                          and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
                 lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
-                    f"{x.title}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
+                    f"{self._title(x)}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
                     for x in group) + " (short items sharing this block, in this order)")
                 continue
-            lines.append(f"- {when(s.start_dt, s.end_dt)}: {s.title} [{', '.join(self._flags(s, upcoming_from))}] "
+            lines.append(f"- {when(s.start_dt, s.end_dt)}: {self._title(s)} [{', '.join(self._flags(s, upcoming_from))}] "
                          f"id={s.id}")
         windows = self.open_windows(after=upcoming_from)
         free = "; ".join(self.describe_window(s, e) for s, e in windows) or "none"
@@ -1323,6 +1331,14 @@ class PlanTools:
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
                    + "\n".join(missed_lines(behind)) if behind else ""))
+
+    def _title(self, span) -> str:
+        """The short title the chat says (11-06): the headline of a long line, never a raw id."""
+        from thirties_core.titles import is_raw_id, resolve_raw, title_of
+        if is_raw_id(span.title):
+            return title_of(resolve_raw(self.scheduler.state_db if self.scheduler else None, span.title,
+                                        self.services.tasks if self.services is not None else []) or "an item")
+        return title_of(span.title)
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
