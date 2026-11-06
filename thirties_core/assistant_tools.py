@@ -1559,6 +1559,8 @@ class AssistantTools(KindTools):
             if rec is not None and rec.get("slot"):
                 self.before.take_off_today(rec)  # not today's any more: its slot goes
         placed, overflow = self.before.place_today([recs.get(k["title"].lower(), k) for k in new_keep])
+        for k in new_keep:
+            self._someday_in_joplin(recs.get(k["title"].lower(), k), k.get("when") == "someday")
         data["leftovers"] = {"keep": new_keep, "drop": new_drop}
         data["overflow"] = [o["title"] for o in overflow]
         self._db.set_sync_meta(self._rollover_key(), json.dumps(data))
@@ -1665,29 +1667,88 @@ class AssistantTools(KindTools):
                 return f"{rec['title']}: today, but there's no free time left for it."
         elif rec.get("slot"):
             self.before.take_off_today(rec)  # not today's any more
+        self._someday_in_joplin(rec, h == "someday")
         return f"{rec['title']}: {window['when']}."
 
     def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
-        """Dropped on the user's word: out of the pool and off the Today note. Its own list keeps it."""
+        """Applied drops (the user's word, or by themselves after their day): out of Thirties' pool, and in Joplin
+        ticked and filed in the month's Dropped note beside the Done notes, with the reason (11-06, Matt: "that is
+        the whole contract of the app"). An item with a home list is filed from there and its Today copy goes; one
+        that's only on Today is filed from Today. A mere proposal never touches Joplin."""
         from thirties_core.carry import OpenPool
+        from thirties_core.done_log import FILED_ROLES, file_dropped_op
         from thirties_core.today import TodayLinks, note_items
         titles = [i["title"] for i in items]
         if not titles or self._db is None:
             return []
-        data = OpenPool(self._db).all()
+        pool = OpenPool(self._db)
+        recs = pool.all()
         for t in titles:
-            rec = data.get(t.lower())
-            if rec is not None:
-                OpenPool(self._db).place(t, "dropped")
+            if recs.get(t.lower()) is not None:
+                pool.place(t, "dropped")
         note, writer = self._today_note(), self._writer()
-        if note is not None and writer is not None and getattr(writer, "allowed", True):
-            open_lines = {x for x, ticked in note_items(note) if not ticked}
-            for t in titles:
-                if t in open_lines:
-                    writer.submit({"op": "remove", "note_id": note["id"], "title": t})
-                    self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]
-                    TodayLinks(self._db).unlink(t)
+        if writer is None or not getattr(writer, "allowed", True):
+            return titles
+        open_today = {x for x, ticked in note_items(note) if not ticked} if note is not None else set()
+        links = TodayLinks(self._db)
+        for t in titles:
+            rec = recs.get(t.lower()) or {"title": t}
+            if rec.get("filed_key"):
+                continue  # filed already
+            link = links.home_of(t)
+            home_id = rec.get("task_id") or (link or {}).get("home_id") or ""
+            home = next((x for x in self.s.tasks if x.id == home_id and x.list_role in FILED_ROLES), None) or \
+                next((x for x in self.s.tasks if x.title.strip().lower() == t.strip().lower()
+                      and x.list_role in FILED_ROLES and not x.id.startswith("media:")), None)
+            op = None
+            if home is not None:
+                op = file_dropped_op(home.parent_note_id, home.title, home.parent_note_title or "", self._today(),
+                                     0, rec.get("why") or "")
+            elif note is not None and t in open_today:
+                op = file_dropped_op(note["id"], t, note.get("title", ""), self._today(), 0, rec.get("why") or "")
+            if op is not None:
+                status, _ = writer.submit(op)
+                if status in ("done", "queued"):
+                    pool.set(t, filed_key=op["key"])
+                    self.s.tasks = [x for x in self.s.tasks if not (home is not None and x.id == home.id)]
+            if note is not None and t in open_today and (op is None or op["note_id"] != note["id"]):
+                writer.submit({"op": "remove", "note_id": note["id"], "title": t})  # its Today copy
+                self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]
+                links.unlink(t)
         return titles
+
+    def _someday_in_joplin(self, rec: Dict[str, Any], someday: bool) -> None:
+        """Where the list already has a someday section, an item's place there follows its horizon (11-06): put
+        to someday, it moves under that section; taken off someday, it moves back to the top. No new sections."""
+        writer = self._writer()
+        task = next((t for t in self.s.tasks if rec.get("task_id") and t.id == rec["task_id"]), None)
+        if writer is None or task is None or task.list_role == "today" or bool(task.someday) == someday:
+            return
+        if someday:
+            names = [n.lower() for n in getattr(self.pt.scheduler.config.joplin, "someday_sections", [])] \
+                if self.pt.scheduler else []
+            note = next((n for n in self._joplin_notes() if n["id"] == task.parent_note_id), None)
+            from thirties_core.note_ops import _headings
+            heading = next((h for h in _headings((note or {}).get("body") or "") if h.lower() in names), None)
+            if heading is None:
+                return
+            writer.submit({"op": "move", "note_id": task.parent_note_id, "title": task.title, "section": heading,
+                           "open_only": True})
+        else:
+            writer.submit({"op": "move", "note_id": task.parent_note_id, "title": task.title, "section": "",
+                           "open_only": True})
+
+    def _undrop_in_joplin(self, rec: Dict[str, Any]) -> str:
+        """An applied drop taken back: the item goes back to its list, where it was, open again."""
+        writer = self._writer()
+        if not rec.get("filed_key") or writer is None:
+            return ""
+        status, msg = writer.submit({"op": "unfile_dropped", "key": rec["filed_key"], "title": rec["title"]})
+        if status in ("done", "queued"):
+            from thirties_core.carry import OpenPool
+            OpenPool(self._db).set(rec["title"], filed_key="")
+            return ""
+        return f"(couldn't put it back in Joplin: {msg})"
 
     def rollover_pending(self) -> bool:
         """A proposal was offered today and not yet applied or declined."""

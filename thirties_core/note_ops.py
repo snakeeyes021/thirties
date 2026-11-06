@@ -47,6 +47,8 @@ def apply(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
         return _move_many(writer, op)
     if kind in ("file_done", "unfile_done", "worked_on"):
         return _done(writer, op, occ)
+    if kind in ("file_dropped", "unfile_dropped"):
+        return _dropped(writer, op, occ)
     return False, f"gone: unknown operation {kind!r}"
 
 
@@ -156,6 +158,95 @@ def _done(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
     if ok:
         log.save_filed(op["key"], op["title"], op["note_id"], op.get("list_title") or "", held.get("section"),
                        held.get("block") or [], line, op["month"], op["day"])
+    return ok, msg
+
+
+def _anchor(body: str, text: str, occ: int) -> str:
+    """The wording of the item just before this one, at the same depth (where to put it back)."""
+    lines = body.splitlines()
+    i = ne.find_item(lines, text, occ, ticked_too=False, open_only=True)
+    if i is None:
+        return ""
+    m = ne._match(lines[i])
+    width = ne._width(m.group(1)) if m else 0
+    for j in range(i - 1, -1, -1):
+        if ne.HEADING_REGEX.match(lines[j]):
+            return FIRST  # the first item of its section
+        p = ne._match(lines[j])
+        if p and ne._width(p.group(1)) == width:
+            return p.group(2).strip()
+    return FIRST
+
+
+FIRST = "^"  # an anchor meaning "first in its section"
+
+
+def _put_after(body: str, block: List[str], anchor: str, section: Optional[str]) -> str:
+    """The block right after the item worded ``anchor`` if it's still there, else at its section's end."""
+    lines = body.splitlines()
+    if anchor == FIRST:
+        heads = [k for k, line in enumerate(lines) if ne.HEADING_REGEX.match(line)
+                 and ne.HEADING_REGEX.match(line).group(1).strip() == (section or "")]
+        at = heads[0] + 1 if heads else (0 if not section else None)
+        if at is not None:
+            lines[at:at] = block
+            return "\n".join(lines) + ("\n" if body.endswith("\n") or not body else "")
+    i = ne.find_item(lines, anchor, 0) if anchor and anchor != FIRST else None
+    if i is None:
+        heads = _headings(body)
+        sec = section if section in ([""] + heads) else ("" if heads else None)
+        return ne.insert_lines(body, block, sec)
+    j = ne.item_end(lines, i)
+    lines[j:j] = block
+    return "\n".join(lines) + ("\n" if body.endswith("\n") or not body else "")
+
+
+def _dropped(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
+    """A dropped item, filed like a done one (done_log.DROPPED_NOTE_TITLE), or put back where it was."""
+    from datetime import date
+    from thirties_core.done_log import DROPPED_NOTE_TITLE, DoneLog, done_note_id, dropped_line
+    log = DoneLog(writer.db)
+    if op["op"] == "unfile_dropped":
+        rec = log.get(op["key"])
+        if rec is None:
+            return False, "gone: Thirties has no record of dropping it."
+        note_id = done_note_id(writer.api, writer.db, rec["month"], create=False, title_tpl=DROPPED_NOTE_TITLE,
+                               key_prefix="dropped_note")
+        if note_id is None:
+            return False, "gone: the Dropped note isn't in Joplin any more."
+        anchor = writer.db.get_sync_meta(f"dropped_anchor:{rec['key']}") or ""
+
+        def take_line(body: str) -> Optional[str]:
+            taken = ne.take_item(body, rec["line"], 0)
+            return taken[0] if taken else None
+
+        def put_back(body: str) -> str:
+            return _put_after(body, ne.untick(rec["block"] or [f"- [x] {rec['title']}"]), anchor, rec["section"])
+        ok, msg = writer._edit_bodies([(note_id, take_line), (rec["source_note_id"], put_back)])
+        if ok:
+            log.set_state(rec["key"], "undropped")
+        return ok, msg
+    note_id = done_note_id(writer.api, writer.db, op["month"], title_tpl=DROPPED_NOTE_TITLE, key_prefix="dropped_note")
+    if note_id is None:
+        return False, "Couldn't make the Dropped note in Joplin."
+    line = dropped_line(date.fromisoformat(op["day"]), op["title"], op.get("list_title") or "", op.get("why") or "")
+    held: Dict[str, Any] = {}
+
+    def take(body: str) -> Optional[str]:
+        held["anchor"] = _anchor(body, op["title"], occ)
+        taken = ne.take_item(body, op["title"], occ, ticked_too=False, open_only=True)
+        if taken is None:
+            return None
+        held["block"], held["section"] = taken[1], taken[2]
+        return taken[0]
+
+    def file(body: str) -> str:  # ticked, dated, naming its list and why; what was nested under it stays under it
+        return ne.insert_lines(body, [f"- [x] {line}"] + held["block"][1:], None)
+    ok, msg = writer._edit_bodies([(op["note_id"], take), (note_id, file)])
+    if ok:
+        log.save_filed(op["key"], op["title"], op["note_id"], op.get("list_title") or "", held.get("section"),
+                       held.get("block") or [], line, op["month"], op["day"], state="dropped")
+        writer.db.set_sync_meta(f"dropped_anchor:{op['key']}", held.get("anchor") or "")
     return ok, msg
 
 

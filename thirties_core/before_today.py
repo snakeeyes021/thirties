@@ -103,8 +103,14 @@ class BeforeToday:
         day = self._today()
         pool = OpenPool(self.db)
         pool.apply_drops(day)
+        try:
+            self.reconcile()
+        except Exception:
+            pass
         keep, drop, archive = [], [], {}
         for rec in pool.all().values():
+            if rec.get("horizon") == "gone":
+                continue
             row = {"title": rec["title"], "why": rec.get("why") or "", "when": rec.get("when") or "this week",
                    "at": None}
             if rec.get("horizon") == DROPPED:
@@ -147,12 +153,18 @@ class BeforeToday:
             return f"{title}: stays {rec.get('when') or 'as proposed'}."  # copy-madlibs T3-020
         if action == "drop":
             return self._drop(rec, by="user")
-        if action == "done":
-            out = self.a.pt.execute("log_outcome", {"event": title, "status": "done"})
+        if action == "done":  # the normal done path: ticked in Joplin, filed in the month's Done note
+            task = next((t for t in self.a.s.tasks if rec.get("task_id") and t.id == rec["task_id"]), None)
+            if task is not None and self._on_plan(rec) is None:
+                out = f"Marked {title} done " + self.a._complete_backlog_task(task, for_good=True) + "."
+            else:
+                out = self.a.pt.execute("log_outcome", {"event": title, "status": "done"})
             pool.drop([title])
             return out
-        # keep / undrop: back into Keep with a proposed slot (Python's first guess, never someday)
+        # keep / undrop: back into Keep with a proposed slot (Python's first guess, never someday); an applied
+        # drop goes back to its list in Joplin first, where it was, open again
         from thirties_core.carry import default_when
+        note = self.a._undrop_in_joplin(rec) if rec.get("horizon") == DROPPED else ""
         h = rec.get("horizon") if rec.get("horizon") not in (DROPPED, SOMEDAY, "", None) else "week"
         window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
                               self._week_start())
@@ -161,8 +173,47 @@ class BeforeToday:
         rec = pool.all()[title.strip().lower()]
         placed, overflow = self.place_today([rec])
         if placed:
-            return f"{title}: back, on today's plan."  # T3-021
-        return f"{title}: back, {window['when']}."  # T3-022
+            return f"{title}: back, on today's plan." + (" " + note if note else "")  # T3-021
+        return f"{title}: back, {window['when']}." + (" " + note if note else "")  # T3-022
+
+    def reconcile(self) -> None:
+        """Joplin is the truth (11-06), read from the notes themselves: an item ticked there is done (out of the
+        pool); one moved or reworded into another note keeps its record (found by its wording); one under a
+        someday section is someday; one gone from every note is gone here too. Only while Joplin is up and its
+        notes are read (an empty read changes nothing)."""
+        from thirties_core.carry import SOMEDAY
+        from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX
+        if not self.a._joplin_up():
+            return
+        notes = self.a._joplin_notes()
+        if not notes:
+            return
+        open_items, ticked = set(), set()
+        for n in notes:
+            for line in (n.get("body") or "").splitlines():
+                m = CHECKBOX_REGEX.match(line)
+                if m:
+                    open_items.add(m.group(2).strip().lower())
+                    continue
+                d = DONE_CHECKBOX_REGEX.match(line)
+                if d:
+                    ticked.add(d.group(2).strip().lower())
+        pool = OpenPool(self.db)
+        tasks = {t.title.strip().lower(): t for t in self.a.s.tasks if t.list_role != "today"}
+        for rec in pool.all().values():
+            if rec.get("horizon") in (DROPPED, "gone"):
+                continue
+            low = rec["title"].strip().lower()
+            if low in open_items:
+                task = tasks.get(low)
+                if task is not None and task.id != rec.get("task_id"):
+                    pool.set(rec["title"], task_id=task.id)  # moved in Joplin: the same item, its new place
+                if task is not None and task.someday and rec.get("horizon") != SOMEDAY:
+                    pool.set(rec["title"], horizon=SOMEDAY, when="someday", start="", end="")
+            elif low in ticked:
+                pool.drop([rec["title"]])  # ticked by hand: done
+            else:
+                pool.set(rec["title"], horizon="gone")  # taken out of every list by hand
 
     def _drop(self, rec: Dict[str, Any], by: str) -> str:
         self.take_off_today(rec)

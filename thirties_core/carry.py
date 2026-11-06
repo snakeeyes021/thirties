@@ -74,7 +74,8 @@ class OpenPool:
         data = _load(self.db, POOL_KEY)
         if today is not None:
             cutoff = (today - timedelta(days=POOL_DAYS)).isoformat()
-            data = {k: v for k, v in data.items() if v.get("since", "") >= cutoff and v.get("horizon") != DROPPED}
+            data = {k: v for k, v in data.items() if v.get("since", "") >= cutoff
+                    and v.get("horizon") not in (DROPPED, "gone")}
         return data
 
     def apply_drops(self, today: date) -> List[str]:
@@ -181,6 +182,10 @@ def settle(assistant, day: date) -> Dict[str, Any]:
     out = sort_leftovers(assistant, day)
     if db is not None:
         pool = OpenPool(db)
+        try:
+            assistant.before.reconcile()  # what the user changed in Joplin by hand comes first (11-06)
+        except Exception:
+            pass
         gone = pool.apply_drops(day)  # drops proposed on an earlier day and never touched: applied, archived
         if gone:
             try:

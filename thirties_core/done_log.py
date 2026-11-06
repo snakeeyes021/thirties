@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 DONE_NOTEBOOK = "Thirties"
 DONE_NOTE_TITLE = "Done {month}"   # month as 2026-10: the notes sort in order
+# Dropped items (11-06, Matt: "tick off and put in the proper archive list in joplin dropped items") go the same
+# way as done ones, into their own month's note beside the Done notes: "- [x] 2026-11-06: Watch the comet
+# (Errands/Admin) · dropped: the night is gone". Undrop moves it back, to the section and place it came from.
+DROPPED_NOTE_TITLE = "Dropped {month}"
 # Where done items are filed from. Not a menu: its options are picked again and again ("go outside"), so a tick
 # there isn't "finished for good" (decision; revisit with item kinds, B2).
 FILED_ROLES = ("list", "project", "backlog", "dropbox")
@@ -169,13 +173,18 @@ def _merge_duplicates(api, db, title: str, notes: List[Dict[str, Any]]) -> Optio
     return keep["id"]
 
 
-def done_note_id(api, db, month: str, create: bool = True) -> Optional[str]:
+def dropped_line(day: date, title: str, list_title: str, why: str = "") -> str:
+    return done_line(day, title, list_title) + (f" · dropped: {why.strip()}" if why and why.strip() else " · dropped")
+
+
+def done_note_id(api, db, month: str, create: bool = True, title_tpl: str = DONE_NOTE_TITLE,
+                 key_prefix: str = "done_note") -> Optional[str]:
     """The id of the month's Done note, made (with the Thirties notebook) the first time it's needed. Joplin must
     be up. The note is marked "ignore", so it's never read as a list. It's looked for by title before one is made,
     and when Joplin has synced in a second one (two devices each made it), they're merged into the older one."""
-    key = f"done_note:{month}"
+    key = f"{key_prefix}:{month}"
     cached = db.get_sync_meta(key)
-    title = done_note_title(month)
+    title = title_tpl.format(month=month)
     cached_note = api.get_note(cached, fields="id,title") if cached else None
     if cached_note and cached_note.get("title") not in (None, title):
         cached_note = None  # merged away (renamed) on another device: find the one it went into
@@ -216,6 +225,13 @@ def file_done_op(note_id: str, title: str, list_title: str, day: date, occurrenc
     return {"op": "file_done", "note_id": note_id, "title": title, "occurrence": occurrence,
             "list_title": list_title, "day": day.isoformat(), "month": day.strftime("%Y-%m"),
             "key": filed_key(note_id, title, day.isoformat())}
+
+
+def file_dropped_op(note_id: str, title: str, list_title: str, day: date, occurrence: int = 0,
+                    why: str = "") -> Dict[str, Any]:
+    return {"op": "file_dropped", "note_id": note_id, "title": title, "occurrence": occurrence,
+            "list_title": list_title, "day": day.isoformat(), "month": day.strftime("%Y-%m"), "why": why,
+            "key": filed_key(note_id, title, day.isoformat() + "|dropped")}
 
 
 def worked_on_op(title: str, list_title: str, day: date) -> Dict[str, Any]:
@@ -283,6 +299,12 @@ class DoneLog:
         with self.db._get_connection() as conn:
             rows = conn.execute("SELECT * FROM done_filed WHERE state = 'filed' AND month >= ? ORDER BY day DESC, "
                                 "updated_at DESC", (since_month,)).fetchall()
+        return [self._row(r) for r in rows]
+
+    def dropped(self, since_month: str = "") -> List[Dict[str, Any]]:
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM done_filed WHERE state = 'dropped' AND month >= ? ORDER BY day DESC",
+                                (since_month,)).fetchall()
         return [self._row(r) for r in rows]
 
     def latest(self, title: str) -> Optional[Dict[str, Any]]:
@@ -419,6 +441,31 @@ class DoneLog:
                                                "note_id": rec["source_note_id"]})
                     if status in ("done", "queued"):
                         out.append(f"put {rec['title']} back on {rec['source_title']}")
+        out += self._undropped_by_hand(writer)
+        return out
+
+    def _undropped_by_hand(self, writer) -> List[str]:
+        """A line unticked (or deleted) in a Dropped note by hand: Joplin is the truth. Unticked means "keep it
+        after all": back to its list and its place, and back in Thirties' Keep."""
+        out = []
+        for month in sorted({r["month"] for r in self.dropped()}, reverse=True)[:2]:
+            note_id = self.db.get_sync_meta(f"dropped_note:{month}")
+            note = writer.api.get_note(note_id, fields="id,title,body") if note_id else None
+            if not note:
+                continue
+            open_lines = {m.group(2).strip() for m in map(CHECKBOX_REGEX.match, (note.get("body") or "").splitlines())
+                          if m}
+            for rec in self.dropped(month):
+                if rec["month"] == month and rec["line"] in open_lines:
+                    status, _ = writer.submit({"op": "unfile_dropped", "key": rec["key"], "title": rec["title"],
+                                               "note_id": rec["source_note_id"]})
+                    if status in ("done", "queued"):
+                        from thirties_core.carry import OpenPool, resolve_when
+                        from datetime import date as _date
+                        OpenPool(self.db).set(rec["title"], horizon="week", pending_drop=False, dropped_on="",
+                                              dropped_by="", placed_by="user", filed_key="",
+                                              **resolve_when("this week", _date.today()))
+                        out.append(f"put {rec['title']} back on {rec['source_title']} (unticked in Dropped)")
         return out
 
 
@@ -430,4 +477,5 @@ def clear_completed(db, task_id: str) -> None:
 
 __all__ = ["DoneLog", "MERGED_SUFFIX", "merge_done_bodies", "DONE_NOTEBOOK", "DONE_NOTE_TITLE", "FILED_ROLES",
            "FILE_AFTER", "done_note_id", "done_line",
-           "file_done_op", "worked_on_op", "ticked_to_file", "clear_completed", "filed_key"]
+           "file_done_op", "worked_on_op", "ticked_to_file", "clear_completed", "filed_key", "file_dropped_op",
+           "dropped_line", "DROPPED_NOTE_TITLE"]
