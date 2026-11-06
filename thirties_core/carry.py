@@ -110,7 +110,9 @@ class OpenPool:
         for item in items:
             key = item["title"].strip().lower()
             old = data.get(key)
-            rec = {"title": item["title"].strip(), "task_id": item.get("task_id") or "",
+            if old and old.get("horizon") == DROPPED and not item.get("undrop"):
+                continue  # dropped stays dropped (the archive) unless the user brings it back
+            rec = {**(old or {}), "title": item["title"].strip(), "task_id": item.get("task_id") or "",
                    "since": (old or {}).get("since") or since.isoformat(),
                    "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
             rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop", "proposed_on", "slot")
@@ -488,11 +490,14 @@ def proposal_lines(keep: List[Dict[str, str]], drop: List[Dict[str, str]], short
 def notice_text(kept: int, on_today: int, drops: int, overflow: List[str]) -> str:
     """The morning's word on the leftovers when no model writes it (copy-madlibs T3-023 to T3-025): what was
     done, not a question; the one question is only for what doesn't fit today."""
-    if not kept and not drops:
+    if not kept and not drops and not overflow:
         return ""
-    out = f"Kept {kept} from before ({on_today} on today's plan)"
-    out += f", and I'd drop {drops}" if drops else ""
-    out += ": see Before today."
+    out = ""
+    if kept or drops:
+        out = f"Kept {kept} from before ({on_today} on today's plan)"
+        out += f", and I'd drop {drops}" if drops else ""
+        out += ": see Before today."
     if overflow:
-        out += ("\nDoesn't fit today: " + ", ".join(overflow) + ". Drop, move to another day, or squeeze in?")
+        out += (("\n" if out else "") + "Doesn't fit today: " + ", ".join(overflow)
+                + ". Drop, move to another day, or squeeze in?")
     return out

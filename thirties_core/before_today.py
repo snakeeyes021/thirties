@@ -113,6 +113,8 @@ class BeforeToday:
                 continue
             row = {"title": rec["title"], "why": rec.get("why") or "", "when": rec.get("when") or "this week",
                    "at": None}
+            if rec.get("end") and rec["end"] < day.isoformat():  # its day went by: say which, not "today"
+                row["when"] = "from " + date.fromisoformat(rec["end"]).strftime("%a")  # copy-madlibs T3-040
             if rec.get("horizon") == DROPPED:
                 if rec.get("dropped_by") == "app":
                     archive.setdefault(rec.get("dropped_on") or "", []).append(row)

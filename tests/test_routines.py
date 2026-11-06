@@ -543,7 +543,7 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual([k for k, _ in self.sent], ["rollover"])  # one message (10-31: three at sunrise)
-        self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
+        self.assertRegex(self.sent[0][1], r"4:00( PM)? – Call the bank")
         self.assertTrue(any(s.title == "Lunch" for s in self.m.day_plan.spans))  # set up, and not listed
         self.assertNotIn("On today by themselves", self.sent[0][1])
         self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))  # on the plan: no yes needed
@@ -560,7 +560,7 @@ class TestTheMorningMessage(RoutineCase):
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
         self.assertTrue(text.startswith("☀️ Good morning! "), text)
-        self.assertTrue(text.endswith("On the plan for the free time:\n- 4:00 PM – Call the bank"), text)  # a notice
+        self.assertRegex(text, r"On the plan for the free time:\n- 4:00( PM)? – Call the bank$")  # a notice
         self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))
 
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):

@@ -222,8 +222,9 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
     (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
     pt = assistant.pt
     plan = pt.day_plan
+    daily = assistant.routines.daily_titles()  # routines and meals go on by themselves every day: not news
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
-                    and s.end_dt > pt._now()), key=lambda s: s.start_dt)
+                    and s.end_dt > pt._now() and s.title.strip().lower() not in daily), key=lambda s: s.start_dt)
     lines = []
     for s in items:
         when = format_clock(s.start_dt) if pt._is_fixed(s) else format_clock(thirty_of(s.start_dt))

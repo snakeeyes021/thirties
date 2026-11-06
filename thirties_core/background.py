@@ -583,7 +583,8 @@ class BackgroundService:
         text = manager.execute_tool("rollover_proposal", {})
         if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
             text = ""
-        if ahead and text and manager.tools.assistant is not None:  # yesterday's leftovers are said once
+        if manager.tools.assistant is not None:  # again: the morning just put today's items on the plan; and
+            # yesterday's leftovers are said once
             from thirties_core.day_lists import planned_ahead_text
             offered = [re.sub(r" \(since [^)]*\)$", "", line[2:].split(" – ", 1)[-1])  # said once (11-06 replay:
                        for line in text.splitlines() if line.startswith("- ")]  # asked about, then listed again)
@@ -648,6 +649,12 @@ class BackgroundService:
         day = manager.day_plan.target_date
         if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
             return
+        try:  # not on top of the morning's message (11-06 replay: two messages a minute apart)
+            sent = self.scheduler.state_db.get_sync_meta("morning_sent_at")
+            if sent and timedelta(0) <= now - datetime.fromisoformat(sent) < timedelta(hours=3):
+                return
+        except ValueError:
+            pass
         if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
                 or assistant.proposals.pending():  # the morning's leftovers need no answer any more (11-06)
             return  # one offer at a time: the day's proposal is answered first

@@ -1458,8 +1458,21 @@ class AssistantTools(KindTools):
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         day = self._today()
         left = settle(self, day)
+        # what's on today's list with no time goes on today's schedule too (11-06: no "no time yet" any more)
+        from thirties_core.day_lists import pencilled_in
+        try:
+            listed = pencilled_in(self)
+        except Exception:
+            listed = []
+        tasks_by_title = {t.title.strip().lower(): t for t in self.s.tasks}
+        _, list_overflow = self.before.place_today([
+            {"title": t, "task_id": getattr(tasks_by_title.get(t.lower()), "id", ""), "start": day.isoformat(),
+             "end": day.isoformat()} for t in listed])
         ask = still_unknown(self, day, left["ask"])
         if not ask:
+            if list_overflow:
+                from thirties_core.carry import notice_text
+                return notice_text(0, 0, 0, [_short(o["title"]) for o in list_overflow])
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         mark_asked(self._db, ask, day)  # proposed now: never again
         week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
@@ -1471,6 +1484,7 @@ class AssistantTools(KindTools):
                          "why": "", "proposed_on": day.isoformat()})
         OpenPool(self._db).add(keep, day - timedelta(days=1))
         placed, overflow = self.before.place_today(keep)  # today's Keeps are on the schedule now
+        overflow += list_overflow
         self._db.set_sync_meta(self._rollover_key(), json.dumps({
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
             "leftovers": {"keep": keep, "drop": []}, "overflow": [o["title"] for o in overflow],
