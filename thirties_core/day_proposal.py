@@ -188,6 +188,10 @@ class DayProposal:
         from thirties_core.carry import OpenPool, weekday
         pool = OpenPool(self.db).all(day) if self.db is not None else {}  # left open on an earlier day (carry.py)
         pool_ids = {v.get("task_id"): k for k, v in pool.items() if v.get("task_id")}
+
+        def left_open(t) -> Optional[Dict[str, str]]:
+            key = t.title.strip().lower()
+            return pool.get(key) or (pool.get(pool_ids[t.id]) if t.id in pool_ids else None)
         out: Dict[str, Dict[str, Any]] = {}
         for t in self.a.s.tasks:
             title = t.title.strip()
@@ -200,16 +204,24 @@ class DayProposal:
             due_in = None
             if t.due:
                 try:
-                    due_in = (date.fromisoformat(t.due) - day).days
+                    due_in = (date.fromisoformat(t.due[:10]) - day).days
                 except ValueError:
                     due_in = None
+            left = left_open(t)
+            h = (left or {}).get("horizon", "")
+            if h in ("someday", "dropped"):
+                continue  # left open, and placed where daily plans don't reach (carry.py)
+            since = f"left open since {weekday(date.fromisoformat(left['since']))}" if left else ""
             if due_in is not None and due_in <= 7:
-                rank, why = (0, due_in), urgency_label(t)
+                rank, why = (0, due_in), urgency_label(t) + (f"; {since}" if since else "")
             elif t.urgency == "now":
-                rank, why = (1, 0), "now"
-            elif low in pool or t.id in pool_ids:  # waits for a day it fits: an option, never pushed into today
-                left = pool.get(low) or pool[pool_ids[t.id]]
-                rank, why = (2, 0), f"left open since {weekday(date.fromisoformat(left['since']))}"
+                rank, why = (1, 0), "now" + (f"; {since}" if since else "")
+            elif h == "today":  # left open, and it can't wait / is quick / is due very soon
+                rank, why = (1, 5), f"{since}; meant for today"
+            elif h == "deadline":
+                continue  # its deadline is more than a week off: pulled in when it nears
+            elif left:  # this week: an option where the free time fits, never pushed into today
+                rank, why = (2, 0), f"{since}; this week"
             elif t.list_role == "today":
                 rank, why = (2, 0), "on today's list"
             elif t.urgency == "soon":

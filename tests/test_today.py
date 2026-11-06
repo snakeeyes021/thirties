@@ -373,6 +373,45 @@ class TestMorning(TodayTestCase):
         self.assertFalse(cands["Buy stamps"].startswith("left open"))  # urgent things still come first
         self.assertNotIn("Call the bank", [s.title for s in self.t.day_plan.spans])
 
+    def test_a_left_open_item_waits_at_the_horizon_that_fits_it(self):
+        # Matt, 11-05: "a human is planning at multiple horizons when it comes to missed items"
+        from datetime import timedelta
+        from thirties_core.carry import choose_horizon
+        from thirties_core.models import TaskItem
+        from tests.fixtures import DAY
+        a = self.t.assistant
+
+        def task(title, **kw):
+            return TaskItem(id="t_" + title[:4], source_notebook="1. Tasks", title=title, is_checkbox_item=True,
+                            parent_note_title="Errands/Admin", parent_note_id="n_errands", **kw)
+        self.assertEqual(choose_horizon(a, task("Renew passport", urgency="now"), "Renew passport", DAY), "today")
+        self.assertEqual(choose_horizon(a, task("Pay the bill", due=(DAY + timedelta(days=1)).isoformat()),
+                                        "Pay the bill", DAY), "today")  # due very soon
+        self.assertEqual(choose_horizon(a, task("Text Sam"), "Text Sam", DAY, said_minutes=5), "today")  # quick
+        self.assertEqual(choose_horizon(a, task("File taxes", due=(DAY + timedelta(days=20)).isoformat()),
+                                        "File taxes", DAY), "deadline")
+        self.assertEqual(choose_horizon(a, task("Learn the harp", someday=True), "Learn the harp", DAY), "someday")
+        self.assertEqual(choose_horizon(a, task("Clean the garage"), "Clean the garage", DAY), "week")  # unsure
+        self.assertEqual(choose_horizon(a, None, "Jon podcast", DAY), "week")
+
+    def test_the_day_draws_from_the_pool_by_horizon(self):
+        from thirties_core.carry import OpenPool
+        from tests.fixtures import DAY
+        self.t.assistant.start_the_day()
+        out = self.t.execute("rollover_proposal", {})
+        self.assertIn("Whatever wasn't done waits on its list, to come back this week: Call the bank, Clip cat nails",
+                      out)
+        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
+        self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))
+        cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertNotIn("Call the bank", cands)  # someday: not in daily plans unless asked
+        self.t.execute("place_leftover", {"item": "call the bank", "horizon": "today"})
+        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertTrue(cands["Call the bank"].endswith("meant for today"), cands)
+        OpenPool(self.sched.state_db).add([{"title": "Call the bank", "horizon": "week"}], DAY)
+        self.assertEqual(OpenPool(self.sched.state_db).all()["call the bank"]["horizon"], "today")  # the user's word
+
     def test_things_that_never_roll_simply_end(self):
         self.yesterday("Lunch", "12:00 PM")                     # a meal
         self.yesterday("Dentist", "3:00 PM", fixed=True)         # fixed to its time

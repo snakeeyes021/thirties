@@ -14,11 +14,20 @@ The rules, applied once a day when the day is built (after the user's first repl
 3. A one-off to-do that's on a list (its home list, or the Today note) and has no outcome is asked about once,
    in one short batched question in the morning message ("Did any of these get done: A, B, C?"). Never per
    item, never before the user is up, never again for the same item: the answer, or no answer, settles it.
-4. Not done (or no answer): it goes into the open-items pool, not into today. It stays on its own list in
-   Joplin and leaves the Today note (an item with no other list stays there: nothing is ever lost). When the day
-   is proposed, a pool item is one of the options ("left open since Tuesday"), after anything due or urgent, and
-   it's proposed only if it fits the free time; otherwise it waits. It leaves the pool once it's done, planned,
-   or two weeks old (it's still on its list).
+4. Not done (or no answer): it goes into the open-items pool, not into today, at the horizon that fits it
+   (Matt, 11-05: "a human is planning at multiple horizons"). It stays on its own list in Joplin and leaves the
+   Today note (an item with no other list stays there: nothing is ever lost). The horizon, from what the item
+   already carries, first match wins:
+   - today: it can't wait (urgency "now", or its horizon is today/tomorrow), it's due today or tomorrow, or
+     it's quick (15 minutes or less, by what the user said it takes);
+   - by its deadline: it has a due date further off; it's pulled in once the deadline is a week away;
+   - someday: the user put it at "someday" (or a someday section, or a pick-from menu list);
+   - this week: everything else. When unsure, this week, never today.
+   Recurring things (routine steps, meals, anchors) never enter the pool: a missed one skips to its next turn.
+   Dropped: only when the user says so (place_leftover). The user can move any item (place_leftover).
+   The daily proposal draws from the pool by fit: today's first (after anything due or urgent), then this
+   week's where free time fits, then deadline items as their day nears; never someday or dropped ones. An
+   item leaves the pool once it's done, or after two weeks (it's still on its list).
 5. The Today note holds today's plan only.
 """
 
@@ -28,7 +37,12 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
-POOL_KEY = "open_pool"          # {title lower: {"title", "task_id", "since"}}
+POOL_KEY = "open_pool"          # {title lower: {"title", "task_id", "since", "horizon", "due"}}
+TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED = "today", "week", "deadline", "someday", "dropped"
+POOL_HORIZONS = (TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED)
+SAID = {TODAY: "today", WEEK: "this week", DEADLINE: "by its deadline", SOMEDAY: "someday", DROPPED: "dropped"}
+QUICK_MINUTES = 15
+DEADLINE_PULL_DAYS = 7
 ASKED_KEY = "status_asked"      # {title lower: day asked}: never asked twice
 POOL_DAYS = 14
 ASKED_DAYS = 60
@@ -62,12 +76,31 @@ class OpenPool:
         return data
 
     def add(self, items: Iterable[Dict[str, str]], since: date) -> None:
+        """New items come in at their horizon; an item already waiting keeps its first day and, if the user
+        placed it, their horizon."""
         data = self.all(since)
         for item in items:
             key = item["title"].strip().lower()
-            data.setdefault(key, {"title": item["title"].strip(), "task_id": item.get("task_id") or "",
-                                  "since": since.isoformat()})
+            old = data.get(key)
+            rec = {"title": item["title"].strip(), "task_id": item.get("task_id") or "",
+                   "since": (old or {}).get("since") or since.isoformat(),
+                   "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
+            if old and old.get("placed_by") == "user":
+                rec["horizon"], rec["placed_by"] = old.get("horizon", WEEK), "user"
+            data[key] = rec
         _save(self.db, POOL_KEY, data)
+
+    def place(self, title: str, horizon: str) -> Optional[Dict[str, str]]:
+        """The user moved it: their word stands until it's done."""
+        data = _load(self.db, POOL_KEY)
+        key = title.strip().lower()
+        rec = data.get(key) or next((v for k, v in data.items() if key in k), None)
+        if rec is None:
+            return None
+        rec["horizon"], rec["placed_by"] = horizon, "user"
+        data[rec["title"].strip().lower()] = rec
+        _save(self.db, POOL_KEY, data)
+        return rec
 
     def drop(self, titles: Iterable[str]) -> None:
         data = _load(self.db, POOL_KEY)
@@ -180,8 +213,9 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
 
     def rollable_item(title: str, low: str) -> Dict[str, str]:
         home = home_of(title)
-        task = listed.get(low)
-        return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else "")}
+        task = tasks.get((home or {}).get("home_id", "")) or listed.get(low)
+        return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else ""),
+                "horizon": choose_horizon(assistant, task, title, day), "due": (task.due or "")[:10] if task else ""}
 
     # yesterday's plan: what ended with no outcome
     for s in unmarked:
@@ -239,6 +273,48 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         pool_items.append(rollable_item(title, low))
     return {"ask": ask, "off_today": off_today, "ended": ended,
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items}
+
+
+def where_text(items: List[Dict[str, str]], short=lambda t: t) -> str:
+    """Where each not-done item would wait, in a line, grouped by horizon."""
+    groups: Dict[str, List[str]] = {}
+    for i in items:
+        h = i.get("horizon") or WEEK
+        label = SAID[h] if h != DEADLINE or not i.get("due") else f"by {date.fromisoformat(i['due']).strftime('%a %b %-d')}"
+        groups.setdefault(label, []).append(short(i["title"]))
+    return "; ".join(f"{label}: {', '.join(ts)}" for label, ts in groups.items())
+
+
+def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optional[int] = None) -> str:
+    """The pool horizon for an item not done (rules above, first match wins), from what it already carries:
+    its urgency and horizon, its due date, its length as the user gave it, its list."""
+    due = None
+    if task is not None and task.due:
+        try:
+            due = date.fromisoformat(task.due[:10])
+        except ValueError:
+            due = None
+    horizon = ""
+    if task is not None:
+        try:
+            from thirties_core.horizons import HorizonPlanner
+            horizon = HorizonPlanner(assistant.pt).horizon_of(task) or ""
+        except Exception:
+            horizon = ""
+    minutes = said_minutes
+    if minutes is None:
+        try:
+            minutes = assistant.lasting_facts(task.title if task is not None else title).minutes
+        except Exception:
+            minutes = None
+    if task is not None and (task.someday or task.list_role in ("menu", "backlog")) or horizon == "someday":
+        return SOMEDAY
+    if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
+            or (minutes is not None and 0 < minutes <= QUICK_MINUTES):
+        return TODAY
+    if due is not None:
+        return DEADLINE
+    return WEEK
 
 
 def weekday(day: Optional[date]) -> str:

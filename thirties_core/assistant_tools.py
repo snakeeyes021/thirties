@@ -205,6 +205,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "place_leftover",
+        "description": "Move an item left open on an earlier day to another horizon, as the user says: today, week "
+                       "(this week, when there's room), deadline (pulled in as its due date nears), someday (never "
+                       "offered unless asked), or dropped (let go; it stays on its list).",
+        "parameters": {"item": "The item's title.", "horizon": "today, week, deadline, someday or dropped."},
+        "required": ["item", "horizon"],
+    },
+    {
         "name": "apply_rollover",
         "description": "Close the morning's question about yesterday's items. It moves nothing: record what got "
                        "done with log_outcome.",
@@ -1420,7 +1428,7 @@ class AssistantTools(KindTools):
         one-off to-dos with no outcome are asked about once, in one short question, and whatever wasn't done
         waits on its list for a day it fits (the day's proposal offers it)."""
         import json
-        from thirties_core.carry import done_question, mark_asked, settle, still_unknown
+        from thirties_core.carry import done_question, mark_asked, settle, still_unknown, where_text
         ask = still_unknown(self, self._today(), settle(self, self._today())["ask"]) if self._db is not None else []
         if ask:
             mark_asked(self._db, ask, self._today())  # asked now: never again
@@ -1429,8 +1437,11 @@ class AssistantTools(KindTools):
         self._db.set_sync_meta(self._rollover_key(), json.dumps({
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
             "offered_at": self.pt._now().isoformat()}))
-        return (done_question([_short(t) for t in ask]) + " (Whatever wasn't done waits on its list; I'll offer it "
-                "on a day it fits.)")
+        left = settle(self, self._today())
+        asked = {t.lower() for t in ask}
+        where = where_text([i for i in left.get("pool_items", []) if i["title"].lower() in asked], _short)
+        return (done_question([_short(t) for t in ask]) + " Whatever wasn't done waits on its list, " +
+                f"to come back {where}." if where else done_question([_short(t) for t in ask]))
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
@@ -1495,6 +1506,17 @@ class AssistantTools(KindTools):
                          + ". Want me to put " + ("it" if len(homeless) == 1 else "them") + " on one of your lists, "
                          "or let " + ("it" if len(homeless) == 1 else "them") + " go?")
         return "\n".join(parts) or "Today's list stays as it is."
+
+    def place_leftover(self, item: str = "", horizon: str = "", **_: Any) -> str:
+        from thirties_core.carry import POOL_HORIZONS, SAID, OpenPool
+        h = {"this week": "week", "later": "week", "drop": "dropped", "backlog": "someday"}.get(
+            str(horizon).strip().lower(), str(horizon).strip().lower())
+        if h not in POOL_HORIZONS:
+            raise ToolError("horizon must be today, week, deadline, someday or dropped.")
+        rec = OpenPool(self._db).place(str(item), h) if self._db is not None else None
+        if rec is None:
+            raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
+        return f"{rec['title']}: {SAID[h]}" + (" (it stays on its list)." if h == "dropped" else ".")
 
     def rollover_pending(self) -> bool:
         """A proposal was offered today and not yet applied or declined."""
@@ -1868,6 +1890,7 @@ class AssistantTools(KindTools):
             "get_weather": self.get_weather,
             "rollover_proposal": self.rollover_proposal,
             "apply_rollover": self.apply_rollover,
+            "place_leftover": self.place_leftover,
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,
