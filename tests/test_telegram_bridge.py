@@ -287,5 +287,28 @@ class TestBridgeBursts(BridgeCase):
         self.assertIn("\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
 
 
+    def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):
+        # 11-05: "a simple yes or thumbs up will do", and a 👍 reaction on the message counts too
+        import json
+        from tests.test_conversation import reply
+        from thirties_core.telegram_bridge import YES_TARGETS_KEY
+        self.scheduler.state_db.set_sync_meta(YES_TARGETS_KEY, json.dumps([[1001, 77]]))
+        self.mock_inference.responses = [reply("Done.")]
+        thumbs = {"chat": {"id": 1001}, "message_id": 77, "new_reaction": [{"type": "emoji", "emoji": "👍"}]}
+        self.bridge.handle_updates([{"update_id": 3, "message_reaction": thumbs},
+                                    {"update_id": 4, "message_reaction": {**thumbs, "message_id": 12}}])
+        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
+        self.assertEqual(users[-1], "👍")
+        self.assertEqual(len(self.mock_inference.call_history), 1)  # a 👍 on any other message is just a 👍
+
+
+class TestPlainLists(unittest.TestCase):
+
+    def test_telegram_lists_have_no_bullets(self):
+        from thirties_core.telegram_bridge import plain_lists
+        self.assertEqual(plain_lists("Keep:\n- Thank yous - today\n  - nested\n*Bold* stays\n```\n- code\n```"),
+                         "Keep:\nThank yous - today\n  nested\n*Bold* stays\n```\n- code\n```")
+
+
 if __name__ == "__main__":
     unittest.main()

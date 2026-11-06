@@ -65,6 +65,22 @@ def telegram_html(text: str) -> str:
     return "".join(out)
 
 
+
+THUMBS_UP = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"}
+YES_TARGETS_KEY = "telegram_yes_targets"  # [[chat_id, message_id], ...]: messages a 👍 answers with "yes"
+
+
+def plain_lists(text: str) -> str:
+    """Lists in Telegram are one item per line, with no "- " bullets (11-05, Matt: emphatic). Code blocks are left
+    as they are."""
+    import re as _re
+    out, code = [], False
+    for line in str(text).split("\n"):
+        if line.lstrip().startswith("```"):
+            code = not code
+        out.append(line if code else _re.sub(r"^(\s*)[-•*]\s+(?=\S)", r"\1", line))
+    return "\n".join(out)
+
 class TelegramClient:
     """Minimal, dependency-free Telegram Bot API client using urllib.request."""
 
@@ -72,6 +88,7 @@ class TelegramClient:
         self.bot_token = bot_token.strip()
         self.api_url = f"{base_url.rstrip('/')}/bot{self.bot_token}"
         self.undelivered: List[tuple] = []  # (chat_id, text, when, expires, parse_mode) that never got through
+        self.sent_ids: List[tuple] = []  # (chat_id, message_id) of what was sent, newest last (reactions)
 
     def _request(self, method: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
         url = f"{self.api_url}/{method}"
@@ -96,7 +113,9 @@ class TelegramClient:
 
     def get_updates(self, offset: Optional[int] = None, timeout: int = 25) -> List[Dict[str, Any]]:
         """Fetch new updates via long-polling."""
-        payload: Dict[str, Any] = {"timeout": timeout}
+        payload: Dict[str, Any] = {"timeout": timeout,
+                                   # a 👍 on the morning proposal answers it (11-05)
+                                   "allowed_updates": ["message", "edited_message", "message_reaction"]}
         if offset is not None:
             payload["offset"] = offset
         try:
@@ -135,6 +154,7 @@ class TelegramClient:
         tried again; one that still fails is kept in `undelivered`, and the bridge sends it once Telegram answers
         again (a reply reached the app but not the phone, 10-24 9:18), unless it ``expires`` first."""
         success = True
+        text = plain_lists(text)
         for chunk in self._chunk_text(text, max_len=4000):
             sent = self._send_chunk(chat_id, chunk, parse_mode)
             if sent is False:
@@ -153,7 +173,11 @@ class TelegramClient:
             payload["parse_mode"] = parse_mode
         for attempt, wait in enumerate((*self.RETRY_WAITS, None)):
             try:
-                if self._request("sendMessage", payload, timeout=15.0).get("ok"):
+                res = self._request("sendMessage", payload, timeout=15.0)
+                if res.get("ok"):
+                    mid = (res.get("result") or {}).get("message_id")
+                    if mid is not None:
+                        self.sent_ids.append((chat_id, mid))
                     return True
                 raise urllib.error.HTTPError(url="", code=400, msg="Telegram API error", hdrs={}, fp=None)  # type: ignore
             except urllib.error.HTTPError as e:
@@ -516,6 +540,15 @@ class ThirtiesTelegramBridge:
         )
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
+    def _asks_yes(self, chat_id, message_id) -> bool:
+        db = getattr(self.scheduler, "state_db", None)
+        if db is None or message_id is None:
+            return False
+        try:
+            return [chat_id, message_id] in json.loads(db.get_sync_meta(YES_TARGETS_KEY) or "[]")
+        except ValueError:
+            return False
+
     def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown") -> None:
         """Send a message to the paired phone(s). A notice that ``expires`` is dropped if it can't go before then."""
         for chat_id in list(self.allowed_chat_ids):
@@ -541,6 +574,13 @@ class ThirtiesTelegramBridge:
         """Answer a batch of updates: commands one by one, and each chat's plain messages as one burst."""
         bursts: Dict[int, List[str]] = {}
         for u in updates:
+            reaction = u.get("message_reaction")
+            if reaction:  # a 👍 on a message that asks for a yes (the morning proposal) is that yes
+                chat_id = (reaction.get("chat") or {}).get("id")
+                emojis = {r.get("emoji") for r in reaction.get("new_reaction") or [] if r.get("type") == "emoji"}
+                if chat_id is not None and emojis & THUMBS_UP and self._asks_yes(chat_id, reaction.get("message_id")):
+                    bursts.setdefault(chat_id, []).append("👍")
+                continue
             msg = u.get("message") or u.get("edited_message")
             if not msg:
                 continue

@@ -38,6 +38,7 @@ DesktopNotify = Callable[[str, str, str], None]  # (title, body, kind) -> None
 
 
 LEVELS = ("off", "light", "medium", "heavy")
+YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
 REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
@@ -157,10 +158,15 @@ class BackgroundService:
             except Exception as e:
                 logger.warning("Desktop notification failed: %s", e)
         if self.bridge is not None:
+            before = len(self.bridge.client.sent_ids)
             if expires is None:
                 self.bridge.broadcast(telegram_text or text)
             else:
                 self.bridge.broadcast(telegram_text or text, expires=expires)
+            if kind in YES_KINDS:  # a 👍 on this message is a yes (telegram_bridge.handle_updates)
+                from thirties_core.telegram_bridge import YES_TARGETS_KEY
+                ids = [list(x) for x in self.bridge.client.sent_ids[before:]]
+                self.scheduler.state_db.set_sync_meta(YES_TARGETS_KEY, json.dumps(ids))
         if to_conversation:  # after delivery: this waits for a turn that's under way (Telegram) to finish
             try:
                 manager = self.manager()
