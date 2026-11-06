@@ -276,13 +276,20 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
 
 
 def where_text(items: List[Dict[str, str]], short=lambda t: t) -> str:
-    """Where each not-done item would wait, in a line, grouped by horizon."""
-    groups: Dict[str, List[str]] = {}
-    for i in items:
+    """Where the not-done ones wait, in a sentence: this week unless said otherwise, naming only the others."""
+    if not items:
+        return ""
+
+    def label(i) -> str:
         h = i.get("horizon") or WEEK
-        label = SAID[h] if h != DEADLINE or not i.get("due") else f"by {date.fromisoformat(i['due']).strftime('%a %b %-d')}"
-        groups.setdefault(label, []).append(short(i["title"]))
-    return "; ".join(f"{label}: {', '.join(ts)}" for label, ts in groups.items())
+        if h == DEADLINE and i.get("due"):
+            return f"by {date.fromisoformat(i['due']).strftime('%a %b %-d')}"
+        return SAID[h]
+    others = [f"{short(i['title'])} ({label(i)})" for i in items if (i.get("horizon") or WEEK) != WEEK]
+    if len(others) == len(items):
+        return "Whatever wasn't done waits on its list: " + ", ".join(others) + "."
+    return "Whatever wasn't done waits on its list for this week" + (
+        ", except " + ", ".join(others) if others else "") + "."
 
 
 def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optional[int] = None) -> str:

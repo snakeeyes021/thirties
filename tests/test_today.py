@@ -399,8 +399,7 @@ class TestMorning(TodayTestCase):
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Whatever wasn't done waits on its list, to come back this week: Call the bank, Clip cat nails",
-                      out)
+        self.assertIn("Whatever wasn't done waits on its list for this week.", out)
         cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
         self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))

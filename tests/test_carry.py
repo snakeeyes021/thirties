@@ -42,3 +42,16 @@ class TestShort(unittest.TestCase):
 
     def test_a_lettered_line_keeps_its_words(self):
         self.assertEqual(_short("b. **Hotfix for stable**. It only adds 51 to the list."), "Hotfix for stable.")
+
+
+class TestWhere(unittest.TestCase):
+
+    def test_only_the_exceptions_to_this_week_are_named(self):
+        from thirties_core.carry import where_text
+        self.assertEqual(where_text([{"title": "A", "horizon": "week"}, {"title": "B", "horizon": "today"},
+                                     {"title": "C", "horizon": "deadline", "due": "2026-11-20"}]),
+                         "Whatever wasn't done waits on its list for this week, except B (today), C (by Fri Nov 20).")
+        self.assertEqual(where_text([{"title": "A", "horizon": "week"}]),
+                         "Whatever wasn't done waits on its list for this week.")
+        self.assertEqual(where_text([{"title": "B", "horizon": "someday"}]),
+                         "Whatever wasn't done waits on its list: B (someday).")

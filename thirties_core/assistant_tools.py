@@ -1440,8 +1440,7 @@ class AssistantTools(KindTools):
         left = settle(self, self._today())
         asked = {t.lower() for t in ask}
         where = where_text([i for i in left.get("pool_items", []) if i["title"].lower() in asked], _short)
-        return (done_question([_short(t) for t in ask]) + " Whatever wasn't done waits on its list, " +
-                f"to come back {where}." if where else done_question([_short(t) for t in ask]))
+        return done_question([_short(t) for t in ask]) + (" " + where if where else "")
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
