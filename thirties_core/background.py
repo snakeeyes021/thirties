@@ -517,9 +517,9 @@ class BackgroundService:
         self.send(hello_text(titles), "morning", now=now)
 
     def _plate(self, plan) -> List[str]:
-        """What's on the plate today, without times and without changing anything: fixed calendar events and
-        things planned ahead, then yesterday's leftovers and today's list as they'd carry over (carry.py), never
-        routines, meals or anchors."""
+        """What's on the plate today, without times and without changing anything: what's already on today's plan
+        (fixed calendar events, things planned ahead) and list items due today. Never routines, meals or anchors,
+        and never yesterday's leftovers: they aren't today's by default (carry.py)."""
         from thirties_core.assistant_tools import _short
         assistant = self.manager().tools.assistant
         daily = assistant.routines.daily_titles() if assistant is not None else set()
@@ -527,14 +527,9 @@ class BackgroundService:
                if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
                and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
         if assistant is not None:
-            try:
-                from thirties_core.carry import DROP, CarryLedger
-                left = [p["title"] for p in assistant.rollover_plan()] + assistant.today_carryover()["keep"]
-                gone = {t.lower() for t in CarryLedger(self.scheduler.state_db).sort(
-                    left, plan.target_date, save=False)[DROP]}
-                out += [t for t in left if t.lower() not in gone]
-            except Exception as e:
-                logger.warning("Listing the day's items for the first message failed: %s", e)
+            day = plan.target_date.isoformat()
+            out += [t.title for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
+                    and t.title.strip().lower() not in daily]
         return [_short(t) for t in out]
 
     def rollover(self, now: datetime) -> None:

@@ -392,13 +392,15 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         first = self.sent[0][1]
         self.assertTrue(first.startswith("☀️ Good morning! Let me know when you're up and I'll put your schedule "
                                          "together."), first)
-        self.assertIn("On the plate today:\n- PT\n- Dentist\n- Call\n- Taxes", first)  # yesterday's too; no times
+        self.assertIn("On the plate today:\n- PT\n- Dentist\n- Call", first)  # no times
+        self.assertNotIn("Taxes", first)  # yesterday's leftover isn't today's by default (carry.py)
         self.assertNotRegex(first, r"\d:\d\d")
         self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built
         from tests.fixtures import mark_up
         mark_up(self.sched.state_db, at("10:22"))  # the reply
         self.run_until("10:30", start="10:25")
-        self.assertIn("rollover", [k for k, _ in self.sent])  # the day is built after it
+        from tests.fixtures import DAY as _DAY
+        self.assertTrue(self.sched.state_db.get_sync_meta(f"rollover_offered:{_DAY.isoformat()}"))  # built after it
         self.assertEqual([k for k, _ in self.sent].count("morning"), 1)
 
     def test_the_first_message_at_sunrise_and_without_the_items(self):
@@ -417,36 +419,37 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
 
 
 class TestRollover(unittest.TestCase):
+    """Yesterday's unmarked items (carry.py; Matt, 11-05): a one-off on a list is asked about once, in one
+    question; nothing is moved into today; things on no list simply end."""
 
     def setUp(self):
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
         y = lambda hhmm: at(hhmm, -1)
-        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", y("17:00"), y("18:00"), SpanCategory.TASK))
+        from thirties_core.models import TaskItem
+        self.tasks = [TaskItem(id="t_tax", source_notebook="1. Tasks", title="Taxes", is_checkbox_item=True,
+                               parent_note_title="Errands/Admin", parent_note_id="n_errands")]
+        self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", y("17:00"), y("18:00"), SpanCategory.TASK,
+                                                  task_id="t_tax"))
         self.sched.state_db.upsert_span(EventSpan("ml", "Email Mom", y("19:00"), y("19:30"), SpanCategory.ACTIVITY))
         self.sched.state_db.upsert_span(EventSpan("dn", "Dishes", y("20:00"), y("20:30"), SpanCategory.ACTIVITY))
         from thirties_core.conversation import ConversationManager
         plan, pending = self.sched.build_day_plan(DAY)
-        self.m = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(), active_notes=[])
+        self.m = ConversationManager(plan, list(self.tasks), pending, self.sched, inference_engine=MockInferenceEngine(),
+                                     active_notes=[])
 
-    def test_proposal_keeps_times_that_are_free_then_applies_in_one_go(self):
+    def test_one_question_and_nothing_moved_into_today(self):
         text = self.m.execute_tool("rollover_proposal", {})
-        self.assertIn("- 5:00 PM – Taxes", text)  # same time today: it's free
-        self.assertIn("- 7:00 PM – Email Mom", text)
-        out = self.m.execute_tool("apply_rollover", {"skip": "dishes"})
-        self.assertIn("Rolled into today", out)
-        self.assertIn("Back to your lists: Dishes.", out)
-        today = {s.title: s for s in self.sched.build_day_plan(DAY)[0].spans}
-        self.assertEqual(today["Taxes"].start_dt, at("17:00"))
-        yesterday = {s.title: s.status.value for s in self.sched.build_day_plan(DAY - timedelta(days=1))[0].spans
-                     if s.title in ("Taxes", "Dishes")}
-        self.assertEqual(yesterday, {"Taxes": "skipped", "Dishes": "skipped"})
-        self.assertIn("already rolled over", self.m.execute_tool("apply_rollover", {}))
+        self.assertTrue(text.startswith("Did Taxes get done yesterday?"), text)  # Email Mom, Dishes: on no list
+        self.assertNotIn("Email Mom", text)
+        out = self.m.execute_tool("apply_rollover", {})
+        self.assertIn("Nothing rolls over by itself", out)
+        self.assertNotIn("Taxes", [s.title for s in self.sched.build_day_plan(DAY)[0].spans])
 
     def test_offered_once_after_waking(self):
         joplin = MagicMock()
-        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = list(self.tasks), []
         sent = []
         svc = BackgroundService(self.sched.config, lambda t, b, k: sent.append((k, b)), scheduler=self.sched,
                                 joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
@@ -459,4 +462,5 @@ class TestRollover(unittest.TestCase):
         svc.rollover(at("08:15"))
         svc.rollover(at("08:30"))
         self.assertEqual([k for k, _ in sent], ["rollover"])
-        self.assertTrue(sent[0][1].startswith("☀️ Good morning! From yesterday, still open:"))
+        self.assertTrue(sent[0][1].startswith("☀️ Good morning! "), sent[0][1])
+        self.assertIn("Did Taxes get done yesterday?", sent[0][1])

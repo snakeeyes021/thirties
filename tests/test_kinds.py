@@ -221,11 +221,11 @@ class TestTheMorningRollover(KindsTestCase):
         self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])
 
     def test_the_question_is_plain(self):
-        self.add("Clean broken glass", "9:00 PM", day=Y)
+        # carry.py (11-05): unmarked means unknown; one short question, nothing put on today
+        self.api.notes["n_today"]["body"] = "- [ ] Clean broken glass\n"
         out = self.t.execute("rollover_proposal", {})
-        self.assertTrue(out.startswith("From yesterday, still open:\n- 9:00 PM – Clean broken glass\n"), out)
-        self.assertTrue(out.endswith("Should I plan these today at those times? Say which to leave out."), out)
-        self.assertNotIn("like that", out)
+        self.assertTrue(out.startswith("Did Clean broken glass get done yesterday?"), out)
+        self.assertNotIn("today at", out)
 
 
 if __name__ == "__main__":

@@ -602,7 +602,8 @@ class TestMessages(SlmTestCase):
                                                   datetime.combine(y, _t(20), TZ), SpanCategory.TASK))
         self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
         out = self.say("yes please", {"type": "chat"})
-        self.assertIn("Rolled into today:\n- 7:00 PM – Taxes", out)
+        self.assertNotIn("Rolled into today", out)  # carry.py (11-05): nothing rolls into today by itself
+        self.assertNotIn("Taxes", [s.title for s in self.m.day_plan.spans])
 
 
 class TestFromTheMilestoneRun(SlmTestCase):
@@ -670,11 +671,12 @@ class TestFromTheDaySim(unittest.TestCase):
         from tests.fixtures import TZ
         from datetime import datetime, time as _t
         from thirties_core.models import EventSpan, SpanCategory
-        self.sched.state_db.upsert_span(EventSpan("br", "Message Brad back", datetime.combine(y, _t(21, 30), TZ),
-                                                  datetime.combine(y, _t(21, 45), TZ), SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("br", "Message Brad about a weekend trip",  # on a list: asked about
+                                                  datetime.combine(y, _t(21, 30), TZ), datetime.combine(y, _t(21, 45), TZ),
+                                                  SpanCategory.ACTIVITY, task_id="t2"))
         self.m.add_assistant_message(self.m.execute_tool("rollover_proposal", {}))
         out = self.say("yeah put that on today", {"type": "confirm"})
-        self.assertIn("Rolled into today", out)
+        self.assertNotIn("Rolled into today", out)  # nothing rolls by itself (carry.py)
         self.assertTrue(all(s.tentative for s in self.shows()))  # the invites are still unanswered
 
     def test_declining_both_invites_by_name(self):

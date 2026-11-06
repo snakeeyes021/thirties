@@ -185,6 +185,9 @@ class DayProposal:
         on_plan_ids = {s.task_id for s in plan.spans if s.task_id}
         done = self.db.completed_since(day - timedelta(days=DONE_HIDES_DAYS)) if self.db is not None else set()
         today_titles = {t.title.strip().lower() for t in self.a.s.tasks if t.list_role == "today"}
+        from thirties_core.carry import OpenPool, weekday
+        pool = OpenPool(self.db).all(day) if self.db is not None else {}  # left open on an earlier day (carry.py)
+        pool_ids = {v.get("task_id"): k for k, v in pool.items() if v.get("task_id")}
         out: Dict[str, Dict[str, Any]] = {}
         for t in self.a.s.tasks:
             title = t.title.strip()
@@ -204,6 +207,9 @@ class DayProposal:
                 rank, why = (0, due_in), urgency_label(t)
             elif t.urgency == "now":
                 rank, why = (1, 0), "now"
+            elif low in pool or t.id in pool_ids:  # waits for a day it fits: an option, never pushed into today
+                left = pool.get(low) or pool[pool_ids[t.id]]
+                rank, why = (2, 0), f"left open since {weekday(date.fromisoformat(left['since']))}"
             elif t.list_role == "today":
                 rank, why = (2, 0), "on today's list"
             elif t.urgency == "soon":
@@ -430,8 +436,9 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
 
 MORNING_FACTS = (
     "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already; "
-    "keep any question in it, folded into your one question). Name each of yesterday's items in one short line, "
-    "unless your proposal already places it. Start with \"☀️ Good morning!\". Don't list the routines or meals: "
+    "keep any question in it, folded into your one question). If it asks whether yesterday's items got done, "
+    "keep that as one short question; don't list them otherwise. Start with \"☀️ Good morning!\". Don't list the "
+    "routines or meals: "
     "they go on by themselves every day.\n---\n{facts}\n---")
 
 

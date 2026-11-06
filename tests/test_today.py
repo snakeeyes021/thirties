@@ -301,10 +301,14 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
         self.t.assistant.start_the_day()
-        self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n")
+        self.assertEqual(self.body("n_today"), "")  # routines never carry over; the bank waits on its own list
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
 
 
 class TestMorning(TodayTestCase):
+    """Yesterday's unmarked items (carry.py; Matt, 11-05): unmarked means unknown; some things never roll; a
+    one-off to-do is asked about once, in one question; not done, it waits on its list for a day it fits; the
+    Today note holds today's plan only."""
 
     def setUp(self):
         super().setUp()
@@ -315,11 +319,20 @@ class TestMorning(TodayTestCase):
         catalog.set_role("n_routine", "routine", "Morning Routine")
         catalog.set_urgency("t_stamps", "now")
         self.services.tasks = catalog.apply(self.services.tasks)
+        with self.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
+            conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
 
-    def test_routines_start_unticked_and_whats_done_leaves_today(self):
+    def yesterday(self, title, start, **extra):
+        from datetime import timedelta
+        from tests.fixtures import DAY
+        args = {"title": title, "start": start, "duration": "30 min", "day": (DAY - timedelta(days=1)).isoformat()}
+        self.t.execute("add_event", {**args, **extra})
+
+    def test_routines_start_unticked_and_leftovers_leave_today(self):
         self.t.assistant.start_the_day()
         self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] PT\n")
-        self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n- [ ] Clip cat nails\n")
+        self.assertEqual(self.body("n_today"), "- [ ] Clip cat nails\n")  # it has no other list: it stays
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # waits on its own list
         self.sched.config.joplin.reset_routines = False
         self.api.notes["n_routine"]["body"] = "- [x] Shower\n"
         self.t.assistant.start_the_day()
@@ -335,28 +348,50 @@ class TestMorning(TodayTestCase):
         self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] PT\n")
         self.assertFalse(self.t.assistant.morning_pending())
 
-    def test_without_write_back_the_rollover_still_applies(self):
-        self.t.assistant.start_the_day()
-        self.t.execute("rollover_proposal", {})
-        self.sched.config.joplin.write_back = False
-        out = self.t.execute("apply_rollover", {})
-        self.assertIn("Couldn't put Buy stamps on today's list", out)
-        self.assertEqual(self.t.execute("apply_rollover", {}), "Yesterday's items were already rolled over.")
-
-    def test_a_rolled_over_item_isnt_added_again(self):
-        # 10-31: "yes to Jon's podcast" rolled yesterday's copy into today, then add_event made a second one: the
-        # move landed in a fresh copy of today, which the duplicate guard never saw.
-        from datetime import timedelta
+    def test_unmarked_items_are_asked_about_once_in_one_question(self):
         from tests.fixtures import DAY
-        y = DAY - timedelta(days=1)
-        self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour",
-                                     "day": y.isoformat()})
-        self.t.execute("rollover_proposal", {})
-        self.assertIn("Return the library books", self.t.execute("apply_rollover", {}))
-        out = self.t.execute("add_event", {"title": "Return the library books", "start": "7:00 PM", "duration": "1 hour"})
-        self.assertIn("already planned", out)
-        today = [s for s in self.t.day_plan.spans if s.title == "Return the library books"]
-        self.assertEqual(len(today), 1)
+        self.yesterday("Buy stamps", "7:00 PM")  # planned, on a list, no outcome
+        self.t.assistant.start_the_day()
+        out = self.t.execute("rollover_proposal", {})
+        self.assertTrue(out.startswith("Did any of these get done: Buy stamps, Call the bank or Clip cat nails?"), out)
+        self.assertNotIn("Buy stamps", [s.title for s in self.t.day_plan.spans])  # not put on today
+        self.assertIn("Nothing rolls over by itself", self.t.execute("apply_rollover", {}))
+        # the next morning, still unmarked: never asked again
+        self.sched.state_db.set_sync_meta(f"leftovers:{DAY.isoformat()}", "")
+        self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
+        self.assertTrue(self.t.execute("rollover_proposal", {}).startswith("Nothing from yesterday"))
+
+    def test_not_done_waits_in_the_pool_and_is_offered_only_as_an_option(self):
+        from thirties_core.carry import OpenPool
+        from tests.fixtures import DAY
+        self.t.assistant.start_the_day()
+        self.assertIn("call the bank", OpenPool(self.sched.state_db).all(DAY))
+        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertTrue(cands["Call the bank"].startswith("left open since "), cands)
+        self.assertFalse(cands["Buy stamps"].startswith("left open"))  # urgent things still come first
+        self.assertNotIn("Call the bank", [s.title for s in self.t.day_plan.spans])
+
+    def test_things_that_never_roll_simply_end(self):
+        self.yesterday("Lunch", "12:00 PM")                     # a meal
+        self.yesterday("Dentist", "3:00 PM", fixed=True)         # fixed to its time
+        self.yesterday("Walk around the block", "8:00 PM")       # on no list: when unsure, it doesn't roll
+        self.yesterday("Thirties dev", "9:00 PM")                # time on a project
+        self.api.notes["n_today"]["body"] = ""
+        self.t.assistant.start_the_day()
+        from thirties_core.carry import settle
+        from tests.fixtures import DAY
+        out = settle(self.t.assistant, DAY)
+        self.assertEqual(out["ask"], [])
+        for title in ("Lunch", "Dentist", "Walk around the block", "Thirties dev"):
+            self.assertIn(title, out["ended"])
+        self.assertTrue(self.t.execute("rollover_proposal", {}).startswith("Nothing from yesterday"))
+
+    def test_put_on_today_today_isnt_a_leftover(self):
+        # the morning reset can run late (Joplin was closed at wake-up): what went on Today today stays
+        with self.sched.state_db._get_connection() as conn:
+            conn.execute("UPDATE today_links SET updated_at = '2099-01-01T12:00:00+00:00'")
+        self.t.assistant.start_the_day()
+        self.assertIn("Call the bank", self.body("n_today"))
 
     def test_daily_things_and_project_time_dont_carry_over(self):
         from datetime import timedelta
@@ -377,86 +412,22 @@ class TestMorning(TodayTestCase):
         set_debug_time(at("15:00"))  # five hours later
         self.assertFalse(self.t.assistant.rollover_pending())
 
-    def test_whats_recorded_done_is_never_offered_again(self):
+    def test_whats_recorded_done_is_never_asked_about(self):
         from datetime import timedelta
         from thirties_core.joplin_engine import item_id
-        self.t.assistant.start_the_day()
+        from tests.fixtures import DAY
         self.sched.state_db.record_task_completed(item_id("n_today", "Clip cat nails"), DAY - timedelta(days=1))
         self.api.up = False  # the tick never reached Joplin (Zein's text, 10-21 to 10-24)
+        self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
         self.assertNotIn("Clip cat nails", out)
         self.assertIn("Call the bank", out)
-        y = DAY - timedelta(days=1)
-        self.t.execute("add_event", {"title": "Read the text", "start": "7:00 PM", "duration": "30 min",
-                                     "day": y.isoformat()})
-        self.t.execute("add_event", {"title": "Read the text", "start": "8:00 PM", "duration": "30 min",
-                                     "day": y.isoformat()})
-        later = [s for s in self.t.plan_for(y).spans if s.title == "Read the text"][-1]
-        out = self.t.execute("log_outcome", {"event": later.id, "status": "done", "day": y.isoformat()})
-        self.assertNotIn(NOT_DONE, out)  # done as the later copy: the earlier one isn't still open
-        self.assertNotIn("Read the text", [p["title"] for p in self.t.assistant.rollover_plan()])
 
-    def test_each_item_carries_over_once_is_asked_about_once_then_leaves(self):
-        # 11-04, 11-05: every open line on Today came back every morning, a week's worth piling up
-        import json
-        from datetime import timedelta
-        from tests.fixtures import DAY
-        from thirties_core.carry import KEY
-        db = self.sched.state_db
-        self.t.assistant.start_the_day()
-        out = self.t.execute("rollover_proposal", {})
-        self.assertIn("From yesterday, still open:\n- Call the bank\n- Clip cat nails", out)  # carried, once
-        self.assertNotIn("keep or drop", out)
-
-        two_days = (DAY - timedelta(days=2)).isoformat()  # the next morning: they've been open since the day before
-        db.set_sync_meta(KEY, json.dumps({"call the bank": {"since": two_days}, "clip cat nails": {"since": two_days}}))
-        out = self.t.execute("rollover_proposal", {})
-        self.assertNotIn("From yesterday", out)
-        self.assertIn("Still open for a few days now (keep or drop?", out)
-        self.assertIn("- Call the bank (since ", out)
-        out = self.t.execute("apply_rollover", {"skip": "nails"})
-        self.assertNotIn("Call the bank", out)  # kept: it stays, and starts again from today
-        self.assertEqual(json.loads(db.get_sync_meta(KEY))["call the bank"], {"since": DAY.isoformat(), "asked": ""})
-
-        yesterday = (DAY - timedelta(days=1)).isoformat()  # asked yesterday and not answered: it goes
-        db.set_sync_meta(KEY, json.dumps({"call the bank": {"since": two_days, "asked": yesterday}}))
-        db.set_sync_meta(f"rollover:{DAY.isoformat()}", "")
-        out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Off today's list after a few days (still on their own lists): Call the bank.", out)
-        self.assertNotIn("Call the bank", self.body("n_today"))
-        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # never lost
-
-    def test_an_item_with_no_other_list_isnt_lost_when_it_leaves(self):
-        import json
-        from datetime import timedelta
-        from tests.fixtures import DAY
-        from thirties_core.carry import KEY
-        self.t.assistant.start_the_day()
-        old = {"since": (DAY - timedelta(days=3)).isoformat(), "asked": (DAY - timedelta(days=1)).isoformat()}
-        self.sched.state_db.set_sync_meta(KEY, json.dumps({"clip cat nails": old}))
-        self.t.execute("rollover_proposal", {})
-        self.assertIn("Clip cat nails", self.body("n_today"))  # no drop box: it stays where it is
-
-    def test_a_group_is_offered_by_its_name(self):
+    def test_a_group_is_asked_about_by_its_name(self):
         self.api.notes["n_today"]["body"] += "- [ ] Lab\n    - [ ] Check the scores\n    - [ ] Merge the PR\n"
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertIn("- Lab\n", out)
+        self.assertIn("Lab", out)
         self.assertNotIn("Merge the PR", out)
 
-    def test_the_morning_proposal_keeps_drops_and_adds(self):
-        self.t.assistant.start_the_day()
-        out = self.t.execute("rollover_proposal", {})
-        self.assertEqual(out, "From yesterday, still open:\n- Call the bank\n- Clip cat nails\n"
-                              "Also pressing: Buy stamps (now).\nShould I keep these on today's list and add the "
-                              "pressing one? Say which to leave out.")
-        out = self.t.execute("apply_rollover", {"skip": ["bank", "nails"]})
-        self.assertIn("Back to your lists: Call the bank.", out)
-        self.assertIn("Added to today's list: Buy stamps.", out)
-        self.assertIn("with no other list to go back to: Clip cat nails", out)
-        self.assertEqual(self.body("n_today"), "- [ ] Buy stamps\n")
-        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # still on its home list
 
-
-if __name__ == "__main__":
-    unittest.main()

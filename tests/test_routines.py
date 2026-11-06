@@ -281,7 +281,7 @@ class TestDailyAnchors(RoutineCase):
         t2.assistant.routines.set_up_current()
         body = self.body("n_today")
         self.assertEqual(body.count("- [ ] Lunch"), 1)  # yesterday's went, today's is on
-        self.assertIn("- [ ] Call the bank", body)
+        self.assertNotIn("Call the bank", body)  # a leftover waits on its own list (carry.py)
 
     def test_offered_once(self):
         book = RoutineBook(self.sched.state_db)
