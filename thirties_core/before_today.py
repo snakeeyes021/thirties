@@ -135,7 +135,7 @@ class BeforeToday:
 
     # --- what the user does (from the tab or the chat) ---
 
-    def action(self, item: str, action: str) -> str:
+    def action(self, item: str, action: str, when: str = "") -> str:
         """accept (it stands as proposed), done, drop, keep (a proposed drop kept instead, with a proposed slot),
         undrop (back from the archive into Keep)."""
         from thirties_core.assistant_tools import ToolError
@@ -168,10 +168,23 @@ class BeforeToday:
         # drop goes back to its list in Joplin first, where it was, open again
         from thirties_core.carry import default_when
         note = self.a._undrop_in_joplin(rec) if rec.get("horizon") == DROPPED else ""
-        h = rec.get("horizon") if rec.get("horizon") not in (DROPPED, SOMEDAY, "", None) else "week"
-        window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
-                              self._week_start())
-        pool.set(title, horizon="week" if window["end"] != self._today().isoformat() else "today",
+        if when:  # the user named where (chat: "keep X, next week")
+            try:
+                window = resolve_when(when, self._today(), self._week_start())
+            except ValueError as e:
+                raise ToolError(str(e))
+        elif rec.get("when") and (rec.get("start") or rec.get("when") == "someday"):
+            # the horizon the row showed: what Keep was going to do is what it does (11-06: "full visibility into
+            # what would and will happen")
+            window = {k: rec.get(k, "") for k in ("when", "start", "end")}
+            if window["end"] and window["end"] < self._today().isoformat():
+                window = resolve_when("today", self._today(), self._week_start())  # its day went by: today
+        else:
+            h = rec.get("horizon") if rec.get("horizon") not in (DROPPED, SOMEDAY, "", None) else "week"
+            window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
+                                  self._week_start())
+        pool.set(title, horizon=SOMEDAY if window["when"] == "someday" else (
+                     "week" if window["end"] != self._today().isoformat() else "today"),
                  pending_drop=False, dropped_on="", dropped_by="", placed_by="user", settled=True, **window)
         rec = pool.all()[title.strip().lower()]
         placed, overflow = self.place_today([rec])

@@ -160,3 +160,29 @@ class TestEveryActionSettlesTheRow(TestDropsInJoplin):
         keep, drop, archive = self.groups()
         self.assertEqual((keep, drop), (set(), set()))
         self.assertIn("Call the bank", archive)
+
+
+class TestADropRowShowsWhereKeepWouldPutIt(TestDropsInJoplin):
+    """11-06, Matt: "the user has full visibility into what would and will happen". A proposed drop shows the
+    horizon Keep would give it, and Keep does exactly that (unless the user names another, in the chat)."""
+
+    def setUp(self):
+        super().setUp()
+        from thirties_core.carry import resolve_when
+        self.next_week = resolve_when("next week", DAY)
+        self.pool.set("Call the bank", **self.next_week)
+
+    def test_the_row_shows_it_and_keep_uses_it(self):
+        drop = self.t.assistant.before.rows()["drop"]
+        self.assertEqual([(r["title"], r["when"]) for r in drop], [("Call the bank", "next week")])
+        self.t.execute("leftover_action", {"item": "Call the bank", "action": "keep"})
+        rec = OpenPool(self.sched.state_db).all()["call the bank"]
+        self.assertEqual((rec["when"], rec["start"], rec["end"]),
+                         (self.next_week["when"], self.next_week["start"], self.next_week["end"]))
+        rows = self.t.assistant.before.rows()
+        self.assertNotIn("Call the bank", {r["title"] for g in ("keep", "drop") for r in rows[g]})  # settled
+
+    def test_in_the_chat_a_named_horizon_wins(self):
+        self.t.execute("leftover_action", {"item": "Call the bank", "action": "keep", "when": "tomorrow"})
+        rec = OpenPool(self.sched.state_db).all()["call the bank"]
+        self.assertEqual(rec["start"], (DAY + timedelta(days=1)).isoformat())

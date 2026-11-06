@@ -59,7 +59,8 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
             self._add_rows(group, [(self._when(r), self._row(r, ("accept", "done", "drop"))) for r in keep])
         if drop:
             group = self._group("drop", DROP_TITLE, DROP_HINT)
-            self._add_rows(group, [("", self._row(r, ("accept", "keep", "done"))) for r in drop])
+            # where it would go if kept, in the left column like the Keep rows (11-06): Keep does exactly that
+            self._add_rows(group, [(self._when(r), self._row(r, ("accept", "keep", "done"))) for r in drop])
         if archive:
             group = self._group("archive", ARCHIVE_TITLE, ARCHIVE_HINT)
             for day, rows in archive:

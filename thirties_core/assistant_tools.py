@@ -227,7 +227,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Act on something left from before, as the user says (the same as the app's Before today "
                        "tab): accept (stands as proposed), done (it got done), drop, keep (a proposed drop kept "
                        "instead), undrop (back from the archive).",
-        "parameters": {"item": "The item's title.", "action": "accept, done, drop, keep or undrop."},
+        "parameters": {"item": "The item's title.", "action": "accept, done, drop, keep or undrop.",
+                       "when": "For keep or undrop, where it goes if the user names it (otherwise the horizon the "
+                               "proposal showed)."},
         "required": ["item", "horizon"],
     },
     {
@@ -2141,7 +2143,7 @@ class AssistantTools(KindTools):
             "apply_rollover": self.apply_rollover,
             "place_leftover": self.place_leftover,
             "propose_leftovers": self.propose_leftovers,
-            "leftover_action": lambda item="", action="", **_: self.before.action(item, action),
+            "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,

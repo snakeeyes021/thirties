@@ -263,7 +263,7 @@ class DayViewTests(unittest.TestCase):
         rows = {"keep": [{"title": "Thank yous", "when": "this week", "at": None, "why": "a week old"},
                          {"title": "Check on rent", "when": "today", "at": self.plan.day_start.replace(hour=16),
                           "why": "it was due yesterday"}],
-                "drop": [{"title": "Watch the comet", "when": "", "at": None, "why": "the night is gone"}],
+                "drop": [{"title": "Watch the comet", "when": "next week", "at": None, "why": "the night is gone"}],
                 "archive": [("2026-10-14", [{"title": "Old thing", "when": "", "at": None, "why": "moot"}])]}
         view = DayView()
         view.set_actions(lambda name, args: calls.append((name, args)) or "ok")
@@ -272,7 +272,7 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(view.agenda_stack.get_visible_child_name(), "today")
         self.assertNotIn("pencilled", view.agenda.groups)  # gone from Today (11-06)
         self.assertEqual(_blocks(view.before.groups["keep"]), [("this week", ["Thank yous"]), ("4 PM", ["Check on rent"])])
-        self.assertEqual(_blocks(view.before.groups["drop"]), [("", ["Watch the comet"])])
+        self.assertEqual(_blocks(view.before.groups["drop"]), [("next week", ["Watch the comet"])])  # where Keep puts it
         view.before.buttons[("Watch the comet", "keep")].emit("clicked")
         view.before.buttons[("Old thing", "undrop")].emit("clicked")
         self.assertEqual(calls, [("leftover_action", {"item": "Watch the comet", "action": "keep"}),
