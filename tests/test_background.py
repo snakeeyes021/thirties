@@ -390,11 +390,11 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         kinds = [k for k, _ in self.sent]
         self.assertEqual(kinds, ["morning", "reminder"], self.sent)  # no heads-up, check-in or block notice
         first = self.sent[0][1]
-        self.assertTrue(first.startswith("☀️ Good morning! Let me know when you're up and I'll put your schedule "
-                                         "together."), first)
-        self.assertIn("On the plate today:\n- PT\n- Dentist\n- Call", first)  # no times
+        from thirties_core.wake import FALLBACK
+        line, items = first.split("\n\n", 1)
+        self.assertEqual(line, FALLBACK["wake"].format(clock="7:00"))  # the mock model: the plain fallback (AM trimmed)
+        self.assertEqual(items, "On the plate today:\nPT\nDentist\nCall")  # one per line, no bullets, no times
         self.assertNotIn("Taxes", first)  # yesterday's leftover isn't today's by default (carry.py)
-        self.assertNotRegex(first, r"\d:\d\d")
         self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built
         from tests.fixtures import mark_up
         mark_up(self.sched.state_db, at("10:22"))  # the reply
@@ -439,8 +439,9 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         set_debug_time(plan.sunrise)
         self.svc.morning_hello(plan.sunrise)
         self.svc.morning_hello(plan.sunrise + timedelta(minutes=5))
-        self.assertEqual(self.sent, [("morning", "☀️ Good morning! Let me know when you're up and I'll put your "
-                                                 "schedule together.")])
+        from thirties_core.clock import format_clock
+        from thirties_core.wake import FALLBACK
+        self.assertEqual(self.sent, [("morning", FALLBACK["sunrise"].format(clock=format_clock(plan.sunrise).replace(" AM", "")))])
 
 
 class TestRollover(unittest.TestCase):

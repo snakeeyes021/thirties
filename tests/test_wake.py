@@ -30,8 +30,35 @@ class TestUp(unittest.TestCase):
 
 
 class TestHello(unittest.TestCase):
+    """11-05: the model writes the first message fresh each morning; Python checks it has what it must."""
 
-    def test_the_items_without_times(self):
-        self.assertEqual(hello_text([]), "☀️ Good morning! Let me know when you're up and I'll put your schedule "
-                                         "together.")
-        self.assertTrue(hello_text(["Dentist", "dentist", "Call"]).endswith("On the plate today:\n- Dentist\n- Call"))
+    def test_the_items_one_per_line_without_bullets(self):
+        self.assertEqual(hello_text("Morning!", []), "Morning!")
+        self.assertEqual(hello_text("Morning!", ["Dentist", "dentist", "Call"]),
+                         "Morning!\n\nOn the plate today:\nDentist\nCall")
+
+    def test_the_model_writes_it_and_python_checks_it(self):
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.wake import write_hello
+        engine = MockInferenceEngine()
+        engine.responses = [{"role": "assistant", "content": "6:47 and the sun is up. Morning! Ready to plan when "
+                                                             "you are.", "tool_calls": []}]
+        line = write_hello(engine, "sunrise", at("06:47"), [])
+        self.assertTrue(line.startswith("☀️ "), line)  # sunrise mode always has the sun
+        self.assertIn("6:47", line)
+        prompt = engine.call_history[0][0]["content"]
+        self.assertIn("6:47 AM", prompt)
+        self.assertIn("sunrise", prompt)
+
+    def test_without_the_time_or_a_model_its_the_plain_fallback(self):
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.wake import FALLBACK, write_hello
+        engine = MockInferenceEngine()
+        engine.responses = [{"role": "assistant", "content": "Good morning! Ready when you are.", "tool_calls": []}]
+        self.assertEqual(write_hello(engine, "wake", at("07:00"), []), FALLBACK["wake"].format(clock="7:00 AM"))
+        self.assertEqual(write_hello(None, "sunrise", at("06:52"), []), FALLBACK["sunrise"].format(clock="6:52 AM"))
+
+    def test_seven_oclock_can_be_said_as_7am(self):
+        from thirties_core.wake import check_line
+        self.assertTrue(check_line("7am means the alarm is ringing! Want me to plan the day?", "wake", at("07:00")))
+        self.assertIsNone(check_line("Rise and shine! Want me to plan the day?", "wake", at("07:00")))

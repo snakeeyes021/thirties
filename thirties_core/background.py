@@ -504,7 +504,7 @@ class BackgroundService:
         """The first message of the day, once, at sunrise or the scheduled wake-up (assistant.morning_message_at):
         "let me know when you're up", with the day's items and no times if assistant.morning_message_items is on.
         Nothing is built until the user replies (wake.py)."""
-        from thirties_core.wake import hello_text, hello_time, user_is_up
+        from thirties_core.wake import RECENT_KEY, hello_text, hello_time, user_is_up, write_hello
         if self.level() == "off":
             return
         db = self.scheduler.state_db
@@ -526,7 +526,15 @@ class BackgroundService:
             return
         db.set_sync_meta(key, now.isoformat())
         titles = self._plate(plan) if getattr(self.config.assistant, "morning_message_items", True) else []
-        self.send(hello_text(titles), "morning", now=now)
+        mode = "sunrise" if getattr(self.config.assistant, "morning_message_at", "wake") == "sunrise" else "wake"
+        try:
+            recent = json.loads(db.get_sync_meta(RECENT_KEY) or "[]")
+        except ValueError:
+            recent = []
+        engine = self.inference_engine if getattr(self.config.assistant, "brain", "frontier") == "frontier" else None
+        line = write_hello(engine, mode, at, recent)  # the model writes it fresh each morning (11-05)
+        db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
+        self.send(hello_text(line, titles), "morning", now=now)
 
     def _plate(self, plan) -> List[str]:
         """What's on the plate today, without times and without changing anything: what's already on today's plan
