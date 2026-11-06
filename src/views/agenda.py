@@ -121,7 +121,13 @@ class AgendaPage(Gtk.ScrolledWindow):
             following = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED
                          and _takes_time(s)]
             until = f" until {short_clock(min(self._when(s) for s in following))}" if following else ""
-            group.add(Adw.ActionRow(title=f"Free{until}"))
+            # in the time column: when the free stretch began, so the row lines up with the rest (11-05)
+            began = max((_block_end(s) for s in spans if _takes_time(s) and s.status != SpanStatus.SKIPPED
+                         and _block_end(s) <= block), default=None)
+            if began is None:
+                began = next((s.end_dt for s in spans if s.category == SpanCategory.SLEEP and s.end_dt <= now),
+                             plan.day_start)
+            self._add_blocks(group, [(began, Adw.ActionRow(title=f"Free{until}"))])
             if current:  # someone else's event, or an invite, happening now: shown under "Free", dimmed
                 self._fill(group, current, now)
         upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
@@ -245,12 +251,14 @@ class AgendaPage(Gtk.ScrolledWindow):
         if not routines:
             return
         group = self._group("routines", "Routines", "Skipping one isn't putting it off.")
+        entries = []
         for r in routines:
             row = Adw.ActionRow(title=r["title"], subtitle=r.get("state", ""))
             menu = self._skip_menu(plan, r)
             row.add_suffix(menu)
             self.skip_menus[r["title"]] = menu
-            group.add(row)
+            entries.append((r.get("at"), row))  # its time in the time column, like every other row (11-05)
+        self._add_blocks(group, entries)
 
     def _skip_menu(self, plan: DayPlan, routine: Dict[str, Any]) -> Gtk.MenuButton:
         """A "Skip" menu button whose popover holds the three choices, each with the day it brings the routine

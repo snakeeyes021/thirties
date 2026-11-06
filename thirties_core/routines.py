@@ -853,11 +853,29 @@ class RoutineTools:
             due = is_due(r, day, self.gen, self.last_done(note, r))
             if not planned and (steps or not due):
                 continue  # all marked (done or skipped), or not today's
-            state = (f"On the plan at {format_clock(min(s.start_dt for s in planned))}" if planned
-                     else "Due, not on the plan yet")
-            out.append({"title": note["title"], "note_id": note["id"], "state": state,
+            # its time goes in the Agenda's time column like every row (11-05): when it's on the plan, else when it
+            # usually goes
+            at = min(s.start_dt for s in planned) if planned else self._usual_start(plan, r)
+            state = "On the plan" if planned else "Due, not on the plan yet"
+            out.append({"title": note["title"], "note_id": note["id"], "state": state, "at": at,
                         "choices": self.skip_choices(note, day)})
         return out
+
+    def _usual_start(self, plan: "DayPlan", r: Routine) -> Optional[datetime]:
+        """When its first part usually goes on this day: its clock time, or the day's waking."""
+        if not r.parts:
+            return None
+        at = r.parts[0].get("at", "")
+        if at.startswith("wake"):
+            from thirties_core.day_times import wake_time
+            history = (self.db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+                       if self.db is not None else [])
+            woke = wake_time(plan, history) or plan.day_start
+            return thirty_ceil(woke) + timedelta(minutes=30 * (int(at[5:]) if "+" in at else 0))
+        try:
+            return _at(at, plan.day_start)
+        except Exception:
+            return None
 
     # --- tools ---
 

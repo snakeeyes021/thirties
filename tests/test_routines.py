@@ -332,7 +332,8 @@ class TestSkipping(RoutineCase):
     def test_the_day_page_lists_what_can_still_be_skipped(self):
         r = self.t.assistant.routines
         got = {d["title"]: d for d in r.day_routines()}
-        self.assertEqual(got["Deep Clean"]["state"], "On the plan at 6:00 PM")
+        self.assertEqual(got["Deep Clean"]["state"], "On the plan")  # its time goes in the time column (11-05)
+        self.assertEqual(got["Deep Clean"]["at"], at("18:00"))
         self.assertEqual([(c["how"], c["back"]) for c in got["Deep Clean"]["choices"]],
                          [("today", date(2026, 10, 16)), ("this_time", date(2026, 10, 27)), ("until", None)])
         self.t.execute("skip_routine", {"routine": "Deep Clean", "how": "this time"})  # what the Skip button calls

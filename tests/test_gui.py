@@ -246,7 +246,10 @@ class DayViewTests(unittest.TestCase):
         now = self.action_rows(view.agenda.groups["now"])
         self.assertEqual(now[0], ("Free until 8 PM", ""))  # someone else's event doesn't make the user busy
         self.assertEqual(now[1], ("Rehearsal", "not yours (shown only)"))
-        self.assertEqual(_blocks(view.agenda.groups["now"]), [("7 PM", ["Rehearsal"])])
+        blocks = _blocks(view.agenda.groups["now"])  # 11-05: "Free" has a time too (when it began), so rows line up
+        self.assertEqual([b for b in blocks if b[1] == ["Rehearsal"]], [("7 PM", ["Rehearsal"])])
+        self.assertEqual(blocks[0][1], ["Free until 8 PM"])
+        self.assertTrue(blocks[0][0])
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Torquio dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Torquio dev"].title_label.get_label())  # a session isn't struck through
@@ -263,10 +266,13 @@ class DayViewTests(unittest.TestCase):
                    {"how": "until", "label": "Skip until…", "back": None}]
         view.set_actions(lambda name, args: calls.append((name, args)) or "Skipped Deep Clean. Next: Tue Oct 27.",
                          on_notice=notices.append,
-                         routines=lambda plan: [{"title": "Deep Clean", "state": "On the plan at 6:00 PM",
+                         routines=lambda plan: [{"title": "Deep Clean", "state": "On the plan",
+                                                 "at": self.plan.day_start.replace(hour=18, minute=0),
                                                  "choices": choices}])
         view.refresh_plan(self.plan)
-        self.assertIn(("Deep Clean", "On the plan at 6:00 PM"), self.action_rows(view.agenda.groups["routines"]))
+        self.assertIn(("Deep Clean", "On the plan"), self.action_rows(view.agenda.groups["routines"]))
+        # 11-05: the time in the time column, like every other row, not inside the row
+        self.assertEqual(_blocks(view.agenda.groups["routines"]), [("6 PM", ["Deep Clean"])])
         menu = view.agenda.skip_menus["Deep Clean"]
         self.assertEqual(menu.choices["today"].get_tooltip_text(), "Skip today: Back tomorrow")
         self.assertEqual(menu.choices["this_time"].get_tooltip_text(), "Skip this time: Back Tue Oct 27")
