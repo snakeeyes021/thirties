@@ -47,7 +47,10 @@
         <ul>
           <li>One morning message, written fresh each day, at your wake-up time or at sunrise, optionally with the day's items; nothing else is sent and nothing is planned until you reply</li>
           <li>The morning routine goes on from when you're actually up, a part per half hour, alongside work</li>
-          <li>Yesterday's unmarked items aren't pushed into today: meals, routines and appointments simply end; what's left from before gets one morning proposal (keep it today, tomorrow, this weekend, before a day, next week, next month or someday, or drop it), confirmed with a yes or a 👍; kept items come back on a day they fit; the Today note holds today's plan only</li>
+          <li>When you say you're up, the day is built and simply is the plan: no approval step; the one question left is what doesn't fit today</li>
+          <li>What's left from before takes effect by itself: today's items go on today's schedule, the rest wait for a day they fit, and proposed drops are applied after the day unless you say otherwise</li>
+          <li>Agenda: a Before today tab beside Today (keep, drop, done, and an archive you can undrop from); the "no time yet" section is gone</li>
+          <li>Dropped items are ticked and filed in Joplin in a monthly Dropped note beside the Done notes; undropping puts them back where they were</li>
           <li>Telegram lists are one item per line, without bullets</li>
           <li>Agenda: the Free row and each routine show their time in the time column</li>
           <li>The assistant no longer says it can't make changes ("text-only mode")</li>
