@@ -561,7 +561,8 @@ class BackgroundService:
         key = f"rollover_offered:{day.isoformat()}"
         if db.get_sync_meta(key):
             return
-        if not self._up(now) or self._turn_running():  # the user's first message of the day starts it (wake.py);
+        if not self._up(now) or self._turn_running() or self._quiet(now):  # the user's first message of the day
+            # starts it (wake.py), never while asleep;
             return  # the proposal follows their reply
         db.set_sync_meta(key, "1")
         holiday = ahead = ""
