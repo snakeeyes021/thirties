@@ -70,3 +70,76 @@ class TestItemsKeepTheirTitles(TodayTestCase):
         task = next(t for t in self.services.tasks if t.title == "Call the bank")
         self.assertEqual(description_for(self.sched.state_db, "Call the bank", task.id), "ask about the old account")
         self.assertEqual(ItemNotes(self.sched.state_db).get(task.id), "ask about the old account")
+
+
+class TestNoRawLineLeavesThirties(TodayTestCase):
+    """11-07: the schedule sent on request carried the NAS item's whole line. Every way an item's name leaves
+    Thirties (tool results the model reads, its replies, the background's messages) says its short title."""
+
+    RAW = ("**NAS: change the `pm-agent` password** (it leaked into an agent log on 11-04; then give the PM the "
+           "new one)")
+
+    def setUp(self):
+        super().setUp()
+        from thirties_core.models import TaskItem
+        from tests.test_today import TITLES
+        self.services.tasks.append(TaskItem(id="t_nas", source_notebook="1. Tasks", title=self.RAW,
+                                            is_checkbox_item=True, parent_note_title=TITLES["n_errands"],
+                                            parent_note_id="n_errands"))
+        self.t.execute("add_event", {"title": self.RAW, "start": "4:00 PM", "duration": "30 min", "task_id": "t_nas"})
+        self.t.execute("add_event", {"title": self.RAW + " again", "start": "9:00 AM", "duration": "30 min"})
+
+    def assertClean(self, text, where):
+        self.assertNotIn("**", text, where)
+        self.assertNotIn("it leaked", text, where)
+        self.assertNotIn("`", text, where)
+
+    def test_every_schedule_tool(self):
+        for name in ("show_schedule", "list_schedule", "pencilled_in", "day_options"):
+            out = self.t.execute(name, {})
+            self.assertClean(out, name)
+        self.assertIn("NAS: change the pm-agent password", self.t.execute("show_schedule", {}))
+
+    def test_tool_results_that_name_the_item(self):
+        span = next(s for s in self.t.day_plan.spans if s.task_id == "t_nas")
+        self.assertClean(self.t.execute("update_event", {"event": span.id, "start": "4:30 PM"}), "update_event")
+        self.assertClean(self.t.execute("log_outcome", {"event": span.id, "status": "done"}), "log_outcome")
+
+    def test_the_item_is_still_found_by_its_short_title(self):
+        out = self.t.execute("update_event", {"event": "NAS: change the pm-agent password", "start": "5:00 PM"})
+        self.assertIn("matches several items", out)  # two share the short title here: asked by id, said short
+        self.assertClean(out, "the refusal")
+        other = next(s for s in self.t.day_plan.spans if s.title.endswith(" again"))
+        self.t.execute("remove_event", {"event": other.id})
+        out = self.t.execute("update_event", {"event": "NAS: change the pm-agent password", "start": "5:00 PM"})
+        self.assertNotIn("NOT_DONE", out)
+        self.assertEqual(self.t.assistant._exact_task("NAS: change the pm-agent password").id, "t_nas")
+
+    def test_the_background_messages(self):
+        from unittest.mock import MagicMock
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.background import BackgroundService
+        from thirties_core.inference import MockInferenceEngine
+        sent = []
+        svc = BackgroundService(self.sched.config, lambda t, b, k: sent.append(b), scheduler=self.sched,
+                                joplin_engine=self.services.joplin, inference_engine=MockInferenceEngine(),
+                                sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        self.sched.config.assistant.message_level = "heavy"
+        for hhmm in ("09:00", "09:40", "16:00", "16:40"):
+            set_debug_time(at(hhmm))
+            for duty in (svc.starts, svc.check_ins, svc.heads_up):
+                duty(at(hhmm))
+        self.assertTrue(sent)
+        for text in sent:
+            self.assertClean(text, text)
+
+    def test_a_reply_that_quotes_the_line(self):
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        engine = MockInferenceEngine([{"role": "assistant", "content": "At 4: " + self.RAW, "tool_calls": []}])
+        m = ConversationManager(self.t.day_plan, self.services.tasks, [], self.sched, inference_engine=engine,
+                                active_notes=[])
+        reply = m.send_user_message("what's my schedule?")
+        self.assertClean(reply, "reply")
+        self.assertIn("NAS: change the pm-agent password", reply)

@@ -159,6 +159,8 @@ class BackgroundService:
         try:
             now = now or self.now()
             keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)
+            text = self.manager().tools.shorten(text)  # items by their short titles (11-07)
+            telegram_text = self.manager().tools.shorten(telegram_text) if telegram_text else None
             text = trim_meridiems(to_thirties(text, keep), now)
             telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
         except Exception:

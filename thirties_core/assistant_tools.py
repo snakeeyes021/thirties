@@ -470,6 +470,12 @@ class AssistantTools(KindTools):
         "Kitty litter boxes" and put "My Dinner with Andre" on Today for "Dinner"."""
         ref = ref.strip()
         exact = [t for t in self.s.tasks if t.id == ref or _same_words(t.title, ref)]
+        if not exact:  # by its short title (what the user and the model see: 11-07), if only one item has it
+            from thirties_core.titles import title_of
+            short = [t for t in self.s.tasks if title_of(t.title) != t.title.strip() and _same_words(title_of(t.title), ref)]
+            if len(short) > 1:  # its Today copies share the title: the item on its own list is the one
+                short = [t for t in short if t.list_role != "today"]
+            exact = short if len(short) == 1 else []
         return exact[0] if exact else None
 
     def _no_exact_match(self, ref: str, what: str = "item") -> ToolError:

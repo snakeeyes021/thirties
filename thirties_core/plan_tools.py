@@ -495,7 +495,9 @@ class PlanTools:
             if span.id == ref_str or span.id == f"cal:{ref_str}" or span.source_event_id == ref_str:
                 return span
         lowered = ref_str.lower()
-        exact = [s for s in in_view if s.title.lower() == lowered]
+        from thirties_core.titles import title_of
+        exact = [s for s in in_view if s.title.lower() == lowered] or \
+            [s for s in in_view if title_of(s.title).lower() == lowered]  # by its short title too (11-07)
         if len(exact) == 1:
             return exact[0]
         partial = [s for s in in_view if lowered in s.title.lower()]
@@ -1417,15 +1419,27 @@ class PlanTools:
                 self.outcomes_logged += 1  # "I've logged it as done" needs one of these (frontier.py)
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
-            return result
+            return self.shorten(result) if outermost else result  # items by their short titles (11-07)
         except (ToolError, ClockError) as e:
-            return f"{NOT_DONE}: {e}"
+            return self.shorten(f"{NOT_DONE}: {e}") if outermost else f"{NOT_DONE}: {e}"
         except TypeError as e:
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
         finally:
             self.day_plan = saved
             if outermost:
                 self._home_plan = None
+
+    def shorten(self, text: str) -> str:
+        """Long item lines in ``text`` said by their short titles (titles.py): what the model reads and passes on
+        never carries a whole raw line."""
+        from thirties_core.titles import long_titles, shorten_in
+        try:
+            texts = [s.title for s in self.day_plan.spans] + [s.title for s in (self._home_plan or self.day_plan).spans]
+            if self.services is not None:
+                texts += [t.title for t in self.services.tasks]
+            return shorten_in(text, long_titles(texts))
+        except Exception:
+            return text
 
     def _learn_routine_move(self, event: Any) -> None:
         """A routine step moved by itself is where it usually goes now (routines.RoutineTools.learn_move)."""

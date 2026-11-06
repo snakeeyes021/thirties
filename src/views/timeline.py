@@ -448,7 +448,8 @@ class DayCanvas(Gtk.Widget):
         card = w.card
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=6, margin_bottom=6,
                       margin_start=8, margin_end=8)
-        title = Gtk.Label(label=card.span.title, xalign=0, wrap=True)
+        from thirties_core.titles import title_of
+        title = Gtk.Label(label=title_of(card.span.title), xalign=0, wrap=True)
         title.add_css_class("heading")
         box.append(title)
         lines = [card.times] + ([card.status] if card.status else []) + card.notes
@@ -935,7 +936,8 @@ class WeekPage(Gtk.ScrolledWindow):
             self.frees[i].set_text("" if col.is_past else free_text(col.free_blocks, self.units))
 
     def _chip(self, chip: Dict[str, str]) -> Gtk.Widget:
-        button = Gtk.MenuButton(label=chip["title"], tooltip_text=(f"{chip['title']} ({chip['list']}): drag onto a "
+        from thirties_core.titles import title_of
+        button = Gtk.MenuButton(label=title_of(chip["title"]), tooltip_text=(f"{title_of(chip['title'])} ({chip['list']}): drag onto a "
                                                                    "day, or pick one" if chip.get("list") else
                                                                    "Drag onto a day, or pick one"))
         button.add_css_class("tl-chip")
@@ -1214,7 +1216,8 @@ class PlanHerePopover(Gtk.Popover):
         if suggestions:
             wrap = Adw.WrapBox(child_spacing=4, line_spacing=4)
             for s in suggestions:
-                b = Gtk.Button(label=s["title"], tooltip_text=s.get("why") or None)
+                from thirties_core.titles import title_of
+                b = Gtk.Button(label=title_of(s["title"]), tooltip_text=s.get("why") or None)
                 b.add_css_class("tl-chip")
                 b.connect("clicked", lambda _b, s=s: self._pick(s))
                 wrap.append(b)

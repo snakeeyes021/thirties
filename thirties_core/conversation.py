@@ -450,6 +450,7 @@ class ConversationManager:
         final = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
                                if self.day_plan.target_date == self.tools.today() else None)
         final = self._no_repeat_checkins(final)
+        final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
         if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":

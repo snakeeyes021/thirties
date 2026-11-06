@@ -19,6 +19,7 @@ import re
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 RAW_ID = re.compile(r"^(?:cal:)?[0-9a-f]{12}(?:[0-9a-f]{4})?$")
+SHORT_LINE = 60  # a plain line this long or shorter is a title as it stands
 NOTES_KEY = "item_notes"  # {task_id or lowercased title: the description the user set}
 
 _LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -40,6 +41,8 @@ def _plain(text: str) -> str:
 def split_title(text: Any, limit: int = 80) -> Tuple[str, str]:
     """(short title, description) for a source line. A short line is all title."""
     raw = str(text or "").strip()
+    if len(raw) <= SHORT_LINE and not re.search(r"\*\*|`|\]\(|https?://", raw):
+        return raw, ""  # a short plain line is all title, asides and all ("Breakfast (w/ vitamins)")
     raw = re.sub(r"^(?:[a-z]|\d{1,2})[.)]\s+(?=\S)", "", raw)  # "b. READY: ..." (a lettered list line)
     bold = re.match(r"^\*\*(.+?)\*\*\s*[.:]?\s*(.*)$", raw)
     if bold:
@@ -163,3 +166,22 @@ def repair_raw_titles(db, tasks: Iterable[Any] = ()) -> int:
             if changed:
                 conn.execute("UPDATE sync_meta SET value = ? WHERE key = ?", (json.dumps(data), key))
     return fixed
+
+
+def long_titles(texts: Iterable[Any]) -> list:
+    """The item lines among ``texts`` that have a shorter title (longest first, so a line inside another isn't
+    replaced first)."""
+    out = {str(t).strip() for t in texts if t and split_title(t)[0] != str(t).strip()}
+    return sorted(out, key=len, reverse=True)
+
+
+def shorten_in(text: str, raws: Iterable[str]) -> str:
+    """Every whole item line in ``text`` said by its short title (11-07: the schedule sent on request carried
+    the full line, markdown and all). Applied where text leaves Thirties: tool results the model reads, its
+    replies, and the messages the background sends."""
+    if not text:
+        return text
+    for raw in raws:
+        if raw in text:
+            text = text.replace(raw, split_title(raw)[0])
+    return text
