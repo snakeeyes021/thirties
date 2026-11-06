@@ -498,11 +498,17 @@ class BackgroundService:
         """The first message of the day, once, at sunrise or the scheduled wake-up (assistant.morning_message_at):
         "let me know when you're up", with the day's items and no times if assistant.morning_message_items is on.
         Nothing is built until the user replies (wake.py)."""
-        from thirties_core.wake import hello_text, hello_time
-        if self.level() == "off" or self._up(now):
+        from thirties_core.wake import hello_text, hello_time, user_is_up
+        if self.level() == "off":
             return
         db = self.scheduler.state_db
-        plan = self.manager().day_plan
+        manager = self.manager()
+        plan = manager.day_plan
+        if now >= plan.day_end - timedelta(hours=3):  # before sunrise: the coming day's wake-up may be due already
+            plan = manager.tools.plan_for(plan.target_date + timedelta(days=1))  # (11-05: the wake-up time mode
+            # is its own choice, not "sunrise or later")
+        if user_is_up(db, plan, now):
+            return
         key = f"morning_hello:{plan.target_date.isoformat()}"
         if db.get_sync_meta(key) or db.get_sync_meta(f"rollover_offered:{plan.target_date.isoformat()}"):
             return

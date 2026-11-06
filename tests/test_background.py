@@ -403,6 +403,31 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         self.assertTrue(self.sched.state_db.get_sync_meta(f"rollover_offered:{_DAY.isoformat()}"))  # built after it
         self.assertEqual([k for k, _ in self.sent].count("morning"), 1)
 
+    def test_at_the_wake_up_time_even_before_sunrise(self):
+        # 11-05: "at your wake-up time" is its own choice, not "sunrise or later"
+        from datetime import timedelta as _td
+        from thirties_core.day_times import morning_sleep
+        plan = self.svc.manager().day_plan
+        sleep = morning_sleep(plan, self.sched.state_db.get_spans_between(plan.day_start - _td(hours=18),
+                                                                          plan.day_start))
+        wake = sleep.end_dt
+        early = plan.sunrise - _td(minutes=40)  # a winter morning: the alarm before the sun
+        sleep.end_dt = early
+        self.sched.state_db.upsert_span(sleep)
+        self.svc.today = lambda: DAY - timedelta(days=1)  # before sunrise it's still yesterday's day
+        self.svc._manager = None
+        set_debug_time(early - _td(minutes=5))
+        self.svc.morning_hello(early - _td(minutes=5))
+        self.assertEqual(self.sent, [])
+        set_debug_time(early)
+        self.svc.morning_hello(early)
+        self.assertEqual([k for k, _ in self.sent], ["morning"])
+        from tests.fixtures import mark_up
+        from thirties_core.wake import user_is_up
+        mark_up(self.sched.state_db, early + _td(minutes=10))  # the reply, still before sunrise, counts for today
+        self.assertTrue(user_is_up(self.sched.state_db, self.sched.build_day_plan(DAY)[0], plan.sunrise + _td(minutes=5)))
+        self.assertNotEqual(wake, early)
+
     def test_the_first_message_at_sunrise_and_without_the_items(self):
         self.sched.config.assistant.morning_message_at = "sunrise"
         self.sched.config.assistant.morning_message_items = False
