@@ -77,6 +77,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                                                    else span.source == "calendar" or span.is_firm)
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
+        self.day_view.before.rows_provider = self._before_today  # the same records as the chat (11-06)
         self.content_toolbar.set_content(self.day_view)
         self._wire_timeline(self.day_view.timeline)
 
@@ -217,6 +218,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                     assistant.routines._refresh_envelopes()
             except Exception as e:
                 logger.warning("Updating Work and Sleep to the new hours failed: %s", e)
+
+    def _before_today(self):
+        assistant = self.conv_manager.tools.assistant if self.conv_manager else None
+        return assistant.before.rows() if assistant is not None else {}
 
     def _day_routines(self, plan):
         assistant = self.conv_manager.tools.assistant if self.conv_manager else None

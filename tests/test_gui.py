@@ -257,6 +257,29 @@ class DayViewTests(unittest.TestCase):
         self.assertNotIn("Rehearsal", cards)  # a quiet note where it starts, never a card
         self.assertEqual([lbl.get_text() for lbl, _ in view.timeline.canvas.notes], ["Rehearsal (not yours)"])
 
+    def test_before_today_beside_today_with_the_same_actions_as_the_chat(self) -> None:
+        # 11-06: Keep rows (accept/done/drop), Drop rows (accept/keep/done), an Archive by day (undrop)
+        calls = []
+        rows = {"keep": [{"title": "Thank yous", "when": "this week", "at": None, "why": "a week old"},
+                         {"title": "Check on rent", "when": "today", "at": self.plan.day_start.replace(hour=16),
+                          "why": "it was due yesterday"}],
+                "drop": [{"title": "Watch the comet", "when": "", "at": None, "why": "the night is gone"}],
+                "archive": [("2026-10-14", [{"title": "Old thing", "when": "", "at": None, "why": "moot"}])]}
+        view = DayView()
+        view.set_actions(lambda name, args: calls.append((name, args)) or "ok")
+        view.before.rows_provider = lambda: rows
+        view.refresh_plan(self.plan)
+        self.assertEqual(view.agenda_stack.get_visible_child_name(), "today")
+        self.assertNotIn("pencilled", view.agenda.groups)  # gone from Today (11-06)
+        self.assertEqual(_blocks(view.before.groups["keep"]), [("this week", ["Thank yous"]), ("4 PM", ["Check on rent"])])
+        self.assertEqual(_blocks(view.before.groups["drop"]), [("", ["Watch the comet"])])
+        view.before.buttons[("Watch the comet", "keep")].emit("clicked")
+        view.before.buttons[("Old thing", "undrop")].emit("clicked")
+        self.assertEqual(calls, [("leftover_action", {"item": "Watch the comet", "action": "keep"}),
+                                 ("leftover_action", {"item": "Old thing", "action": "undrop"})])
+        self.assertEqual({a for t, a in view.before.buttons if t == "Thank yous"}, {"accept", "done", "drop"})
+        self.assertEqual({a for t, a in view.before.buttons if t == "Watch the comet"}, {"accept", "keep", "done"})
+
     def test_a_routine_can_be_skipped_three_ways_from_the_day_page(self) -> None:
         from datetime import date
         calls, notices = [], []

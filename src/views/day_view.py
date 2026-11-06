@@ -18,6 +18,9 @@ from thirties_core.clock import thirty_of
 from thirties.widgets.solar_arc import SolarArcWidget
 
 
+
+BEFORE_TODAY_TAB = "Before today"  # copy-madlibs T3-039 (working name)
+
 class DayView(Gtk.Box):
     """Day and Timeline pages for one day's plan."""
 
@@ -90,8 +93,24 @@ class DayView(Gtk.Box):
         self.timeline = TimelinePage()
         self.timeline.run_tool = lambda name, args: self.run_tool(name, args) if self.run_tool else ""
         self.timeline.ongoing = self._ongoing
+        # the Agenda: Today and, beside it, Before today (11-06), like the Timeline's Day and Week tabs
+        from thirties.views.before_today import BeforeTodayPage
+        self.before = BeforeTodayPage()
+        self.before.run_tool = lambda name, args: self.run_tool(name, args) if self.run_tool else ""
+        self.agenda_stack = Adw.ViewStack(vexpand=True)
+        self.agenda_stack.add_titled_with_icon(self.agenda, "today", "Today", "view-list-symbolic")
+        self.agenda_stack.add_titled_with_icon(self.before, "before", BEFORE_TODAY_TAB, "document-open-recent-symbolic")
+        agenda_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        bar = Gtk.Box(margin_top=6, margin_bottom=6, margin_start=12, margin_end=12)
+        tabs = Adw.InlineViewSwitcher(stack=self.agenda_stack, halign=Gtk.Align.START)
+        tabs.add_css_class("flat")
+        bar.append(tabs)
+        agenda_box.append(bar)
+        agenda_box.append(self.agenda_stack)
+        self.agenda_stack.connect("notify::visible-child-name", lambda *_: self.before.refresh()
+                                  if self.agenda_stack.get_visible_child_name() == "before" else None)
         self.stack = Adw.ViewStack(vexpand=True)
-        self.stack.add_titled_with_icon(self.agenda, "day", "Agenda", "view-list-symbolic")
+        self.stack.add_titled_with_icon(agenda_box, "day", "Agenda", "view-list-symbolic")
         self.stack.add_titled_with_icon(self.timeline, "timeline", "Timeline", "x-office-calendar-symbolic")
         switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER,
                                     margin_top=6)
@@ -104,6 +123,7 @@ class DayView(Gtk.Box):
         skip choices (RoutineTools.day_routines); ``ongoing()`` gives a span -> bool for ongoing items."""
         self.run_tool, self.on_replan = run_tool, on_replan
         self.agenda.on_notice, self.agenda.routines = on_notice, routines
+        self.before.on_notice = on_notice
         self.ongoing_provider = ongoing
 
     # --- time ---
@@ -145,6 +165,7 @@ class DayView(Gtk.Box):
         now = self.live_now()
         self._now_thirty = thirty_of(now) if now else None
         self.agenda.refresh(day_plan, now)
+        self.before.refresh()
         self.timeline.refresh(day_plan, self.today)
 
     def _read_kinds(self) -> None:
