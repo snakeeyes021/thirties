@@ -83,6 +83,12 @@ class OpenPool:
             return None
 
 
+def note_added_today(db, day: date, titles: Iterable[str]) -> None:
+    key = f"today_added:{day.isoformat()}"
+    have = set(json.loads(db.get_sync_meta(key) or "[]"))
+    db.set_sync_meta(key, json.dumps(sorted(have | {t.strip().lower() for t in titles})))
+
+
 def _asked(db) -> Dict[str, str]:
     return _load(db, ASKED_KEY)
 
@@ -194,7 +200,11 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
 
     tz = pt.day_plan.day_start.tzinfo
 
-    def put_on_today_today(title: str) -> bool:  # linked today: today's, not a leftover (a late morning reset)
+    added_today = set(json.loads(db.get_sync_meta(f"today_added:{day.isoformat()}") or "[]")) if db else set()
+
+    def put_on_today_today(title: str) -> bool:  # put on today: today's, not a leftover (a late morning reset)
+        if title.strip().lower() in added_today:
+            return True
         rec = home_of(title)
         try:
             return bool(rec and rec.get("updated_at")) and \

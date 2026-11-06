@@ -952,9 +952,10 @@ class HorizonPlanner:
         last = track_line(self, before, {"week": "last week", "month": before.start.strftime("%B"),
                                          "year": str(before.start.year)}[p.level])  # how the last one went (C2)
         lines = [f"{opening}." + (f" {last}" if last else "") + f" For {self.label(p)} I'd plan:"]
+        from thirties_core.assistant_tools import _short  # a list line in brief (11-04 replay: whole paragraphs)
         for c in picks:
             why = c.facts()
-            lines.append(f"- {c.title}" + (f" ({why})" if why else ""))
+            lines.append(f"- {_short(c.title)}" + (f" ({why})" if why else ""))
         lines.append(f"Want {self.label(p)} like that?")
         return "\n".join(lines)
 

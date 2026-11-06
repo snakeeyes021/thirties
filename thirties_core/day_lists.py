@@ -110,6 +110,12 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     if note is None:
         return []
     routines = {n["title"].strip().lower() for n in assistant._routines()}
+    import json  # yesterday's leftovers aren't today's (carry.py), even before the reset has taken them off
+    try:
+        left = json.loads(db.get_sync_meta(f"leftovers:{plan.target_date.isoformat()}") or "{}")
+    except ValueError:
+        left = {}
+    routines |= {t.strip().lower() for k in ("ended", "pooled", "off_today") for t in left.get(k, [])}
     spans = [s for s in plan.spans if _plannable(s) and s.status != SpanStatus.SKIPPED]
     titles = {s.title.strip().lower() for s in spans}
     task_ids = {s.task_id for s in spans if s.task_id}

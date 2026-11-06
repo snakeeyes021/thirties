@@ -622,6 +622,8 @@ class BackgroundService:
         manager = self.manager()
         assistant = manager.tools.assistant
         day = manager.day_plan.target_date
+        if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
+            return
         if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
                 or assistant.rollover_pending() or assistant.proposals.pending():
             return  # one offer at a time: the day's proposal is answered first

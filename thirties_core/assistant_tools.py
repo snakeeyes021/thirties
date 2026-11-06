@@ -690,6 +690,9 @@ class AssistantTools(KindTools):
                                          parent_note_id=note["id"], list_role="today", urgency="now"))
             on_today.add(title.lower())
             added.append(title)
+        if added and self._db is not None:  # today's, never a leftover of an earlier day (carry.py)
+            from thirties_core.carry import note_added_today
+            note_added_today(self._db, self._today(), added)
         parts = []
         if added:
             parts.append("Added to today's list: " + ", ".join(added) + (" (Joplin will get it when it's open)"
@@ -702,6 +705,9 @@ class AssistantTools(KindTools):
         """Before the first write to Today for the day being planned, that day's morning reset (start_the_day).
         ``adding``: titles the caller is about to put on Today itself (the reset leaves them to it)."""
         plan = self.pt.day_plan
+        if self._db is not None and self.pt.is_current(plan):
+            from thirties_core.carry import settle
+            settle(self, plan.target_date)  # what's left from before, sorted before anything is added today
         if self._db is not None and self.pt.is_current(plan) and \
                 self._db.get_sync_meta(f"day_started:{plan.target_date.isoformat()}") != "done":
             self._adding = {str(t).strip().lower() for t in adding}

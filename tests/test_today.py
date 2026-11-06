@@ -301,8 +301,8 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual(self.t.assistant.today_carryover()["keep"], ["Call the bank"])
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
         self.t.assistant.start_the_day()
-        self.assertEqual(self.body("n_today"), "")  # routines never carry over; the bank waits on its own list
-        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        # routines never carry over; the bank went on after the day began, so it's today's (carry.py)
+        self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n")
 
 
 class TestMorning(TodayTestCase):
@@ -321,6 +321,8 @@ class TestMorning(TodayTestCase):
         self.services.tasks = catalog.apply(self.services.tasks)
         with self.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
             conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
+        from tests.fixtures import DAY
+        self.sched.state_db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
 
     def yesterday(self, title, start, **extra):
         from datetime import timedelta
@@ -411,6 +413,15 @@ class TestMorning(TodayTestCase):
         self.assertTrue(self.t.assistant.rollover_pending())
         set_debug_time(at("15:00"))  # five hours later
         self.assertFalse(self.t.assistant.rollover_pending())
+
+    def test_put_on_today_before_a_late_reset_isnt_a_leftover(self):
+        # Joplin was closed at wake-up, so the reset runs later; something added today in between stays
+        from tests.fixtures import DAY
+        self.t.execute("add_to_today", {"items": ["Return the parcel"]})
+        self.t.assistant.start_the_day()
+        self.assertIn("Return the parcel", self.body("n_today"))
+        from thirties_core.carry import settle
+        self.assertNotIn("Return the parcel", settle(self.t.assistant, DAY)["ask"])
 
     def test_whats_recorded_done_is_never_asked_about(self):
         from datetime import timedelta
