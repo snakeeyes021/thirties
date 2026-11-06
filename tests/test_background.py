@@ -467,10 +467,14 @@ class TestRollover(unittest.TestCase):
 
     def test_one_question_and_nothing_moved_into_today(self):
         text = self.m.execute_tool("rollover_proposal", {})
-        self.assertTrue(text.startswith("Did Taxes get done yesterday?"), text)  # Email Mom, Dishes: on no list
-        self.assertNotIn("Email Mom", text)
+        # 11-05: a proposal per leftover, the model's to revise; Email Mom and Dishes are tasks too (no item is
+        # "on no list")
+        self.assertTrue(text.startswith("Here's what I'd do with what's left from before:\nKeep:\n"), text)
+        self.assertIn("Taxes – this week", text)
+        self.assertIn("Email Mom – this week", text)
+        self.assertNotIn("- ", text)  # no bullets
         out = self.m.execute_tool("apply_rollover", {})
-        self.assertIn("Nothing rolls over by itself", out)
+        self.assertIn("The rest wait where proposed.", out)
         self.assertNotIn("Taxes", [s.title for s in self.sched.build_day_plan(DAY)[0].spans])
 
     def test_offered_once_after_waking(self):
@@ -489,4 +493,4 @@ class TestRollover(unittest.TestCase):
         svc.rollover(at("08:30"))
         self.assertEqual([k for k, _ in sent], ["rollover"])
         self.assertTrue(sent[0][1].startswith("☀️ Good morning! "), sent[0][1])
-        self.assertIn("Did Taxes get done yesterday?", sent[0][1])
+        self.assertIn("Taxes – this week", sent[0][1])

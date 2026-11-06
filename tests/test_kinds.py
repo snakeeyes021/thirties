@@ -224,7 +224,7 @@ class TestTheMorningRollover(KindsTestCase):
         # carry.py (11-05): unmarked means unknown; one short question, nothing put on today
         self.api.notes["n_today"]["body"] = "- [ ] Clean broken glass\n"
         out = self.t.execute("rollover_proposal", {})
-        self.assertTrue(out.startswith("Did Clean broken glass get done yesterday?"), out)
+        self.assertIn("Keep:\nClean broken glass – this week", out)
         self.assertNotIn("today at", out)
 
 

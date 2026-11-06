@@ -205,11 +205,21 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "propose_leftovers",
+        "description": "Your version of this morning's proposal for what's left from before (it starts as Python's "
+                       "first guess). Every leftover goes in keep (with a natural 'when': today, tomorrow, this "
+                       "week, this weekend, before <day>, by <day>, next week, next month, someday; Python works "
+                       "out the days) or in drop (it has gone moot or can't happen any more, e.g. a one-time event "
+                       "whose day is gone). Drops wait for the user's yes.",
+        "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}."},
+        "required": ["keep"],
+    },
+    {
         "name": "place_leftover",
-        "description": "Move an item left open on an earlier day to another horizon, as the user says: today, week "
-                       "(this week, when there's room), deadline (pulled in as its due date nears), someday (never "
-                       "offered unless asked), or dropped (let go; it stays on its list).",
-        "parameters": {"item": "The item's title.", "horizon": "today, week, deadline, someday or dropped."},
+        "description": "Move an item left open on an earlier day where the user says: a natural horizon (today, "
+                       "tomorrow, this week, this weekend, before <day>, next week, next month, someday) or "
+                       "'drop' (let go; it stays on its own list).",
+        "parameters": {"item": "The item's title.", "horizon": "Where it goes, in natural words, or 'drop'."},
         "required": ["item", "horizon"],
     },
     {
@@ -1424,23 +1434,79 @@ class AssistantTools(KindTools):
         return "; ".join(done)
 
     def rollover_proposal(self, **_: Any) -> str:
-        """The morning's word on yesterday's unmarked items (carry.py): nothing rolls into today by itself; the
-        one-off to-dos with no outcome are asked about once, in one short question, and whatever wasn't done
-        waits on its list for a day it fits (the day's proposal offers it)."""
+        """The morning's proposal for what's left from before (carry.py; 11-05: the model proposes, the user
+        confirms). Nothing rolls into today by itself. Each one-off with no outcome gets Python's first guess, a
+        natural horizon (today, this week, by its deadline, someday); kept items wait there at once, and the
+        morning model may revise the proposal (propose_leftovers), dropping what has gone moot. Drops wait for a
+        yes. Asked about once: never again."""
         import json
-        from thirties_core.carry import done_question, mark_asked, settle, still_unknown, where_text
-        ask = still_unknown(self, self._today(), settle(self, self._today())["ask"]) if self._db is not None else []
-        if ask:
-            mark_asked(self._db, ask, self._today())  # asked now: never again
+        from thirties_core.carry import (PROPOSAL_ASK, PROPOSAL_INTRO, OpenPool, default_when, mark_asked,
+                                         proposal_lines, settle, still_unknown)
+        if self._db is None:
+            return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
+        day = self._today()
+        left = settle(self, day)
+        ask = still_unknown(self, day, left["ask"])
         if not ask:
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
+        mark_asked(self._db, ask, day)  # put to the user now: never again
+        week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
+        by_title = {i["title"].lower(): i for i in left.get("pool_items", [])}
+        keep = []
+        for t in ask:
+            item = by_title.get(t.lower()) or {"title": t, "task_id": "", "horizon": "week", "due": ""}
+            keep.append({**item, **default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start),
+                         "why": "Python's first guess"})
+        OpenPool(self._db).add(keep, day - timedelta(days=1))  # kept items wait where proposed straight away
         self._db.set_sync_meta(self._rollover_key(), json.dumps({
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
-            "offered_at": self.pt._now().isoformat()}))
-        left = settle(self, self._today())
-        asked = {t.lower() for t in ask}
-        where = where_text([i for i in left.get("pool_items", []) if i["title"].lower() in asked], _short)
-        return done_question([_short(t) for t in ask]) + (" " + where if where else "")
+            "leftovers": {"keep": keep, "drop": []}, "offered_at": self.pt._now().isoformat()}))
+        return PROPOSAL_INTRO + "\n" + proposal_lines(keep, [], _short) + "\n" + PROPOSAL_ASK
+
+    def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
+        """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python
+        works out the days) or dropped. Kept items wait there at once; drops wait for the user's yes."""
+        import json
+        from thirties_core.carry import OpenPool, proposal_lines, resolve_when
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        data = json.loads(raw) if raw else {}
+        pending = (data.get("leftovers") or {}).get("keep", []) + (data.get("leftovers") or {}).get("drop", [])
+        if not pending:
+            raise ToolError("There's no leftover proposal this morning.")
+        by_title = {p["title"].lower(): p for p in pending}
+
+        def find(name: Any) -> Dict[str, Any]:
+            low = str(name or "").strip().lower()
+            hit = by_title.get(low) or next((p for t, p in by_title.items() if low and (low in t or t in low)), None)
+            if hit is None:
+                raise ToolError(f"'{name}' isn't one of this morning's leftovers: " +
+                                ", ".join(p["title"] for p in pending) + ".")
+            return hit
+        week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
+        day, new_keep, new_drop, seen = self._today(), [], [], set()
+        for k in (keep if isinstance(keep, list) else []):
+            k = k if isinstance(k, dict) else {"item": k, "when": "this week"}
+            item = find(k.get("item") or k.get("title"))
+            try:
+                window = resolve_when(k.get("when") or "this week", day, week_start)
+            except ValueError as e:
+                raise ToolError(f"{item['title']}: {e}")
+            new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
+            seen.add(item["title"].lower())
+        for d in (drop if isinstance(drop, list) else []):
+            d = d if isinstance(d, dict) else {"item": d}
+            item = find(d.get("item") or d.get("title"))
+            new_drop.append({**item, "why": str(d.get("why") or ""), "pending_drop": True})
+            seen.add(item["title"].lower())
+        missing = [p["title"] for p in pending if p["title"].lower() not in seen]
+        if missing:
+            raise ToolError("Say what to do with each one; missing: " + ", ".join(missing) + ".")
+        pool = OpenPool(self._db)
+        pool.add(new_keep + new_drop, day - timedelta(days=1))
+        data["leftovers"] = {"keep": new_keep, "drop": new_drop}
+        self._db.set_sync_meta(self._rollover_key(), json.dumps(data))
+        return ("Proposal remembered: kept items wait there now; drops wait for the user's yes (then apply_rollover). "
+                "Show it like this, one per line, no bullets:\n" + proposal_lines(new_keep, new_drop, _short))
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
@@ -1453,10 +1519,12 @@ class AssistantTools(KindTools):
         data = json.loads(raw)
         if data.get("state") == "applied":
             return "Yesterday's items were already rolled over."
-        if not data.get("plan") and not (data.get("today") or {}).get("keep") and not (data.get("today") or {}).get("add"):
+        if "leftovers" in data or (not data.get("plan") and not (data.get("today") or {}).get("keep")
+                                   and not (data.get("today") or {}).get("add")):
+            dropped = self._drop_leftovers((data.get("leftovers") or {}).get("drop", []))
             self._db.set_sync_meta(self._rollover_key(), json.dumps({**data, "state": "applied"}))
-            return ("Nothing rolls over by itself: what wasn't done waits on its list, and today's proposal offers "
-                    "what fits. Anything that did get done is recorded as done once you say which.")
+            return (("Dropped: " + ", ".join(_short(t) for t in dropped) + ". " if dropped else "") +
+                    "The rest wait where proposed.")  # copy-madlibs T3-009, T3-010
         skip_words = _stem_words(" ".join(skip) if isinstance(skip, list) else str(skip or ""))
 
         def skipped(title: str) -> bool:
@@ -1507,15 +1575,53 @@ class AssistantTools(KindTools):
         return "\n".join(parts) or "Today's list stays as it is."
 
     def place_leftover(self, item: str = "", horizon: str = "", **_: Any) -> str:
-        from thirties_core.carry import POOL_HORIZONS, SAID, OpenPool
-        h = {"this week": "week", "later": "week", "drop": "dropped", "backlog": "someday"}.get(
-            str(horizon).strip().lower(), str(horizon).strip().lower())
-        if h not in POOL_HORIZONS:
-            raise ToolError("horizon must be today, week, deadline, someday or dropped.")
-        rec = OpenPool(self._db).place(str(item), h) if self._db is not None else None
+        """The user moved a leftover: to a natural horizon (today, tomorrow, this weekend, before friday, next
+        month, someday) or dropped. Their word stands."""
+        from thirties_core.carry import OpenPool, resolve_when
+        text = str(horizon or "").strip().lower()
+        pool = OpenPool(self._db) if self._db is not None else None
+        if pool is None:
+            raise ToolError("There's nothing waiting here.")
+        if text in ("drop", "dropped", "let it go", "forget it"):
+            rec = pool.place(str(item), "dropped")
+            if rec is None:
+                raise ToolError(f"'{item}' isn't waiting from an earlier day.")
+            self._drop_leftovers([rec])
+            return f"Dropped {rec['title']} (it stays on its own list)."
+        week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
+        try:
+            window = resolve_when({"week": "this week", "deadline": "this month"}.get(text, text), self._today(),
+                                  week_start)
+        except ValueError as e:
+            raise ToolError(str(e))
+        h = "someday" if window["when"] == "someday" else ("today" if window["end"] == self._today().isoformat()
+                                                            else "window")
+        rec = pool.place(str(item), h, window)
         if rec is None:
             raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
-        return f"{rec['title']}: {SAID[h]}" + (" (it stays on its list)." if h == "dropped" else ".")
+        return f"{rec['title']}: {window['when']}."
+
+    def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
+        """Dropped on the user's word: out of the pool and off the Today note. Its own list keeps it."""
+        from thirties_core.carry import OpenPool
+        from thirties_core.today import TodayLinks, note_items
+        titles = [i["title"] for i in items]
+        if not titles or self._db is None:
+            return []
+        data = OpenPool(self._db).all()
+        for t in titles:
+            rec = data.get(t.lower())
+            if rec is not None:
+                OpenPool(self._db).place(t, "dropped")
+        note, writer = self._today_note(), self._writer()
+        if note is not None and writer is not None and getattr(writer, "allowed", True):
+            open_lines = {x for x, ticked in note_items(note) if not ticked}
+            for t in titles:
+                if t in open_lines:
+                    writer.submit({"op": "remove", "note_id": note["id"], "title": t})
+                    self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]
+                    TodayLinks(self._db).unlink(t)
+        return titles
 
     def rollover_pending(self) -> bool:
         """A proposal was offered today and not yet applied or declined."""
@@ -1890,6 +1996,7 @@ class AssistantTools(KindTools):
             "rollover_proposal": self.rollover_proposal,
             "apply_rollover": self.apply_rollover,
             "place_leftover": self.place_leftover,
+            "propose_leftovers": self.propose_leftovers,
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,

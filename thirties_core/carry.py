@@ -1,35 +1,34 @@
 """What happens to yesterday's unmarked items: the rule set that ends the pile-up.
 
-11-04, 11-05: every open line on the Today note came back every morning, a week's worth piled up, and the
-same pile sat in "on the list, no time yet" all day. Matt (11-05): a person planning a day tracks whole items
-and works out when each can go; they don't throw everything unmarked into the next day. An assistant that
-can't see what was done does have to find out, once.
+11-04, 11-05: every open line on the Today note came back every morning, a week's worth piled up. Matt (11-05):
+a person planning a day tracks whole items, at several horizons, and works out when each can go; an assistant
+that can't see what was done has to find out, once.
 
 The rules, applied once a day when the day is built (after the user's first reply, wake.py):
 
 1. Unmarked means unknown: not "not done", and not "do it today".
-2. Some things never roll. Once their day is over they simply end, unasked: routine steps, meals and daily
-   anchors, time on a project, calendar events and anything fixed to a time, anything that has gone moot, and a
-   planned item that's on no list (when unsure, it doesn't roll). They leave the Today note.
-3. A one-off to-do that's on a list (its home list, or the Today note) and has no outcome is asked about once,
-   in one short batched question in the morning message ("Did any of these get done: A, B, C?"). Never per
-   item, never before the user is up, never again for the same item: the answer, or no answer, settles it.
-4. Not done (or no answer): it goes into the open-items pool, not into today, at the horizon that fits it
-   (Matt, 11-05: "a human is planning at multiple horizons"). It stays on its own list in Joplin and leaves the
-   Today note (an item with no other list stays there: nothing is ever lost). The horizon, from what the item
-   already carries, first match wins:
+2. Some things never roll. Once their day is over they end, unasked: routine steps, meals and daily anchors,
+   time on a project and other ongoing activities, calendar events and anything fixed to a time, and anything
+   gone moot. Nothing is "on no list": what Thirties plans lands on the Today note at least, so its type decides.
+3. Each one-off left over is in one morning proposal, after the user is up, and never again: keep it at a
+   natural horizon (today, tomorrow, this week, this weekend, before <day>, by <day>, next week, next month,
+   someday), or drop it. Python makes the first guess, from what the item carries (first match wins):
    - today: it can't wait (urgency "now", or its horizon is today/tomorrow), it's due today or tomorrow, or
-     it's quick (15 minutes or less, by what the user said it takes);
-   - by its deadline: it has a due date further off; it's pulled in once the deadline is a week away;
-   - someday: the user put it at "someday" (or a someday section, or a pick-from menu list);
-   - this week: everything else. When unsure, this week, never today.
-   Recurring things (routine steps, meals, anchors) never enter the pool: a missed one skips to its next turn.
-   Dropped: only when the user says so (place_leftover). The user can move any item (place_leftover).
-   The daily proposal draws from the pool by fit: today's first (after anything due or urgent; "today" holds
-   for the day after it was left open, then it's this week's), then this week's where free time fits, then
-   deadline items as their day nears; never someday or dropped ones. An
-   item leaves the pool once it's done, or after two weeks (it's still on its list).
-5. The Today note holds today's plan only.
+     it's quick (15 minutes or less, as the user said);
+   - by its deadline: a due date further off;
+   - someday: the user put it there (someday, a someday section, a pick-from menu list);
+   - this week: everything else; when unsure, this week, never today.
+   The morning model revises it (propose_leftovers): drops what has gone moot (a one-time event whose day is
+   gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
+4. Kept items wait at their horizon straight away; drops wait for a yes (a reply, or a 👍). The user can say
+   what to change (place_leftover) or what's already done. No answer: kept items stay where proposed, and
+   nothing is dropped. Recurring things never enter the pool: a missed one skips to its next turn.
+5. The daily proposal draws from the pool by fit: anything due or urgent first, then what's meant for today
+   (or whose window ends today), then what's within its window where free time fits; never before its window,
+   never someday or dropped ones. An item leaves the pool once it's done, or after two weeks (it's still on its
+   list).
+6. The Today note holds today's plan: the morning reset takes leftovers off it when their home item is still
+   open on its list. An item with no other list stays, and anything put on Today today is never touched.
 """
 
 from __future__ import annotations
@@ -86,12 +85,13 @@ class OpenPool:
             rec = {"title": item["title"].strip(), "task_id": item.get("task_id") or "",
                    "since": (old or {}).get("since") or since.isoformat(),
                    "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
+            rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop") if k in item})
             if old and old.get("placed_by") == "user":
-                rec["horizon"], rec["placed_by"] = old.get("horizon", WEEK), "user"
+                rec.update({k: old[k] for k in ("horizon", "when", "start", "end", "placed_by") if k in old})
             data[key] = rec
         _save(self.db, POOL_KEY, data)
 
-    def place(self, title: str, horizon: str) -> Optional[Dict[str, str]]:
+    def place(self, title: str, horizon: str, window: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
         """The user moved it: their word stands until it's done."""
         data = _load(self.db, POOL_KEY)
         key = title.strip().lower()
@@ -99,6 +99,9 @@ class OpenPool:
         if rec is None:
             return None
         rec["horizon"], rec["placed_by"] = horizon, "user"
+        rec.pop("pending_drop", None)
+        if window is not None:
+            rec.update(window)
         data[rec["title"].strip().lower()] = rec
         _save(self.db, POOL_KEY, data)
         return rec
@@ -224,9 +227,10 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low in seen or low in done_titles or (s.task_id and s.task_id in done_ids):
             continue
         seen.add(low)
-        on_a_list = (s.task_id in tasks) or low in on_today or low in listed or home_of(s.title) is not None
+        # no item is ever "on no list" (11-05): what Thirties plans lands on the Today note at least, so its type
+        # decides: a calendar event or anything fixed to a time ends; a task is proposed
         if (s.category == SpanCategory.CALENDAR or s.is_firm or pt._is_fixed(s) or s.status == SpanStatus.UNKNOWN
-                or not on_a_list or never_rolls(s.title, s)):
+                or never_rolls(s.title, s)):
             ended.append(s.title)
             continue
         if low not in asked_before:
@@ -349,3 +353,94 @@ def still_unknown(assistant, day: date, titles: List[str]) -> List[str]:
     note = assistant._today_note()
     done |= {t.lower() for t, ticked in note_items(note) if ticked} if note is not None else set()
     return [t for t in titles if t.strip().lower() not in done]
+
+
+# --- the morning proposal: what to do with each leftover (11-05: the model proposes, the user confirms) ---
+
+NATURAL = ("today", "tomorrow", "this week", "this weekend", "before <day>", "by <day>", "next week", "this month",
+           "next month", "someday")
+
+
+def _week_bounds(day: date, week_start: str = "mon") -> tuple:
+    first = 6 if str(week_start).lower().startswith("sun") else 0  # date.weekday(): Monday is 0
+    start = day - timedelta(days=(day.weekday() - first) % 7)
+    return start, start + timedelta(days=6)
+
+
+def resolve_when(text: str, day: date, week_start: str = "mon") -> Dict[str, str]:
+    """A natural horizon ("today", "this weekend", "before friday", "next month", "someday") as a window of days,
+    worked out in Python: {"when": the words, "start", "end"} ("" for someday). Raises ValueError if unclear."""
+    import calendar
+    import re
+    from thirties_core.clock import parse_day
+    raw = " ".join(str(text or "").strip().lower().split())
+    if not raw:
+        raise ValueError("say when: today, tomorrow, this week, this weekend, before <day>, next week, next month "
+                         "or someday")
+
+    def window(a: date, b: date) -> Dict[str, str]:
+        a = max(a, day)
+        return {"when": raw, "start": a.isoformat(), "end": max(a, b).isoformat()}
+    if raw in ("someday", "some day", "later", "backlog", "eventually", "no rush"):
+        return {"when": "someday", "start": "", "end": ""}
+    w_start, w_end = _week_bounds(day, week_start)
+    if raw in ("this week", "sometime this week", "later this week"):
+        return window(day, w_end)
+    if raw in ("this weekend", "the weekend", "weekend", "over the weekend"):
+        sat = day + timedelta(days=(5 - day.weekday()) % 7)
+        if day.weekday() == 6:
+            return window(day, day)
+        return window(sat, sat + timedelta(days=1))
+    if raw in ("next week", "sometime next week"):
+        return window(w_start + timedelta(days=7), w_end + timedelta(days=7))
+    if raw in ("this month", "sometime this month", "later this month"):
+        return window(day, date(day.year, day.month, calendar.monthrange(day.year, day.month)[1]))
+    if raw in ("next month", "sometime next month"):
+        y, m = (day.year + 1, 1) if day.month == 12 else (day.year, day.month + 1)
+        return window(date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1]))
+    m = re.fullmatch(r"(?:sometime |some time |any time )?(before|by|until) (.+)", raw)
+    if m:
+        target = parse_day(m.group(2), day)
+        if target is None:
+            raise ValueError(f"which day is '{m.group(2)}'?")
+        end = target - timedelta(days=1) if m.group(1) == "before" else target
+        return window(day, end)
+    target = parse_day(raw, day)
+    if target is None:
+        raise ValueError(f"'{text}' isn't a horizon I know: " + ", ".join(NATURAL))
+    return window(target, target)
+
+
+def default_when(horizon: str, due: str, day: date, week_start: str = "mon") -> Dict[str, str]:
+    """Python's first guess (choose_horizon) as a natural horizon, for when no model can propose."""
+    if horizon == TODAY:
+        return resolve_when("today", day, week_start)
+    if horizon == SOMEDAY:
+        return resolve_when("someday", day, week_start)
+    if horizon == DEADLINE and due:
+        try:
+            d = date.fromisoformat(due[:10])
+            return {**resolve_when(f"by {d.isoformat()}", day, week_start),
+                    "when": f"by {d.strftime('%A') if (d - day).days < 7 else d.strftime('%b %-d')}"}
+        except ValueError:
+            pass
+    return resolve_when("this week", day, week_start)
+
+
+PROPOSAL_INTRO = "Here's what I'd do with what's left from before:"  # copy-madlibs T3-005
+KEEP_HEADING = "Keep:"                                                # T3-006
+DROP_HEADING = "Drop:"                                                # T3-007
+PROPOSAL_ASK = ("Does that look right? A yes or a 👍 will do. Tell me what to change, or what you already "
+                "finished.")                                          # T3-008
+
+
+def proposal_lines(keep: List[Dict[str, str]], drop: List[Dict[str, str]], short=lambda t: t) -> str:
+    """The Keep / Drop block: one item per line, no bullets (11-05)."""
+    out = []
+    if keep:
+        out.append(KEEP_HEADING)
+        out += [f"{short(k['title'])} – {k['when']}" for k in keep]
+    if drop:
+        out.append(DROP_HEADING)
+        out += [short(d["title"]) for d in drop]
+    return "\n".join(out)

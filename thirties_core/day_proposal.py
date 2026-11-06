@@ -209,7 +209,14 @@ class DayProposal:
                     due_in = None
             left = left_open(t)
             h = (left or {}).get("horizon", "")
-            if h == "today" and left.get("placed_by") != "user" and \
+            if left and (left.get("pending_drop") or h == "dropped"):
+                continue  # proposed for dropping (waiting for a yes), or dropped
+            if left and left.get("start") and h != "someday":  # a window of days (carry.resolve_when)
+                start, end = date.fromisoformat(left["start"]), date.fromisoformat(left["end"])
+                if start > day:
+                    continue  # not yet: it waits for its window
+                h = "today" if end <= day else "week"
+            elif h == "today" and left.get("placed_by") != "user" and \
                     date.fromisoformat(left["since"]) < day - timedelta(days=1):
                 h = "week"  # "today" was for the day after; now it's an option this week (a due date or
                 # urgency still puts it first)
@@ -220,12 +227,12 @@ class DayProposal:
                 rank, why = (0, due_in), urgency_label(t) + (f"; {since}" if since else "")
             elif t.urgency == "now":
                 rank, why = (1, 0), "now" + (f"; {since}" if since else "")
-            elif h == "today":  # left open, and it can't wait / is quick / is due very soon
-                rank, why = (1, 5), f"{since}; meant for today"
+            elif h == "today":  # left open, and it can't wait / is quick / is due very soon / its window ends
+                rank, why = (1, 5), f"{since}; meant for {left.get('when') or 'today'}"
             elif h == "deadline":
                 continue  # its deadline is more than a week off: pulled in when it nears
-            elif left:  # this week: an option where the free time fits, never pushed into today
-                rank, why = (2, 0), f"{since}; this week"
+            elif left:  # within its window: an option where the free time fits, never pushed into today
+                rank, why = (2, 0), f"{since}; {left.get('when') or 'this week'}"
             elif t.list_role == "today":
                 rank, why = (2, 0), "on today's list"
             elif t.urgency == "soon":
@@ -452,9 +459,12 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
 
 MORNING_FACTS = (
     "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already; "
-    "keep any question in it, folded into your one question). If it asks whether yesterday's items got done, "
-    "keep that as one short question; don't list them otherwise. Start with \"☀️ Good morning!\". Don't list the "
-    "routines or meals: "
+    "keep any question in it, folded into your one question). If it holds a proposal for what's left from before, "
+    "that's Python's first guess: use your judgement (drop what has gone moot or can't happen any more, such as a "
+    "one-time event whose day is gone; keep the rest at a fitting horizon) and call propose_leftovers with your "
+    "version, then put it in the message as its Keep: and Drop: lines, one item per line, no bullets, asking for a "
+    "yes (a 👍 works too) and inviting changes or what's already finished. Start with \"☀️ Good morning!\". Don't "
+    "list the routines or meals: "
     "they go on by themselves every day.\n---\n{facts}\n---")
 
 

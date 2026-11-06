@@ -305,6 +305,9 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n")
 
 
+from datetime import timedelta
+
+
 class TestMorning(TodayTestCase):
     """Yesterday's unmarked items (carry.py; Matt, 11-05): unmarked means unknown; some things never roll; a
     one-off to-do is asked about once, in one question; not done, it waits on its list for a day it fits; the
@@ -355,9 +358,9 @@ class TestMorning(TodayTestCase):
         self.yesterday("Buy stamps", "7:00 PM")  # planned, on a list, no outcome
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertTrue(out.startswith("Did any of these get done: Buy stamps, Call the bank or Clip cat nails?"), out)
+        self.assertIn("Keep:\nBuy stamps – today\nCall the bank – this week\nClip cat nails – this week\n", out)
         self.assertNotIn("Buy stamps", [s.title for s in self.t.day_plan.spans])  # not put on today
-        self.assertIn("Nothing rolls over by itself", self.t.execute("apply_rollover", {}))
+        self.assertIn("The rest wait where proposed.", self.t.execute("apply_rollover", {}))
         # the next morning, still unmarked: never asked again
         self.sched.state_db.set_sync_meta(f"leftovers:{DAY.isoformat()}", "")
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
@@ -399,7 +402,7 @@ class TestMorning(TodayTestCase):
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Whatever wasn't done waits on its list for this week.", out)
+        self.assertIn("Call the bank – this week", out)
         cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
         self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))
@@ -420,10 +423,42 @@ class TestMorning(TodayTestCase):
         why = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertNotIn("meant for today", why["Call the bank"])  # its urgency still ranks it
 
+    def test_the_model_revises_the_proposal_and_a_yes_drops_what_it_dropped(self):
+        # 11-05: the model proposes (keep at a natural horizon, or drop), the user confirms
+        from thirties_core.carry import OpenPool
+        from tests.fixtures import DAY
+        self.yesterday("Watch the comet", "9:00 PM")
+        self.t.assistant.start_the_day()
+        self.t.execute("rollover_proposal", {})
+        out = self.t.execute("propose_leftovers", {
+            "keep": [{"item": "Call the bank", "when": "tomorrow", "why": "the branch is closed today"},
+                     {"item": "clip cat nails", "when": "this weekend"}],
+            "drop": [{"item": "Watch the comet", "why": "it was last night"}]})
+        self.assertIn("Keep:\nCall the bank – tomorrow\nClip cat nails – this weekend\nDrop:\nWatch the comet", out)
+        pool = OpenPool(self.sched.state_db).all()
+        self.assertEqual(pool["call the bank"]["start"], (DAY + timedelta(days=1)).isoformat())  # waits there now
+        self.assertTrue(pool["watch the comet"]["pending_drop"])  # dropped only on a yes
+        cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertNotIn("Call the bank", cands)  # tomorrow: not offered today
+        self.assertIn("Dropped: Watch the comet.", self.t.execute("apply_rollover", {}))
+        self.assertEqual(OpenPool(self.sched.state_db).all()["watch the comet"]["horizon"], "dropped")
+        with self.assertRaises(Exception):
+            self.t.assistant.propose_leftovers(keep=[{"item": "Call the bank", "when": "this week"}])  # all of them
+
+    def test_place_leftover_takes_natural_words(self):
+        from thirties_core.carry import OpenPool
+        from tests.fixtures import DAY
+        self.t.assistant.start_the_day()
+        self.t.execute("rollover_proposal", {})
+        self.assertIn("next month", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "next month"}))
+        rec = OpenPool(self.sched.state_db).all()["call the bank"]
+        self.assertEqual(rec["start"][:7], (DAY.replace(day=28) + timedelta(days=7)).isoformat()[:7])
+        self.assertIn("Dropped", self.t.execute("place_leftover", {"item": "Clip cat nails", "horizon": "drop"}))
+
     def test_things_that_never_roll_simply_end(self):
         self.yesterday("Lunch", "12:00 PM")                     # a meal
         self.yesterday("Dentist", "3:00 PM", fixed=True)         # fixed to its time
-        self.yesterday("Walk around the block", "8:00 PM")       # on no list: when unsure, it doesn't roll
+        self.yesterday("Walk around the block", "8:00 PM")       # an ongoing activity, not a to-do
         self.yesterday("Thirties dev", "9:00 PM")                # time on a project
         self.api.notes["n_today"]["body"] = ""
         self.t.assistant.start_the_day()

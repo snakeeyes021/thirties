@@ -55,3 +55,25 @@ class TestWhere(unittest.TestCase):
                          "Whatever wasn't done waits on its list for this week.")
         self.assertEqual(where_text([{"title": "B", "horizon": "someday"}]),
                          "Whatever wasn't done waits on its list: B (someday).")
+
+
+class TestNaturalHorizons(unittest.TestCase):
+    """The model says when in words; Python works out the days (carry.resolve_when). 2026-11-06 is a Friday."""
+
+    def test_the_words(self):
+        from thirties_core.carry import resolve_when
+
+        def w(text):
+            r = resolve_when(text, DAY)
+            return (r["start"], r["end"])
+        self.assertEqual(w("today"), ("2026-11-06", "2026-11-06"))
+        self.assertEqual(w("tomorrow"), ("2026-11-07", "2026-11-07"))
+        self.assertEqual(w("this week"), ("2026-11-06", "2026-11-08"))
+        self.assertEqual(w("this weekend"), ("2026-11-07", "2026-11-08"))
+        self.assertEqual(w("before wednesday"), ("2026-11-06", "2026-11-10"))
+        self.assertEqual(w("by wednesday"), ("2026-11-06", "2026-11-11"))
+        self.assertEqual(w("next week"), ("2026-11-09", "2026-11-15"))
+        self.assertEqual(w("next month"), ("2026-12-01", "2026-12-31"))
+        self.assertEqual(w("someday"), ("", ""))
+        with self.assertRaises(ValueError):
+            resolve_when("whenever the stars align", DAY)
