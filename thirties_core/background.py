@@ -546,6 +546,8 @@ class BackgroundService:
         db.set_sync_meta(key, "1")
         holiday = ahead = ""
         if manager.tools.assistant is not None:
+            from thirties_core.carry import settle
+            settle(manager.tools.assistant, day)  # what's left from before, sorted before the morning is written
             started = manager.tools.assistant.start_the_day()
             if started:
                 logger.info("Morning: %s.", started)

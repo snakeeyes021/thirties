@@ -30,7 +30,10 @@ def user_is_up(db, plan, now: datetime) -> bool:
     """The user has started this day: they've written since the day began (sunrise, rounded down), or their
     waking is on the record (log_day_times)."""
     said = _last_message(db)
-    if said is not None and plan.day_start <= said <= now + timedelta(minutes=1):
+    slept_since = said is not None and any(  # a night's sleep ended since they last wrote: not up yet (11-04 replay:
+        s.category.value == "sleep" and said < s.end_dt <= now and not s.tentative  # 6:30, before sunrise, still
+        for s in plan.spans)                                                         # counted as yesterday)
+    if said is not None and plan.day_start <= said <= now + timedelta(minutes=1) and not slept_since:
         return True
     from thirties_core.day_times import morning_sleep
     history = []
