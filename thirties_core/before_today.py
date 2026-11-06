@@ -69,8 +69,9 @@ class BeforeToday:
             need = timedelta(minutes=minutes)
             now = pt._now()
             spot = None
+            from thirties_core.clock import first_fitting_thirty
             for a, b in pt.open_windows(after=now):
-                a = max(a, thirty_ceil(now))
+                a = max(a, first_fitting_thirty(now, minutes))  # the current thirty only if it fits in what's left
                 if b - a >= need:
                     spot = a
                     break

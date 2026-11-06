@@ -436,8 +436,9 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
             {"start": "on waking", "items": FIRST}, {"start": "right after that", "items": SECOND}]})
         set_debug_time(at("09:45"))  # in the middle of Work (8:30 to 4)
         self.t.assistant.routines.set_up_current()
-        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("09:30"))
-        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:00"))
+        # 15 minutes left of the 9:30 block: the part doesn't fit, so the next block (11-06)
+        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("10:00"))
+        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:30"))
         work = self.spans(self.t, "Work")[0]
         self.assertEqual((work.start_dt, work.end_dt), (at("08:30"), at("16:00")))  # alongside, never moved
 
@@ -448,8 +449,31 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
             {"start": "6:30 AM", "items": FIRST}, {"start": "7:00 AM", "items": SECOND}]})
         set_debug_time(at("09:45"))
         self.t.assistant.routines.set_up_current()
-        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("09:30"))
-        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:00"))
+        self.assertEqual(self.spans(self.t, "Feed kitties")[0].start_dt, at("10:00"))
+        self.assertEqual(self.spans(self.t, "Throne")[0].start_dt, at("10:30"))
+
+class TestTheFirstBlockMustFit(RoutineCase):
+    """11-06: up at 9:25, the morning routine went in the 9:00 block with 5 minutes left. The current block only
+    if the part fits in what's left of it (at most 5 minutes short); else the next one."""
+
+    def place_at(self, hhmm):
+        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+            {"start": "6:30 AM", "items": FIRST}, {"start": "7:00 AM", "items": SECOND}]})
+        set_debug_time(at(hhmm))
+        self.t.assistant.routines.set_up_current()
+        return (self.spans(self.t, "Feed kitties")[0].start_dt, self.spans(self.t, "Throne")[0].start_dt)
+
+    def test_up_at_9_25_this_morning(self):
+        self.assertEqual(self.place_at("09:25"), (at("09:30"), at("10:00")))
+
+    def test_up_at_9_02_it_still_fits(self):
+        self.assertEqual(self.place_at("09:02"), (at("09:00"), at("09:30")))
+
+    def test_up_at_9_28(self):
+        self.assertEqual(self.place_at("09:28"), (at("09:30"), at("10:00")))
+
+    def test_up_at_9_58(self):
+        self.assertEqual(self.place_at("09:58"), (at("10:00"), at("10:30")))
 
 class TestProposingTheDay(RoutineCase):
 

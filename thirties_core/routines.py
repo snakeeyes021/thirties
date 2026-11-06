@@ -614,6 +614,7 @@ class RoutineTools:
         now = self.pt._now()
         if now >= self._bedtime(plan) - timedelta(minutes=30):
             return ""  # that day's waking hours are over (6:30 AM: yesterday's day isn't set up any more)
+        self.db.set_sync_meta(f"day_built_at:{plan.target_date.isoformat()}", now.isoformat())  # check-ins
         self.db.set_sync_meta(key, json.dumps({"state": "running"}))  # first: placing writes to Today, which asks
         saved, self.pt.day_plan, self.placing = self.pt.day_plan, plan, True
         state: Dict[str, Any] = {"state": "done", "placed": [], "moved": [], "unplaced": [], "on_today": []}
@@ -653,7 +654,9 @@ class RoutineTools:
             # The day is set up when the user is up (wake.py): if that's later than the wake on the record (they
             # slept past the planned 6:30), waking is now: the first part goes in the current thirty (11-05: woke
             # at 9, the routine was laid out from 6:30 and its first part pushed to after work).
-            base = max(thirty_ceil(woke), thirty_of(now)) if plan.day_start <= now < bed else thirty_ceil(woke)
+            from thirties_core.clock import first_fitting_thirty
+            base = max(thirty_ceil(woke), first_fitting_thirty(now, minutes)) if plan.day_start <= now < bed \
+                else thirty_ceil(woke)
             start = base + timedelta(minutes=30 * (int(at[5:]) if "+" in at else 0))
         else:
             start = _at(at, plan.day_start)
@@ -668,7 +671,8 @@ class RoutineTools:
         # Its time has passed: from the current thirty on, the first one without a fixed calendar event or sleep
         # in it. Routine steps sit alongside Work and other items (11-03: "the morning routine can overlap
         # work!!!"; 11-05: a missed 6:30 part went to 3 PM, after work).
-        t = thirty_of(now)
+        from thirties_core.clock import first_fitting_thirty
+        t = first_fitting_thirty(now, minutes)  # the current thirty only if the part still fits in it
         while t + timedelta(minutes=30) <= bed:
             blocked = any(s.start_dt < t + timedelta(minutes=30) and t < s.end_dt and s.status != SpanStatus.SKIPPED
                           and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))

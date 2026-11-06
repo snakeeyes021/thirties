@@ -409,3 +409,15 @@ def parse_day(text, today):
         if candidates:
             return min(candidates, key=lambda d: abs((d - today).days))
     raise ClockError(f"Could not read the day '{text}'. Use 'today', 'tomorrow', a weekday, or a date like 'Oct 20'.")
+
+
+FIT_SLACK_MINUTES = 5
+
+
+def first_fitting_thirty(now, minutes: int = 30, slack: int = FIT_SLACK_MINUTES):
+    """Where something that takes ``minutes`` can start from now: the current thirty only if it fits in what's
+    left of it (at most ``slack`` minutes short), else the next one (11-06: up at 9:25, the morning routine was
+    put in the 9:00 block, with 5 minutes left)."""
+    block = thirty_of(now)
+    left = (block + timedelta(minutes=30) - now).total_seconds() / 60
+    return block if left + slack >= min(minutes, 30) else block + timedelta(minutes=30)

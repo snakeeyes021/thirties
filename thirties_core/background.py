@@ -41,6 +41,7 @@ LEVELS = ("off", "light", "medium", "heavy")
 YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
+CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
 REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
 
 
@@ -346,11 +347,23 @@ class BackgroundService:
             self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now,
                       expires=bed)
 
+    def _built_late(self, span, plan) -> bool:
+        """The day was built (the user's first message) when this item's thirty was already half over: no
+        check-in about it (11-06: built at 9:25, the 9:00 block's check-in came at 9:57)."""
+        raw = self.scheduler.state_db.get_sync_meta(f"day_built_at:{plan.target_date.isoformat()}")
+        try:
+            built = datetime.fromisoformat(raw) if raw else None
+        except ValueError:
+            return False
+        return built is not None and thirty_of(span.start_dt) + timedelta(minutes=15) <= built
+
     def check_ins(self, now: datetime) -> None:
         """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
-        have no outcome: never twice about an item, never about one already reported or muted."""
+        have no outcome: never twice about an item, never about one already reported or muted. Each goes out at
+        its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
+        late day build never pushes check-ins later or sends one for a block that was half over by then."""
         cfg = self.config.assistant
-        if self.level() != "heavy" or self._quiet(now) or self._talking(now):
+        if self.level() != "heavy" or self._quiet(now):
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
@@ -366,7 +379,13 @@ class BackgroundService:
         due = [s for s in plan.active_spans()
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
                and thirty_end(s) + grace <= now < thirty_end(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
-        if not due:
+        late = [s for s in due if now >= thirty_end(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
+        if late:  # its moment passed (the user was talking then), or the day was built too late for it: never sent
+            for s in late:
+                asked[s.id] = now.date().isoformat()
+            self._remember("checkins_asked", asked, now)
+            due = [s for s in due if s not in late]
+        if not due or self._talking(now):
             return
         for s in due:
             asked[s.id] = now.date().isoformat()

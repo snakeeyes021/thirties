@@ -279,12 +279,56 @@ class TestMessageLevels(unittest.TestCase):
         self.sched.state_db.set_sync_meta("last_user_message_at", at("17:30").isoformat())
         self.svc.check_ins(at("17:45"))  # Shower's thirty ended at 5:00: but the user just wrote
         self.assertEqual(self.sent, [])
-        self.svc.check_ins(at("18:20"))
-        self.assertTrue(self.sent and self.sent[0][0] == "checkin")
+        self.svc.check_ins(at("18:12"))  # Food's (until 6) is due at 6:10, its own time: the talk is over
+        self.assertEqual([(k, "Food" in t, "Shower" in t) for k, t in self.sent], [("checkin", True, False)])  # 11-06:
+        # Shower's moment passed while the user was talking: never sent late
         self.sched.state_db.upsert_span(EventSpan("x", "Errand", at("15:00"), at("15:20"), SpanCategory.ACTIVITY))
         before = len(self.sent)
         self.svc.starts(at("15:00"))  # during the dentist: quiet
         self.assertEqual(len(self.sent), before)
+
+
+class TestCheckInsAtTheirOwnTime(unittest.TestCase):
+    """11-06: the day was built at 9:25 (the first message), the user wrote again at 9:27, and the 9:00 block's
+    check-in came at 9:57. Each check-in goes out at its own time (its thirty's end + 10 minutes) or not at all;
+    none for a block that was half over when the day was built; a late build never shifts or batches them."""
+
+    def run_morning(self, built, talked, placed_9_00=True):
+        set_debug_time(at("09:30"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        sent = []
+        svc = BackgroundService(sched.config, lambda t, b, k: sent.append((svc.now().strftime("%H:%M"), b)),
+                                scheduler=sched, joplin_engine=joplin, inference_engine=MockInferenceEngine(),
+                                sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        sched.config.assistant.message_level = "heavy"
+        if placed_9_00:
+            sched.state_db.upsert_span(EventSpan("fk", "Feed kitties", at("09:00"), at("09:06"), SpanCategory.TASK))
+        sched.state_db.upsert_span(EventSpan("th", "Throne", at("09:30"), at("09:37"), SpanCategory.TASK))
+        sched.state_db.set_sync_meta(f"day_built_at:{DAY.isoformat()}", at(built).isoformat())
+        sched.state_db.set_sync_meta("last_user_message_at", at(talked).isoformat())
+        t = at("09:30")
+        while t <= at("10:40"):
+            set_debug_time(t)
+            svc.check_ins(t)
+            t += timedelta(minutes=1)
+        return sent
+
+    def test_this_morning_built_at_9_25(self):
+        sent = self.run_morning("09:25", "09:27")
+        self.assertEqual([(when, "Throne" in text, "Feed kitties" in text) for when, text in sent],
+                         [("10:10", True, False)])  # the 9:30 block on time; the 9:00 block never
+
+    def test_built_at_9_02_the_9_00_block_gets_its_check_in(self):
+        sent = self.run_morning("09:02", "09:02")
+        self.assertEqual([when for when, _ in sent], ["09:40", "10:10"])
+
+    def test_talking_at_its_time_means_it_isnt_sent_later(self):
+        sent = self.run_morning("09:02", "09:35")  # still talking at 9:40: the 9:00 block's moment passes
+        self.assertEqual([when for when, _ in sent], ["10:10"])
 
 
 class TestTurnsInTheBackground(unittest.TestCase):
@@ -345,8 +389,8 @@ class TestTurnsInTheBackground(unittest.TestCase):
         from thirties_core.messages import MissedTracker
         self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
         self.svc._manager = None
-        self.svc.check_ins(at("18:45"))
-        self.assertIn("taxes", MissedTracker(self.sched.state_db).titles_shown(at("18:45")))
+        self.svc.check_ins(at("18:12"))  # its own time: 10 minutes after its thirty ends
+        self.assertIn("taxes", MissedTracker(self.sched.state_db).titles_shown(at("18:12")))
 
 
 if __name__ == "__main__":
