@@ -1420,8 +1420,10 @@ class AssistantTools(KindTools):
         one-off to-dos with no outcome are asked about once, in one short question, and whatever wasn't done
         waits on its list for a day it fits (the day's proposal offers it)."""
         import json
-        from thirties_core.carry import done_question, settle, still_unknown
+        from thirties_core.carry import done_question, mark_asked, settle, still_unknown
         ask = still_unknown(self, self._today(), settle(self, self._today())["ask"]) if self._db is not None else []
+        if ask:
+            mark_asked(self._db, ask, self._today())  # asked now: never again
         if not ask:
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         self._db.set_sync_meta(self._rollover_key(), json.dumps({

@@ -93,7 +93,8 @@ def _asked(db) -> Dict[str, str]:
     return _load(db, ASKED_KEY)
 
 
-def _mark_asked(db, titles: Iterable[str], day: date) -> None:
+def mark_asked(db, titles: Iterable[str], day: date) -> None:
+    """Recorded when the question is really put to the user, never just because the day was sorted."""
     data = {k: v for k, v in _asked(db).items() if v >= (day - timedelta(days=ASKED_DAYS)).isoformat()}
     for t in titles:
         data[t.strip().lower()] = day.isoformat()
@@ -117,7 +118,6 @@ def settle(assistant, day: date) -> Dict[str, Any]:
         pool = OpenPool(db)
         done = {t.lower() for t in _done_titles(assistant, day)}
         pool.drop([k for k in pool.all() if k in done])  # done since: out of the pool
-        _mark_asked(db, out["ask"], day)
         OpenPool(db).add(out["pool_items"], day - timedelta(days=1))
         db.set_sync_meta(key, json.dumps(out))
     return out
