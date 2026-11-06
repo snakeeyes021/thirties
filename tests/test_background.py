@@ -465,14 +465,12 @@ class TestRollover(unittest.TestCase):
         self.m = ConversationManager(plan, list(self.tasks), pending, self.sched, inference_engine=MockInferenceEngine(),
                                      active_notes=[])
 
-    def test_one_question_and_nothing_moved_into_today(self):
+    def test_a_notice_and_nothing_moved_into_today(self):
         text = self.m.execute_tool("rollover_proposal", {})
-        # 11-05: a proposal per leftover, the model's to revise; Email Mom and Dishes are tasks too (no item is
-        # "on no list")
-        self.assertTrue(text.startswith("Here's what I'd do with what's left from before:\nKeep:\n"), text)
-        self.assertIn("Taxes – this week", text)
-        self.assertIn("Email Mom – this week", text)
-        self.assertNotIn("- ", text)  # no bullets
+        # 11-06: in effect by itself, said as a notice; Email Mom and Dishes are tasks too (no item is "on no list")
+        self.assertEqual(text, "Kept 3 from before (0 on today's plan): see Before today.")
+        keep = {r["title"]: r["when"] for r in self.m.tools.assistant.before.rows()["keep"]}
+        self.assertEqual(keep, {"Taxes": "this week", "Email Mom": "this week", "Dishes": "this week"})
         out = self.m.execute_tool("apply_rollover", {})
         self.assertIn("The rest wait where proposed.", out)
         self.assertNotIn("Taxes", [s.title for s in self.sched.build_day_plan(DAY)[0].spans])
@@ -492,5 +490,4 @@ class TestRollover(unittest.TestCase):
         svc.rollover(at("08:15"))
         svc.rollover(at("08:30"))
         self.assertEqual([k for k, _ in sent], ["rollover"])
-        self.assertTrue(sent[0][1].startswith("☀️ Good morning! "), sent[0][1])
-        self.assertIn("Taxes – this week", sent[0][1])
+        self.assertTrue(sent[0][1].strip(), sent[0][1])  # one message (the model writes the notice)

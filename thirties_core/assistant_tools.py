@@ -223,6 +223,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["item", "horizon"],
     },
     {
+        "name": "leftover_action",
+        "description": "Act on something left from before, as the user says (the same as the app's Before today "
+                       "tab): accept (stands as proposed), done (it got done), drop, keep (a proposed drop kept "
+                       "instead), undrop (back from the archive).",
+        "parameters": {"item": "The item's title.", "action": "accept, done, drop, keep or undrop."},
+        "required": ["item", "horizon"],
+    },
+    {
         "name": "apply_rollover",
         "description": "Close the morning's question about yesterday's items. It moves nothing: record what got "
                        "done with log_outcome.",
@@ -1433,15 +1441,19 @@ class AssistantTools(KindTools):
             done += onto_today(self, day)
         return "; ".join(done)
 
+    @property
+    def before(self):
+        from thirties_core.before_today import BeforeToday
+        return BeforeToday(self)
+
     def rollover_proposal(self, **_: Any) -> str:
-        """The morning's proposal for what's left from before (carry.py; 11-05: the model proposes, the user
-        confirms). Nothing rolls into today by itself. Each one-off with no outcome gets Python's first guess, a
-        natural horizon (today, this week, by its deadline, someday); kept items wait there at once, and the
-        morning model may revise the proposal (propose_leftovers), dropping what has gone moot. Drops wait for a
-        yes. Asked about once: never again."""
+        """The morning's proposal for what's left from before (carry.py, before_today.py; 11-06: it takes effect
+        by itself). Each one-off with no outcome gets Python's first guess, a natural horizon; a Keep for today
+        goes on today's schedule now, the others wait at their horizon. The morning model may revise it
+        (propose_leftovers), proposing drops; a drop is applied by itself once the day is over. Returns a short
+        notice of what was done; the one question is only for what doesn't fit today. Never again per item."""
         import json
-        from thirties_core.carry import (PROPOSAL_ASK, PROPOSAL_INTRO, OpenPool, default_when, mark_asked,
-                                         proposal_lines, settle, still_unknown)
+        from thirties_core.carry import OpenPool, default_when, mark_asked, settle, still_unknown
         if self._db is None:
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         day = self._today()
@@ -1449,19 +1461,55 @@ class AssistantTools(KindTools):
         ask = still_unknown(self, day, left["ask"])
         if not ask:
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
-        mark_asked(self._db, ask, day)  # put to the user now: never again
+        mark_asked(self._db, ask, day)  # proposed now: never again
         week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
         by_title = {i["title"].lower(): i for i in left.get("pool_items", [])}
         keep = []
         for t in ask:
             item = by_title.get(t.lower()) or {"title": t, "task_id": "", "horizon": "week", "due": ""}
             keep.append({**item, **default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start),
-                         "why": "Python's first guess"})
-        OpenPool(self._db).add(keep, day - timedelta(days=1))  # kept items wait where proposed straight away
+                         "why": "", "proposed_on": day.isoformat()})
+        OpenPool(self._db).add(keep, day - timedelta(days=1))
+        placed, overflow = self.before.place_today(keep)  # today's Keeps are on the schedule now
         self._db.set_sync_meta(self._rollover_key(), json.dumps({
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
-            "leftovers": {"keep": keep, "drop": []}, "offered_at": self.pt._now().isoformat()}))
-        return PROPOSAL_INTRO + "\n" + proposal_lines(keep, [], _short) + "\n" + PROPOSAL_ASK
+            "leftovers": {"keep": keep, "drop": []}, "overflow": [o["title"] for o in overflow],
+            "offered_at": self.pt._now().isoformat()}))
+        return self.leftover_notice()
+
+    def leftover_notice(self) -> str:
+        """The morning's word on the leftovers, as Python says it (the model says it in its own words)."""
+        import json
+        from thirties_core.carry import notice_text
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        data = json.loads(raw) if raw else {}
+        lo = data.get("leftovers") or {}
+        today = self._today().isoformat()
+        on_today = [k for k in lo.get("keep", []) if k.get("end") and k["end"] <= today
+                    and k["title"] not in data.get("overflow", [])]
+        return notice_text(len(lo.get("keep", [])), len(on_today), len(lo.get("drop", [])),
+                           [_short(t) for t in data.get("overflow", [])])
+
+    def leftover_brief(self) -> str:
+        """For the morning model: each leftover as proposed, with what it carries, and what doesn't fit today."""
+        import json
+        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
+        data = json.loads(raw) if raw else {}
+        lo = data.get("leftovers") or {}
+        if not lo.get("keep") and not lo.get("drop"):
+            return ""
+        tasks = {t.id: t for t in self.s.tasks}
+        lines = []
+        for k in lo.get("keep", []):
+            t = tasks.get(k.get("task_id") or "")
+            facts = [f"kept: {k.get('when')}"] + ([f"due {t.due[:10]}"] if t is not None and t.due else []) + (
+                [f"urgency {t.urgency}"] if t is not None and t.urgency else []) + (
+                [f"list {t.parent_note_title}"] if t is not None and t.parent_note_title else ["no list"]) + (
+                ["DOESN'T FIT TODAY"] if k["title"] in data.get("overflow", []) else [])
+            lines.append(f"- {k['title']} ({'; '.join(facts)})")
+        lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
+        return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; today's "
+                "are on the plan):\n" + "\n".join(lines))
 
     def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python
@@ -1502,11 +1550,23 @@ class AssistantTools(KindTools):
         if missing:
             raise ToolError("Say what to do with each one; missing: " + ", ".join(missing) + ".")
         pool = OpenPool(self._db)
+        for d in new_drop:
+            d["proposed_on"] = day.isoformat()
         pool.add(new_keep + new_drop, day - timedelta(days=1))
+        recs = pool.all()
+        for r in new_drop + [k for k in new_keep if k["end"] > day.isoformat() or k["start"] > day.isoformat()]:
+            rec = recs.get(r["title"].lower())
+            if rec is not None and rec.get("slot"):
+                self.before.take_off_today(rec)  # not today's any more: its slot goes
+        placed, overflow = self.before.place_today([recs.get(k["title"].lower(), k) for k in new_keep])
         data["leftovers"] = {"keep": new_keep, "drop": new_drop}
+        data["overflow"] = [o["title"] for o in overflow]
         self._db.set_sync_meta(self._rollover_key(), json.dumps(data))
-        return ("Proposal remembered: kept items wait there now; drops wait for the user's yes (then apply_rollover). "
-                "Show it like this, one per line, no bullets:\n" + proposal_lines(new_keep, new_drop, _short))
+        return ("In effect now, no approval needed: today's Keeps are on the plan" +
+                (", except what doesn't fit: " + ", ".join(data["overflow"]) if data["overflow"] else "") +
+                "; the rest wait at their horizon; drops are applied by themselves after today unless the user says "
+                "otherwise. Say it as a short notice (see Before today), not a question:\n" +
+                proposal_lines(new_keep, new_drop, _short))
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
@@ -1599,6 +1659,12 @@ class AssistantTools(KindTools):
         rec = pool.place(str(item), h, window)
         if rec is None:
             raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
+        if h == "today":
+            placed, overflow = self.before.place_today([rec])
+            if overflow:
+                return f"{rec['title']}: today, but there's no free time left for it."
+        elif rec.get("slot"):
+            self.before.take_off_today(rec)  # not today's any more
         return f"{rec['title']}: {window['when']}."
 
     def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
@@ -1997,6 +2063,7 @@ class AssistantTools(KindTools):
             "apply_rollover": self.apply_rollover,
             "place_leftover": self.place_leftover,
             "propose_leftovers": self.propose_leftovers,
+            "leftover_action": lambda item="", action="", **_: self.before.action(item, action),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,

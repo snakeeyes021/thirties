@@ -133,7 +133,8 @@ class AgendaPage(Gtk.ScrolledWindow):
         upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
-        self._fill_pencilled(None)
+        # no "on the list, no time yet" section on Today any more (11-06): today's items are placed on the
+        # schedule, and what's left from before is in the Before today tab
         self._fill_routines(plan, now)
         self._fill_done(spans)
 

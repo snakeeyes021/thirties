@@ -476,18 +476,15 @@ class TestProposingTheDay(RoutineCase):
         self.assertIn("- Buy stamps (due Saturday; Errands/Admin; about 30m) task_id=t_stamps", text)  # horizons
         self.assertIn("Free time:\n- 4:00 PM – ", text)  # after work, before bed
 
-    def test_one_proposal_applied_on_yes(self):
+    def test_the_proposal_is_the_plan_at_once(self):
+        # 11-06, Matt: "proposed schedules should just BE the schedule; I shouldn't have to ok it"
         section = self.t.assistant.proposals.prompt_section()
         self.assertTrue(section.startswith("DAY OPTIONS"), section)
         out = self.t.execute("propose_day", {"items": [{"item": "t_stamps", "start": "4:30 PM"},
                                                        {"item": "Call the bank", "start": "5:30 PM"}],
                                              "why": "the stamps are due Saturday"})
-        self.assertIn("- 4:30 PM – Buy stamps\n- 5:30 PM – Call the bank", out)
-        self.assertFalse(self.spans(self.t, "Buy stamps"))  # nothing on the plan until yes
-        self.assertTrue(self.t.assistant.proposals.pending())
-        self.assertIn("DAY PROPOSAL waiting", self.t.assistant.proposals.prompt_section())
-        out = self.t.execute("apply_day_proposal", {})
-        self.assertEqual(out, "On the plan:\n- 4:30 PM – Buy stamps\n- 5:30 PM – Call the bank")
+        self.assertIn("On the plan:\n- 4:30 PM – Buy stamps\n- 5:30 PM – Call the bank", out)
+        self.assertIn("not a question", out)
         self.assertEqual(self.spans(self.t, "Buy stamps")[0].task_id, "t_stamps")
         self.assertIn("- [ ] Buy stamps", self.body("n_today"))
         self.assertFalse(self.t.assistant.proposals.pending())
@@ -542,15 +539,14 @@ class TestTheMorningMessage(RoutineCase):
         self.engine.responses = [
             {"role": "assistant", "content": "", "tool_calls": [
                 {"name": "propose_day", "arguments": {"items": [{"item": "t_bank", "start": "4:00 PM"}]}}]},
-            {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one. "
-                                             "Want that?"}]
+            {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one."}]
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual([k for k, _ in self.sent], ["rollover"])  # one message (10-31: three at sunrise)
         self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
         self.assertTrue(any(s.title == "Lunch" for s in self.m.day_plan.spans))  # set up, and not listed
         self.assertNotIn("On today by themselves", self.sent[0][1])
-        self.assertTrue(self.m.tools.assistant.proposals.pending())
+        self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))  # on the plan: no yes needed
         visible = [h["content"] for h in self.m.history()]
         self.assertFalse(any(v.startswith("[Morning") for v in visible))  # the instruction stays hidden
         self.assertTrue(any("Call the bank" in v for v in visible))
@@ -564,8 +560,8 @@ class TestTheMorningMessage(RoutineCase):
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
         self.assertTrue(text.startswith("☀️ Good morning! "), text)
-        self.assertTrue(text.endswith("For the free time today, how about:\n- 4:00 PM – Call the bank\n"
-                                      "Want these on the plan?"), text)
+        self.assertTrue(text.endswith("On the plan for the free time:\n- 4:00 PM – Call the bank"), text)  # a notice
+        self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))
 
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
         # 10-31 sim: the model wrote a plan but never called propose_day; Python's went out, and the app showed both

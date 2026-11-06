@@ -40,12 +40,14 @@ PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a late
 MIN_FREE_MINUTES = 60  # less free time than this ahead: nothing to propose
 
 MORNING_INSTRUCTION = (
-    "[Morning, not from the user] The day has started, and its routines and anchors are on the plan. Propose the day: "
-    "pick a few concrete things for the free time from DAY OPTIONS (what's pressing first; not the whole backlog), "
-    "call propose_day with them, then write a short message: the proposal as a list, one line on why, and one "
-    "question. If yesterday's items were just offered too, one question covers both. If the week's plan says how it's "
-    "going (on track or behind), you may mention it in one line. If nothing is worth proposing, reply with only: "
-    "NOTHING")
+    "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
+    "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
+    "backlog) and call propose_day with them. They go on the plan at once: the schedule just IS the schedule, with "
+    "no approval step (11-06). Then write one short message: a notice of what you put on, as a list, and one line "
+    "on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
+    "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
+    "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
+    "nothing to say, reply with only: NOTHING")
 
 
 def usual_minutes(assistant: "AssistantTools", task: Optional[TaskItem], title: str) -> int:
@@ -379,9 +381,11 @@ class DayProposal:
         if problems:
             raise ToolError("; ".join(problems) + ". Free time: " + ("; ".join(
                 self.pt.describe_window(a, b) for a, b in free) or "none") + ".")
-        listed = self._store(sorted(out, key=lambda i: i["start"]), str(why or ""))
-        return ("Proposal remembered; nothing is on the plan until the user says yes (then apply_day_proposal). "
-                "Show it like this:\n" + listed)
+        self._store(sorted(out, key=lambda i: i["start"]), str(why or ""))
+        # 11-06, Matt: "proposed schedules should just BE the schedule; I shouldn't have to ok it". On the plan now.
+        placed = self.apply_day_proposal()
+        return ("On the plan now: it IS the plan, no approval needed. Tell the user what you put on, as a short "
+                "notice, not a question (they'll say if something's wrong):\n" + placed)
 
     def apply_day_proposal(self, skip: Any = None, **_: Any) -> str:
         from thirties_core.assistant_tools import ToolError, _stem_words
@@ -458,17 +462,16 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
 
 
 MORNING_FACTS = (
-    "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already; "
-    "keep any question in it, folded into your one question). If it holds a proposal for what's left from before, "
-    "that's Python's first guess: use your judgement (drop what has gone moot or can't happen any more, such as a "
-    "one-time event whose day is gone; keep the rest at a fitting horizon) and call propose_leftovers with your "
-    "version, then put it in the message as its Keep: and Drop: lines, one item per line, no bullets, asking for a "
-    "yes (a 👍 works too) and inviting changes or what's already finished. Start with \"☀️ Good morning!\". Don't "
-    "list the routines or meals: "
-    "they go on by themselves every day.\n---\n{facts}\n---")
+    "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already). "
+    "If it says what was done with what's left from before, say that as a notice in your words, not a question: "
+    "how many were kept and how many are on today's plan, how many you'd drop, and that it's all in Before today "
+    "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
+    "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
+    "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
+    "morning!\". Don't list the routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
 
 
-def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
+def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:
     """The morning proposal as a message: (text, already_in_the_conversation). The Frontier brain picks in a turn of
     its own, and its message also says ``facts`` (what's planned, yesterday's leftovers: one message, 10-31);
     otherwise (or if that fails) Python proposes the obvious few, and the caller adds the facts. ('', False) when
@@ -478,12 +481,15 @@ def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
         return "", False
     dp = assistant.proposals
     plan = manager.day_plan
-    if not dp.should_offer(plan):
+    offer = dp.should_offer(plan)
+    if not offer and not brief:
         return "", False
     if getattr(manager, "brain_name", "") == "frontier":
         try:
-            reply = manager.assistant_turn(MORNING_INSTRUCTION + (MORNING_FACTS.format(facts=facts) if facts else ""))
-            if dp.state(plan.target_date).get("state") == "offered":
+            reply = manager.assistant_turn(MORNING_INSTRUCTION + (MORNING_FACTS.format(facts=facts) if facts else "")
+                                           + ("\n" + brief if brief else ""))
+            if dp.state(plan.target_date).get("state") in ("offered", "applied") or (
+                    brief and reply.strip() and not reply.strip().upper().startswith("NOTHING")):
                 return reply, True
             if reply.strip().upper().startswith("NOTHING"):
                 dp.db.set_sync_meta(dp._key(plan.target_date), json.dumps({"state": "nothing"}))
@@ -491,17 +497,21 @@ def morning_proposal(manager, facts: str = "") -> Tuple[str, bool]:
             _hide(manager, reply)  # no proposal behind it: Python's goes out instead, so the chat shows one
         except Exception as e:
             logger.warning("The morning proposal turn failed: %s", e)
-    items = dp.default_items(plan)
+    items = dp.default_items(plan) if offer else []
     if not items:
         return "", False
     saved, manager.tools.day_plan = manager.tools.day_plan, plan
     try:
-        listed = dp._store(items)
+        dp._store(items)
+        listed = "\n".join(dp._lines(items))
+        dp.apply_day_proposal()  # it IS the plan (11-06): on the plan at once
     finally:
         manager.tools.day_plan = saved
     week = week_line(manager.tools)
-    return ((week + "\n" if week else "") + "For the free time today, how about:\n" + listed
-            + "\nWant these on the plan?"), False
+    return ((week + "\n" if week else "") + FREE_TIME_HEADING + "\n" + listed), False  # a notice, not a question
+
+
+FREE_TIME_HEADING = "On the plan for the free time:"  # copy-madlibs T3-026
 
 
 def _hide(manager, reply: str) -> None:

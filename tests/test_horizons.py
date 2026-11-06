@@ -507,6 +507,12 @@ class TestSessions(PlannerCase):
             self.assertEqual(sent, [])  # one offer at a time
             assistant.proposals.decline()
         svc.horizon_session(self.when)
+        # 11-06: the day's plan is applied at once; if it already put the week's only item on today, the week has
+        # nothing left to plan and the session stays quiet
+        on_today = {s.task_id for s in svc.manager().day_plan.spans if s.task_id}
+        if "tax" in on_today:
+            self.assertEqual(sent, [])
+            return
         self.assertEqual([k for k, _ in sent], ["horizon"])
         self.assertTrue(sent[0][1].startswith("📅 A new week."))
         self.assertIn("A new week.", svc.manager().history()[-1]["content"])

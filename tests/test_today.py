@@ -358,8 +358,12 @@ class TestMorning(TodayTestCase):
         self.yesterday("Buy stamps", "7:00 PM")  # planned, on a list, no outcome
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Keep:\nBuy stamps – today\nCall the bank – this week\nClip cat nails – this week\n", out)
-        self.assertNotIn("Buy stamps", [s.title for s in self.t.day_plan.spans])  # not put on today
+        # 11-06: in effect by itself; today's keep is on today's schedule already, and the morning says so
+        self.assertEqual(out, "Kept 3 from before (1 on today's plan): see Before today.")
+        rows = {r["title"]: r for r in self.t.assistant.before.rows()["keep"]}
+        self.assertIsNotNone(rows["Buy stamps"]["at"])  # placed
+        self.assertEqual(rows["Call the bank"]["when"], "this week")
+        self.assertIn("Buy stamps", [s.title for s in self.t.day_plan.spans])
         self.assertIn("The rest wait where proposed.", self.t.execute("apply_rollover", {}))
         # the next morning, still unmarked: never asked again
         self.sched.state_db.set_sync_meta(f"leftovers:{DAY.isoformat()}", "")
@@ -402,15 +406,14 @@ class TestMorning(TodayTestCase):
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Call the bank – this week", out)
+        self.assertEqual(out, "Kept 2 from before (0 on today's plan): see Before today.")  # a notice
         cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
         self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))
         cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertNotIn("Call the bank", cands)  # someday: not in daily plans unless asked
         self.t.execute("place_leftover", {"item": "call the bank", "horizon": "today"})
-        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
-        self.assertTrue(cands["Call the bank"].endswith("meant for today"), cands)
+        self.assertIn("Call the bank", [s.title for s in self.t.day_plan.spans])  # today: on the schedule at once
         OpenPool(self.sched.state_db).add([{"title": "Call the bank", "horizon": "week"}], DAY)
         self.assertEqual(OpenPool(self.sched.state_db).all()["call the bank"]["horizon"], "today")  # the user's word
 
@@ -512,15 +515,17 @@ class TestMorning(TodayTestCase):
         self.sched.state_db.record_task_completed(item_id("n_today", "Clip cat nails"), DAY - timedelta(days=1))
         self.api.up = False  # the tick never reached Joplin (Zein's text, 10-21 to 10-24)
         self.t.assistant.start_the_day()
-        out = self.t.execute("rollover_proposal", {})
-        self.assertNotIn("Clip cat nails", out)
-        self.assertIn("Call the bank", out)
+        self.t.execute("rollover_proposal", {})
+        keep = [r["title"] for r in self.t.assistant.before.rows()["keep"]]
+        self.assertNotIn("Clip cat nails", keep)
+        self.assertIn("Call the bank", keep)
 
     def test_a_group_is_asked_about_by_its_name(self):
         self.api.notes["n_today"]["body"] += "- [ ] Lab\n    - [ ] Check the scores\n    - [ ] Merge the PR\n"
         self.t.assistant.start_the_day()
-        out = self.t.execute("rollover_proposal", {})
-        self.assertIn("Lab", out)
-        self.assertNotIn("Merge the PR", out)
+        self.t.execute("rollover_proposal", {})
+        keep = [r["title"] for r in self.t.assistant.before.rows()["keep"]]
+        self.assertIn("Lab", keep)
+        self.assertNotIn("Merge the PR", keep)
 
 

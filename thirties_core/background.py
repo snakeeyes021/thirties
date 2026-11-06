@@ -589,17 +589,18 @@ class BackgroundService:
                        for line in text.splitlines() if line.startswith("- ")]  # asked about, then listed again)
             ahead = planned_ahead_text(manager.tools.assistant, skip=offered)
         facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
-        self.propose_the_day(now, facts)
+        brief = manager.tools.assistant.leftover_brief() if manager.tools.assistant is not None else ""
+        self.propose_the_day(now, facts, brief)
         db.set_sync_meta("morning_sent_at", now.isoformat())
 
-    def propose_the_day(self, now: datetime, facts: str = "") -> None:
+    def propose_the_day(self, now: datetime, facts: str = "", brief: str = "") -> None:
         """The morning's one message (10-31: three texts at sunrise, "two of them were so verbose"): what's
         already planned, yesterday's leftovers and the holiday note (``facts``), with one short proposal for the
         free time (day_proposal.py), and one question."""
         from thirties_core.day_proposal import morning_proposal
         manager = self.manager()
         try:
-            text, stored = morning_proposal(manager, facts)
+            text, stored = morning_proposal(manager, facts, brief)
         except Exception as e:
             logger.warning("The morning proposal failed: %s", e)
             text, stored = "", False
@@ -648,7 +649,7 @@ class BackgroundService:
         if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
             return
         if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
-                or assistant.rollover_pending() or assistant.proposals.pending():
+                or assistant.proposals.pending():  # the morning's leftovers need no answer any more (11-06)
             return  # one offer at a time: the day's proposal is answered first
         from thirties_core.horizons import HorizonPlanner
         text = HorizonPlanner(manager.tools).offer_session()

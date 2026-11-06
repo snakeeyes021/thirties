@@ -69,23 +69,51 @@ class OpenPool:
         self.db = db
 
     def all(self, today: Optional[date] = None) -> Dict[str, Dict[str, str]]:
+        """Every record; with ``today``, only those still waiting to be offered (not dropped, not two weeks
+        old). Dropped ones are kept, in the archive (rows()): nothing is ever deleted."""
         data = _load(self.db, POOL_KEY)
         if today is not None:
             cutoff = (today - timedelta(days=POOL_DAYS)).isoformat()
-            data = {k: v for k, v in data.items() if v.get("since", "") >= cutoff}
+            data = {k: v for k, v in data.items() if v.get("since", "") >= cutoff and v.get("horizon") != DROPPED}
         return data
+
+    def apply_drops(self, today: date) -> List[str]:
+        """A drop proposed on an earlier day that the user never touched is applied once that day is over
+        (11-06: proposed for a day, then applied by itself); it goes to the archive, with its reason."""
+        data = _load(self.db, POOL_KEY)
+        done = []
+        for rec in data.values():
+            if rec.get("pending_drop") and rec.get("proposed_on", today.isoformat()) < today.isoformat():
+                rec.update({"horizon": DROPPED, "pending_drop": False, "dropped_on": today.isoformat(),
+                            "dropped_by": "app"})
+                done.append(rec["title"])
+        if done:
+            _save(self.db, POOL_KEY, data)
+        return done
+
+    def set(self, title: str, **fields) -> Optional[Dict[str, str]]:
+        data = _load(self.db, POOL_KEY)
+        key = title.strip().lower()
+        rec = data.get(key) or next((v for k, v in data.items() if key and key in k), None)
+        if rec is None:
+            return None
+        rec.update(fields)
+        data[rec["title"].strip().lower()] = rec
+        _save(self.db, POOL_KEY, data)
+        return rec
 
     def add(self, items: Iterable[Dict[str, str]], since: date) -> None:
         """New items come in at their horizon; an item already waiting keeps its first day and, if the user
         placed it, their horizon."""
-        data = self.all(since)
+        data = _load(self.db, POOL_KEY)  # every record: an old or dropped one is kept, never overwritten away
         for item in items:
             key = item["title"].strip().lower()
             old = data.get(key)
             rec = {"title": item["title"].strip(), "task_id": item.get("task_id") or "",
                    "since": (old or {}).get("since") or since.isoformat(),
                    "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
-            rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop") if k in item})
+            rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop", "proposed_on", "slot")
+                        if k in item})
             if old and old.get("placed_by") == "user":
                 rec.update({k: old[k] for k in ("horizon", "when", "start", "end", "placed_by") if k in old})
             data[key] = rec
@@ -153,6 +181,12 @@ def settle(assistant, day: date) -> Dict[str, Any]:
     out = sort_leftovers(assistant, day)
     if db is not None:
         pool = OpenPool(db)
+        gone = pool.apply_drops(day)  # drops proposed on an earlier day and never touched: applied, archived
+        if gone:
+            try:
+                assistant._drop_leftovers([{"title": t} for t in gone])  # off the Today note too
+            except Exception:
+                pass
         done = {t.lower() for t in _done_titles(assistant, day)}
         pool.drop([k for k in pool.all() if k in done])  # done since: out of the pool
         OpenPool(db).add(out["pool_items"], day - timedelta(days=1))
@@ -444,3 +478,16 @@ def proposal_lines(keep: List[Dict[str, str]], drop: List[Dict[str, str]], short
         out.append(DROP_HEADING)
         out += [short(d["title"]) for d in drop]
     return "\n".join(out)
+
+
+def notice_text(kept: int, on_today: int, drops: int, overflow: List[str]) -> str:
+    """The morning's word on the leftovers when no model writes it (copy-madlibs T3-023 to T3-025): what was
+    done, not a question; the one question is only for what doesn't fit today."""
+    if not kept and not drops:
+        return ""
+    out = f"Kept {kept} from before ({on_today} on today's plan)"
+    out += f", and I'd drop {drops}" if drops else ""
+    out += ": see Before today."
+    if overflow:
+        out += ("\nDoesn't fit today: " + ", ".join(overflow) + ". Drop, move to another day, or squeeze in?")
+    return out
