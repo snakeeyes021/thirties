@@ -25,8 +25,9 @@ The rules, applied once a day when the day is built (after the user's first repl
    - this week: everything else. When unsure, this week, never today.
    Recurring things (routine steps, meals, anchors) never enter the pool: a missed one skips to its next turn.
    Dropped: only when the user says so (place_leftover). The user can move any item (place_leftover).
-   The daily proposal draws from the pool by fit: today's first (after anything due or urgent), then this
-   week's where free time fits, then deadline items as their day nears; never someday or dropped ones. An
+   The daily proposal draws from the pool by fit: today's first (after anything due or urgent; "today" holds
+   for the day after it was left open, then it's this week's), then this week's where free time fits, then
+   deadline items as their day nears; never someday or dropped ones. An
    item leaves the pool once it's done, or after two weeks (it's still on its list).
 5. The Today note holds today's plan only.
 """

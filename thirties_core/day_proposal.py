@@ -209,6 +209,10 @@ class DayProposal:
                     due_in = None
             left = left_open(t)
             h = (left or {}).get("horizon", "")
+            if h == "today" and left.get("placed_by") != "user" and \
+                    date.fromisoformat(left["since"]) < day - timedelta(days=1):
+                h = "week"  # "today" was for the day after; now it's an option this week (a due date or
+                # urgency still puts it first)
             if h in ("someday", "dropped"):
                 continue  # left open, and placed where daily plans don't reach (carry.py)
             since = f"left open since {weekday(date.fromisoformat(left['since']))}" if left else ""

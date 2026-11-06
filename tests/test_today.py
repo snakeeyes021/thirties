@@ -411,6 +411,15 @@ class TestMorning(TodayTestCase):
         OpenPool(self.sched.state_db).add([{"title": "Call the bank", "horizon": "week"}], DAY)
         self.assertEqual(OpenPool(self.sched.state_db).all()["call the bank"]["horizon"], "today")  # the user's word
 
+    def test_today_holds_for_the_day_after_then_its_this_weeks(self):
+        from datetime import timedelta
+        from thirties_core.carry import OpenPool
+        from tests.fixtures import DAY
+        pool = OpenPool(self.sched.state_db)
+        pool.add([{"title": "Call the bank", "task_id": "t_bank", "horizon": "today"}], DAY - timedelta(days=3))
+        why = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertNotIn("meant for today", why["Call the bank"])  # its urgency still ranks it
+
     def test_things_that_never_roll_simply_end(self):
         self.yesterday("Lunch", "12:00 PM")                     # a meal
         self.yesterday("Dentist", "3:00 PM", fixed=True)         # fixed to its time
