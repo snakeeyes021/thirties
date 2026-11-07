@@ -427,7 +427,8 @@ class QuotaExhausted(AgyError):
     """agy says the usage quota is used up: stop the whole eval and report how far it got."""
 
 
-AGY_ERROR_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out")
+AGY_ERROR_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out",
+                      "Sorry, I couldn't reach the model")  # the last: turns.LOST_TURN_PREFIX, after retries
 QUOTA_RE = re.compile(r"quota|rate.?limit|resource.?exhausted|\b429\b|too many requests|usage limit|limit (reached|exceeded)",
                       re.IGNORECASE)
 
@@ -622,6 +623,30 @@ class SimJoplinAPI:
         self.notes.setdefault(note_id, {"id": note_id, "body": ""}).update(data)
         return True
 
+    # folders and new notes: the month's Done note, a list split by triage
+    folders: Dict[str, Dict[str, str]] = {}
+    made: Dict[str, Dict[str, str]] = {}
+
+    def get_folders(self) -> List[Dict[str, str]]:
+        return list(self.folders.values())
+
+    def create_folder(self, title: str, parent_id: Optional[str] = None) -> Dict[str, str]:
+        self.folders = dict(self.folders)
+        fid = f"simfolder{len(self.folders) + 1}"
+        self.folders[fid] = {"id": fid, "title": title, "parent_id": parent_id or ""}
+        return self.folders[fid]
+
+    def get_folder_notes(self, folder_id: str) -> List[Dict[str, str]]:
+        return [m for m in self.made.values() if m.get("parent_id") == folder_id]
+
+    def create_note(self, title: str, body: str, parent_id: Optional[str] = None) -> Dict[str, str]:
+        self.made = dict(self.made)
+        nid = f"simnote{len(self.made) + 1}"
+        self.notes[nid] = {"id": nid, "body": body}
+        folder = self.folders.get(parent_id or "", {}).get("title", "")
+        self.made[nid] = {"id": nid, "title": title, "parent_id": parent_id or "", "source_notebook": folder}
+        return {"id": nid, "title": title}
+
 
 class SimJoplin:
     """The Joplin connector over SimJoplinAPI: the notes Thirties reads, as edited during the sim."""
@@ -631,7 +656,8 @@ class SimJoplin:
         self.meta = {n["id"]: n for n in notes}
 
     def fetch_active_notes(self) -> List[Dict[str, Any]]:
-        return [dict(self.meta[nid], body=n["body"]) for nid, n in self.api_client.notes.items() if nid in self.meta]
+        meta = {**self.meta, **self.api_client.made}
+        return [dict(meta[nid], body=n["body"]) for nid, n in self.api_client.notes.items() if nid in meta]
 
     def fetch_tasks(self) -> List[TaskItem]:
         from thirties_core.joplin_engine import checklist_tasks

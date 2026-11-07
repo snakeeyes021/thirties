@@ -19,6 +19,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEADING_REGEX
+from thirties_core.horizons import HORIZONS
 from thirties_core.lists import ROLES, URGENCIES
 from thirties_core.models import TaskItem
 
@@ -31,12 +32,24 @@ URGENCY_LINES = "\n".join(f"- {name}: {meaning}" for name, meaning in URGENCIES.
 
 ROLE_PROMPT = f"""You sort a person's to-do notes for their planning assistant. Given one note (its notebook, title and how it begins), say what the note is for:
 {ROLE_LINES}
-Notes are usually organized by area of life (home, errands, medical, a project). A note of daily repeated steps is a routine. A note named for today's tasks is today. A list of options for free time ("go outside", "read a book", "pick one item from...") is a menu. A software or other ongoing project's list of features, bugs or tickets is a backlog. Shopping lists are lists unless they read as wishlists. Notes of facts, plans, ideas, cheat sheets or logs, with few or no checkboxes, are ignore."""
+Notes are usually organized by area of life (home, errands, medical, a project). A note of daily repeated steps is a routine. A note named for today's tasks is today. A list of options for free time ("go outside", "read a book", "pick one item from...") is a menu. A software or other ongoing project's list of features, bugs or tickets is a backlog. A catch-all of unrelated quick items waiting to be sorted ("Assorted Quickies", "Inbox", "Misc") is a dropbox. Shopping lists are lists unless they read as wishlists. Notes of facts, plans, ideas, cheat sheets or logs, with few or no checkboxes, are ignore."""
 
 URGENCY_PROMPT = f"""You help a planning assistant judge how pressing each item on a person's to-do list is:
 {URGENCY_LINES}
 Most items on a list are "whenever". Use "now" only for something that clearly can't wait past tomorrow (a deadline, something broken or unsafe, a reply someone is waiting for), and "soon" only when there's a reason it should happen within a couple of weeks.
 Read the note the way its owner wrote it: headings ("Active", "Probation", "Someday", "Do I want?"), groups separated by blank lines (an item set apart at the top is often the pressing one), nesting (sub-items share their parent's urgency unless they say otherwise), and the wording ("for THIS winter", "before the trip", "need to call"). Medical, money and deadline items lean soon; home improvements and purchases lean whenever unless something makes them pressing; anything under a someday, probation or maybe heading is someday."""
+
+
+HORIZON_LINES = "\n".join(f"- {name}: {meaning}" for name, meaning in HORIZONS.items())
+
+HORIZON_PROMPT = f"""You help a planning assistant judge the time horizon of things on a person's lists: when each one belongs, so it can be planned into the right day, week, month or year:
+{HORIZON_LINES}
+Most things on a list are "year": they matter, with no particular hurry. Use "month" when there's a reason it belongs this month (a season, an event, something waiting on it, a monthly chore), "week" only for something that should happen within days, and "day" only when it clearly can't wait. Anything under a someday, probation or maybe heading, or worded as a maybe or a wish, is someday.
+Read the note the way its owner wrote it: headings, groups separated by blank lines (an item set apart at the top is often the pressing one), nesting (sub-items share their parent's horizon unless they say otherwise), and the wording ("for THIS winter", "before the trip")."""
+
+NOTE_HORIZON_PROMPT = f"""You help a planning assistant judge the time horizon of a person's to-do note as a whole: when its items generally belong, as a default for them:
+{HORIZON_LINES}
+Most notes are "year". A note for a near event or trip, or for this season, is "month" (or "week" if the event is days away). A note of wishes, maybes or ideas is someday."""
 
 
 # Signs in an item's own words that it can't wait: a time word, a reply someone's waiting for, something broken.
@@ -103,6 +116,8 @@ class GemmaListSorter:
                    "required": ["role"]}
     URGENCY_SCHEMA = {"type": "object", "properties": {"urgency": {"type": "string", "enum": list(URGENCIES)}},
                       "required": ["urgency"]}
+    HORIZON_SCHEMA = {"type": "object", "properties": {"horizon": {"type": "string", "enum": list(HORIZONS)}},
+                      "required": ["horizon"]}
 
     def __init__(self, runtime) -> None:
         self.runtime = runtime
@@ -122,6 +137,27 @@ class GemmaListSorter:
                 urgency = "soon"  # Gemma says "now" far too often; it stands only with a sign of urgency
             if urgency in URGENCIES:
                 out[t.id] = (urgency, None)
+        return out
+
+    def note_horizon(self, note: Dict[str, Any], role: str) -> Optional[str]:
+        out = self.runtime.json_call(NOTE_HORIZON_PROMPT, f"{_head(note)}\nWhat it's for: {role}",
+                                     self.HORIZON_SCHEMA, max_output_tokens=24)
+        return out.get("horizon") if out.get("horizon") in HORIZONS else None
+
+    def horizons(self, note: Dict[str, Any], role: str, items: List[TaskItem], today: date,
+                 default: str = "year") -> Dict[str, str]:
+        """One constrained choice per item, seeing the note around it."""
+        out: Dict[str, str] = {}
+        for t in items:
+            user = (f"Today is {today:%A, %B %-d}.\nList: {note.get('title', '')} ({role}; its items are usually "
+                    f"{default})\n{note_outline(note.get('body') or '', mark=t.title)}\n\n"
+                    f"When does the item marked →, '{t.title}', belong?")
+            got = self.runtime.json_call(HORIZON_PROMPT, user, self.HORIZON_SCHEMA, max_output_tokens=24)
+            horizon = got.get("horizon")
+            if horizon == "day" and not NOW_CUE.search(t.title):
+                horizon = "week"  # as with urgency: "can't wait" stands only with a sign of it in the words
+            if horizon in HORIZONS:
+                out[t.id] = horizon
         return out
 
 
@@ -159,6 +195,29 @@ class FrontierListSorter:
                 continue
             if 1 <= n <= len(items) and row.get("urgency") in URGENCIES:
                 out[items[n - 1].id] = (row["urgency"], _due(row.get("due")))
+        return out
+
+    def note_horizon(self, note: Dict[str, Any], role: str) -> Optional[str]:
+        out = self._ask(NOTE_HORIZON_PROMPT + '\nReturn ONLY a JSON object: {"horizon": "<one of the horizons>"}',
+                        f"{_head(note)}\nWhat it's for: {role}")
+        return out.get("horizon") if out.get("horizon") in HORIZONS else None
+
+    def horizons(self, note: Dict[str, Any], role: str, items: List[TaskItem], today: date,
+                 default: str = "year") -> Dict[str, str]:
+        """A whole note per call."""
+        titles = [t.title for t in items]
+        user = (f"Today is {today:%A, %B %-d, %Y}.\nList: {note.get('title', '')} ({role}; its items are usually "
+                f"{default})\n{note_outline(note.get('body') or '', numbered=titles, max_lines=400)}\n\n"
+                "Judge each numbered item. Return ONLY a JSON object: "
+                '{"items": [{"n": <number>, "horizon": "day" | "week" | "month" | "year" | "someday"}...]}')
+        out: Dict[str, str] = {}
+        for row in self._ask(HORIZON_PROMPT, user).get("items") or []:
+            try:
+                n = int(row.get("n"))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= n <= len(items) and row.get("horizon") in HORIZONS:
+                out[items[n - 1].id] = row["horizon"]
         return out
 
 

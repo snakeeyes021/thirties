@@ -24,7 +24,7 @@ Gemma 4 E4B is *extremely* weak at this task. It can't hold a schedule in its he
 Lessons:
 - **Keep the instruction in a long-lived conversation.** Each later message pays only for its own tokens. The session restarts before the 4,096-token window fills, and is warmed in the background when a client starts.
 - **Prefer free-text JSON plus validation to constrained decoding.** With good examples, Gemma's free-text JSON parsed 10/10 in testing. Constrained decoding (llguidance) stays as the fallback when the output doesn't parse.
-- **One model call per message.** A separate intent router followed by slot filling would have doubled latency, and one combined parse proved accurate enough.
+- **One model call per request.** A separate intent router followed by slot filling would have doubled latency, and one combined parse proved accurate enough for one request; a message with several requests lost one of them half the time, so since 0.2 Python separates them first (no model call) and each is parsed on its own.
 - **Memory pressure matters.** With browsers open (2 GB free, 11 GB swap in use), turns slowed to 30–45 s.
 
 ---
@@ -34,10 +34,15 @@ Lessons:
 ```
 user message
   │
-  ├─▶ [python] context: time, today's items (compact), last item mentioned, last assistant line,
-  │            pending proposal, 5 backlog items related to the message (keyword match)
-  ├─▶ [gemma]  parse → {"actions": [...]}: add, move, remove, swap, outcome, confirm, reject,
-  │            choose, suggest, question, remember, profile, energy, chat
+  ├─▶ [python] separate the requests (steps.py): "work ran until 4:30, and move budget review to 4:30"
+  │            is two; a self-correction ("no wait") or an alongside ("while I eat") stays one
+  ├─▶ [python] context per request: time, today's items (compact), last item mentioned, last assistant
+  │            line, pending proposal, backlog items related to it (keyword match)
+  ├─▶ [gemma]  parse each request → {"actions": [...]}: add, move, remove, swap, outcome, confirm, reject,
+  │            choose, suggest, question, remember, profile, energy, chat, today, urgency, fact, routine
+  ├─▶ [python] coverage: a part of the message that asks for something and matched no action is parsed
+  │            again on its own; if it still yields nothing, the reply asks about that part
+  ├─▶ [python] "Dinner, cooking and eating, listening to X" → one Dinner, X alongside
   ├─▶ [python] sanity: drop adds unrelated to the message, a "move" of something absent becomes an "add",
   │            "removing" a suggestion becomes "no thanks"
   ├─▶ [python] resolve: "it" / "the second upgrades" / titles → items; "7:30" → AM or PM (future, awake,
@@ -235,6 +240,40 @@ Raw reports go to `docs/eval_reports/sim/` (gitignored).
 - **A smaller model (E2B) for speed, and a check on what accuracy it costs.**
 - **Feeding statistics into suggestions** (real durations, completion by time of day).
 
+### 4.5 Why Qwen 4B and Phi-4 mini scored far below Gemma E4B (the model spike, 10-30 to 11-02)
+
+The hope was that another small model would beat Gemma E4B. Through LiteRT, the app's runtime, they scored about half as well. Most of that gap is our setup and the LiteRT exports, not the models. What remains is small for Qwen 4B and large for Phi-4 mini.
+
+The 546-case parse benchmark, correct after Python's reading, on the RTX 3080 Ti:
+
+| Model | LiteRT (the app's runtime) | llama.cpp, Q4_K_M | llama.cpp, Q8_0 |
+|---|---|---|---|
+| Gemma E4B | 87.9% | 88.8% | 89.9% |
+| Qwen3.5 4B | 49.5% (69.8% with the dropped "}" restored) | 84.4% (86.6% with "alongside" read leniently) | 83.5% |
+| Phi-4 mini | 47.6% | 58.8% (59.9%) | 54.9% |
+
+Where Qwen 4B's 38 points went, against Gemma through LiteRT:
+- **About 20 points: the dropped closing brace.** LiteRT often loses the reply's last "}" before Qwen's end-of-turn token. 154 of its 195 unparsed replies were otherwise correct JSON. A runtime artifact; Gemma never hits it.
+- **About 15 points: the rest of the LiteRT export.** 39 replies came back empty even on a freshly loaded engine. Conversations leak into each other, so the run used one engine per session and no constrained retries. The export is a different 4-bit quantization ("mixed int4") from the llama.cpp file.
+- **About 2 points: our scoring.** Qwen writes `"alongside": "workout"` (what it goes alongside), where our schema wants `"alongside": true`. Reading a name as true recovers 12 cases for Qwen, 6 for Phi and none for Gemma.
+- **About 2 points: the model itself, on a prompt built and tuned on Gemma.** Most of what's left is "profile" against "remember", our own distinction between two kinds of memory, which Gemma's examples taught it.
+
+Phi-4 mini's 40 points:
+- **About 30 points: the model.** It scores 58.8% through llama.cpp with an 8k context, and its misses are spread across nearly every category (moving a time: 5 of 16; rambling messages: 5 of 16; confirmations: 4 of 16). Phi-4 at 14B scores 86.6% on the same prompt, so the prompt isn't hostile to the family; the mini model just can't do the task as well.
+- **About 11 points: the LiteRT export.** It holds only about 2048 tokens, though its file name says 4096, so each message gets a fresh session with no history. Two open conversations cost about 22 s per switch, so the brain's parse-then-voice pattern takes about 43 s a message.
+
+Not the cause:
+- **Quantization:** Q8 is no better than Q4 for any of the three.
+- **A Gemma-only prompt:** larger models from other families do well on it (Qwen3.8 27B 95.4%, Qwen3.6 35B-A3B 91.2%, Qwen3 14B 88.1%, Phi-4 14B 86.6%).
+
+Would a fair per-model pass close the gap?
+- **Qwen 4B through llama.cpp: probably to parity, not past it.** A lenient "alongside" (already measured: 86.6%), two or three examples for profile against remember, and a rerun (about 5 minutes of GPU per model) would likely give 86–88%, against Gemma's 88.8%. It's about as fast (0.52 s against 0.59 s per message). About half a day. Shipping it, though, means the app runs llama.cpp instead of LiteRT, a separate and larger decision (bundling llama-server in the Flatpak, about 1–3 days).
+- **Qwen 4B through LiteRT: no.** Constrained JSON on every call would fix the braces, but not the leak between conversations, and the brain needs several conversations at once. Not until a LiteRT-LM release fixes it. (The leak is in our notes only: no bug report, by the user's choice, 11-02.)
+- **Phi-4 mini: no.** Neither a bigger-context build nor prompt tuning closes 30 points that are there on llama.cpp with a full context.
+- **Gemma E4B stays the default.** At this size nothing beats it. Only bigger models (Gemma 26B-A4B at 92.1%, Qwen3.8 27B at 95.4%) do better, at 2–5 times the time per message.
+
+The fair comparison that followed (11-02 to 11-04, every model on the same build, prompt, cases and format repair, plus a ladder by device class) is in `docs/MODEL_LADDER.md`.
+
 ---
 
 ## 5. Running It
@@ -242,4 +281,5 @@ Raw reports go to `docs/eval_reports/sim/` (gitignored).
 - **In the app:** Gemma is the default brain. Setup (or Preferences → Assistant) downloads the model (~3 GB, not gated) to `$XDG_DATA_HOME/thirties/models` with `thirties_core/brains/slm/model_download.py`, resuming and checking its SHA-256.
 - **The Flatpak bundles LiteRT-LM** (the `litert-lm-api` wheel is pure py3 manylinux). It runs Gemma inside the sandbox on the GPU through Vulkan; `--device=dri` is all it needs (measured on an RTX 3080 Ti: 2.2 s to load).
 - **Switching brains:** main menu → Assistant, Preferences, or `/brain gemma` / `/brain gemini` in any chat, including Telegram. The choice belongs to this device, and the conversation carries on.
+- **Other small models (the model spike):** the brain uses only `json_call`, `text_call` and the parser session (`runtime.py`), so `catalog.py` can swap the model: Gemma 4 E4B/E2B through LiteRT-LM, Phi-4 Mini and Qwen3 through llama.cpp (evals only; their files are placed in the models folder by hand). `THIRTIES_SLM_MODEL=<name>` picks one for any eval; `tests/slm_model_compare.py` runs the parse benchmark on each and tabulates accuracy, latency, load time, memory and licence (`--dry-run` says what can run).
 - **Evals and development from source** use a venv with LiteRT: `python3 -m venv --system-site-packages ~/.local/share/thirties/venv`, then `pip install litert-lm-api`, and run everything with `~/.local/share/thirties/venv/bin/python`.

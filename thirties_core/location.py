@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 NOMINATIM = "https://nominatim.openstreetmap.org"
 USER_AGENT = "Thirties/0.1 (tech.redfoxlabs.Thirties; personal day planner)"

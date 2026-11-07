@@ -198,3 +198,20 @@ def planned_minutes(spans: List[EventSpan]) -> int:
     """Activity time planned on a day (not work, sleep or calendar commitments)."""
     return int(sum(s.duration_minutes for s in spans if _trackable(s) and s.status != SpanStatus.SKIPPED))
 
+
+
+def session_lines(spans: List[EventSpan], ongoing, min_sessions: int = 2, limit: int = 3) -> List[str]:
+    """Time on ongoing things (project time, "Torquio dev"), as sessions and hours: done on one of those means
+    "worked on it", so a completion rate says nothing about it (kinds.py). ``ongoing`` says which spans are."""
+    by: Dict[str, List[EventSpan]] = {}
+    for s in spans:
+        if _trackable(s) and s.status in (SpanStatus.DONE, SpanStatus.PARTIAL) and ongoing(s):
+            by.setdefault(activity_key(s.title), []).append(s)
+    out = []
+    for key, done in sorted(by.items(), key=lambda kv: -len(kv[1]))[:limit]:
+        if len(done) < min_sessions:
+            continue
+        minutes = sum(((s.actual_end or s.end_dt) - (s.actual_start or s.start_dt)).total_seconds() / 60 for s in done)
+        hours = round(minutes / 30) / 2
+        out.append(f"'{key}' (ongoing): {len(done)} sessions, about {hours:g}h in all.")
+    return out

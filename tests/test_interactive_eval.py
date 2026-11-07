@@ -6,12 +6,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from tests.interactive_eval import (
-    EvalSession,
-    InteractiveEvaluator,
-    TurnGrade,
-    detect_anomalies,
-)
+from tests.interactive_eval import InteractiveEvaluator, detect_anomalies
 
 
 class TestInteractiveEval(unittest.TestCase):
