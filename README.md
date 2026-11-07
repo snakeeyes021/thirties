@@ -1,6 +1,6 @@
 # Thirties
 
-![GTK 4](https://img.shields.io/badge/GTK%204-Libadwaita-3584e4) ![Language](https://img.shields.io/badge/Language-Python-blue) ![Packaging](https://img.shields.io/badge/Packaging-Flatpak-orange) ![License](https://img.shields.io/badge/License-GPL%203.0-blue) ![Release](https://img.shields.io/badge/Release-v0.1.0-blue)
+![GTK 4](https://img.shields.io/badge/GTK%204-Libadwaita-3584e4) ![Language](https://img.shields.io/badge/Language-Python-blue) ![Packaging](https://img.shields.io/badge/Packaging-Flatpak-orange) ![License](https://img.shields.io/badge/License-GPL%203.0-blue) ![Release](https://img.shields.io/github/v/release/snakeeyes021/thirties?label=Release)
 
 A personal assistant for your time. Thirties gathers your tasks and calendar into one place, lays the day out as 48 half-hour "thirties" anchored to sunrise and sunset, and lets you plan, re-plan and review the day in plain conversation. The aim is to take the work of *organizing the organizing* off you, the way a good executive assistant would.
 
