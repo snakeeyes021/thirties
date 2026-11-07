@@ -1,5 +1,7 @@
 name: Flatpak CI & Packaging
 
+# Build and test only. Releases are published by hand, with bundles that have been audited.
+
 on:
   push:
     branches: [ main, "feature/**", "restructure/**" ]
@@ -72,6 +74,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # The GNOME SDK fills the runner's disk; the bundle export then fails at ostree's 3% free-space floor.
+      # The host's tool cache (/__t: Python, Go, Node, CodeQL...) isn't used by this container job.
+      - name: Free Disk Space
+        run: |
+          df -h /__w
+          rm -rf /__t/* || true
+          df -h /__w
+
       - name: Build Application
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
@@ -87,77 +97,3 @@ jobs:
           path: tech.redfoxlabs.Thirties.flatpak
           if-no-files-found: error
           retention-days: 14
-
-      - name: Export OCI Image
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-        run: |
-          echo "Exporting Flatpak OCI image..."
-          flatpak build-bundle --oci repo tech.redfoxlabs.Thirties.oci tech.redfoxlabs.Thirties
-
-      - name: Upload OCI Image Artifact
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-        uses: actions/upload-artifact@v4
-        with:
-          name: tech.redfoxlabs.Thirties.oci
-          path: tech.redfoxlabs.Thirties.oci
-          if-no-files-found: error
-          retention-days: 7
-
-  publish-oci:
-    name: Publish OCI Image to GHCR
-    needs: flatpak-builder
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Download OCI Image Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: tech.redfoxlabs.Thirties.oci
-          path: tech.redfoxlabs.Thirties.oci
-
-      - name: Install Skopeo
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y skopeo
-
-      - name: Publish to GitHub Container Registry
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login -u "${{ github.actor }}" --password-stdin ghcr.io
-          IMAGE_TAG="latest"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            IMAGE_TAG="${GITHUB_REF#refs/tags/v}"
-          fi
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "Publishing OCI image tag: ${IMAGE_TAG}"
-          skopeo copy oci:tech.redfoxlabs.Thirties.oci "docker://ghcr.io/${OWNER}/thirties:${IMAGE_TAG}"
-          if [[ "${IMAGE_TAG}" != "latest" ]]; then
-            skopeo copy oci:tech.redfoxlabs.Thirties.oci "docker://ghcr.io/${OWNER}/thirties:latest" || true
-          fi
-
-  release:
-    name: Publish GitHub Release
-    needs: flatpak-builder
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download Flatpak Bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: tech.redfoxlabs.Thirties.flatpak
-          path: ./
-
-      - name: Create GitHub Release and Attach Bundle
-        uses: softprops/action-gh-release@v2
-        with:
-          files: tech.redfoxlabs.Thirties.flatpak
-          generate_release_notes: true
-          name: ${{ github.ref_name }}${{ startsWith(github.ref, 'refs/tags/v0.') && ' (alpha)' || '' }}
-          prerelease: false  # alpha is in the name: a pre-release is never "Latest", so the newest would be hidden
-          make_latest: true
