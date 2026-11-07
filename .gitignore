@@ -31,3 +31,14 @@ docs/eval_reports/
 
 # Local agent tooling (worktrees, settings)
 .claude/
+
+# Local data: never commit a real database, config, log or secret
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.log
+/config.toml
+.env
+.env.*
