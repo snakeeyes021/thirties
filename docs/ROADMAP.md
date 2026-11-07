@@ -330,6 +330,8 @@ The model spends its effort on bookkeeping and apologies, where it should be usi
 3. **Helpers for Gemma.** Split each message into small steps with helpers (for example, count and separate the requests first), so the small model never one-shots a whole turn. This goes together with the model spike (After 0.1, item 3).
 4. **The bar for the Frontier brain.** A frontier model handed the raw Joplin backlog can plan a day better than our harness does today. The harness should beat that baseline, so measure it as a reference.
 
+5. **A "note to the engineers" from chat** (Matt, 11-06; half-baked). A message format in Thirties chat that goes straight to Matt's PM, who hotfixes it or hands it to a worker. Open question: shipping the fix while Matt runs Thirties from GNOME Builder (someone has to press Stop/Run; agents can't). Maybe it lands in the planned CEO dashboard's inbox.
+
 ### D. Housekeeping tied to the above
 - **Memory notes that paper over bugs get deleted once their bug is fixed.** Six of eleven qualify (the list is in the 10-24 review). One was never right: shower things go after work only when the morning was missed. Keep the five real preferences.
 - **The profile's "Near-term goals"** are out of date (the Redfox merge is done), which feeds stale offers. A future fix: goals are dated, and they're checked during weekly planning (C2).
