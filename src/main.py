@@ -118,11 +118,16 @@ class ThirtiesApplication(Adw.Application):
             return False
         GLib.idle_add(show)
 
+    def start_at_login(self) -> bool:
+        return self.background_allowed() and bool(self.core.settings.get("background.autostart", True))
+
     def request_background_permission(self, window=None, done=None):
-        """Ask (through the Background portal) to keep running and to start at login."""
+        """Ask (through the Background portal) to keep running and, if the user wants it, to start at login. Asked
+        again with autostart off, the portal takes Thirties out of the login items (10-31: there was no way to stop
+        it starting at login)."""
         from .portal import request_background
         request_background(_("Reminders, check-ins and your phone keep working when Thirties is closed."),
-                           autostart=True, callback=done)
+                           autostart=self.start_at_login(), callback=done)
 
     # --- menus ---
 

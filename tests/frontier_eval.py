@@ -39,7 +39,8 @@ from thirties_core.scheduler import DeterministicScheduler, StateDatabase
 REPORTS_DIR = REPO_ROOT / "docs" / "eval_reports" / "frontier"
 TZ = ZoneInfo("America/New_York")
 TRANSPORT_ERRORS = ("Encountered an error communicating with Gemini API", "Error contacting model via Antigravity CLI",
-                    "Failed invoking Antigravity CLI", "The Antigravity assistant timed out")
+                    "Failed invoking Antigravity CLI", "The Antigravity assistant timed out",
+                    "Sorry, I couldn't reach the model")  # the last: turns.LOST_TURN_PREFIX, after retries
 LIVE_ENGINES = {"agy": AntigravityInferenceEngine, "api": GeminiInferenceEngine}
 ENGINE_CHOICE = "agy"
 DAY = date(2026, 10, 15)  # a Thursday

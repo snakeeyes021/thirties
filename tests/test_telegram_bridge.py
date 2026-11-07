@@ -1,4 +1,3 @@
-import io
 import json
 import tempfile
 import unittest
@@ -89,7 +88,7 @@ class TestTelegramClient(unittest.TestCase):
         self.assertTrue(body["text"].startswith("(Sent late") and body["text"].endswith("winding the clock"))
 
 
-class TestThirtiesTelegramBridge(unittest.TestCase):
+class BridgeCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test_state.sqlite"
@@ -137,6 +136,8 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+
+class TestThirtiesTelegramBridge(BridgeCase):
     def test_unauthorized_chat_rejected(self):
         self.bridge.handle_message(chat_id=9999, text="Hello")
         self.bridge.client.send_message.assert_called_once()
@@ -167,7 +168,8 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
         self.assertIn("Schedule for", msg)
-        self.assertIn("8:30 AM – 4:00 PM: Work", msg)
+        self.assertIn("- 8:30 AM – Work", msg)  # laid out like the assistant's schedule replies
+        self.assertIn("You're in the 9:00 AM block: Work", msg)
         self.assertNotIn("Block", msg)
 
     def test_new_command_starts_fresh_conversation(self):
@@ -219,6 +221,93 @@ class TestThirtiesTelegramBridge(unittest.TestCase):
         ]
         self.assertEqual(pair_by_code(client, "4821", timeout=5), {"id": 9, "name": "Taylor"})
         self.assertEqual(client.send_message.call_args[0][0], 9)
+
+
+class TestFormattingAndLateNotices(unittest.TestCase):
+    """T3: formatting characters are escaped; C3: a notice past its moment is dropped, not sent stale."""
+
+    def test_underscores_inside_words_stay_and_html_is_escaped(self):
+        from thirties_core.telegram_bridge import telegram_html
+        self.assertEqual(telegram_html("Work on photo_sorter <now> & later"), "Work on photo_sorter &lt;now&gt; &amp; later")
+        self.assertEqual(telegram_html("did you get to *Taxes*? **Big** _quiet_ `x_y`"),
+                         "did you get to <b>Taxes</b>? <b>Big</b> <i>quiet</i> <code>x_y</code>")
+        self.assertEqual(telegram_html("- 10:30 – Work\n* not bold"), "- 10:30 – Work\n* not bold")
+
+    @patch("urllib.request.urlopen")
+    def test_replies_go_as_html_and_plain_if_telegram_cant_read_it(self, mock_urlopen):
+        ok = MagicMock()
+        ok.read.return_value = json.dumps({"ok": True, "result": {}}).encode("utf-8")
+        bad = urllib.error.HTTPError(url="", code=400, msg="can't parse entities", hdrs={}, fp=None)
+        mock_urlopen.side_effect = [bad, MagicMock(__enter__=MagicMock(return_value=ok))]
+        TelegramClient("1:X").send_message(5, "photo_sorter *dev*")
+        first = json.loads(mock_urlopen.call_args_list[0][0][0].data)
+        second = json.loads(mock_urlopen.call_args_list[1][0][0].data)
+        self.assertEqual((first["text"], first["parse_mode"]), ("photo_sorter <b>dev</b>", "HTML"))
+        self.assertEqual(second, {"chat_id": 5, "text": "photo_sorter *dev*"})  # the text as written, not the HTML
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_an_expired_notice_is_dropped_not_sent_late(self, mock_urlopen, _sleep):
+        client = TelegramClient("1:X")
+        mock_urlopen.side_effect = [ConnectionResetError()] * 6
+        client.send_message(5, "🔔 9:30: Shower", expires=datetime.now() - timedelta(minutes=1))
+        client.send_message(5, "Logged your shower.")
+        self.assertEqual(len(client.undelivered), 2)
+        ok = MagicMock()
+        ok.read.return_value = json.dumps({"ok": True, "result": {}}).encode("utf-8")
+        mock_urlopen.side_effect = [MagicMock(__enter__=MagicMock(return_value=ok))]
+        client.flush_undelivered()
+        self.assertEqual(client.undelivered, [])
+        body = json.loads(mock_urlopen.call_args[0][0].data)
+        self.assertTrue(body["text"].endswith("Logged your shower."))  # the reply still goes, marked late
+        self.assertEqual(mock_urlopen.call_count, 7)  # and the stale notice never did
+
+
+class TestBridgeBursts(BridgeCase):
+    """A8: quick messages sent together get one reply; /now shows what's not marked yet."""
+
+    def test_a_burst_gets_one_reply(self):
+        from tests.test_conversation import reply
+        self.mock_inference.responses = [reply("Got both.")]
+        updates = [{"update_id": 1, "message": {"text": "fish are fed", "chat": {"id": 1001}}},
+                   {"update_id": 2, "message": {"text": "and I showered", "chat": {"id": 1001}}}]
+        self.bridge.handle_updates(updates)
+        self.bridge.client.send_message.assert_called_once()
+        self.assertEqual(self.bridge.client.send_message.call_args[0][1], "Got both.")
+        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
+        self.assertEqual(users, ["fish are fed", "and I showered"])
+
+    def test_now_lists_whats_not_marked_yet(self):
+        from tests.fixtures import at
+        self.scheduler.state_db.upsert_span(EventSpan("s", "Shower", at("08:00"), at("08:15"), SpanCategory.ACTIVITY))
+        self.bridge.conv_manager.refresh()
+        with patch.object(self.bridge, "_get_current_time", return_value=at("09:05")):
+            with patch("thirties_core.plan_tools.PlanTools._now", return_value=at("09:05")):
+                self.bridge.handle_message(chat_id=1001, text="/now")
+        self.assertIn("\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
+
+
+    def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):
+        # 11-05: a plain yes or a thumbs up is enough, and a 👍 reaction on the message counts too
+        import json
+        from tests.test_conversation import reply
+        from thirties_core.telegram_bridge import YES_TARGETS_KEY
+        self.scheduler.state_db.set_sync_meta(YES_TARGETS_KEY, json.dumps([[1001, 77]]))
+        self.mock_inference.responses = [reply("Done.")]
+        thumbs = {"chat": {"id": 1001}, "message_id": 77, "new_reaction": [{"type": "emoji", "emoji": "👍"}]}
+        self.bridge.handle_updates([{"update_id": 3, "message_reaction": thumbs},
+                                    {"update_id": 4, "message_reaction": {**thumbs, "message_id": 12}}])
+        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
+        self.assertEqual(users[-1], "👍")
+        self.assertEqual(len(self.mock_inference.call_history), 1)  # a 👍 on any other message is just a 👍
+
+
+class TestPlainLists(unittest.TestCase):
+
+    def test_telegram_lists_have_no_bullets(self):
+        from thirties_core.telegram_bridge import plain_lists
+        self.assertEqual(plain_lists("Keep:\n- Birthday cards - today\n  - nested\n*Bold* stays\n```\n- code\n```"),
+                         "Keep:\nBirthday cards - today\n  nested\n*Bold* stays\n```\n- code\n```")
 
 
 if __name__ == "__main__":

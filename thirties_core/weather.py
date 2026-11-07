@@ -16,7 +16,7 @@ import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 

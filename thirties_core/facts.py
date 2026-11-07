@@ -50,6 +50,7 @@ class ItemFacts:
     not_before: Optional[datetime] = None
     daylight: bool = False                           # must happen between sunrise and sunset
     anchored: bool = False                           # stays at its time when the day is redrawn
+    goes_with: List[str] = field(default_factory=list)  # span ids it goes right after (item_facts; never stored)
 
     def describe(self, titles: Dict[str, str]) -> List[str]:
         out = []

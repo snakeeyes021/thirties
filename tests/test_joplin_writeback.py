@@ -169,7 +169,8 @@ class TestTools(unittest.TestCase):
     def test_add_task_needs_a_clear_list(self):
         self.assertTrue(self.t.execute("add_task", {"title": "Buy stamps", "list": ""}).startswith(NOT_DONE))
         out = self.t.execute("add_task", {"title": "Buy stamps", "list": "errands"})
-        self.assertTrue(out.startswith("Added 'Buy stamps' to Errands. To schedule it, use task_id="), out)
+        self.assertTrue(out.startswith("Added 'Buy stamps' to Errands under 'Errands'. To schedule it, use task_id="),
+                        out)  # where it went is said (B1)
         self.assertIn("- [ ] Buy stamps", self.api.notes["n1"]["body"])
 
 
