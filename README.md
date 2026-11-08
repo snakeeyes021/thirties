@@ -10,6 +10,10 @@ A personal assistant for your time. Thirties gathers your tasks and calendar int
 
 Read [`AGENTS.md`](./AGENTS.md) for the mission and architecture, and [`docs/ROADMAP.md`](./docs/ROADMAP.md) for what's next.
 
+![Thirties: the rest of today's plan beside the conversation that planned it](docs/screenshots/agenda.png)
+
+*Thirties 0.2 (the next version): what's on now and next, beside the planning conversation. (Sample day.)*
+
 ## What "working" means
 
 Thirties works when a real day runs like this without friction:
@@ -20,6 +24,10 @@ Thirties works when a real day runs like this without friction:
 4. **Over weeks:** its suggestions get more realistic because it has learned how long things actually take you.
 
 All four steps are in place as of the MVP (2026-10-16); see `docs/ROADMAP.md`.
+
+<img src="docs/screenshots/day.png" width="420" alt="The day timeline: half-hour blocks, the morning's items marked done, and the current item highlighted beside the sun's position">
+
+*The day as half-hour blocks: done items are crossed off, and the sun marks the time. (Sample day.)*
 
 ## Running
 
