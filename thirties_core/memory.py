@@ -124,7 +124,8 @@ _CHANGE_RE = re.compile(r"^(?:\[[^\]]+\]\s*)?(?:Added|Moved|Changed|Removed|Swap
 
 def summarize_conversation(conv: "Conversation") -> str:
     """A short, factual summary: how it started and what changed (from the tool results and confirmations)."""
-    users = [str(m.get("content", "")) for m in conv.messages if m.get("role") == "user"]
+    users = [str(m.get("content", "")) for m in conv.messages if m.get("role") == "user" and not m.get("hidden")
+             and not str(m.get("content", "")).startswith("[System check")]  # what the user said, not the app
     if not users:
         return ""
     changes: List[str] = []

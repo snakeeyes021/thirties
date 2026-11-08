@@ -61,6 +61,88 @@ class TestOutcomes(ToolsTestCase):
         out = self.t.execute("log_outcome", {"event": "Shower", "status": "done", "finished": "5:50 PM"})
         self.assertIn("5:20 PM – 5:50 PM, estimated", out)  # not a 2h50m shower (10-20): it started late
 
+    def test_done_with_no_time_is_when_it_was_said(self) -> None:
+        # 10-25: a done said at 10:44 was stored at the planned 10:00, and so was every tick in the Day page
+        self.t.execute("add_event", {"title": "Feed the fish", "start": "5:00 PM", "duration": "5 min"})
+        set_debug_time(at("17:44"))
+        out = self.t.execute("log_outcome", {"event": "Feed the fish", "status": "done"})
+        self.assertIn("5:39 PM – 5:44 PM, estimated", out)
+        self.t.execute("add_event", {"title": "Lunch", "start": "12:00 PM", "duration": "30 min"})
+        out = self.t.execute("log_outcome", {"event": "Lunch", "status": "done"})  # hours later: nobody knows when
+        self.assertIn("12:00 PM – 12:30 PM, planned", out)
+
+    def test_adding_whats_already_planned_is_a_move_or_a_second_session(self) -> None:
+        # 10-27 to 10-30: re-adding instead of moving left ghost copies that nagged and rolled over
+        self.t.execute("add_event", {"title": "Bird Song! dev", "start": "3:30 PM", "duration": "1 hour"})
+        out = self.t.execute("add_event", {"title": "bird song! dev", "start": "5:00 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith("NOT_DONE") and "update_event" in out and "again=true" in out, out)
+        out = self.t.execute("add_event", {"title": "Bird Song! dev", "start": "8:00 PM", "duration": "1 hour",
+                                           "again": True})
+        self.assertTrue(out.startswith("Added"), out)
+        self.assertEqual(len([s for s in self.t.day_plan.spans if s.title == "Bird Song! dev"]), 2)
+
+    def test_an_outcome_by_title_asks_when_yesterdays_copy_is_open(self) -> None:
+        # 10-28: a reply to the check-in from yesterday marked today's copy of the item skipped
+        self.t.execute("add_event", {"title": "Email back the landlord", "start": "7:30 PM", "duration": "30 min",
+                                     "day": "yesterday"})
+        self.t.execute("add_event", {"title": "Email back the landlord", "start": "3:00 PM", "duration": "30 min"})
+        out = self.t.execute("log_outcome", {"event": "Email back the landlord", "status": "skipped"})
+        self.assertTrue(out.startswith("NOT_DONE") and "Which one?" in out, out)
+        old = next(s for s in self.t.plan_for("yesterday").spans if s.title == "Email back the landlord")
+        out = self.t.execute("log_outcome", {"event": old.id, "status": "skipped", "day": "yesterday"})
+        self.assertTrue(out.startswith("[") and "Marked Email back the landlord skipped" in out, out)
+        today = next(s for s in self.t.day_plan.spans if s.title == "Email back the landlord")
+        self.assertEqual(today.status, SpanStatus.PLANNED)
+
+    def test_an_id_from_another_day_is_logged_on_that_day(self) -> None:
+        # 11-02: a done for last night, logged with yesterday's id and no day, became a new
+        # activity titled "14d911095040", done at 9:50 PM that evening
+        self.t.execute("add_event", {"title": "Watch the documentary", "start": "9:30 PM", "duration": "2 hours",
+                                     "day": "yesterday"})
+        old = next(s for s in self.t.plan_for("yesterday").spans if s.title == "Watch the documentary")
+        out = self.t.execute("log_outcome", {"event": old.id, "status": "done", "started": "9:50 PM",
+                                             "finished": "2 AM"})
+        self.assertTrue(out.startswith("[") and "Marked Watch the documentary done" in out, out)
+        self.assertFalse(any(s.title == old.id for s in self.t.day_plan.spans))
+        stored = self.sched.state_db.get_span(old.id)
+        self.assertEqual((stored.status, stored.actual_start.date(), stored.actual_end.date()),
+                         (SpanStatus.DONE, DAY - timedelta(days=1), DAY))
+        out = self.t.execute("update_event", {"event": old.id, "title": "Watch the documentary!"})
+        self.assertTrue(out.startswith("NOT_DONE") and "day='" in out, out)  # other tools say which day
+
+    def test_an_unknown_id_is_never_a_title(self) -> None:
+        out = self.t.execute("log_outcome", {"event": "14d911095040", "status": "done", "started": "1:00 PM",
+                                             "finished": "2:00 PM"})
+        self.assertTrue(out.startswith("NOT_DONE") and "has the id" in out, out)
+        self.assertFalse(any(s.title == "14d911095040" for s in self.t.day_plan.spans))
+
+    def test_done_cant_be_later_than_now(self) -> None:
+        out = self.t.execute("log_outcome", {"event": "Emptied the fish tank", "status": "done",
+                                             "started": "9:50 PM", "finished": "10:20 PM", "new": True})
+        self.assertTrue(out.startswith("NOT_DONE") and "later than now" in out and "day=" in out, out)
+        self.t.execute("add_event", {"title": "Reading", "start": "8:00 PM", "duration": "1 hour"})
+        out = self.t.execute("log_outcome", {"event": "Reading", "status": "done", "finished": "9:00 PM"})
+        self.assertTrue(out.startswith("NOT_DONE") and "later than now" in out, out)
+        out = self.t.execute("log_outcome", {"event": "Emptied the fish tank", "status": "done",
+                                             "finished": "6:05 PM", "new": True})  # a few minutes' slack
+        self.assertTrue(out.startswith("Recorded"), out)
+
+    def test_a_list_item_named_by_its_wording_marks_its_planned_copy(self) -> None:
+        # 10-30 sim: ticked in Joplin by its list wording, the planned copy stayed open and was nagged for hours
+        self.t.execute("add_event", {"title": "Taxes call", "start": "4:00 PM", "duration": "30 min",
+                                     "task_id": "t_taxes"})
+        task = next(t for t in self.services.tasks if t.id == "t_taxes")
+        out = self.t.execute("log_outcome", {"event": task.title, "status": "done"})
+        self.assertTrue(out.startswith("Marked Taxes call done"), out)
+        self.assertEqual(next(s for s in self.t.day_plan.spans if s.title == "Taxes call").status, SpanStatus.DONE)
+
+    def test_something_done_that_was_never_planned_is_recorded(self) -> None:
+        # 10-30 sim: a chore that was never planned couldn't be logged as done
+        out = self.t.execute("log_outcome", {"event": "Emptied the fish tank", "status": "done"})
+        self.assertTrue(out.startswith("Recorded Emptied the fish tank done (5:30 PM – 6:00 PM, estimated)"), out)
+        span = next(s for s in self.t.day_plan.spans if s.title == "Emptied the fish tank")
+        self.assertEqual(span.status, SpanStatus.DONE)
+
     def test_skipped_task_counts_a_deferral(self) -> None:
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
@@ -77,7 +159,8 @@ class TestOutcomes(ToolsTestCase):
 
     def test_outcomes_not_for_work_or_unknown_items(self) -> None:
         self.assertTrue(self.t.execute("log_outcome", {"event": "Work", "status": "done"}).startswith(NOT_DONE))
-        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "done"}).startswith(NOT_DONE))
+        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "skipped"}).startswith(NOT_DONE))
+        self.assertTrue(self.t.execute("log_outcome", {"event": "zzz", "status": "done"}).startswith("Recorded"))
         self.assertTrue(self.t.execute("log_outcome", {"event": "Work", "status": "maybe"}).startswith(NOT_DONE))
 
     def test_review_day_lists_unreviewed_and_suggests_rollover(self) -> None:
@@ -138,8 +221,8 @@ class TestAnyDay(ToolsTestCase):
 
     def test_alongside_allows_concurrent_activities(self) -> None:
         self.t.execute("add_event", {"title": "Dinner", "start": "6:30 PM", "duration": "1 hour"})
-        self.assertTrue(self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour"}).startswith(NOT_DONE))
-        self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour", "alongside": True})
+        out = self.t.execute("add_event", {"title": "Audiobook", "start": "6:30 PM", "duration": "1 hour"})
+        self.assertIn("alongside Dinner", out)  # items share time without being told (10-26)
         self.assertEqual(self.t.day_plan.display_title(self.t.day_plan.block_at(at("18:45"))), "Dinner + Audiobook")
 
 

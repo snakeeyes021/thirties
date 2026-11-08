@@ -1,6 +1,6 @@
 """Cross-device sync of Thirties state, item by item with last-write-wins.
 
-Two transports:
+Two transports (``connectors.SyncTransport``; the classes are at the end of this file):
 - **A folder the user picks** (one their cloud storage already syncs: Google Drive
   through Insync, Dropbox, Nextcloud...). Each device writes only its own file,
   ``Thirties sync/<device id>.json``, and merges everyone else's, so the cloud
@@ -155,95 +155,33 @@ class SyncEngine:
             },
         }
 
-    # --- the folder transport: each device writes only its own file; everyone merges the others ---
+    # --- transports (connectors.SyncTransport): where payloads travel; the merge is ours ---
 
-    def _folder(self) -> Path:
-        return Path(os.path.expanduser(self.sync_cfg.folder)) / "Thirties sync"
-
-    def _push_folder(self, payload: Dict[str, Any]) -> Tuple[bool, str]:
-        if not self.sync_cfg.folder:
-            return False, "No sync folder chosen."
-        folder = self._folder()
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            target = folder / f"{payload['device_id']}.json"
-            tmp = folder / f".{payload['device_id']}.json.tmp"
-            tmp.write_text(json.dumps(payload, sort_keys=True))
-            os.replace(tmp, target)
-        except OSError as e:
-            return False, f"Couldn't write to the sync folder: {e}"
-        self.state_db.set_sync_meta("last_push_timestamp", payload["timestamp"])
-        return True, f"Wrote {target.name} to the sync folder."
-
-    def _pull_folder(self) -> Tuple[bool, str]:
-        if not self.sync_cfg.folder:
-            return False, "No sync folder chosen."
-        folder = self._folder()
-        if not folder.is_dir():
-            return True, "Nothing in the sync folder yet."
-        mine = self.get_or_create_device_id()
-        merged, devices = 0, 0
-        for path in sorted(folder.glob("*.json")):
-            if path.stem == mine:
-                continue
-            try:
-                payload = json.loads(path.read_text())
-            except (OSError, ValueError) as e:
-                logger.warning("Skipping unreadable sync file %s: %s", path.name, e)
-                continue
-            if payload.get("$schema") not in (SYNC_SCHEMA, LEGACY_SYNC_SCHEMA):
-                continue
-            ok, msg = self.merge_payload(payload)
-            devices += 1
-        return True, f"Merged {devices} other device(s) from the sync folder."
+    def transport(self):
+        """The transport the user chose: a shared folder, or the Joplin sync note."""
+        if self.sync_cfg.mode == "folder":
+            return FolderTransport(self.sync_cfg.folder, self.get_or_create_device_id)
+        return JoplinNoteTransport(self.joplin_engine, self.sync_cfg)
 
     def push(self) -> Tuple[bool, str]:
         """Serialize local state and push it (to the sync folder, or the Joplin sync note)."""
         if not self.sync_cfg.enabled:
             return False, "Sync is disabled in configuration."
-
         payload = self.export_sync_payload()
-        if self.sync_cfg.mode == "folder":
-            return self._push_folder(payload)
-        body = encode_payload(payload)
-
-        ok, msg = self.joplin_engine.upsert_sync_note(
-            notebook_name=self.sync_cfg.notebook_name,
-            subfolder_name=self.sync_cfg.sync_subfolder,
-            note_title=self.sync_cfg.sync_note_title,
-            note_body=body,
-        )
-
+        ok, msg = self.transport().push(payload)
         if ok:
             self.state_db.set_sync_meta("last_push_timestamp", payload["timestamp"])
-            logger.info("Successfully pushed Thirties state sync payload to Joplin.")
-            return True, msg
-        else:
-            logger.warning("Failed to push Thirties sync payload to Joplin: %s", msg)
-            return False, msg
+        return ok, msg
 
     def pull(self) -> Tuple[bool, str]:
         """Fetch other devices' state (sync folder or Joplin note) and merge it into local SQLite."""
         if not self.sync_cfg.enabled:
             return False, "Sync is disabled in configuration."
-        if self.sync_cfg.mode == "folder":
-            return self._pull_folder()
-
-        note_data = self.joplin_engine.get_sync_note_body(
-            notebook_name=self.sync_cfg.notebook_name,
-            subfolder_name=self.sync_cfg.sync_subfolder,
-            note_title=self.sync_cfg.sync_note_title,
-        )
-
-        if not note_data or not note_data.get("body"):
-            return False, f"Sync note '{self.sync_cfg.sync_note_title}' not found in Joplin."
-
-        body = note_data.get("body", "")
-        payload = decode_payload(body)
-        if not payload or payload.get("$schema") not in (SYNC_SCHEMA, LEGACY_SYNC_SCHEMA):
-            return False, "Sync note does not contain a valid Thirties sync payload."
-
-        return self.merge_payload(payload)
+        ok, msg, payloads = self.transport().pull()
+        results = [self.merge_payload(p) for p in payloads] if ok else []
+        if msg or not results:
+            return ok, msg
+        return results[-1]
 
     def merge_payload(self, payload: Dict[str, Any]) -> Tuple[bool, str]:
         """Merge one device's exported state into this device's database."""
@@ -330,11 +268,22 @@ class SyncEngine:
         return True, result_msg
 
     def _stores(self) -> Dict[str, Any]:
+        from thirties_core.calendar_outcomes import CalendarOutcomes
+        from thirties_core.sharing import SharingRules
+        from thirties_core.contextual import ContextualFlags
         from thirties_core.facts import SpanFacts
+        from thirties_core.item_facts import LastingFacts
+        from thirties_core.horizons import HorizonCatalog, HorizonPlans
         from thirties_core.lists import ListCatalog
+        from thirties_core.routines import RoutineBook
         from thirties_core.today import TodayLinks
         from thirties_core.memory import (CheckinMutes, ConversationStore, EnergyLog, MemoryStore, ProfileStore,
                                           ReminderStore)
+        from thirties_core.memory_audit import MemoryReview
+        from thirties_core.outcome_context import OutcomeContextStore
+        from thirties_core.day_lists import AheadLists
+        from thirties_core.done_log import DoneLog
+        from thirties_core.placement_lists import DropBoxScopes
         return {
             "conversations": ConversationStore(self.state_db),
             "profile": ProfileStore(self.state_db),
@@ -345,6 +294,19 @@ class SyncEngine:
             "lists": ListCatalog(self.state_db),
             "today_links": TodayLinks(self.state_db),
             "span_facts": SpanFacts(self.state_db),
+            # lists and items (0.2 block 2): drop box scopes, what was filed as done, lists for days ahead
+            "dropbox_scopes": DropBoxScopes(self.state_db),
+            "done_filed": DoneLog(self.state_db),
+            "day_list_ahead": AheadLists(self.state_db),
+            "item_facts": LastingFacts(self.state_db),
+            "calendar_outcomes": CalendarOutcomes(self.state_db),
+            "sharing_rules": SharingRules(self.state_db),
+            "routines": RoutineBook(self.state_db),
+            "outcome_context": OutcomeContextStore(self.state_db),
+            "memory_review": MemoryReview(self.state_db),
+            "contextual_flags": ContextualFlags(self.state_db),
+            "horizons": HorizonCatalog(self.state_db),
+            "horizon_plans": HorizonPlans(self.state_db),
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:
@@ -377,3 +339,85 @@ class SyncEngine:
         overall_ok = pull_ok or push_ok
         summary = f"Pull: {pull_msg} | Push: {push_msg}"
         return overall_ok, summary
+
+
+class FolderTransport:
+    """A folder the user's cloud storage already syncs. Each device writes only its own file,
+    ``Thirties sync/<device id>.json``, and reads everyone else's, so the cloud never sees two machines editing
+    the same file."""
+
+    def __init__(self, folder: str, device_id) -> None:
+        self.folder = folder
+        self.device_id = device_id  # a callable: the id is only created when it's needed
+
+    def _dir(self) -> Path:
+        return Path(os.path.expanduser(self.folder)) / "Thirties sync"
+
+    def push(self, payload: Dict[str, Any]) -> Tuple[bool, str]:
+        if not self.folder:
+            return False, "No sync folder chosen."
+        folder = self._dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"{payload['device_id']}.json"
+            tmp = folder / f".{payload['device_id']}.json.tmp"
+            tmp.write_text(json.dumps(payload, sort_keys=True))
+            os.replace(tmp, target)
+        except OSError as e:
+            return False, f"Couldn't write to the sync folder: {e}"
+        return True, f"Wrote {target.name} to the sync folder."
+
+    def pull(self) -> Tuple[bool, str, List[Dict[str, Any]]]:
+        if not self.folder:
+            return False, "No sync folder chosen.", []
+        folder = self._dir()
+        if not folder.is_dir():
+            return True, "Nothing in the sync folder yet.", []
+        mine = self.device_id()
+        payloads = []
+        for path in sorted(folder.glob("*.json")):
+            if path.stem == mine:
+                continue
+            try:
+                payload = json.loads(path.read_text())
+            except (OSError, ValueError) as e:
+                logger.warning("Skipping unreadable sync file %s: %s", path.name, e)
+                continue
+            if payload.get("$schema") in (SYNC_SCHEMA, LEGACY_SYNC_SCHEMA):
+                payloads.append(payload)
+        return True, f"Merged {len(payloads)} other device(s) from the sync folder.", payloads
+
+
+class JoplinNoteTransport:
+    """A note in Joplin (Archive > Thirties_System > Thirties_State_Sync), for users with no shared folder, riding on
+    Joplin's own sync. One note holds the latest device's payload."""
+
+    def __init__(self, joplin_engine: JoplinEngine, sync_cfg: SyncConfig) -> None:
+        self.joplin = joplin_engine
+        self.cfg = sync_cfg
+
+    def push(self, payload: Dict[str, Any]) -> Tuple[bool, str]:
+        ok, msg = self.joplin.upsert_sync_note(
+            notebook_name=self.cfg.notebook_name,
+            subfolder_name=self.cfg.sync_subfolder,
+            note_title=self.cfg.sync_note_title,
+            note_body=encode_payload(payload),
+        )
+        if ok:
+            logger.info("Successfully pushed Thirties state sync payload to Joplin.")
+        else:
+            logger.warning("Failed to push Thirties sync payload to Joplin: %s", msg)
+        return ok, msg
+
+    def pull(self) -> Tuple[bool, str, List[Dict[str, Any]]]:
+        note_data = self.joplin.get_sync_note_body(
+            notebook_name=self.cfg.notebook_name,
+            subfolder_name=self.cfg.sync_subfolder,
+            note_title=self.cfg.sync_note_title,
+        )
+        if not note_data or not note_data.get("body"):
+            return False, f"Sync note '{self.cfg.sync_note_title}' not found in Joplin.", []
+        payload = decode_payload(note_data.get("body", ""))
+        if not payload or payload.get("$schema") not in (SYNC_SCHEMA, LEGACY_SYNC_SCHEMA):
+            return False, "Sync note does not contain a valid Thirties sync payload.", []
+        return True, "", [payload]

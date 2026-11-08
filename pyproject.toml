@@ -4,15 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thirties"
-version = "0.0.1"
+version = "0.2.0"  # keep in step with meson.build
 description = "Diurnal planning and 30-minute interval task budgeting application"
 readme = "README.md"
 requires-python = ">=3.12"
+# The core needs only the standard library; PyGObject is for the desktop app and the EDS calendar.
+# (Astral is gone: astronomy.py is pure NOAA math. TOML, keyring and HTTP use the stdlib or the Secret portal.)
 dependencies = [
-    "astral>=3.2",
     "pygobject",
-    "litert-lm-api",
 ]
+
+[project.optional-dependencies]
+# The on-device SLM brain (Gemma via LiteRT-LM); the Flatpak bundles it, everything else runs without it.
+slm = ["litert-lm-api"]
 
 [tool.setuptools.packages.find]
 where = ["."]

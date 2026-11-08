@@ -92,6 +92,34 @@ class TestWriter(unittest.TestCase):
         self.assertIn("- [x] Taxes", self.api.notes["n1"]["body"])
         self.assertEqual(self.sched.state_db.outbox_pending(), [])
 
+    def test_a_watchlist_item_is_never_queued(self):
+        # one such write was retried for two weeks: it isn't a Joplin item, so it's recorded in Thirties only
+        status, msg = self.writer.submit({"op": "complete", "is_checkbox_item": False,
+                                          "note_id": "media:letterboxd:orchard", "title": "Watch: The Glass Orchard"})
+        self.assertEqual(status, "failed")
+        self.assertEqual(self.sched.state_db.outbox_pending(), [])
+
+    def test_a_change_tried_too_often_is_set_aside_however_it_fails(self):
+        self.writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": "n1", "title": "Taxes"})
+        row = self.sched.state_db.outbox_pending()[0]
+        with self.sched.state_db._get_connection() as conn:  # Joplin kept going away mid-try, many times over
+            conn.execute("UPDATE joplin_outbox SET attempts = ? WHERE id = ?", (JoplinWriter.MAX_TRIES, row["id"]))
+        self.api.up = True
+        self.writer.flush()
+        self.assertEqual(self.sched.state_db.outbox_pending(), [])  # set aside, not retried again
+        self.assertNotIn("- [x] Taxes", self.api.notes["n1"]["body"])
+
+    def test_a_change_held_for_days_doesnt_block_the_queue(self):
+        from datetime import datetime, timedelta, timezone
+        self.writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": "n1", "title": "Taxes"})
+        old = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
+        with self.sched.state_db._get_connection() as conn:
+            conn.execute("UPDATE joplin_outbox SET created_at = ?", (old,))
+        self.api.up = True
+        self.api.holds = lambda notes: True  # the other copy of Joplin never catches up
+        self.writer.flush()
+        self.assertEqual(self.sched.state_db.outbox_pending(), [])
+
     def test_the_right_copy_of_a_repeated_item_is_ticked(self):
         self.api.notes["n1"]["body"] = "- [ ] Call mom\n- [ ] Taxes\n- [ ] Call mom\n"
         self.api.up = True
@@ -169,7 +197,8 @@ class TestTools(unittest.TestCase):
     def test_add_task_needs_a_clear_list(self):
         self.assertTrue(self.t.execute("add_task", {"title": "Buy stamps", "list": ""}).startswith(NOT_DONE))
         out = self.t.execute("add_task", {"title": "Buy stamps", "list": "errands"})
-        self.assertTrue(out.startswith("Added 'Buy stamps' to Errands. To schedule it, use task_id="), out)
+        self.assertTrue(out.startswith("Added 'Buy stamps' to Errands under 'Errands'. To schedule it, use task_id="),
+                        out)  # where it went is said (B1)
         self.assertIn("- [ ] Buy stamps", self.api.notes["n1"]["body"])
 
 

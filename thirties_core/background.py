@@ -20,10 +20,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
@@ -37,8 +38,11 @@ DesktopNotify = Callable[[str, str, str], None]  # (title, body, kind) -> None
 
 
 LEVELS = ("off", "light", "medium", "heavy")
+YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
+CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
+REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
 
 
 def day_stretches(plan) -> List[tuple]:
@@ -73,6 +77,8 @@ class BackgroundService:
     SYNC_EVERY = 300
     LISTS_EVERY = 1800
     TODAY_EVERY = 120
+    MOOT_EVERY = 60
+    PRESENCE_EVERY = 600  # how often the Joplin app's being open is sampled (for offering the sync peer)
 
     def __init__(self, config, desktop_notify: Optional[DesktopNotify] = None, *, scheduler=None, joplin_engine=None,
                  inference_engine=None, sync_engine=None) -> None:
@@ -95,10 +101,16 @@ class BackgroundService:
         self._last_sync = 0.0
         self._last_lists = 0.0
         self._last_today = 0.0
+        self._last_moot = 0.0
+        self._last_presence = 0.0
+        self.peer = None  # the headless Joplin sync peer's duty, when it's on (joplin_peer.py)
         self._sorting = False
         self.sort_lists_enabled = not os.environ.get("THIRTIES_OFFLINE")  # off in tests and evals
         self._threads: List[threading.Thread] = []
         self.running = False
+        self._answering = False
+        self._fixed_now = False      # tests pass the time to each duty
+        self.run_in_threads = True   # tests run the background work inline
 
     # --- the day's conversation (shared with the window and Telegram through the database) ---
 
@@ -112,6 +124,16 @@ class BackgroundService:
             if self._manager is None or today != self._day:
                 tasks, notes = load_backlog(self.config, self.joplin_engine, self.scheduler)
                 plan, pending = self.scheduler.build_day_plan(today)
+                if not getattr(self, "_titles_repaired", False):  # once per run: records with a raw id as a title
+                    self._titles_repaired = True                     # get their real title back (11-06)
+                    try:
+                        from thirties_core.titles import repair_raw_titles
+                        fixed = repair_raw_titles(self.scheduler.state_db, tasks)
+                        if fixed:
+                            logger.info("Gave %d item(s) their title back (they showed an id).", fixed)
+                            plan, pending = self.scheduler.build_day_plan(today)
+                    except Exception as e:
+                        logger.warning("Repairing titles failed: %s", e)
                 self._manager = ConversationManager(plan, tasks, pending, self.scheduler, joplin_engine=self.joplin_engine,
                                                     inference_engine=self.inference_engine, active_notes=notes)
                 self._day = today
@@ -128,12 +150,17 @@ class BackgroundService:
     # --- delivering a message ---
 
     def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
-             to_conversation: bool = True, now: Optional[datetime] = None) -> None:
-        """Send a message to the desktop and, if a phone is paired here, to Telegram."""
+             to_conversation: bool = True, now: Optional[datetime] = None,
+             expires: Optional[datetime] = None) -> None:
+        """Send a message to the desktop and, if a phone is paired here, to Telegram. A notice about a moment
+        (a block starting, a check-in) ``expires``: if Telegram can't take it before then, it's dropped rather than
+        sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower, Journal", 33 minutes late)."""
         from thirties_core.clock import real_times, to_thirties, trim_meridiems
         try:
             now = now or self.now()
-            keep = real_times(spans=self.manager().day_plan.spans)
+            keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)
+            text = self.manager().tools.shorten(text)  # items by their short titles (11-07)
+            telegram_text = self.manager().tools.shorten(telegram_text) if telegram_text else None
             text = trim_meridiems(to_thirties(text, keep), now)
             telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
         except Exception:
@@ -144,7 +171,15 @@ class BackgroundService:
             except Exception as e:
                 logger.warning("Desktop notification failed: %s", e)
         if self.bridge is not None:
-            self.bridge.broadcast(telegram_text or text)
+            before = len(self.bridge.client.sent_ids)
+            if expires is None:
+                self.bridge.broadcast(telegram_text or text)
+            else:
+                self.bridge.broadcast(telegram_text or text, expires=expires)
+            if kind in YES_KINDS:  # a 👍 on this message is a yes (telegram_bridge.handle_updates)
+                from thirties_core.telegram_bridge import YES_TARGETS_KEY
+                ids = [list(x) for x in self.bridge.client.sent_ids[before:]]
+                self.scheduler.state_db.set_sync_meta(YES_TARGETS_KEY, json.dumps(ids))
         if to_conversation:  # after delivery: this waits for a turn that's under way (Telegram) to finish
             try:
                 manager = self.manager()
@@ -164,21 +199,23 @@ class BackgroundService:
         cutoff = (now.date() - timedelta(days=3)).isoformat()
         self.scheduler.state_db.set_sync_meta(key, json.dumps({k: v for k, v in done.items() if v >= cutoff}))
 
-    def _unmarked_tail(self, now: datetime) -> str:
-        """The bottom of a message on the phone: items past their time with nothing said, by block, no times.
-        Said when something new has fallen behind since the last time they were listed (being behind is common;
-        silence about it isn't help, and the same list every half hour would be nagging)."""
-        from thirties_core.clock import unmarked_lines
-        manager = self.manager()
-        behind = [s for s in manager.tools._behind(now) if not (manager.tools.services and manager.tools.services.mutes
-                                                                and manager.tools.services.mutes.is_muted(s.id, now))]
-        listed = self._remembered("unmarked_listed")
-        before = set(listed.get("ids", "").split("|", 1)[-1].split()) if listed.get("ids", "").startswith(
-            now.date().isoformat()) else set()
-        if not behind or {s.id for s in behind} <= before:
-            return ""
-        self._remember("unmarked_listed", {"ids": f"{now.date().isoformat()}|" + " ".join(s.id for s in behind)}, now)
-        return "\n\nNot marked yet:\n" + "\n".join(unmarked_lines(behind))
+    def _with_missed(self, status: str, now: datetime) -> str:
+        """A notice with what's not marked yet right under it (messages.py): one per line, never twice, never the
+        block the user is still in. Added only when something new fell behind since the user was last shown the
+        list (in a notice or a reply): being behind is common, silence about it isn't help, and the same list every
+        half hour would be nagging (C2)."""
+        from thirties_core.messages import MissedTracker, missed_for, with_missed
+        missed = missed_for(self.manager().tools, now)
+        tracker = MissedTracker(self.scheduler.state_db)
+        if not missed or not tracker.anything_new(now, missed):
+            return status
+        tracker.mark(now, missed)
+        return with_missed(status, missed)
+
+    def _asked(self, now: datetime, titles: List[str]) -> None:
+        """A check-in asked about these: a reply needn't ask again (C5)."""
+        from thirties_core.messages import MissedTracker
+        MissedTracker(self.scheduler.state_db).mark(now, titles=titles)
 
     @staticmethod
     def _plannable(span) -> bool:
@@ -193,7 +230,7 @@ class BackgroundService:
     def _quiet(self, now: datetime) -> bool:
         """Asleep, or in a calendar event: no messages (except reminders the user asked for)."""
         plan = self.manager().day_plan
-        return any(s.start_dt <= now < s.end_dt for s in plan.active_spans() if not s.tentative
+        return any(s.covers(now) for s in plan.active_spans() if not s.tentative  # covers: the instant (DST)
                    and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm)))
 
     def _talking(self, now: datetime) -> bool:
@@ -203,6 +240,19 @@ class BackgroundService:
             return bool(raw) and now - datetime.fromisoformat(raw) < QUIET_AFTER_TALK
         except ValueError:
             return False
+
+    def _up(self, now: datetime) -> bool:
+        """The user has started the day (wake.user_is_up): until then nothing is set up or sent, apart from the
+        first message of the day (morning_hello), reminders they asked for, and sunrise/sunset if switched on."""
+        from thirties_core.wake import user_is_up
+        return user_is_up(self.scheduler.state_db, self.manager().day_plan, now)
+
+    def _turn_running(self) -> bool:
+        lock = self.manager().turn_lock
+        if lock.acquire(blocking=False):
+            lock.release()
+            return False
+        return True
 
     def _talked_since(self, since: datetime) -> bool:
         raw = self.scheduler.state_db.get_sync_meta("last_user_message_at")
@@ -234,7 +284,7 @@ class BackgroundService:
             if behind:
                 text += " (" + (", ".join(behind[:-1]) + " and " + behind[-1] if len(behind) > 1 else behind[0]) + \
                         (" aren't" if len(behind) > 1 else " isn't") + " reported yet.)"
-            self.send(text, "heads_up", now=now)
+            self.send(text, "heads_up", now=now, expires=event.start_dt)
         if soon:
             self._remember("heads_up", told, now)
 
@@ -257,8 +307,8 @@ class BackgroundService:
             if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
-                self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items) + "."
-                          + self._unmarked_tail(now), "start", now=now)
+                self.send(self._with_missed(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items)
+                                            + ".", now), "start", now=now, expires=thirty_of(now) + timedelta(minutes=30))
             open_items = [s for s in items if not mutes.is_muted(s.id, now)]
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
@@ -273,7 +323,9 @@ class BackgroundService:
                 self._remember("stretch_asked", asked, now)
                 titles = [s.title for s in open_items]
                 listed = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
-                self.send(f"👋 Since {format_clock(a)}: did you get to {listed}?", "checkin", now=now)
+                self._asked(now, titles)
+                self.send(f"👋 Since {format_clock(a)}: did you get to {listed}?", "checkin", now=now,
+                          expires=now + timedelta(minutes=30))
 
     def wrap_up(self, now: datetime) -> None:
         """Medium: once a day, 45 minutes before bed, one question about whatever from today still isn't reported,
@@ -293,13 +345,27 @@ class BackgroundService:
         self.scheduler.state_db.set_sync_meta(key, "1")
         if open_items:
             listed = open_items[0] if len(open_items) == 1 else ", ".join(open_items[:-1]) + f" and {open_items[-1]}"
-            self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now)
+            self._asked(now, open_items)
+            self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now,
+                      expires=bed)
+
+    def _built_late(self, span, plan) -> bool:
+        """The day was built (the user's first message) when this item's thirty was already half over: no
+        check-in about it (11-06: built at 9:25, the 9:00 block's check-in came at 9:57)."""
+        raw = self.scheduler.state_db.get_sync_meta(f"day_built_at:{plan.target_date.isoformat()}")
+        try:
+            built = datetime.fromisoformat(raw) if raw else None
+        except ValueError:
+            return False
+        return built is not None and thirty_of(span.start_dt) + timedelta(minutes=15) <= built
 
     def check_ins(self, now: datetime) -> None:
         """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
-        have no outcome: never twice about an item, never about one already reported or muted."""
+        have no outcome: never twice about an item, never about one already reported or muted. Each goes out at
+        its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
+        late day build never pushes check-ins later or sends one for a block that was half over by then."""
         cfg = self.config.assistant
-        if self.level() != "heavy" or self._quiet(now) or self._talking(now):
+        if self.level() != "heavy" or self._quiet(now):
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
@@ -315,7 +381,13 @@ class BackgroundService:
         due = [s for s in plan.active_spans()
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
                and thirty_end(s) + grace <= now < thirty_end(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
-        if not due:
+        late = [s for s in due if now >= thirty_end(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
+        if late:  # its moment passed (the user was talking then), or the day was built too late for it: never sent
+            for s in late:
+                asked[s.id] = now.date().isoformat()
+            self._remember("checkins_asked", asked, now)
+            due = [s for s in due if s not in late]
+        if not due or self._talking(now):
             return
         for s in due:
             asked[s.id] = now.date().isoformat()
@@ -328,7 +400,8 @@ class BackgroundService:
             listed = ", ".join(titles[:-1]) + f" and {titles[-1]}"
             question = f"👋 How did it go? Did you get to {listed}?"
             bold = question
-        self.send(question, "checkin", telegram_text=bold, now=now)
+        self._asked(now, titles)
+        self.send(question, "checkin", telegram_text=bold, now=now, expires=now + timedelta(minutes=30))
 
     def reminders(self, now: datetime) -> None:
         from thirties_core.memory import ReminderStore
@@ -344,7 +417,7 @@ class BackgroundService:
                        f"{format_clock(rem.due.astimezone(now.tzinfo))}): {rem.text}"
             else:
                 text = f"⏰ Reminder: {rem.text}"
-            self.send(text, "reminder", now=now)
+            self.send(text, "reminder", now=now, expires=now + REMINDER_STALE)
 
     def starts(self, now: datetime) -> None:
         """Heavy: at the start of a thirty, one message for what's planned to start in it; each item is
@@ -381,39 +454,219 @@ class BackgroundService:
             announced[s.id] = now.date().isoformat()
             announced["title:" + s.title.strip().lower()] = f"{now.date().isoformat()}|" + " ".join(ids_titled(s) + [s.id])
         self._remember("starts_announced", announced, now)
+        try:  # the morning message just said what's on: no block notice on top of it (11-02 replay)
+            morning = self.scheduler.state_db.get_sync_meta("morning_sent_at")
+            if morning and timedelta(0) <= now - datetime.fromisoformat(morning) < timedelta(minutes=10):
+                return
+        except ValueError:
+            pass
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
         if rest:
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
             said = [f"{s.title} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s) else s.title
                     for s in rest]
-            self.send(f"🔔 {format_clock(block)}: " + ", ".join(said) + self._unmarked_tail(now), "start",
-                      now=now)  # a fixed thing by its real time; what's behind at the bottom
+            self.send(self._with_missed(f"🔔 {format_clock(block)}: " + ", ".join(said), now), "start", now=now,
+                      expires=block + timedelta(minutes=30))  # a fixed thing by its real time; what's behind under it
         if sleep:
-            self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now)
+            self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now,
+                      expires=block + timedelta(minutes=30))
+
+    def contextual(self, now: datetime) -> None:
+        """"Have you left yet?", "are you on your way?": only for the items that matter (contextual.py), once
+        each, at light and up, never while asleep."""
+        from thirties_core.contextual import due
+        plan = self.manager().day_plan
+        asleep = any(s.start_dt <= now < s.end_dt for s in plan.active_spans()
+                     if s.category == SpanCategory.SLEEP and not s.tentative)
+        if asleep:
+            return
+        for moment in due(plan, now, self.manager().tools._is_fixed, self.scheduler.state_db, self.level()):
+            self.send(moment.text, "contextual", now=now, expires=moment.until)
+
+    def answer_lost_turns(self, now: datetime) -> None:
+        """A turn the model never answered (it timed out, even after retries) is tried again in the background,
+        and the reply is sent to the desktop and the phone (T1: a message from the user never got an answer, 10-17)."""
+        if self._answering:
+            return
+        manager = self.manager()
+        with manager.turn_lock:
+            manager._catch_up()  # the window's manager may have kept it: it's in the stored conversation
+        if not manager.unanswered():
+            return
+        self._answering = True
+
+        def run() -> None:
+            try:
+                reply = self.manager().answer_unanswered(now if self._fixed_now else None)
+                if reply:
+                    self.send(reply, "reply", to_conversation=False)
+            except Exception as e:
+                logger.warning("Answering a lost turn failed: %s", e)
+            finally:
+                self._answering = False
+        if self.run_in_threads:
+            threading.Thread(target=run, daemon=True, name="LostTurn").start()
+        else:
+            run()
+
+    def _mirror(self, texts: List[str], reply: str, reply_sent: bool) -> None:
+        """The desktop chat on the phone too (T2, 10-28 13:02): what the user typed in the app, marked as from the
+        desktop, then the reply (unless the turn was Telegram's, which sends the reply itself)."""
+        if self.bridge is None or not getattr(self.config.telegram, "mirror_desktop", True):
+            return
+        self.bridge.broadcast("🖥 You, on the desktop:\n" + "\n".join(texts), parse_mode=None)
+        if not reply_sent and reply:
+            self.bridge.broadcast(reply)
+
+    def moot(self, now: datetime) -> None:
+        """Before anything asks: what has gone moot with nothing said (lunch once dinner's begun, yesterday's
+        breakfast) is stored as unknown, so no check-in, wrap-up or morning offer brings it up (kinds.py; 10-23,
+        10-29)."""
+        if time.time() - self._last_moot < self.MOOT_EVERY:
+            return
+        self._last_moot = time.time()
+        manager = self.manager()
+        if manager.tools.assistant is not None:
+            with manager.turn_lock:
+                manager.tools.assistant.settle_moot(now=now)
+
+    def morning_hello(self, now: datetime) -> None:
+        """The first message of the day, once, at sunrise or the scheduled wake-up (assistant.morning_message_at):
+        "let me know when you're up", with the day's items and no times if assistant.morning_message_items is on.
+        Nothing is built until the user replies (wake.py)."""
+        from thirties_core.wake import RECENT_KEY, hello_text, hello_time, user_is_up, write_hello
+        if self.level() == "off":
+            return
+        db = self.scheduler.state_db
+        manager = self.manager()
+        plan = manager.day_plan
+        if now >= plan.day_end - timedelta(hours=3):  # before sunrise: the coming day's wake-up may be due already
+            plan = manager.tools.plan_for(plan.target_date + timedelta(days=1))  # (11-05: the wake-up time mode
+            # is its own choice, not "sunrise or later")
+        if user_is_up(db, plan, now):
+            return
+        key = f"morning_hello:{plan.target_date.isoformat()}"
+        if db.get_sync_meta(key) or db.get_sync_meta(f"rollover_offered:{plan.target_date.isoformat()}"):
+            return
+        history = db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        at = hello_time(self.config, plan, history)
+        bed = min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start),
+                  default=plan.day_end)
+        if at is None or not at <= now < bed - timedelta(hours=2):  # never a "good morning" at bedtime
+            return
+        db.set_sync_meta(key, now.isoformat())
+        titles = self._plate(plan) if getattr(self.config.assistant, "morning_message_items", True) else []
+        mode = "sunrise" if getattr(self.config.assistant, "morning_message_at", "wake") == "sunrise" else "wake"
+        try:
+            recent = json.loads(db.get_sync_meta(RECENT_KEY) or "[]")
+        except ValueError:
+            recent = []
+        engine = self.inference_engine if getattr(self.config.assistant, "brain", "frontier") == "frontier" else None
+        line = write_hello(engine, mode, at, recent)  # the model writes it fresh each morning (11-05)
+        db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
+        self.send(hello_text(line, titles), "morning", now=now)
+
+    def _plate(self, plan) -> List[str]:
+        """What's on the plate today, without times and without changing anything: what's already on today's plan
+        (fixed calendar events, things planned ahead) and list items due today. Never routines, meals or anchors,
+        and never yesterday's leftovers: they aren't today's by default (carry.py)."""
+        from thirties_core.assistant_tools import _short
+        assistant = self.manager().tools.assistant
+        daily = assistant.routines.daily_titles() if assistant is not None else set()
+        out = [s.title for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
+               if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
+               and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
+        if assistant is not None:
+            day = plan.target_date.isoformat()
+            out += [t.title for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
+                    and t.title.strip().lower() not in daily]
+        return [_short(t) for t in out]
 
     def rollover(self, now: datetime) -> None:
-        """Once a day, after waking: offer to roll yesterday's unfinished items into today."""
+        """The morning, if no turn did it (morning.py): normally the user's first message of the day builds the
+        day in its reply. This is the fallback (the model couldn't be reached, or the on-device brain). Marked
+        done only after it has gone out."""
+        from thirties_core import morning
         db = self.scheduler.state_db
         manager = self.manager()
         day = manager.day_plan.target_date
-        key = f"rollover_offered:{day.isoformat()}"
-        if db.get_sync_meta(key):
+        if morning.is_done(db, day):
             return
-        gen = self.config.general
-        wake = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo) + \
-            timedelta(minutes=30 * gen.sleep_end_thirty + 30)
-        if now < wake:
+        if not self._up(now) or self._turn_running() or self._quiet(now):  # never while asleep or mid-turn
             return
-        db.set_sync_meta(key, "1")
-        if manager.tools.assistant is not None:
-            started = manager.tools.assistant.start_the_day()
-            if started:
-                logger.info("Morning: %s.", started)
-        text = manager.execute_tool("rollover_proposal", {})
-        if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
+        facts, brief = morning.prepare(manager, self.level())
+        self.propose_the_day(now, facts, brief)
+        morning.mark_done(db, day, now)
+
+    def propose_the_day(self, now: datetime, facts: str = "", brief: str = "") -> None:
+        """The morning's one message (10-31: three long texts at sunrise were too many): what's
+        already planned, yesterday's leftovers and the holiday note (``facts``), with one short proposal for the
+        free time (day_proposal.py), and one question."""
+        from thirties_core.day_proposal import morning_proposal
+        manager = self.manager()
+        try:
+            text, stored = morning_proposal(manager, facts, brief)
+        except Exception as e:
+            logger.warning("The morning proposal failed: %s", e)
+            text, stored = "", False
+        if not text and not facts:
             return
-        self.send("☀️ Good morning! " + text, "rollover", now=now)
+        if not text:  # nothing to propose: the facts alone
+            text, stored = facts, False
+        elif not stored and facts:
+            text = facts + "\n\n" + text
+        if not stored and not text.startswith("☀️"):  # the model's own message starts so (MORNING_FACTS)
+            text = "☀️ Good morning! " + text
+        self.send(text, "rollover", now=now, to_conversation=not stored)
+
+    def day_times(self, now: datetime) -> None:
+        """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),
+        unless the answer is already on the record."""
+        from thirties_core.day_times import ASK_AT_LEVELS, due_question
+        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now):
+            return
+        plan = self.manager().day_plan
+        history = self.scheduler.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)
+        asked = self._remembered("day_times_asked")
+        due = due_question(plan, now, asked, history)
+        if due:
+            asked[due[0]] = now.date().isoformat()
+            self._remember("day_times_asked", asked, now)
+            self.send(due[1], "checkin", now=now)
+
+    def sun(self, now: datetime) -> None:
+        """Sunrise and sunset, if the user switched them on (sun_notices.py): asked for, so always sent."""
+        from thirties_core.sun_notices import TEXT, WINDOW, due
+        sent = self._remembered("sun_sent")
+        key = due(self.config, now, sent)
+        if key:
+            sent[key] = now.date().isoformat()
+            self._remember("sun_sent", sent, now)
+            self.send(TEXT[key], "sun", now=now, expires=now + WINDOW * 6)  # in the chat too: the app and the
+            # phone show one conversation (the user's parity rule, 10-30)
+
+    def horizon_session(self, now: datetime) -> None:
+        """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short
+        planning session (one proposal, applied on "yes"; horizons.HorizonPlanner.offer_session)."""
+        manager = self.manager()
+        assistant = manager.tools.assistant
+        day = manager.day_plan.target_date
+        if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
+            return
+        try:  # not on top of the morning's message (11-06 replay: two messages a minute apart)
+            sent = self.scheduler.state_db.get_sync_meta("morning_sent_at")
+            if sent and timedelta(0) <= now - datetime.fromisoformat(sent) < timedelta(hours=3):
+                return
+        except ValueError:
+            pass
+        if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
+                or assistant.proposals.pending():  # the morning's leftovers need no answer any more (11-06)
+            return  # one offer at a time: the day's proposal is answered first
+        from thirties_core.horizons import HorizonPlanner
+        text = HorizonPlanner(manager.tools).offer_session()
+        if text:
+            self.send("📅 " + text, "horizon", now=now)
 
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
@@ -425,6 +678,39 @@ class BackgroundService:
             assistant.start_the_day()  # Joplin was closed at wake-up; it may be open now
         for message in assistant.sync_today() if assistant is not None else []:
             self.send("📝 " + message, "today", now=now)
+        if assistant is not None:  # done items move to the month's Done note (done_log.py)
+            from thirties_core.done_log import DoneLog
+            filed = DoneLog(self.scheduler.state_db).sweep(assistant)
+            if filed:
+                logger.info("Done log: %s.", "; ".join(filed))
+
+    def dropbox(self, now: datetime) -> None:
+        """Now and then, in the afternoon: offer to empty the drop box, a home proposed for each item (soak 5)."""
+        from thirties_core.placement_lists import DROPBOX_OFFER_HOURS
+        if not DROPBOX_OFFER_HOURS[0] <= now.hour < DROPBOX_OFFER_HOURS[1] or \
+                time.time() - getattr(self, "_last_dropbox", 0.0) < self.LISTS_EVERY:
+            return  # looked at twice an hour at most: it reads the notes
+        self._last_dropbox = time.time()
+        if self.level() == "off" or self._quiet(now) or self._talking(now):
+            return
+        assistant = self.manager().tools.assistant
+        offer = assistant.lists.dropbox_offer(now) if assistant is not None else ""
+        if offer:
+            self.send(offer, "dropbox", now=now)
+
+    def joplin_presence(self, now: datetime) -> None:
+        """While write-back is on and the sync peer is off: note every ten minutes whether the Joplin app is open,
+        and offer the peer once if it's often closed (changes wait for it then)."""
+        cfg = self.config.joplin
+        if not cfg.write_back or cfg.peer_enabled or time.time() - self._last_presence < self.PRESENCE_EVERY:
+            return
+        self._last_presence = time.time()
+        from thirties_core.joplin_peer import OFFER_TEXT, Presence
+        presence = Presence(self.scheduler.state_db)
+        presence.sample(bool(self.joplin_engine.api_client.ping()), now.date())
+        if presence.should_offer(self.config):
+            presence.offered()
+            self.send(OFFER_TEXT, "joplin_peer", now=now)
 
     def deliver_outbox(self) -> None:
         if time.time() - self._last_outbox < self.OUTBOX_EVERY:
@@ -466,9 +752,12 @@ class BackgroundService:
                     return
                 counts = sort_lists(ListCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today(),
                                     max_notes=10)  # a few notes each half hour, not the whole backlog at once
+                from thirties_core.horizons import HorizonCatalog, sort_horizons
+                counts.update({f"horizon_{k}": v for k, v in sort_horizons(
+                    HorizonCatalog(self.scheduler.state_db), notes, tasks, sorter, self.today(), max_notes=10).items()})
                 if any(counts.values()):
-                    logger.info("Sorted lists: %d note roles and %d item urgencies guessed.",
-                                counts["roles"], counts["items"])
+                    logger.info("Sorted lists: %d note roles, %d item urgencies, %d note and %d item horizons guessed.",
+                                counts["roles"], counts["items"], counts["horizon_notes"], counts["horizon_items"])
                     with self._lock:
                         self._manager = None  # the next turn sees them
             except Exception as e:
@@ -478,9 +767,26 @@ class BackgroundService:
         threading.Thread(target=run, daemon=True, name="ListSorting").start()
 
     def tick(self, now: Optional[datetime] = None) -> None:
+        self._fixed_now = now is not None
         now = now or self.now()
-        for duty in (self.rollover, self.reminders, self.heads_up, self.stretches, self.wrap_up, self.check_ins,
-                     self.starts, self.today_sync):
+        try:
+            manager = self.manager()
+            with manager.turn_lock:  # each duty sees the day as stored: 10-25, ticks made in the app's Agenda at
+                manager.reload_plan()  # 10:53 were listed as "not marked yet" at 11:00
+        except Exception as e:
+            logger.warning("Reloading the day failed: %s", e)
+        try:
+            up = self._up(now)
+        except Exception as e:
+            logger.warning("Checking whether the user is up failed: %s", e)
+            up = True
+        waits = {self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+                 self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
+        for duty in (self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+                     self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
+                     self.answer_lost_turns, self.dropbox, self.joplin_presence):
+            if not up and duty in waits:
+                continue
             try:
                 duty(now)
             except Exception as e:
@@ -506,10 +812,30 @@ class BackgroundService:
             except Exception as e:
                 logger.warning("Telegram bridge didn't start: %s", e)
                 self.bridge = None
+        if self.bridge is not None:
+            from thirties_core.turns import add_mirror
+            add_mirror(self._mirror)
+        self._start_peer()
         t = threading.Thread(target=self._loop, daemon=True, name="ThirtiesBackground")
         t.start()
         self._threads.append(t)
         logger.info("Background service started (Telegram %s).", "on" if self.bridge else "off")
+
+    def _start_peer(self) -> None:
+        """The headless Joplin sync peer runs in its own thread (a sync can take minutes); off, its server stops."""
+        from thirties_core import joplin_peer
+        if not self.config.joplin.peer_enabled:
+            joplin_peer.shutdown_all()
+            return
+        if not self.run_in_threads:
+            return  # tests drive the peer themselves
+        self.peer = joplin_peer.peer_for(self.config)
+
+        def ready() -> None:
+            self._last_outbox = 0.0  # the queued changes go now, not in a minute
+        self.peer.on_ready = ready
+        self.peer.notify = lambda text: self.send(text, "joplin_peer")
+        self.peer.start()
 
     def _loop(self) -> None:
         while self.running:
@@ -521,6 +847,11 @@ class BackgroundService:
 
     def stop(self) -> None:
         self.running = False
+        if self.peer is not None:  # its server stays up across a settings reload; quitting stops it (atexit)
+            self.peer.stop()
+            self.peer = None
+        from thirties_core.turns import remove_mirror
+        remove_mirror(self._mirror)
         if self.bridge is not None:
             self.bridge.stop()
         self.bridge = None

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Callable, List, Optional
 
 from thirties_core.background import BackgroundService, DesktopNotify
 from thirties_core.config import ThirtiesConfig, load_config

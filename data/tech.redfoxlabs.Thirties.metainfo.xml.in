@@ -41,6 +41,25 @@
   </branding>
 
   <releases>
+    <release version="0.2.0" date="2026-11-08" type="development">
+      <description>
+        <p>Mornings that start when you do, and a day that simply is the plan:</p>
+        <ul>
+          <li>One morning message, written fresh each day, at your wake-up time or at sunrise, optionally with the day's items; nothing else is sent until you reply</li>
+          <li>Your reply is the morning: the day is built then, as the plan, with no approval step; the one question left is what doesn't fit today</li>
+          <li>The morning routine goes on from when you're actually up, a part per half hour, alongside work, in a block it fits</li>
+          <li>What's left from before takes effect by itself: today's items go on today's schedule, the rest wait for a day they fit, and proposed drops are applied after the day unless you say otherwise</li>
+          <li>Agenda: a Before today tab beside Today (keep, drop, done, and an archive you can undrop from); the Free row and each routine show their time in the time column</li>
+          <li>Dropped items are ticked and filed in Joplin in a monthly Dropped note beside the Done notes; undropping puts them back where they were</li>
+          <li>Items show a short title everywhere; a long line's details stay out of messages and expand in the Agenda</li>
+          <li>Check-ins come at their own time, or not at all</li>
+          <li>Other people's calendar events stay out of the schedule sent in chat and Telegram</li>
+          <li>Telegram lists are one item per line, without bullets</li>
+          <li>A Joplin change that can't go through is set aside after a few tries, instead of being retried forever</li>
+          <li>The assistant no longer says it can't make changes</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-30" type="development">
       <description>
         <p>The day list, and an assistant you can trust with your lists:</p>

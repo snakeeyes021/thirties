@@ -169,6 +169,8 @@ def find_scripts(dirs: List[Path], only: Optional[List[str]] = None) -> List[Day
         if not Path(d).exists():
             continue
         for path in sorted(Path(d).glob("*.json")) if Path(d).is_dir() else [Path(d)]:
+            if path == LEVELS_FILE:  # the levels kept for paired runs live beside the scripts
+                continue
             script = DayScript.load(path)
             if not only or script.id in only:
                 scripts.append(script)
@@ -445,10 +447,49 @@ def _words(text: str) -> List[str]:
     return [w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2]
 
 
+def _clock_minutes(h: int, m: int) -> set:
+    """A clock time as minutes after midnight, both readings when AM/PM isn't said (3:15 is 3:15 or 15:15)."""
+    return {(h % 12) * 60 + m, (h % 12 + 12) * 60 + m} if h <= 12 else {h * 60 + m}
+
+
+def _times_in(text: str) -> set:
+    found = set()
+    for m in re.finditer(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", text or ""):
+        found |= _clock_minutes(int(m.group(1)), int(m.group(2)))
+    return found
+
+
+def given_times(run: DayRun) -> set:
+    """Minute times Thirties didn't pick, as minutes after midnight (ROADMAP 0.2 item 29): what the user said (in
+    messages, in their lists, the script's work hours, and the time of each message, which is when a "done" with no
+    time is stored), and calendar events' real times. Showing these is right (A13: real times are kept)."""
+    script = run.script
+    given = set()
+
+    def hhmm(value: str) -> set:  # the harness's own 24-hour times: one reading only
+        h, _, m = (value or "").partition(":")
+        return {int(h) * 60 + int(m)} if h.isdigit() and m.isdigit() else set()
+    for t, who, text in run.log:
+        if who == "user":
+            given |= _times_in(text) | hhmm(t)
+    for note in script.notes:
+        given |= _times_in(note.get("body", ""))
+    for value in (script.work or []) + [e[k] for e in script.events for k in ("start", "end") if e.get(k)]:
+        given |= hhmm(value)
+    try:
+        calendar = [s for offset in (0, 1) for s in run.plan(offset).spans_in_view() if s.source == "calendar"]
+    except Exception:
+        calendar = []
+    for s in calendar:
+        given |= {s.start_dt.hour * 60 + s.start_dt.minute, s.end_dt.hour * 60 + s.end_dt.minute}
+    return given
+
+
 def measure(run: DayRun) -> Dict[str, Any]:
     script = run.script
     facts: Dict[str, Any] = {}
-    leaks, internal = [], []
+    leaks, internal, excused = [], [], 0
+    given = given_times(run)
     asked_exact = False
     for t, who, text in run.log:
         if who == "tool":
@@ -456,12 +497,19 @@ def measure(run: DayRun) -> Dict[str, Any]:
         if who == "user":
             asked_exact = bool(EXACT_ASKED_RE.search(text))
             continue
-        if not asked_exact:
-            leaks += [f"[{t}] {m.group(0)}" for m in CLOCK_RE.finditer(text) if m.group(2) not in ("00", "30")]
+        if not asked_exact:  # minutes the user asked for are quoted back on purpose
+            for m in CLOCK_RE.finditer(text):
+                if m.group(2) in ("00", "30"):
+                    continue
+                if _clock_minutes(int(m.group(1)), int(m.group(2))) & given:
+                    excused += 1  # a real time the user or a calendar gave: kept as it is, by design
+                else:
+                    leaks.append(f"[{t}] {m.group(0)}")
         if who == "assistant" and LEAK_RE.search(text):
             internal.append(f"[{t}] {text[:120]}")
-    facts["minute_times_shown"] = len(leaks)
+    facts["minute_times_shown"] = len(leaks)  # only times Thirties picked itself
     facts["minute_time_examples"] = leaks[:8]
+    facts["minute_times_given"] = excused
     facts["internal_text_in_replies"] = internal[:8]
     app = [x for _, w, x in run.log if w == "app"]
     awake_h = max(1.0, (at(script.day, script.bed, 1 if script.bed < script.wake else 0)
@@ -493,7 +541,59 @@ def measure(run: DayRun) -> Dict[str, Any]:
     facts["not_done_items_recorded_done"] = sum(1 for r in rows if not r["really_done"] and r["recorded"])
     errs = [r[k] for r in rows for k in ("start_error_min", "end_error_min") if k in r]
     facts["mean_time_error_min"] = round(sum(errs) / len(errs), 1) if errs else None
+    try:
+        facts["joplin"] = joplin_facts(run)
+    except ImportError:
+        pass  # a version without the write log
     return facts
+
+
+def joplin_facts(run: DayRun) -> Dict[str, Any]:
+    """Every Joplin write of the day, and what must hold at the end of it (heavy principle 2): nothing written into
+    a routine note, everything on today's plan on the Today note, what's done ticked in its list, no line twice."""
+    from collections import Counter
+    from thirties_core.joplin_writeback import WriteLog
+    from thirties_core.lists import ListCatalog
+    from thirties_core.today import TodayLinks, note_items, notes_with_role
+    db = run.scheduler.state_db
+    writes = WriteLog(db).since("")
+    roles = ListCatalog(db).roles()
+    joplin = run.manager.tools.services.joplin
+    notes = joplin.fetch_active_notes() if joplin is not None else []
+    routine_ids = {n["id"] for n in notes_with_role(roles, notes, "routine")}
+    out: Dict[str, Any] = {
+        "writes": len(writes), "failed": sum(1 for w in writes if not w["ok"]),
+        "into_routine": [f"{w['op'].get('op')} {w['note_title']}: +{w['added']}" for w in writes
+                         if w["note_id"] in routine_ids and w["op"].get("op") != "untick_all"],  # a template
+        "log": [f"{w['op'].get('op')} {w['note_title']}: -{w['removed']} +{w['added']}" for w in writes][:40],
+    }
+    from thirties_core.note_edits import is_someday_heading
+    someday = getattr(run.scheduler.config.joplin, "someday_sections", [])
+    out["into_someday"] = [f"{w['op'].get('title')} → {w['note_title']} '{w['op']['place']}'" for w in writes
+                           if w["op"].get("op") == "add_task" and w["op"].get("place")
+                           and is_someday_heading(w["op"]["place"], someday)]  # B1: allowed only for undated maybes
+    out["filed_done"] = len({w["op"].get("key") for w in writes if w["op"].get("op") == "file_done" and w["ok"]})
+    today = next(iter(notes_with_role(roles, notes, "today")), None)
+    if today is not None:
+        lines = [t.lower() for t, _ in note_items(today)]
+        links = TodayLinks(db)
+        plan = run.plan(0)
+        planned = [s for s in plan.spans if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+                   and s.status != SpanStatus.SKIPPED and s.source != "calendar"]
+        out["plan_not_on_today"] = [s.title for s in planned if s.title.lower() not in lines
+                                    and (links.today_title_of(s.task_id) or "") not in lines]
+        top = re.findall(r"^-\s*\[[ xX]\]\s*(.+?)\s*$", today.get("body") or "", re.M)
+        out["today_duplicates"] = [t for t, n in Counter(x.lower() for x in top).items() if n > 1]
+        open_ids = {t.id for t in (joplin.fetch_tasks() if joplin is not None else [])}
+        today_open = {t.lower() for t, ticked in note_items(today) if not ticked}
+        assistant = run.manager.tools.assistant
+        ongoing = {s.id for s in planned if assistant is not None and assistant.kind_of(s) == "ongoing"}
+        out["done_but_open"] = [s.title for s in planned if s.status == SpanStatus.DONE
+                                and ((s.task_id in open_ids - {t.id for t in joplin.fetch_tasks()
+                                                               if t.parent_note_id in routine_ids}
+                                      and s.id not in ongoing)  # done on ongoing is a session: its item stays open
+                                     or s.title.lower() in today_open)]
+    return out
 
 
 JUDGE_DIMS = ("accuracy", "understanding", "plan_respect", "message_load", "record_keeping", "clarity", "tone")
@@ -587,7 +687,11 @@ def summarize(results: List[Dict[str, Any]], brains: List[str]) -> None:
               f"waking hour {mean(r['facts'].get('app_messages_per_waking_hour') for r in rs)} | repeated "
               f"{sum(r['facts'].get('app_messages_repeated', 0) for r in rs)} | internal text "
               f"{sum(len(r['facts'].get('internal_text_in_replies', [])) for r in rs)} | joined titles "
-              f"{sum(len(r['facts'].get('joined_titles', [])) for r in rs)} | time error "
+              f"{sum(len(r['facts'].get('joined_titles', [])) for r in rs)} | joplin: writes "
+              f"{sum(r['facts'].get('joplin', {}).get('writes', 0) for r in rs)}, into routines "
+              f"{sum(len(r['facts'].get('joplin', {}).get('into_routine', [])) for r in rs)}, plan not on Today "
+              f"{sum(len(r['facts'].get('joplin', {}).get('plan_not_on_today', [])) for r in rs)}, done but open "
+              f"{sum(len(r['facts'].get('joplin', {}).get('done_but_open', [])) for r in rs)} | time error "
               f"{mean(r['facts'].get('mean_time_error_min') for r in rs)} min | latency {mean(r['mean_latency'] for r in rs)}s")
 
 
