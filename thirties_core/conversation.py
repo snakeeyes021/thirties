@@ -402,6 +402,24 @@ class ConversationManager:
         self._save()
         return reply
 
+    def _morning_in_turn(self) -> bool:
+        """The user's first message of the day (the morning not done yet): build the day now and tell the model
+        to make its reply the morning's one message. True when that's this turn's job."""
+        from thirties_core import morning
+        db = self.scheduler.state_db if self.scheduler is not None else None
+        if db is None or self.brain_name != "frontier" or not self.tools.is_current(self.day_plan) \
+                or morning.is_done(db, self.day_plan.target_date):
+            return False
+        try:
+            level = getattr(self.scheduler.config.assistant, "message_level", "medium")
+            facts, brief = morning.prepare(self, level)
+        except Exception as e:  # the background tries again later
+            logger.warning("Preparing the morning failed: %s", e)
+            return False
+        self.brain.messages.append({"role": "user", "content": morning.in_turn_instruction(facts, brief),
+                                    "hidden": True})
+        return True
+
     def _run_turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
         """One turn for everything in ``batch``. Returns (reply, answered); answered is False when the model
         couldn't be reached and the messages were kept for later."""
@@ -422,8 +440,7 @@ class ConversationManager:
                 self.tools.assistant.routines.set_up_current()
             except Exception as e:
                 logger.warning("Setting up the day failed: %s", e)
-            # The morning offer itself follows this reply: the background service sends it once this turn is
-            # over (wake.py: the user's first message of the day starts the day).
+        morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         before = len(self.brain.messages)
         changes_before = self.tools.successful_changes
         try:
@@ -436,6 +453,10 @@ class ConversationManager:
         except BrainUnavailable as e:
             logger.warning("The model couldn't be reached: %s", e)
             return self._lost(batch, before, changes_before, e, via, attempts), False
+        if morning_now:  # it went out with this reply: the background doesn't send a second one
+            from thirties_core import morning
+            morning.mark_done(self.scheduler.state_db, self.day_plan.target_date,
+                              get_current_time(self.day_plan.day_start.tzinfo), "in_conversation")
         self._stamp_arrivals(batch, before)
 
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)

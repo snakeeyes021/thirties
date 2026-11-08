@@ -44,9 +44,7 @@ class TestDaySim(unittest.TestCase):
         run = start_day(SCRIPT, "frontier", [], [], MockInferenceEngine())
         run.scheduler.config.assistant.message_level = "heavy"  # a message per item, to test the mechanics
         sim = scripted([
-            {"wait_minutes": 0, "message": "morning!"},
-            {"wait_minutes": 180, "message": None},                  # interrupted by the morning message, which
-            # follows the user's first message (wake.py: nothing is sent before they're up)
+            {"wait_minutes": 0, "message": "morning!"},  # its reply is the morning's one message (A1)
             {"wait_minutes": 180, "message": "back from my walk"},  # interrupted at 10:00 by the start message
             {"wait_minutes": 120, "message": None},                  # interrupted by the check-in
             {"wait_minutes": 0, "message": None, "end_of_day": True},
@@ -57,15 +55,17 @@ class TestDaySim(unittest.TestCase):
         hello = [(t, x) for t, w, x in run.log if w == "app" and "your wake-up time" in x]
         self.assertEqual(len(hello), 1)  # the first message, at the wake-up time
         morning = [(t, x) for t, w, x in run.log if w == "app" and x.startswith("☀️ Good morning")]
-        self.assertIn("Already planned for today", morning[0][1])  # after the reply: what was planned ahead (O2)
+        self.assertEqual(morning, [])  # no second morning message after the reply (A1)
+        prompt = run.manager.brain.messages
+        self.assertTrue(any(str(m.get("content", "")).startswith("[System check") and "Already planned for today"
+                            in str(m.get("content", "")) for m in prompt))  # the reply was told the morning (O2)
         app = [(t, x) for t, w, x in run.log if w == "app" and "For the record" not in x
                and not x.startswith("☀️ Good morning") and "your wake-up time" not in x]
         self.assertEqual(app[0][0], "10:00")
         self.assertIn("Walk", app[0][1])
         self.assertIn("Walk", app[1][1])  # the check-in, after the walk's thirty ended
         self.assertGreaterEqual(app[1][0], "10:30")
-        self.assertLess(morning[0][0], "09:30")  # right after the user's first message
-        self.assertIn("[10:00] App:", sim.prompts[3])  # the user saw the start message before deciding again
+        self.assertIn("[10:00] App:", sim.prompts[2])  # the user saw the start message before deciding again
         self.assertNotIn("back from my walk", [x for _, w, x in run.log if w == "user"])  # dropped: interrupted
         self.assertEqual(run.end_reason, "end of day")
 

@@ -39,12 +39,13 @@ DEFERRED_OFTEN = 3   # put off this many times: offered as a 30-minute start
 PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a later "yes"
 MIN_FREE_MINUTES = 60  # less free time than this ahead: nothing to propose
 
+from thirties_core.morning import POLICY  # one written rule for proposing (A1)
+
 MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
-    "backlog) and call propose_day with them. They go on the plan at once: what you propose is the schedule, with "
-    "no approval step (11-06). Then write one short message: a notice of what you put on, as a list, and one line "
-    "on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
+    "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
+    "on, as a list, and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
     "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
     "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
@@ -72,10 +73,8 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "propose_day",
-        "description": "Propose a short plan for the free time: a few concrete items (from DAY OPTIONS, or what the "
-                       "user named), each with a start. Nothing goes on the plan yet: it's remembered and shown back "
-                       "as a list for your reply, and apply_day_proposal puts exactly that on when the user agrees. "
-                       "A new call replaces the last proposal.",
+        "description": "Plan the free time: a few concrete items (from DAY OPTIONS, or what the user named), each "
+                       "with a start. " + POLICY,
         "parameters": {"items": "A list of {item, start, duration}: item is a task_id or title, start a clock time "
                                 "in the free time, duration optional (default: how long it usually takes).",
                        "why": "One short line on why these (optional)."},

@@ -105,7 +105,8 @@ class TestBursts(TurnsCase):
         self.engine.responses = [reply("Added dinner and a walk.")]
         self.assertEqual(manager.send_user_message("and a walk after"), "Added dinner and a walk.")
         self.assertEqual(len(self.engine.call_history), 1)
-        users = [m["content"] for m in self.engine.call_history[0] if m["role"] == "user"]
+        users = [m["content"] for m in self.engine.call_history[0] if m["role"] == "user"
+                 and not m["content"].startswith("[System check")]
         self.assertEqual(users, ["dinner at 7", "and a walk after"])  # each as sent
         self.assertEqual([m["role"] for m in manager.history()], ["user", "user", "assistant"])
 

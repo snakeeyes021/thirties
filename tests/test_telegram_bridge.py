@@ -274,7 +274,8 @@ class TestBridgeBursts(BridgeCase):
         self.bridge.handle_updates(updates)
         self.bridge.client.send_message.assert_called_once()
         self.assertEqual(self.bridge.client.send_message.call_args[0][1], "Got both.")
-        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
+        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"
+                 and not m["content"].startswith("[System check")]
         self.assertEqual(users, ["fish are fed", "and I showered"])
 
     def test_now_lists_whats_not_marked_yet(self):
@@ -297,7 +298,8 @@ class TestBridgeBursts(BridgeCase):
         thumbs = {"chat": {"id": 1001}, "message_id": 77, "new_reaction": [{"type": "emoji", "emoji": "👍"}]}
         self.bridge.handle_updates([{"update_id": 3, "message_reaction": thumbs},
                                     {"update_id": 4, "message_reaction": {**thumbs, "message_id": 12}}])
-        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"]
+        users = [m["content"] for m in self.mock_inference.call_history[0] if m["role"] == "user"
+                 and not m["content"].startswith("[System check")]
         self.assertEqual(users[-1], "👍")
         self.assertEqual(len(self.mock_inference.call_history), 1)  # a 👍 on any other message is just a 👍
 

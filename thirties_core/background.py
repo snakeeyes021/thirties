@@ -584,46 +584,20 @@ class BackgroundService:
         return [_short(t) for t in out]
 
     def rollover(self, now: datetime) -> None:
-        """Once a day, after waking: the morning reset, the day's routines and anchors put on by themselves (R1),
-        the offer to roll yesterday's unfinished items into today, and a proposal for the free time (A6)."""
+        """The morning, if no turn did it (morning.py): normally the user's first message of the day builds the
+        day in its reply. This is the fallback (the model couldn't be reached, or the on-device brain). Marked
+        done only after it has gone out."""
+        from thirties_core import morning
         db = self.scheduler.state_db
         manager = self.manager()
         day = manager.day_plan.target_date
-        key = f"rollover_offered:{day.isoformat()}"
-        if db.get_sync_meta(key):
+        if morning.is_done(db, day):
             return
-        if not self._up(now) or self._turn_running() or self._quiet(now):  # the user's first message of the day
-            # starts it (wake.py), never while asleep;
-            return  # the proposal follows their reply
-        db.set_sync_meta(key, "1")
-        holiday = ahead = ""
-        if manager.tools.assistant is not None:
-            from thirties_core.carry import settle
-            settle(manager.tools.assistant, day)  # what's left from before, sorted before the morning is written
-            started = manager.tools.assistant.start_the_day()
-            if started:
-                logger.info("Morning: %s.", started)
-            from thirties_core.day_lists import planned_ahead_text
-            ahead = planned_ahead_text(manager.tools.assistant)  # planned for today beforehand (O2: make it visible),
-            with manager.turn_lock:                              # before the day's routines go on by themselves
-                set_up = manager.tools.assistant.routines.set_up_day(manager.day_plan)
-            if set_up:
-                logger.info("Morning: %s", set_up)  # the routines go on by themselves, every day: not news
-            name = db.get_sync_meta(f"holiday:{day.isoformat()}")
-            holiday = f"It's {name}, so I've left Work off today; say if you're working." if name else ""
-        text = manager.execute_tool("rollover_proposal", {})
-        if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
-            text = ""
-        if manager.tools.assistant is not None:  # again: the morning just put today's items on the plan; and
-            # yesterday's leftovers are said once
-            from thirties_core.day_lists import planned_ahead_text
-            offered = [re.sub(r" \(since [^)]*\)$", "", line[2:].split(" – ", 1)[-1])  # said once (11-06 replay:
-                       for line in text.splitlines() if line.startswith("- ")]  # asked about, then listed again)
-            ahead = planned_ahead_text(manager.tools.assistant, skip=offered)
-        facts = "\n\n".join(t for t in (holiday, ahead if self.level() != "off" or text else "", text) if t)
-        brief = manager.tools.assistant.leftover_brief() if manager.tools.assistant is not None else ""
+        if not self._up(now) or self._turn_running() or self._quiet(now):  # never while asleep or mid-turn
+            return
+        facts, brief = morning.prepare(manager, self.level())
         self.propose_the_day(now, facts, brief)
-        db.set_sync_meta("morning_sent_at", now.isoformat())
+        morning.mark_done(db, day, now)
 
     def propose_the_day(self, now: datetime, facts: str = "", brief: str = "") -> None:
         """The morning's one message (10-31: three long texts at sunrise were too many): what's
