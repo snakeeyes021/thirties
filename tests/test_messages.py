@@ -192,3 +192,22 @@ class TestItemHistory(MessagesCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOnlyYourEventsInTheTextSchedule(unittest.TestCase):
+    """Someone else's events (a show-only calendar) are never in the schedule text sent in chat or Telegram,
+    neither in the rows nor in "You're in the … block"."""
+
+    def test_a_show_only_event_is_left_out(self):
+        from thirties_core.messages import render_schedule
+        from thirties_core.models import EventSpan, SpanCategory
+        from tests.fixtures import DAY, at, make_scheduler
+        sched = make_scheduler()
+        sched.state_db.upsert_span(EventSpan("cp", "Choir practice", at("13:00"), at("14:00"), SpanCategory.CALENDAR,
+                                             source="calendar", shown_only=True))
+        sched.state_db.upsert_span(EventSpan("pc", "Pottery class", at("13:30"), at("14:30"), SpanCategory.ACTIVITY))
+        plan = sched.build_day_plan(DAY)[0]
+        for now in (at("13:10"), at("09:00")):
+            text = render_schedule(plan, now, whole_day=True)
+            self.assertNotIn("Choir practice", text)
+            self.assertIn("Pottery class", text)
