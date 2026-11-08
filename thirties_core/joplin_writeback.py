@@ -21,7 +21,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -322,6 +322,8 @@ class JoplinWriter:
     """Delivers write-back operations now if Joplin is up, else queues them in the outbox."""
 
     MAX_ATTEMPTS = 5  # with Joplin up; a change it refuses that often is parked (one was retried 1,557 times)
+    MAX_TRIES = 50    # any change, however it fails (Joplin away included): set aside after this many tries
+    MAX_HELD = timedelta(days=3)  # a change waiting on the other copy of Joplin this long is set aside
 
     def __init__(self, config, state_db, api: Optional[JoplinAPIClient] = None) -> None:
         self.cfg = config.joplin
@@ -350,6 +352,10 @@ class JoplinWriter:
         """("done" | "queued" | "failed" | "not_allowed", message). Never blocks long."""
         if not self.allowed:
             return "not_allowed", "Thirties isn't allowed to change Joplin (Preferences → Tasks)."
+        if any(str(op.get(k) or "").startswith("media:") for k in ("note_id", "to_note_id")):
+            # a watchlist item isn't in Joplin: it's done in Thirties' own record, never queued (one such write was
+            # retried for two weeks)
+            return "failed", "not a Joplin item: it's recorded in Thirties."
         if current_turn.get() and "_turn" not in op:
             op = {**op, "_turn": current_turn.get()[:500]}
         if self.api.ping() and not self._held(op):
@@ -380,9 +386,20 @@ class JoplinWriter:
             if not self.api.ping():
                 return 0
         delivered = 0
+        now = datetime.now(timezone.utc)
         for row in pending:
             op = json.loads(row["op"])
+            if row.get("attempts", 0) >= self.MAX_TRIES:  # tried too often, however it failed: set aside, once
+                self._set_aside(row, op, f"set aside after {row.get('attempts', 0)} tries")
+                continue
             if self._held(op):
+                try:
+                    waited = now - datetime.fromisoformat(row.get("created_at") or "")
+                except ValueError:
+                    waited = timedelta(0)
+                if waited > self.MAX_HELD:  # the other copy never caught up: don't hold the queue forever
+                    self._set_aside(row, op, "set aside: the other copy of Joplin never caught up")
+                    continue
                 break  # the other copy of Joplin hasn't synced this note yet: wait, keeping the order
             ok, msg = self._apply(op)
             if ok:
@@ -398,6 +415,11 @@ class JoplinWriter:
             else:
                 self.db.outbox_attempt(row["id"], msg)
         return delivered
+
+    def _set_aside(self, row: Dict[str, Any], op: Dict[str, Any], why: str) -> None:
+        """A change that can't go through is parked (state 'failed'), never retried, and logged once."""
+        self.db.outbox_fail(row["id"], why)
+        logger.warning("A Joplin change was set aside (%s): %s %r", why, op.get("op"), str(op.get("title") or "")[:80])
 
     # --- the operations ---
 

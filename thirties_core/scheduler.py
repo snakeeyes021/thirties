@@ -347,7 +347,8 @@ class StateDatabase:
 
     def outbox_pending(self) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
-            rows = conn.execute("SELECT id, op, attempts FROM joplin_outbox WHERE state = 'pending' ORDER BY id").fetchall()
+            rows = conn.execute("SELECT id, op, attempts, created_at FROM joplin_outbox WHERE state = 'pending' "
+                                "ORDER BY id").fetchall()
         return [dict(r) for r in rows]
 
     def outbox_done(self, op_id: int) -> None:
