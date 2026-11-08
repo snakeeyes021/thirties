@@ -440,8 +440,8 @@ class ConversationManager:
                 self.tools.assistant.routines.set_up_current()
             except Exception as e:
                 logger.warning("Setting up the day failed: %s", e)
+        before = len(self.brain.messages)  # first: a turn that fails takes the morning instruction back out too
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
-        before = len(self.brain.messages)
         changes_before = self.tools.successful_changes
         try:
             if self.brain_name == "slm":  # its parse reads one message: give it the burst as one

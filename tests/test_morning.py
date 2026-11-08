@@ -49,6 +49,7 @@ class TestOneMorning(unittest.TestCase):
         with patch.object(self.m.brain, "respond", side_effect=BrainUnavailable("no network")):
             self.m.send_user_message("up and at it")
         self.assertFalse(morning.is_done(self.sched.state_db, DAY))  # never marked done before it went out
+        self.assertFalse(any(str(m.get("content", "")).startswith("[System check") for m in self.m.brain.messages))
         mark_up(self.sched.state_db, at("09:25"))
         set_debug_time(at("09:40"))
         self.svc.rollover(at("09:40"))
