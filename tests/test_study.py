@@ -151,6 +151,27 @@ class TestCatalogueAndReport(unittest.TestCase):
         self.assertIn("Verdict: thin", text)
         self.assertIn("ignored requests: 1 of 1 days → 0 of 1", again["report"])  # compared with the last run
 
+    def test_a_run_stops_at_its_end_time_and_resumes_with_the_days_it_kept(self):
+        from datetime import datetime, timedelta
+        study = Study(id="s", question="Q?", change="c", scenarios=[{"script": "t"}, {"script": "u"}],
+                      budget={"days": 2, "calls": 50}, brain="frontier")
+        u = DayScript(**{**SCRIPT.__dict__, "id": "u"})
+        quiet = lambda p: "[]" if "Group these" in p else "{}"
+        with tempfile.TemporaryDirectory() as out, \
+                patch("tests.study.scripts_for", return_value=[SCRIPT, u]), \
+                patch("tests.sim_eval.load_config", side_effect=ThirtiesConfig):
+            first = run_study(study, scripted([{"felt": felt(), "move": {"do": "sleep"}}]), quiet,
+                              MockInferenceEngine(), out_dir=Path(out),
+                              until=datetime.now().astimezone() + timedelta(minutes=10))
+            self.assertEqual((first["days"], first["stopped"]), (0, "time window"))
+            with patch("tests.study.scripts_for", return_value=[SCRIPT]):
+                part = run_study(study, scripted([{"felt": felt(), "move": {"do": "sleep"}}]), quiet,
+                                 MockInferenceEngine(), out_dir=Path(out))
+            whole = run_study(study, scripted([{"felt": felt(), "move": {"do": "sleep"}}]), quiet,
+                              MockInferenceEngine(), out_dir=Path(out), resume=Path(part["dir"]))
+        set_debug_time(None)
+        self.assertEqual([d["script"] for d in whole["per_day"]], ["t", "u"])  # t kept, only u run again
+
     def test_report_with_nothing_found_says_so(self):
         study = Study(id="s", question="Q?", change="c", scenarios=[{"script": "t"}], budget={"days": 1, "calls": 5})
         self.assertIn("No frictions", report(study, [], [], [], {}, 0))

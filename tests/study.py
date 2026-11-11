@@ -380,25 +380,33 @@ def compare(now: List[Dict[str, Any]], before: List[Dict[str, Any]], days_now: i
     return lines
 
 
-def review(study: Study, days: List[StudyDay], frictions: List[Friction], llm: Callable[[str], str],
+def day_record(day: StudyDay) -> Dict[str, Any]:
+    """A finished day, as saved (so a run cut short by its time window can resume)."""
+    run = day.run
+    return {"script": run.script.id, "persona": run.script.persona, "end": run.end_reason,
+            "state_at_bed": day.person.state, "notes": day.person.notes, "log": run.log, "facts": run.facts,
+            "calls": day.calls, "frictions": [f.to_dict() for f in day.frictions]}
+
+
+def review(study: Study, days: List[Dict[str, Any]], frictions: List[Friction], llm: Callable[[str], str],
            earlier: List[str]) -> Dict[str, Any]:
     parts = []
     for d in days:
-        notes = "; ".join(f"{n['at']} {n.get('state')} {n.get('why') or ''}"[:140] for n in d.person.notes[:30])
-        convo = "\n".join(f"[{t}] {w}: {x[:160]}" for t, w, x in d.run.log if w != "tool")[:3000]
-        parts.append(f"== {d.run.script.id}: {d.run.script.persona[:200]}\nNotes: {notes}\n{convo}")
+        notes = "; ".join(f"{n['at']} {n.get('state')} {n.get('why') or ''}"[:140] for n in d["notes"][:30])
+        convo = "\n".join(f"[{t}] {w}: {x[:160]}" for t, w, x in d["log"] if w != "tool")[:3000]
+        parts.append(f"== {d['script']}: {d['persona'][:200]}\nNotes: {notes}\n{convo}")
     raw = llm(REVIEW_PROMPT.format(question=study.question, days="\n\n".join(parts),
                                    frictions=json.dumps([f.label for f in frictions])[:2000],
                                    earlier=", ".join(earlier) or "(none)"))
     return extract_json(raw) or {"raw": raw[:500]}
 
 
-def report(study: Study, days: List[StudyDay], groups: List[Dict[str, Any]], changes: List[str],
+def report(study: Study, days: List[Dict[str, Any]], groups: List[Dict[str, Any]], changes: List[str],
            testers: Dict[str, Any], calls: int, next_step: str = "") -> str:
     """The one-page report: readable in two minutes."""
     lines = [f"# {study.question}", "",
              f"**Change tested:** {study.change}  " + (f"\n**Why:** {study.why}  " if study.why else ""),
-             f"**Days:** {len(days)} ({', '.join(d.run.script.id for d in days)}), brain {study.brain}; "
+             f"**Days:** {len(days)} ({', '.join(d['script'] for d in days)}), brain {study.brain}; "
              f"{calls} model calls of a budget of {study.budget.get('calls')}.", "", "## What it found", ""]
     if not groups:
         lines.append("No frictions: nobody's patience or trust dropped, and nobody repeated or corrected themselves.")
@@ -419,19 +427,24 @@ def report(study: Study, days: List[StudyDay], groups: List[Dict[str, Any]], cha
 # Running a study
 # ----------------------------------------------------------------------------
 
-def previous_run(study_dir: Path) -> Optional[Dict[str, Any]]:
-    runs = sorted(study_dir.glob("*/result.json"))
+def previous_run(study_dir: Path, exclude: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    runs = [r for r in sorted(study_dir.glob("*/result.json")) if exclude is None or r.parent != Path(exclude)]
     return json.loads(runs[-1].read_text()) if runs else None
+
+
+DAY_ROOM = timedelta(minutes=40)  # a day isn't started with less than this left before the run's end time
 
 
 def run_study(study: Study, actor: Callable[[str], str], reviewer: Callable[[str], str], engine, tasks=(), notes=(),
               real: bool = False, out_dir: Optional[Path] = None, max_moves: int = MAX_MOVES,
-              next_step: str = "") -> Dict[str, Any]:
+              next_step: str = "", until: Optional[datetime] = None, resume: Optional[Path] = None) -> Dict[str, Any]:
+    """Run the study's days and write its report. ``until``: start no day that might not finish by then (a GPU
+    window); ``resume``: a run directory cut short earlier, whose finished days are kept and not run again."""
     problems = study.problems()
     if problems:
         raise SystemExit(f"study {study.id} can't run: " + "; ".join(problems))
     study_dir = (out_dir or REPORTS_DIR) / study.id
-    before = previous_run(study_dir)
+    before = previous_run(study_dir, exclude=Path(resume) if resume else None)
     earlier = [g["kind"] for g in (before or {}).get("catalogue", [])]
     calls = {"n": 0}
     limit = int(study.budget["calls"])
@@ -443,36 +456,53 @@ def run_study(study: Study, actor: Callable[[str], str], reviewer: Callable[[str
         return ask
 
     actor, reviewer = counted(actor), counted(reviewer)
-    days: List[StudyDay] = []
+    run_dir = Path(resume) if resume else study_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
+    (run_dir / "days").mkdir(parents=True, exist_ok=True)
+    days: List[Dict[str, Any]] = [json.loads(p.read_text()) for p in sorted((run_dir / "days").glob("*.json"))]
+    calls["n"] = sum(d.get("calls", 0) for d in days)
+    finished = {d["script"] for d in days}
+    stopped = ""
     for script in scripts_for(study, real):
+        if script.id in finished:
+            continue
         if calls["n"] >= limit:
+            stopped = "budget"
+            break
+        if until is not None and datetime.now(until.tzinfo) > until - DAY_ROOM:
+            stopped = "time window"
             break
         print(f"\n== {script.id} [{study.brain}]", flush=True)
         try:
             run = start_day(script, study.brain, list(tasks), list(notes), engine)
             person = Person(state={**START_STATE, **study.start_state})
+            before_calls = calls["n"]
             day = live_study_day(run, actor, person, max_moves, budget_left=lambda: calls["n"] < limit - 2)
+            day.calls = calls["n"] - before_calls
             run.facts = {**measure(run), "joplin": joplin_facts(run)}
-            days.append(day)
+            record = day_record(day)
+            (run_dir / "days" / f"{script.id}.json").write_text(json.dumps(record, indent=2, default=str))
+            days.append(record)
             print(f"  -> {run.end_reason}; {len(day.frictions)} frictions; state at bed {person.state}", flush=True)
         except QuotaExhausted as e:
             print(f"  agy quota ran out: {e}", flush=True)
+            stopped = "agy quota"
             break
         finally:
             set_debug_time(None)
-    frictions = [f for d in days for f in d.frictions]
+    if stopped:
+        print(f"Stopped ({stopped}): {len(days)} of {min(len(study.scenarios), study.budget['days'])} days done; "
+              f"resume with --resume {run_dir}", flush=True)
+    frictions = [Friction(**{k: v for k, v in f.items() if k in Friction.__dataclass_fields__})
+                 for d in days for f in d["frictions"]]
     groups = catalogue(frictions, reviewer, earlier)
     testers = review(study, days, frictions, reviewer, earlier) if days else {}
     changes = compare(groups, (before or {}).get("catalogue", []), len(days), (before or {}).get("days", 0)) \
         if before else []
     text = report(study, days, groups, changes, testers, calls["n"], next_step)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = study_dir / stamp
-    run_dir.mkdir(parents=True, exist_ok=True)
+    stamp = run_dir.name
     result = {"study": study.id, "question": study.question, "at": stamp, "days": len(days), "calls": calls["n"],
-              "catalogue": groups, "frictions": [f.to_dict() for f in frictions], "testers": testers,
-              "per_day": [{"script": d.run.script.id, "end": d.run.end_reason, "state_at_bed": d.person.state,
-                           "notes": d.person.notes, "log": d.run.log, "facts": d.run.facts} for d in days]}
+              "stopped": stopped, "catalogue": groups, "frictions": [f.to_dict() for f in frictions],
+              "testers": testers, "per_day": days}
     (run_dir / "result.json").write_text(json.dumps(result, indent=2, default=str))
     (run_dir / "report.md").write_text(text)
     result["report"] = text
@@ -488,6 +518,8 @@ def main() -> None:
     ap.add_argument("--preview-dir", default="", help="also copy the report here (the preview page)")
     ap.add_argument("--next", default="", help="what the testing agent will do next, for the report")
     ap.add_argument("--max-moves", type=int, default=MAX_MOVES)
+    ap.add_argument("--until", default="", help="start no day that might not finish by this time (HH:MM, local)")
+    ap.add_argument("--resume", default="", help="a run directory cut short earlier: keep its days, run the rest")
     ap.add_argument("--brain", choices=["slm", "frontier"], default="",
                     help="test another brain than the study names (the on-device one needs the GPU)")
     args = ap.parse_args()
@@ -519,8 +551,15 @@ def main() -> None:
             sched = DeterministicScheduler(real_cfg, StateDatabase(Path(tmp) / "s.sqlite"), MockCalendarEngine([]))
             tasks, notes = load_backlog(real_cfg, JoplinEngine(real_cfg), sched)
     print(f"Study {study.id}: {study.question}\n  change: {study.change}\n  budget: {study.budget}", flush=True)
+    until = None
+    if args.until:
+        h, m = (int(x) for x in args.until.split(":"))
+        until = datetime.now().astimezone().replace(hour=h, minute=m, second=0, microsecond=0)
+        if until < datetime.now().astimezone():
+            until += timedelta(days=1)
     result = run_study(study, make_llm(study.actor_model), make_llm(study.reviewer_model), engine, tasks, notes,
-                       real=args.real, max_moves=args.max_moves, next_step=args.next)
+                       real=args.real, max_moves=args.max_moves, next_step=args.next, until=until,
+                       resume=Path(args.resume) if args.resume else None)
     if args.preview_dir:
         dest = Path(args.preview_dir).expanduser()
         dest.mkdir(parents=True, exist_ok=True)
