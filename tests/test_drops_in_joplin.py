@@ -1,7 +1,7 @@
-"""Dropped items in Joplin (11-06: a drop has to be ticked off and filed in the proper archive list in Joplin): an
-applied drop is ticked and filed in the month's Dropped note beside the Done notes; undrop
-puts it back where it was, open; done goes the normal done way; a proposal alone never touches Joplin. On a fake
-copy of the notes, never the user's."""
+"""Drops and Joplin (decided 11-11): a drop means "stop rolling it over", and the item's home list is never touched;
+the planning can pick it up again. Only an explicit archive ("delete it", "archive it") ticks it and files it in the
+month's Dropped note, and undrop puts it back where it was, open. Drops filed under the old meaning get a one-time
+offer to go back on their lists. On a fake copy of the notes with invented items, never the user's."""
 
 import json
 from datetime import timedelta
@@ -31,48 +31,91 @@ class TestDropsInJoplin(TodayTestCase):
     def dropped_note(self):
         return next((n for n in self.api.notes.values() if n.get("title", "").startswith("Dropped ")), None)
 
-    def test_a_proposal_alone_touches_nothing_then_accepting_files_it(self):
-        self.assertEqual(self.body("n_errands"), ERRANDS)  # proposed: Joplin as it was
-        self.assertIsNone(self.dropped_note())
+    def archive(self, item="Call the bank"):
+        self.t.user_message = "archive it, I'm never doing that"  # explicit: a real removal
+        try:
+            return self.t.execute("leftover_action", {"item": item, "action": "archive"})
+        finally:
+            self.t.user_message = None
+
+    def test_a_drop_never_touches_the_home_list(self):
         out = self.t.execute("leftover_action", {"item": "Call the bank", "action": "accept"})
         self.assertIn("Dropped Call the bank", out)
+        self.assertEqual(self.body("n_errands"), ERRANDS)  # untouched: unticked, in its place
+        self.assertIsNone(self.dropped_note())
+        archive = dict(self.t.assistant.before.rows()["archive"])
+        self.assertEqual([r["title"] for r in archive[DAY.isoformat()]], ["Call the bank"])  # the record
+
+    def test_a_dropped_item_can_be_planned_again(self):
+        self.t.execute("leftover_action", {"item": "Call the bank", "action": "drop"})
+        from thirties_core.lists import ListCatalog
+        ListCatalog(self.sched.state_db).set_urgency("t_bank", "now")
+        self.services.tasks = ListCatalog(self.sched.state_db).apply(self.services.tasks)
+        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertIn("Call the bank", cands)  # an ordinary list item again, ranked by its urgency
+        self.assertNotIn("left open", cands["Call the bank"])  # not a leftover rolling over
+
+    def test_an_explicit_archive_ticks_and_files_it(self):
+        self.assertIn("Archived Call the bank", self.archive())
         after = self.body("n_errands")
-        print("\n--- Errands/Admin before:\n" + ERRANDS + "--- after the drop:\n" + after)
+        print("\n--- Errands/Admin before:\n" + ERRANDS + "--- after an explicit archive:\n" + after)
         self.assertNotIn("Call the bank", after)
         note = self.dropped_note()
         print("--- " + note["title"] + ":\n" + note["body"])
-        self.assertEqual(note["title"], "Dropped " + DAY.strftime("%Y-%m"))
         self.assertIn(f"- [x] {DAY.isoformat()}: Call the bank (Errands/Admin) · dropped: the branch closed for good",
                       note["body"])
 
+    def test_archive_without_explicit_words_is_only_a_drop(self):
+        self.t.user_message = "drop the bank one"
+        try:
+            out = self.t.execute("leftover_action", {"item": "Call the bank", "action": "archive"})
+        finally:
+            self.t.user_message = None
+        self.assertIn("still on its list", out)
+        self.assertEqual(self.body("n_errands"), ERRANDS)
+        self.assertIsNone(self.dropped_note())
+
     def test_undrop_puts_it_back_where_it_was_open(self):
-        self.t.execute("leftover_action", {"item": "Call the bank", "action": "drop"})
+        self.archive()
         out = self.t.execute("leftover_action", {"item": "Call the bank", "action": "undrop"})
         self.assertIn("Call the bank: back", out)
-        after = self.body("n_errands")
-        print("\n--- Errands/Admin after drop then undrop:\n" + after)
-        self.assertEqual(after, ERRANDS)  # its place and section, open again
+        self.assertEqual(self.body("n_errands"), ERRANDS)  # its place and section, open again
         self.assertNotIn("Call the bank", self.dropped_note()["body"])
 
     def test_undrop_after_its_neighbour_moved_goes_to_its_section(self):
         self.api.notes["n_errands"]["body"] = "## Errands\n- [ ] Buy stamps\n- [ ] Call the bank\n\n## Someday\n- [ ] x\n"
-        self.t.execute("leftover_action", {"item": "Call the bank", "action": "drop"})
+        self.archive()
         self.api.notes["n_errands"]["body"] = self.body("n_errands").replace("- [ ] Buy stamps\n", "")  # gone by hand
         self.t.execute("leftover_action", {"item": "Call the bank", "action": "undrop"})
         self.assertTrue(self.body("n_errands").startswith("## Errands\n- [ ] Call the bank\n"), self.body("n_errands"))
 
-    def test_an_app_drop_after_its_day_is_filed_and_archived(self):
+    def test_an_app_drop_after_its_day_leaves_joplin_alone(self):
         from thirties_core.carry import settle
         self.pool.set("Call the bank", proposed_on=(DAY - timedelta(days=1)).isoformat())  # yesterday's proposal
         settle(self.t.assistant, DAY)
-        self.assertNotIn("Call the bank", self.body("n_errands"))
-        self.assertIn("Call the bank (Errands/Admin) · dropped", self.dropped_note()["body"])
+        self.assertEqual(self.body("n_errands"), ERRANDS)
+        self.assertIsNone(self.dropped_note())
         archive = dict(self.t.assistant.before.rows()["archive"])
         self.assertEqual([r["title"] for r in archive[DAY.isoformat()]], ["Call the bank"])
         self.t.execute("leftover_action", {"item": "Call the bank", "action": "undrop"})
-        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
         self.assertFalse(self.t.assistant.before.rows()["archive"])  # out of the archive, settled at its horizon
         self.assertIn("call the bank", OpenPool(self.sched.state_db).all(DAY))
+
+    def test_drops_filed_under_the_old_meaning_are_offered_back_once(self):
+        self.archive()  # stands in for a drop filed before 11-11
+        rows = self.t.assistant.before.rows()
+        self.assertEqual(rows["restore"], ["Call the bank"])
+        out = self.t.execute("restore_old_drops", {"put_back": True})
+        self.assertIn("Put back on their lists: Call the bank.", out)
+        self.assertEqual(self.body("n_errands"), ERRANDS)  # back where it was, open
+        self.assertEqual(self.t.assistant.before.rows()["restore"], [])  # offered once
+        self.assertIn("Call the bank", [r["title"] for _, rs in self.t.assistant.before.rows()["archive"] for r in rs])
+
+    def test_leaving_the_old_drops_filed_ends_the_offer(self):
+        self.archive()
+        self.assertIn("Left them", self.t.execute("restore_old_drops", {"put_back": False}))
+        self.assertNotIn("Call the bank", self.body("n_errands"))
+        self.assertEqual(self.t.assistant.before.rows()["restore"], [])
 
     def test_done_goes_the_normal_done_way(self):
         self.pool.set("Call the bank", pending_drop=False)

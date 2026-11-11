@@ -257,6 +257,16 @@ class DayViewTests(unittest.TestCase):
         self.assertNotIn("Book group", cards)  # a quiet note where it starts, never a card
         self.assertEqual([lbl.get_text() for lbl, _ in view.timeline.canvas.notes], ["Book group (not yours)"])
 
+    def test_before_today_offers_once_to_put_old_drops_back(self) -> None:
+        calls = []
+        view = DayView()
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Put back on their lists: Old thing.")
+        view.before.rows_provider = lambda: {"keep": [], "drop": [], "archive": [], "restore": ["Old thing"]}
+        view.refresh_plan(self.plan)
+        self.assertIn("restore", view.before.groups)
+        view.before.buttons[("restore", "put_back")].emit("clicked")
+        self.assertEqual(calls, [("restore_old_drops", {"put_back": True})])
+
     def test_before_today_beside_today_with_the_same_actions_as_the_chat(self) -> None:
         # 11-06: Keep rows (accept/done/drop), Drop rows (accept/keep/done), an Archive by day (undrop)
         calls = []

@@ -211,7 +211,7 @@ class DayProposal:
             left = left_open(t)
             h = (left or {}).get("horizon", "")
             if left and (left.get("pending_drop") or h == "dropped"):
-                continue  # proposed for dropping (waiting for a yes), or dropped
+                left, h = None, ""  # dropped means "don't roll it over": it's an ordinary list item again (11-11)
             if left and left.get("start") and h != "someday":  # a window of days (carry.resolve_when)
                 start, end = date.fromisoformat(left["start"]), date.fromisoformat(left["end"])
                 if start > day:
