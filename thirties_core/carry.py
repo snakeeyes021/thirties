@@ -237,7 +237,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     note = assistant._today_note()
     today_lines: List[str] = []
     if note is not None:
-        open_lines = [t for t, ticked in with_done(note, done_ids) if not ticked]
+        open_lines = [t for t, ticked in with_done(note, done_ids, assistant._db) if not ticked]
         children = {c.lower() for t in open_lines for c in (group_items(note, t) or [])}
         today_lines = [t for t in open_lines if t.lower() not in children]  # a group by its name (11-05)
     on_today = {t.lower() for t in today_lines}

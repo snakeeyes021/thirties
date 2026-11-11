@@ -15,7 +15,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from thirties_core.assistant_tools import ToolError, _checkbox_id, _stem, _words
+from thirties_core.assistant_tools import ToolError, _stem, _words
+from thirties_core.item_ids import keep_id, line_id, line_ids, new_line_id
 from thirties_core.models import SpanStatus, TaskItem
 from thirties_core.scheduler import utc_now_iso
 
@@ -113,7 +114,7 @@ def rekey(db, plans, tasks: List[TaskItem], old: TaskItem, new_id: str, new_titl
           new_note_title: str) -> None:
     """An item's id is its note, wording and copy, so a reworded or moved item has a new one: what Thirties keeps
     about it (plan items, Today links, urgency, history) follows it."""
-    if old.id == new_id:
+    if old.id == new_id and old.title == new_title and old.parent_note_id == new_note_id:
         return
     if db is not None:
         with db._get_connection() as conn:
@@ -151,8 +152,16 @@ def _rekey_rows(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: s
 def _rekey_horizons(conn, old: TaskItem, new_id: str, new_title: str, new_note_id: str, new_note_title: str) -> None:
     """Pins and horizons follow a moved item (10-31: an item pinned to the weekend was moved to another
     note; the pin pointed at nothing and it was never offered). The old rows go 'out' and new
-    ones come in, so the change syncs (rows merge by id, newest wins)."""
+    ones come in, so the change syncs (rows merge by id, newest wins). With the same id (ids follow edits now),
+    only the wording and note change."""
     now = utc_now_iso()
+    if new_id == old.id:
+        conn.execute("UPDATE horizon_plan SET title = ?, note_id = ?, list_title = COALESCE(NULLIF(?, ''), list_title), "
+                     "updated_at = ? WHERE item_id = ? AND state = 'in'", (new_title, new_note_id, new_note_title, now,
+                                                                           old.id))
+        conn.execute("UPDATE horizon_marks SET note_id = ?, title = ?, updated_at = ? WHERE ref = ?",
+                     (new_note_id, new_title, now, f"item:{old.id}"))
+        return
     for r in conn.execute("SELECT * FROM horizon_plan WHERE item_id = ? AND state = 'in'", (old.id,)).fetchall():
         row_id = r["id"][:-len(old.id)] + new_id if r["id"].endswith(old.id) else f"{r['id']}>{new_id}"
         conn.execute("""INSERT OR REPLACE INTO horizon_plan (id, item_id, title, note_id, list_title, level, period,
@@ -237,7 +246,8 @@ class ListTools:
             queued = self._submit({"op": "rename", "note_id": note_id, "title": found.title, "new_title": new,
                                    "occurrence": occ, "open_only": is_open})
             old_title = found.title
-            rekey(self.a._db, self._plans(), self.a.s.tasks, found, _checkbox_id(note_id, new), new, note_id, note_title)
+            keep_id(self.a._db, note_id, new, found.id)  # the reworded line is the same item
+            rekey(self.a._db, self._plans(), self.a.s.tasks, found, found.id, new, note_id, note_title)
             return f"Reworded '{old_title}' to '{new}' in {note_title}{queued}."
         if split:
             if len(split) < 2:
@@ -246,18 +256,20 @@ class ListTools:
                                    "occurrence": occ, "open_only": is_open})
             old_title = found.title
             for part in split[1:]:
-                self.a.s.tasks.append(TaskItem(id=_checkbox_id(note_id, part), source_notebook=found.source_notebook,
+                self.a.s.tasks.append(TaskItem(id=new_line_id(self.a._db, note_id, part),
+                                               source_notebook=found.source_notebook,
                                                title=part, is_checkbox_item=True, parent_note_title=note_title,
                                                parent_note_id=note_id, section=found.section,
                                                parent_task_id=found.parent_task_id, list_role=found.list_role))
-            rekey(self.a._db, self._plans(), self.a.s.tasks, found, _checkbox_id(note_id, split[0]), split[0], note_id,
-                  note_title)
+            keep_id(self.a._db, note_id, split[0], found.id)  # the first part is the item itself
+            rekey(self.a._db, self._plans(), self.a.s.tasks, found, found.id, split[0], note_id, note_title)
             return f"Split '{old_title}' in {note_title} into: " + "; ".join(split) + f"{queued}."
         if under:
             queued = self._submit({"op": "break_down", "note_id": note_id, "parent_title": found.title,
                                    "steps": under, "occurrence": occ, "ticked_too": True})
             for step in under:
-                self.a.s.tasks.append(TaskItem(id=_checkbox_id(note_id, step), source_notebook=found.source_notebook,
+                self.a.s.tasks.append(TaskItem(id=new_line_id(self.a._db, note_id, step),
+                                               source_notebook=found.source_notebook,
                                                title=step, is_checkbox_item=True, parent_note_title=note_title,
                                                parent_note_id=note_id, section=found.section,
                                                parent_task_id=found.id, list_role=found.list_role))
@@ -285,8 +297,8 @@ class ListTools:
                                "ticked_too": True, "open_only": any(t is found for t in self.a.s.tasks),
                                "reason": str(reason or "")[:200]})
         old_note = found.parent_note_title
-        rekey(self.a._db, self._plans(), self.a.s.tasks, found, _checkbox_id(target["id"], found.title), found.title,
-              target["id"], target["title"])
+        keep_id(self.a._db, target["id"], found.title, found.id)  # moved, it's the same item
+        rekey(self.a._db, self._plans(), self.a.s.tasks, found, found.id, found.title, target["id"], target["title"])
         found.section = section or ""
         found.list_role = placement.role(target)
         if target["id"] == (source or {}).get("id"):
@@ -354,7 +366,8 @@ class ListTools:
         task = next((t for t in self.a.s.tasks if linked and t.id == linked), None)
         names = [x for x in {title, task.title if task else ""} if x]
         log = DoneLog(self.a._db)
-        rec = (next((r for r in log.filed() if linked and _checkbox_id(r["source_note_id"], r["title"]) == linked), None)
+        rec = (next((r for r in log.filed() if linked and linked in line_ids(self.a._db, r["source_note_id"], r["title"])),
+                    None)
                or next((r for r in (log.latest(n) for n in names) if r), None))  # by its link, else its wording
         if linked and rec is None:  # done but not filed yet: the linked line, by its id
             hit = self._ticked_line([], by_id=linked)
@@ -363,7 +376,11 @@ class ListTools:
         if rec is not None:
             queued = self._submit({"op": "unfile_done", "key": rec["key"], "title": rec["title"],
                                    "note_id": rec["source_note_id"]})
-            new_id = _checkbox_id(rec["source_note_id"], rec["title"])
+            if linked:  # put back, it's the same item it was
+                keep_id(self.a._db, rec["source_note_id"], rec["title"], linked)
+                new_id = linked
+            else:
+                new_id = new_line_id(self.a._db, rec["source_note_id"], rec["title"])
             clear_completed(self.a._db, new_id)
             role = ListCatalog(self.a._db).role(rec["source_note_id"]) or ""
             if not any(t.id == new_id for t in self.a.s.tasks):
@@ -378,7 +395,7 @@ class ListTools:
         if ticked is not None:
             note, text = ticked
             queued = self._submit({"op": "untick", "note_id": note["id"], "title": text})
-            clear_completed(self.a._db, _checkbox_id(note["id"], text))
+            clear_completed(self.a._db, line_id(self.a._db, note["id"], text, done=True))
             parts.append(f"unticked '{text}' in {note['title']}{queued}")
         if today is not None and (rec is not None or (ticked is not None and ticked[0]["id"] != today["id"])):
             on_today = self._ticked_line(names, only=today)  # its copy on today's list, too
@@ -405,7 +422,7 @@ class ListTools:
             for line in (note.get("body") or "").splitlines():
                 m = DONE_CHECKBOX_REGEX.match(line)
                 if m and (m.group(2).strip().lower() in want
-                          or (by_id and _checkbox_id(note["id"], m.group(2).strip()) == by_id)):
+                          or (by_id and by_id in line_ids(self.a._db, note["id"], m.group(2).strip()))):
                     return note, m.group(2).strip()
         return None
 
@@ -463,9 +480,9 @@ class ListTools:
             if new_list:
                 catalog.set_role(target_id, "list", target_title, source="user")
             for t in found:  # the time it was filed under becomes its urgency
-                new_id = _checkbox_id(target_id, t.title)
-                catalog.set_urgency(new_id, horizon_urgency(t.section), note_id=target_id, title=t.title, source="user")
-                rekey(self.a._db, self._plans(), self.a.s.tasks, t, new_id, t.title, target_id, target_title)
+                keep_id(self.a._db, target_id, t.title, t.id)  # moved, each is the same item
+                catalog.set_urgency(t.id, horizon_urgency(t.section), note_id=target_id, title=t.title, source="user")
+                rekey(self.a._db, self._plans(), self.a.s.tasks, t, t.id, t.title, target_id, target_title)
                 t.section, t.urgency = "", horizon_urgency(t.section)
         later = " (Joplin will get it when it's open)" if status == "queued" else ""
         return f"Moved {len(found)} items from {source['title']} to {target_title}{later}: " + \

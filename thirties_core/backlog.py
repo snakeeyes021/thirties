@@ -30,6 +30,8 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
     tasks: List[TaskItem] = []
     notes: List[Dict[str, Any]] = []
     if joplin_engine is not None:
+        if scheduler is not None and hasattr(joplin_engine, "use_ids"):
+            joplin_engine.use_ids(scheduler.state_db)  # ids that follow edits and moves (item_ids.py)
         tasks.extend(joplin_engine.fetch_tasks())
         notes = joplin_engine.fetch_active_notes()
     tasks.extend(load_media_tasks(config) if media is None else media)

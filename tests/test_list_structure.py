@@ -23,12 +23,17 @@ class TestStructure(ListsTestCase):
         out = self.t.execute("edit_list_item", {"item": "Call the bank", "rename_to": "Call the credit union"})
         self.assertEqual(out, "Reworded 'Call the bank' to 'Call the credit union' in Errands/Admin.")
         self.assertIn("- [ ] Call the credit union\n", self.body("n_errands"))
-        new_id = _checkbox_id("n_errands", "Call the credit union")
+        # Ids follow edits now: the reworded line is the same item, so nothing points anywhere new.
         span = next(s for s in self.t.day_plan.spans if s.title == "Bank")
-        self.assertEqual(span.task_id, new_id)
+        self.assertEqual(span.task_id, bank.id)
         stored = self.sched.build_day_plan(self.t.day_plan.target_date)[0]
-        self.assertEqual(next(s for s in stored.spans if s.title == "Bank").task_id, new_id)
-        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], new_id)
+        self.assertEqual(next(s for s in stored.spans if s.title == "Bank").task_id, bank.id)
+        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], bank.id)
+        from thirties_core.item_ids import ItemIds, checklist_lines
+        body = self.body("n_errands")
+        ids = ItemIds(self.sched.state_db).ids_for({"id": "n_errands", "body": body})
+        line = [t for t, _ in checklist_lines(body)].index("Call the credit union")
+        self.assertEqual(ids[line], bank.id)  # and the next read of Joplin gives the new line that id
         self.assertEqual(WriteLog(self.sched.state_db).since("")[-1]["added"], ["- [ ] Call the credit union"])
 
     def test_split_a_line_and_add_sub_items(self):
@@ -88,7 +93,8 @@ class TestTriage(ListsTestCase):
         self.assertEqual(self.body("n_home"), "- [ ] Fix the closet door\n- [ ] Clean the gutters\n- [ ] Fix the closet "
                                               "door\n- [ ] Clean the gutters\n- [ ] Paint the fence\n")
         urgency = ListCatalog(self.sched.state_db).urgencies()
-        self.assertEqual(urgency[_checkbox_id("n_home", "Paint the fence")]["urgency"], "whenever")
+        fence = next(t.id for t in self.services.tasks if t.title == "Paint the fence" and t.parent_note_id == "n_home")
+        self.assertEqual(urgency[fence]["urgency"], "whenever")  # the same item, moved
 
         health = ["Call the dentist", "Refill prescription", "Book a physical", "Get a flu shot", "Try acupuncture"]
         out = self.t.execute("apply_triage_group", {"list": "Big List", "items": health, "new_list": "Health"})
@@ -98,8 +104,9 @@ class TestTriage(ListsTestCase):
         self.assertIn("- [ ] Try acupuncture", made["body"])
         self.assertEqual(ListCatalog(self.sched.state_db).role(made["id"]), "list")
         urgency = ListCatalog(self.sched.state_db).urgencies()
-        self.assertEqual(urgency[_checkbox_id(made["id"], "Try acupuncture")]["urgency"], "someday")
-        self.assertEqual(urgency[_checkbox_id(made["id"], "Refill prescription")]["urgency"], "soon")
+        moved = {t.title: t.id for t in self.services.tasks if t.parent_note_id == made["id"]}  # same items, moved
+        self.assertEqual(urgency[moved["Try acupuncture"]]["urgency"], "someday")
+        self.assertEqual(urgency[moved["Refill prescription"]]["urgency"], "soon")
         self.assertNotIn("Call the dentist", self.body("n_big"))
         self.assertIn("Build a shed", self.body("n_big"))  # not in a group: stays
 

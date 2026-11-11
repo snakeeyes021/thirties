@@ -48,6 +48,7 @@
           <li>Nothing very sensitive goes to Gemini: passwords, PINs, keys and codes, card and bank numbers, ID numbers, and medication or diagnosis names are swapped for placeholders before a message leaves the computer, and put back in the reply</li>
           <li>Private notes (tagged "private" in Joplin, or in a list named Medical, Health or Finance) go to Gemini as item titles only, never their contents</li>
           <li>Safer Joplin writes: a change never overwrites an edit you make in the note at the same moment, a change Joplin saved without answering is never applied twice, and a morning's tidy-up of Today that has to wait never runs on a later day</li>
+          <li>Items keep who they are when you reword, reorder or move them in Joplin: their plans, Today links and history follow them; a finished copy of a repeated item no longer hides the next copy, and an item written again after it was done is a new item</li>
         </ul>
       </description>
     </release>

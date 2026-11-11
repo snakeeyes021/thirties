@@ -17,6 +17,7 @@ from thirties_core.clock import ClockError, format_clock, format_duration, parse
 from thirties_core.horizons import HORIZON_READ_ONLY, HORIZON_TOOL_SPECS, horizon_handlers
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
+from thirties_core.item_ids import line_id, new_line_id
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
 from thirties_core.kind_tools import KindTools, rollover_question
 from thirties_core.kinds import ONGOING, put_off_counts, rolls_over
@@ -429,7 +430,8 @@ def describe_task(t: TaskItem) -> str:
 
 
 def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
-    """The id the Joplin reader gives a checklist item (see joplin_engine.checklist_tasks)."""
+    """The old id of a checklist item: a hash of its note, wording and copy. Only a fallback now: ids come from
+    Thirties' id table, which follows edits and moves (item_ids.py: line_id, new_line_id, keep_id)."""
     import hashlib
     return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
 
@@ -731,7 +733,8 @@ class AssistantTools(KindTools):
             queued = queued or status == "queued"
             if task is not None and task.parent_note_id != note["id"]:
                 TodayLinks(self._db).link(title, task)
-            self.s.tasks.append(TaskItem(id=_checkbox_id(note["id"], title), source_notebook=note.get("source_notebook", ""),
+            self.s.tasks.append(TaskItem(id=new_line_id(self._db, note["id"], title),
+                                         source_notebook=note.get("source_notebook", ""),
                                          title=title, is_checkbox_item=True, parent_note_title=note["title"],
                                          parent_note_id=note["id"], list_role="today", urgency="now"))
             on_today.add(title.lower())
@@ -829,7 +832,8 @@ class AssistantTools(KindTools):
         self._today_groups[key] = (have or set()) | {s.lower() for s in missing}
         links = TodayLinks(self._db)
         for step in missing:
-            links.link(step, TaskItem(id=_checkbox_id(routine["id"], step), source_notebook=routine.get("source_notebook", ""),
+            links.link(step, TaskItem(id=line_id(self._db, routine["id"], step),
+                                      source_notebook=routine.get("source_notebook", ""),
                                       title=step, is_checkbox_item=True, parent_note_title=name,
                                       parent_note_id=routine["id"], list_role="routine"))
         return f"Added to today's list: {name} ({', '.join(missing)})."
@@ -877,7 +881,7 @@ class AssistantTools(KindTools):
                 for k, text in enumerate(todo):
                     args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "alongside": True}
                     if text.lower() in by_text:
-                        args.update(category="task", task_id=_checkbox_id(note["id"], text))
+                        args.update(category="task", task_id=line_id(self._db, note["id"], text))
                     if day not in (None, ""):
                         args["day"] = day
                     out = self.pt.execute("add_event", args)
@@ -937,7 +941,7 @@ class AssistantTools(KindTools):
             for line in (note.get("body") or "").splitlines():
                 m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
                 if m and m.group(2).strip().lower() == want:
-                    hits.append(TaskItem(id=_checkbox_id(note["id"], m.group(2).strip()), title=m.group(2).strip(),
+                    hits.append(TaskItem(id=line_id(self._db, note["id"], m.group(2).strip()), title=m.group(2).strip(),
                                          source_notebook=note.get("source_notebook", ""), is_checkbox_item=True,
                                          parent_note_title=note["title"], parent_note_id=note["id"]))
                     break
@@ -996,7 +1000,7 @@ class AssistantTools(KindTools):
             raise ToolError(msg)
         notebook = note.get("source_notebook") or next((t.source_notebook for t in self.s.tasks
                                                         if t.parent_note_id == note_id), "")
-        new_id = _checkbox_id(note_id, title)
+        new_id = new_line_id(self._db, note_id, title)
         new = TaskItem(id=new_id, source_notebook=notebook, title=title.strip(), is_checkbox_item=True,
                        parent_note_title=note_title, parent_note_id=note_id, section=place or "",
                        list_role=placement.role(note))
@@ -1046,7 +1050,7 @@ class AssistantTools(KindTools):
             raise ToolError(msg)
         note_id = found.parent_note_id if found.is_checkbox_item else found.id
         for step in steps:
-            self.s.tasks.append(TaskItem(id=_checkbox_id(note_id, step), source_notebook=found.source_notebook,
+            self.s.tasks.append(TaskItem(id=new_line_id(self._db, note_id, step), source_notebook=found.source_notebook,
                                          title=step, is_checkbox_item=True,
                                          parent_note_title=found.parent_note_title or found.title,
                                          parent_note_id=note_id, section=found.section,
@@ -1357,7 +1361,7 @@ class AssistantTools(KindTools):
         recent = [self._plan_peek(self._today() - timedelta(days=1)), self._plan_peek(self._today())]
         self.settle_moot(recent[0], ctx=ctx)
         moot = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.UNKNOWN}
-        keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
+        keep = [text for text, ticked in with_done(note, done, self._db) if not ticked and text.lower() not in routine
                 and text.lower() not in done_on_plan and text.lower() not in moot
                 and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
         from thirties_core.today import group_items

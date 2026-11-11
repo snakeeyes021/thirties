@@ -33,6 +33,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEADING_REGEX, item_id
+from thirties_core.item_ids import line_ids
 from thirties_core.note_edits import HeadingTrail, item_end
 from thirties_core.scheduler import utc_now_iso
 
@@ -394,7 +395,8 @@ class DoneLog:
                 self.forget_seen(note["id"], text)
             for text, n in ticked_to_file(body):
                 low = text.lower()
-                ours = any(item_id(note["id"], text, k) in completed for k in range(3))
+                ours = bool(line_ids(self.db, note["id"], text) & completed) or any(
+                    item_id(note["id"], text, k) in completed for k in range(3))
                 if not (low in pending or ours or (before is not None and low in before)):
                     continue  # ticked before Thirties ever saw it open: history, not news
                 if self._daily(assistant, text):

@@ -422,11 +422,11 @@ class RoutineTools:
 
     def last_done(self, note: Dict[str, Any], r: Optional[Routine] = None) -> Optional[date]:
         """The last day it was really done: what the user said, or the latest tick of any of its steps."""
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_id
         r = r or self.book().get(note["id"], note["title"])
         days = [_day_of(r.last_done)]
         for step in self.steps(note):
-            rec = self.db.get_task_history(_checkbox_id(note["id"], step))
+            rec = self.db.get_task_history(line_id(self.db, note["id"], step))
             days.append(_day_of(rec.completed_date) if rec and rec.completed_date else None)
         return max((d for d in days if d), default=None)
 
@@ -445,11 +445,11 @@ class RoutineTools:
         """For a routine with no placement yet: each step at the thirty it was most often planned in over the last
         two weeks (ties: the latest), grouped into parts in the note's order. On 0.2's first morning this is the
         pattern the user built by hand since 10-18."""
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_ids
         if self.pt.scheduler is None:
             return []
         steps = self.steps(note)
-        by_id = {_checkbox_id(note["id"], s): s for s in steps}
+        by_id = {i: s for s in steps for i in line_ids(self.pt.scheduler.state_db, note["id"], s)}
         by_title = {s.lower(): s for s in steps}
         tz = self.pt.day_plan.day_start.tzinfo
         end = datetime.combine(before, datetime.min.time(), tzinfo=tz)
@@ -493,11 +493,12 @@ class RoutineTools:
         from thirties_core.plan_log import outer_tool
         if span is None or span.is_envelope or self.placing or self.db is None or outer_tool() != "update_event":
             return
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_ids
         want = span.title.strip().lower()
         for note in self.a._routines():
             steps = self.steps(note)
-            name = next((s for s in steps if span.task_id == _checkbox_id(note["id"], s) or s.lower() == want), None)
+            name = next((s for s in steps if s.lower() == want or span.task_id in line_ids(self.a._db, note["id"], s)),
+                        None)
             if name is None and want in self.known_extras(note):
                 name = span.title.strip()
             if name is not None:

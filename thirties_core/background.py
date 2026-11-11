@@ -90,6 +90,8 @@ class BackgroundService:
         self.desktop_notify = desktop_notify
         self.scheduler = scheduler or DeterministicScheduler(config)
         self.joplin_engine = joplin_engine or JoplinEngine(config)
+        if hasattr(self.joplin_engine, "use_ids"):
+            self.joplin_engine.use_ids(self.scheduler.state_db)  # item ids that follow edits and moves
         self.inference_engine = inference_engine or get_inference_engine(config)
         self.sync_engine = sync_engine or SyncEngine(config=config, state_db=self.scheduler.state_db,
                                                      joplin_engine=self.joplin_engine)

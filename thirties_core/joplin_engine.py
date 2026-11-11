@@ -38,12 +38,14 @@ def item_id(note_id: str, text: str, occurrence: int = 0) -> str:
 
 
 def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
-                    someday_sections: List[str]) -> List[TaskItem]:
+                    someday_sections: List[str], ids: Optional[List[str]] = None) -> List[TaskItem]:
     """Open checklist items in a note body, with heading, nesting and someday context.
 
-    Ids are stable across edits elsewhere in the note: they hash the note id, the
-    item text and its occurrence number, not the line number.
+    ``ids``: the id of each checklist line, open and ticked, in order, as Thirties' id table follows them
+    (item_ids.py: they follow rewording and moves). Without it (a bare read, tests), an item's id is the old hash
+    of its note, text and open-copy number.
     """
+    line_no = -1
     tasks: List[TaskItem] = []
     someday = {s.strip().lower() for s in someday_sections}
     section = ""
@@ -60,6 +62,7 @@ def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
         match = open_match or done_match
         if not match:
             continue
+        line_no += 1
         indent = _indent_width(match.group(1))
         while stack and stack[-1][0] >= indent:
             stack.pop()
@@ -71,7 +74,7 @@ def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
         text = open_match.group(2).strip()
         n = seen.get(text, 0)
         seen[text] = n + 1
-        task_id = item_id(note_id, text, n)
+        task_id = ids[line_no] if ids is not None and line_no < len(ids) else item_id(note_id, text, n)
         tasks.append(TaskItem(
             id=task_id,
             occurrence=n,
@@ -271,6 +274,13 @@ class JoplinEngine:
         # live (joplin_peer.py). Reads below go through config.resolve_joplin_db_path, which picks the same way.
         from thirties_core.joplin_peer import api_client_for
         self.api_client = api_client_for(self.config)
+        self.ids = None  # Thirties' id table (item_ids.py), once a state database is known: use_ids
+
+    def use_ids(self, db) -> None:
+        """Give items the ids Thirties' table follows through edits and moves, instead of hashing wording."""
+        if db is not None and (self.ids is None or self.ids.db is not db):
+            from thirties_core.item_ids import ItemIds
+            self.ids = ItemIds(db)
 
     def _open_db(self, db_path: Path) -> sqlite3.Connection:
         """Open SQLite database in immutable read-only mode with timeout."""
@@ -299,7 +309,25 @@ class JoplinEngine:
         allowed_notebooks = self.joplin_cfg.allowed_notebooks
         whitelist_notes = self.joplin_cfg.whitelist_notes
 
+        kept = []
         for row in rows:
+            full_path = row["full_path"]
+            # Filter by the chosen notebooks (none chosen: all but the excluded ones)
+            excluded = any(full_path == nb or full_path.startswith(f"{nb} >") for nb in self.joplin_cfg.excluded_notebooks)
+            is_allowed_notebook = not excluded and (not allowed_notebooks or any(
+                full_path == nb or full_path.startswith(f"{nb} >")
+                for nb in allowed_notebooks
+            ))
+            if is_allowed_notebook or row["title"] in whitelist_notes:
+                kept.append(row)
+        followed: Dict[str, List[str]] = {}
+        if self.ids is not None:  # every note in one pass, so an item moved between notes keeps its id
+            try:
+                followed = self.ids.follow([{"id": r["id"], "body": r["body"] or ""} for r in kept])
+            except Exception as e:  # the ids must never stop the lists being read
+                logger.warning("Couldn't follow item ids: %s", e)
+
+        for row in kept:
             note_id = row["id"]
             full_path = row["full_path"]
             title = row["title"]
@@ -307,19 +335,9 @@ class JoplinEngine:
             is_todo = bool(row["is_todo"])
             todo_completed = row["todo_completed"]
 
-            # Filter by the chosen notebooks (none chosen: all but the excluded ones)
-            excluded = any(full_path == nb or full_path.startswith(f"{nb} >") for nb in self.joplin_cfg.excluded_notebooks)
-            is_allowed_notebook = not excluded and (not allowed_notebooks or any(
-                full_path == nb or full_path.startswith(f"{nb} >")
-                for nb in allowed_notebooks
-            ))
-            is_whitelisted_note = title in whitelist_notes
-
-            if not (is_allowed_notebook or is_whitelisted_note):
-                continue
-
             # 1. Checklist items, with their heading, nesting and someday context
-            note_tasks = checklist_tasks(note_id, title, full_path, body, self.joplin_cfg.someday_sections)
+            note_tasks = checklist_tasks(note_id, title, full_path, body, self.joplin_cfg.someday_sections,
+                                         ids=followed.get(note_id))
             tasks.extend(note_tasks)
             found_checkboxes = bool(note_tasks) or any(DONE_CHECKBOX_REGEX.match(l) for l in body.splitlines())
 

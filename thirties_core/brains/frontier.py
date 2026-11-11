@@ -224,7 +224,7 @@ RULES
         lines = []
         for role, heading in (("today", "Today's list"), ("routine", "Routine")):
             for note in notes_with_role(roles, self.active_notes, role):
-                items = with_done(note, done[role])
+                items = with_done(note, done[role], db)
                 if items:
                     lines.append(f"{heading} ({note['title']}):")
                     lines += [f"- {'[done] ' if ticked else ''}{text}" for text, ticked in items]
