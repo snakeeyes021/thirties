@@ -44,7 +44,9 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
         HorizonCatalog(scheduler.state_db).apply(tasks, date.today(), week_start_index(config))
         done = scheduler.state_db.completed_since(date.today() - timedelta(days=DONE_HIDES_DAYS))
         tasks = [t for t in tasks if t.id not in done or t.list_role == "routine"]  # done is done, even if
-    return tasks, notes                                                             # Joplin didn't get the tick
+    from thirties_core.privacy import SHIELD                                        # Joplin didn't get the tick
+    SHIELD.set_private_notes(notes)  # what a cloud model must never see in full, as of this read
+    return tasks, notes
 
 
 def load_media_tasks(config: ThirtiesConfig, opener=None) -> List[TaskItem]:

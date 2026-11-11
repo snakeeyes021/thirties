@@ -22,6 +22,7 @@ from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.messages import now_section
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS, TOOL_SPECS, PlanTools
+from thirties_core.privacy import is_private_note
 
 logger = logging.getLogger(__name__)
 
@@ -352,9 +353,13 @@ RULES
                         nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}{pressing}")
                 elif is_todo and todo_comp == 0:
                     nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
-                    if body.strip():
+                    if body.strip() and is_private_note(note):
+                        nb_block.append("    (Private note: details not shown.)")
+                    elif body.strip():
                         excerpt = "\n    ".join(body.strip().splitlines()[:5])
                         nb_block.append(f"    Details:\n    {excerpt}")
+                elif body.strip() and is_private_note(note):
+                    nb_block.append("    (Private note: contents not shown.)")
                 elif body.strip():
                     clean_lines = [l for l in body.splitlines() if l.strip()]
                     if clean_lines:

@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
+from thirties_core import privacy
 from thirties_core.config import InferenceConfig, ThirtiesConfig
 
 logger = logging.getLogger(__name__)
@@ -312,7 +313,7 @@ class AntigravityInferenceEngine:
         cmd = [agy_bin, "--sandbox", "--input-format", "stream-json", "--output-format", "stream-json",
                "--model", self.model, "--disable-slash-commands", "--agent", AGY_AGENT]
         workspace = agy_workspace_dir()
-        prompt = f"{AGY_NO_TOOLS}\n\n{prompt}"
+        prompt = f"{AGY_NO_TOOLS}\n\n{privacy.SHIELD.redact_prompt(prompt)}"  # the exit to the cloud: filtered
         try:
             res = self._run(cmd, prompt, workspace)
             result = _stream_result(res.stdout)
@@ -324,7 +325,7 @@ class AntigravityInferenceEngine:
             record_agy_call(self.model, "timeout")
             return "The Antigravity assistant timed out waiting for a response."
         if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
-            return str(result.get("response", ""))
+            return privacy.SHIELD.restore(str(result.get("response", "")))
         return f"Error contacting model via Antigravity CLI: {res.stderr or res.stdout[-1000:]}"
 
     def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
@@ -344,7 +345,7 @@ class AntigravityInferenceEngine:
         if not agy_bin:
             raise RuntimeError("Antigravity CLI (agy) binary not found.")
 
-        prompt_text = self._format_prompt(messages)
+        prompt_text = self._format_prompt(privacy.SHIELD.redact_messages(messages))  # the exit to the cloud
         is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
 
         # The prompt goes in on stdin (one stream-json message): as a command-line argument it
@@ -406,11 +407,11 @@ class AntigravityInferenceEngine:
             }
 
         clean_text, tool_calls = parse_model_directives(raw_reply)
-        return {
+        return privacy.SHIELD.restore_reply({
             "role": "assistant",
             "content": clean_text,
             "tool_calls": tool_calls,
-        }
+        })
 
 
 class GeminiInferenceEngine:
@@ -443,7 +444,7 @@ class GeminiInferenceEngine:
         system_instruction = None
         contents: List[Dict[str, Any]] = []
 
-        for msg in messages:
+        for msg in privacy.SHIELD.redact_messages(messages):  # the exit to the cloud: filtered
             role = msg.get("role", "")
             if role == "system":
                 system_instruction = {"parts": [{"text": msg.get("content", "")}]}
@@ -492,11 +493,11 @@ class GeminiInferenceEngine:
                 raw_text = "".join(p.get("text", "") for p in parts)
 
             clean_text, tool_calls = parse_model_directives(raw_text)
-            return {
+            return privacy.SHIELD.restore_reply({
                 "role": "assistant",
                 "content": clean_text,
                 "tool_calls": tool_calls,
-            }
+            })
         except Exception as e:
             logger.error("Gemini API request failed: %s", e)
             return {

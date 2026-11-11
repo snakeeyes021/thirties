@@ -371,6 +371,7 @@ class JoplinEngine:
         allowed_notebooks = self.joplin_cfg.allowed_notebooks
         whitelist_notes = self.joplin_cfg.whitelist_notes
         notes: List[Dict[str, Any]] = []
+        tags = self._note_tags(path)
 
         for row in rows:
             full_path = row["full_path"]
@@ -396,9 +397,21 @@ class JoplinEngine:
                 "body": body,
                 "is_todo": is_todo,
                 "todo_completed": todo_completed,
+                "tags": tags.get(row["id"], []),
             })
 
         return notes
+
+    def _note_tags(self, path: Path) -> Dict[str, List[str]]:
+        """Each note's Joplin tags (a note tagged "private" never has its body sent to a cloud model)."""
+        out: Dict[str, List[str]] = {}
+        try:
+            with self._open_db(path) as conn:
+                for row in conn.execute("SELECT nt.note_id, t.title FROM note_tags nt JOIN tags t ON t.id = nt.tag_id"):
+                    out.setdefault(row[0], []).append(row[1])
+        except sqlite3.Error:  # an older profile, or a test database without tags
+            pass
+        return out
 
     def complete_task(self, task: TaskItem) -> Tuple[bool, str]:
         """Mark a task complete in Joplin.
