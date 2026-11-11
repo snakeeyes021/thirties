@@ -12,13 +12,18 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 
+from thirties_core.titles import title_of
 from thirties.views.agenda import GUTTER, short_clock
 
 # copy-madlibs T3-027 to T3-038 (button labels, section titles and hints, empty state)
 KEEP_TITLE, KEEP_HINT = "Keep", "Waiting for a day they fit; today's are on the schedule."
 DROP_TITLE, DROP_HINT = "Drop", "Proposed. Applied by itself after today unless you say otherwise."
+RESTORE_TITLE = "Put these back on their lists?"
+RESTORE_HINT = ("Dropped earlier, when a drop still took items off their lists. A drop now only stops an item "
+                "rolling over.")
+RESTORE_PUT_BACK, RESTORE_LEAVE = "Put back", "Leave them"
 ARCHIVE_TITLE, ARCHIVE_HINT = "Archive", "Let go. Nothing is deleted: undrop brings one back."
 EMPTY = "Nothing left from before."
 LABELS = {"accept": "Accept", "done": "Done", "drop": "Drop", "keep": "Keep", "undrop": "Undrop"}
@@ -51,7 +56,21 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
         except Exception:  # never in the way of the rest of the window
             data = {}
         keep, drop, archive = data.get("keep") or [], data.get("drop") or [], data.get("archive") or []
-        if not keep and not drop and not archive:
+        restore = data.get("restore") or []
+        if restore:  # once: drops filed under the old meaning can go back on their lists (11-11)
+            group = self._group("restore", RESTORE_TITLE, RESTORE_HINT)
+            for title in restore:
+                group.add(Adw.ActionRow(title=GLib.markup_escape_text(title_of(title))))
+            buttons = Gtk.Box(spacing=6, halign=Gtk.Align.END, margin_top=6)
+            for put_back, label in ((False, RESTORE_LEAVE), (True, RESTORE_PUT_BACK)):
+                b = Gtk.Button(label=label)
+                if put_back:
+                    b.add_css_class("suggested-action")
+                b.connect("clicked", lambda _b, p=put_back: self._restore(p))
+                self.buttons[("restore", "put_back" if put_back else "leave")] = b
+                buttons.append(b)
+            group.add(buttons)
+        if not keep and not drop and not archive and not restore:
             self._group("empty", "").add(Adw.ActionRow(title=EMPTY))
             return
         if keep:
@@ -86,6 +105,12 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
             self.buttons[(r["title"], action)] = b
             row.add_suffix(b)
         return row
+
+    def _restore(self, put_back: bool) -> None:
+        out = self.run_tool("restore_old_drops", {"put_back": put_back}) if self.run_tool else ""
+        if out and self.on_notice:
+            self.on_notice(out)
+        self.refresh()
 
     def _act(self, title: str, action: str) -> None:
         out = self.run_tool("leftover_action", {"item": title, "action": action}) if self.run_tool else ""

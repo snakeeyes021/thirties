@@ -232,12 +232,23 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "leftover_action",
         "description": "Act on something left from before, as the user says (the same as the app's Before today "
-                       "tab): accept (stands as proposed), done (it got done), drop, keep (a proposed drop kept "
-                       "instead), undrop (back from the archive).",
-        "parameters": {"item": "The item's title.", "action": "accept, done, drop, keep or undrop.",
+                       "tab): accept (stands as proposed), done (it got done), drop (stop rolling it over; its "
+                       "list in Joplin keeps it, untouched), keep (a proposed drop kept instead), undrop (back from "
+                       "the archive), archive (only when the user explicitly wants it gone: \"delete it\", "
+                       "\"archive it\", \"I'm never doing that\"; it's ticked and filed in the Dropped note). "
+                       "When unsure, drop.",
+        "parameters": {"item": "The item's title.", "action": "accept, done, drop, keep, undrop or archive.",
                        "when": "For keep or undrop, where it goes if the user names it (otherwise the horizon the "
                                "proposal showed)."},
-        "required": ["item", "horizon"],
+        "required": ["item", "action"],
+    },
+    {
+        "name": "restore_old_drops",
+        "description": "Answer the one-time offer about items dropped before drops stopped touching Joplin (they "
+                       "were filed in Dropped notes): put_back true puts them back on their lists where they were, "
+                       "false leaves them filed. Asked once, in the Before today tab.",
+        "parameters": {"put_back": "true to put them back, false to leave them filed."},
+        "required": ["put_back"],
     },
     {
         "name": "apply_rollover",
@@ -1697,12 +1708,12 @@ class AssistantTools(KindTools):
         return f"{rec['title']}: {window['when']}."
 
     def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
-        """Applied drops (the user's word, or by themselves after their day): out of Thirties' pool, and in Joplin
-        ticked and filed in the month's Dropped note beside the Done notes, with the reason (11-06: nothing is
-        ever deleted, only filed). An item with a home list is filed from there and its Today copy goes; one
-        that's only on Today is filed from Today. A mere proposal never touches Joplin."""
+        """A drop means "stop rolling it over" (decided 11-11): Thirties records that, and the item's home list in
+        Joplin is never touched; the normal planning can pick the item up again. Only its copy on the Today note
+        goes, and only when it has a home list to stay on. Ticking and filing happen only on an explicit archive
+        (_archive_in_joplin)."""
         from thirties_core.carry import OpenPool
-        from thirties_core.done_log import FILED_ROLES, file_dropped_op
+        from thirties_core.done_log import FILED_ROLES
         from thirties_core.today import TodayLinks, note_items
         titles = [i["title"] for i in items]
         if not titles or self._db is None:
@@ -1713,10 +1724,39 @@ class AssistantTools(KindTools):
             if recs.get(t.lower()) is not None:
                 pool.place(t, "dropped")
         note, writer = self._today_note(), self._writer()
-        if writer is None or not getattr(writer, "allowed", True):
+        if note is None or writer is None or not getattr(writer, "allowed", True):
             return titles
+        open_today = {x for x, ticked in note_items(note) if not ticked}
+        links = TodayLinks(self._db)
+        for t in titles:
+            if t not in open_today:
+                continue
+            has_home = links.home_of(t) is not None or any(
+                x.title.strip().lower() == t.strip().lower() and x.list_role in FILED_ROLES for x in self.s.tasks)
+            if not has_home:
+                continue  # it's only on Today: it stays there, so nothing is lost
+            writer.submit({"op": "remove", "note_id": note["id"], "title": t})  # its Today copy, not the item
+            self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]
+            links.unlink(t)
+        return titles
+
+    def _archive_in_joplin(self, items: List[Dict[str, Any]]) -> List[str]:
+        """An explicit archive ("delete it", "archive it", "I'm never doing that"): the item is ticked and filed in
+        the month's Dropped note beside the Done notes, with the reason, from its home list (or from Today, when
+        that's its only place). Undrop puts it back where it was."""
+        from thirties_core.carry import OpenPool
+        from thirties_core.done_log import FILED_ROLES, file_dropped_op
+        from thirties_core.today import TodayLinks, note_items
+        titles = [i["title"] for i in items]
+        writer = self._writer()
+        if not titles or self._db is None or writer is None or not getattr(writer, "allowed", True):
+            return []
+        pool = OpenPool(self._db)
+        recs = pool.all()
+        note = self._today_note()
         open_today = {x for x, ticked in note_items(note) if not ticked} if note is not None else set()
         links = TodayLinks(self._db)
+        done = []
         for t in titles:
             rec = recs.get(t.lower()) or {"title": t}
             if rec.get("filed_key"):
@@ -1737,11 +1777,12 @@ class AssistantTools(KindTools):
                 if status in ("done", "queued"):
                     pool.set(t, filed_key=op["key"])
                     self.s.tasks = [x for x in self.s.tasks if not (home is not None and x.id == home.id)]
+                    done.append(t)
             if note is not None and t in open_today and (op is None or op["note_id"] != note["id"]):
                 writer.submit({"op": "remove", "note_id": note["id"], "title": t})  # its Today copy
                 self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]
                 links.unlink(t)
-        return titles
+        return done
 
     def _someday_in_joplin(self, rec: Dict[str, Any], someday: bool) -> None:
         """Where the list already has a someday section, an item's place there follows its horizon (11-06): put
@@ -2166,6 +2207,7 @@ class AssistantTools(KindTools):
             "propose_leftovers": self.propose_leftovers,
             "set_item_note": self.set_item_note,
             "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
+            "restore_old_drops": lambda put_back=True, **_: self.before.restore_old_drops(put_back),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,

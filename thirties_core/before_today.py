@@ -16,12 +16,18 @@ Later, a week plan can feed ``place_today`` (what's meant for today) the same wa
 
 from __future__ import annotations
 
+import re
+
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core.carry import DROPPED, SOMEDAY, OpenPool, resolve_when
 
-ACTIONS = ("accept", "done", "drop", "keep", "undrop")
+ACTIONS = ("accept", "done", "drop", "keep", "undrop", "archive")
+# An archive takes the item off its list in Joplin: allowed in chat only when the user's words ask for it (11-11:
+# "drop" means stop rolling it over; a real removal only on an explicit ask). Anything else is a plain drop.
+EXPLICIT_REMOVAL = re.compile(r"\b(archive|delete|remove it|get rid of|drop (it|that|this) (completely|for good|"
+                              r"entirely)|for good|never (going to|gonna|doing|do)|not ever)\b", re.I)
 
 
 class BeforeToday:
@@ -132,7 +138,8 @@ class BeforeToday:
             keep.append(row)
         keep.sort(key=lambda r: (r["at"] is None, r["at"].timestamp() if r["at"] else 0, r["title"].lower()))
         drop.sort(key=lambda r: r["title"].lower())
-        return {"keep": keep, "drop": drop, "archive": sorted(archive.items(), reverse=True)}
+        return {"keep": keep, "drop": drop, "archive": sorted(archive.items(), reverse=True),
+                "restore": [r["title"] for r in self.old_filed_drops()]}
 
     # --- what the user does (from the tab or the chat) ---
 
@@ -155,6 +162,14 @@ class BeforeToday:
                 return self._drop(rec, by="user")
             pool.set(title, placed_by="user", settled=True)  # leaves Keep (11-06: Accept left rows standing)
             return f"{title}: stays {rec.get('when') or 'as proposed'}."  # copy-madlibs T3-020
+        if action == "archive":
+            said = getattr(self.a.pt, "user_message", None)
+            if said is not None and not EXPLICIT_REMOVAL.search(str(said)):
+                # the user didn't ask for a removal: the non-destructive reading (decided 11-11)
+                return self._drop(rec, by="user") + " (It's still on its list: say \"archive it\" to take it off.)"
+            out = self._drop(rec, by="user")
+            filed = self.a._archive_in_joplin([{"title": title}])
+            return f"Archived {title}: ticked and filed in the Dropped note." if filed else out
         if action == "drop":
             return self._drop(rec, by="user")
         if action == "done":  # the normal done path: ticked in Joplin, filed in the month's Done note
@@ -232,9 +247,34 @@ class BeforeToday:
             else:
                 pool.set(rec["title"], horizon="gone")  # taken out of every list by hand
 
+    # --- the one-time offer for drops filed under the old meaning (before 11-11) ---
+
+    OFFER_KEY = "old_drops_offer"
+
+    def old_filed_drops(self) -> List[Dict[str, Any]]:
+        """Drops filed in a Dropped note under the old meaning, while the one-time offer is still open."""
+        if self.db is None or self.db.get_sync_meta(self.OFFER_KEY):
+            return []
+        return [r for r in OpenPool(self.db).all().values() if r.get("horizon") == DROPPED and r.get("filed_key")]
+
+    def restore_old_drops(self, put_back: Any = True) -> str:
+        """The one-time offer: put the items filed in Dropped notes back on their home lists, open, where they
+        were (they still don't roll over), or leave them filed. Either way it isn't offered again."""
+        put_back = str(put_back).strip().lower() not in ("false", "0", "no", "leave")
+        items = self.old_filed_drops()
+        back = []
+        if put_back:
+            for rec in items:
+                if not self.a._undrop_in_joplin(rec):
+                    back.append(rec["title"])
+        self.db.set_sync_meta(self.OFFER_KEY, "put back" if put_back else "left")
+        if not put_back:
+            return "Left them in the Dropped notes."
+        return ("Put back on their lists: " + ", ".join(back) + ".") if back else "Nothing needed putting back."
+
     def _drop(self, rec: Dict[str, Any], by: str) -> str:
         self.take_off_today(rec)
         OpenPool(self.db).set(rec["title"], horizon=DROPPED, pending_drop=False, dropped_on=self._today().isoformat(),
                               dropped_by=by)
-        self.a._drop_leftovers([{"title": rec["title"]}])  # off the Today note; its own list keeps it
-        return f"Dropped {rec['title']} (it stays on its own list)."  # T3-011
+        self.a._drop_leftovers([{"title": rec["title"]}])  # off the Today note; its own list keeps it, untouched
+        return f"Dropped {rec['title']}: it won't roll over, and it stays on its own list."
