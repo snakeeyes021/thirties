@@ -500,6 +500,9 @@ class ThirtiesTelegramBridge:
         live = plan.day_start <= now < plan.day_end
         text = render_schedule(plan, now if live else None, whole_day=True,
                                missed=missed_for(self.conv_manager.tools, now) if live else [], label="today")
+        if live and getattr(self.conv_manager.tools, "assistant", None) is not None:
+            from thirties_core.if_time import text_for
+            text += text_for(self.conv_manager.tools.assistant)  # after the day's timed items
         title = f"📅 *Schedule for {plan.target_date.strftime('%A, %b %d')}*\n\n"
         self.client.send_message(chat_id, title + text, parse_mode="Markdown")
 

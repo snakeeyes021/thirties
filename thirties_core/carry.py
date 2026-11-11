@@ -256,11 +256,15 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     def home_of(title: str) -> Optional[Dict[str, str]]:
         return links.home_of(title) if links is not None else None
 
+    from thirties_core import if_time
+    untimed_left = {t.lower() for t in if_time.items(note)} if note is not None else set()
+
     def rollable_item(title: str, low: str) -> Dict[str, str]:
         home = home_of(title)
         task = tasks.get((home or {}).get("home_id", "")) or listed.get(low)
+        horizon = WEEK if low in untimed_left else choose_horizon(assistant, task, title, day)  # If there's time: this week
         return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else ""),
-                "horizon": choose_horizon(assistant, task, title, day), "due": (task.due or "")[:10] if task else ""}
+                "horizon": horizon, "due": (task.due or "")[:10] if task else ""}
 
     # yesterday's plan: what ended with no outcome
     for s in unmarked:

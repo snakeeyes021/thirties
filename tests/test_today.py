@@ -1,7 +1,7 @@
 """The day's list: the Today note, linked to the lists its items came from."""
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
 from thirties_core.assistant_tools import Services
@@ -18,6 +18,12 @@ TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "
 def item(tid, title, note="n_errands"):
     return TaskItem(id=tid, source_notebook="1. Tasks", title=title, is_checkbox_item=True,
                     parent_note_title=TITLES[note], parent_note_id=note)
+
+
+def as_earlier_lines():
+    """Lines put on Today the way an earlier day left them: with no time (before everything added today got one,
+    if_time.py). The morning tests start from such leftovers."""
+    return patch("thirties_core.if_time.on_plan_today", return_value=object())
 
 
 class TodayTestCase(unittest.TestCase):
@@ -50,7 +56,10 @@ class TestAddingToToday(TodayTestCase):
 
     def test_list_items_go_on_linked_and_new_things_go_on_as_they_are(self):
         out = self.t.execute("add_to_today", {"items": ["call the bank", "Rinse the tank filter", "Buy stamps for the trip"]})
-        self.assertEqual(out, "Added to today's list: Call the bank, Rinse the tank filter, Buy stamps for the trip.")
+        self.assertTrue(out.startswith("On today's plan: Call the bank at "), out)  # each gets its time at once
+        for title in ("Call the bank", "Rinse the tank filter", "Buy stamps for the trip"):
+            self.assertIn(f"{title} at ", out)
+            self.assertTrue(any(s.title == title for s in self.t.day_plan.spans), title)
         self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n- [ ] Rinse the tank filter\n- [ ] Buy stamps for the trip\n")
         links = TodayLinks(self.sched.state_db)
         self.assertEqual(links.home_of("Call the bank")["home_id"], "t_bank")
@@ -83,7 +92,7 @@ class TestAddingToToday(TodayTestCase):
                                             title="Watch: Dinner at the Glass Orchard (1979)"))
         self.services.tasks.append(item("t_shelf", "Near shelf boxes"))
         out = self.t.execute("add_to_today", {"items": ["Dinner"]})
-        self.assertEqual(out, "Added to today's list: Dinner.")  # 10-22: it added the film
+        self.assertTrue(out.startswith("On today's plan: Dinner at "), out)  # 10-22: it added the film
         self.assertIsNone(TodayLinks(self.sched.state_db).home_of("Dinner"))
         out = self.t.execute("log_outcome", {"event": "Shelf storage boxes", "status": "done"})
         self.assertTrue(out.startswith(NOT_DONE), out)  # 10-18: it ticked a near match in Joplin
@@ -91,7 +100,8 @@ class TestAddingToToday(TodayTestCase):
         self.assertEqual(self.api.updates, [u for u in self.api.updates if u[0] == "n_today"])
 
     def test_by_task_id_too(self):
-        self.assertEqual(self.t.execute("add_to_today", {"items": ["t_bank"]}), "Added to today's list: Call the bank.")
+        self.assertTrue(self.t.execute("add_to_today", {"items": ["t_bank"]}).startswith(
+            "On today's plan: Call the bank at "))
         self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], "t_bank")
 
     def test_without_a_today_note(self):
@@ -158,7 +168,8 @@ class TestWhatsLeft(TodayTestCase):
     def test_the_slm_answers_from_the_plan_and_todays_list(self):
         from thirties_core.brains.slm import SlmBrain
         from thirties_core.brains.slm.parse import Action
-        self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+        with as_earlier_lines():
+            self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
         self.t.execute("add_event", {"title": "Shower", "start": "9:00 AM", "duration": "30 min"})
         self.t.execute("add_event", {"title": "Call the bank", "start": "2:00 PM", "duration": "30 min",
                                      "task_id": "t_bank"})
@@ -175,8 +186,7 @@ class TestSlmShortcuts(TodayTestCase):
     def test_gemma_puts_things_on_todays_list_and_records_urgency(self):
         from thirties_core.brains.slm import SlmBrain
         brain = SlmBrain(self.t, tasks=self.services.tasks)
-        self.assertEqual(brain.respond("add call the bank and rinse the tank filter to today's list"),
-                         "Added to today's list: Call the bank, Rinse the tank filter.")
+        self.assertIn("Call the bank at ", brain.respond("add call the bank and rinse the tank filter to today's list"))
         self.assertTrue(brain.respond("buy stamps isn't urgent").startswith("Noted: 'Buy stamps' is whenever"))
         self.assertTrue(brain.respond("call the bank has to happen by friday").startswith(
             "Noted: 'Call the bank' is by"))
@@ -315,7 +325,8 @@ class TestMorning(TodayTestCase):
 
     def setUp(self):
         super().setUp()
-        self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+        with as_earlier_lines():
+            self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
         self.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + self.body("n_today")
         self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
         catalog = ListCatalog(self.sched.state_db)

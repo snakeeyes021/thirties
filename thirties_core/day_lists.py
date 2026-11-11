@@ -121,12 +121,14 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     task_ids = {s.task_id for s in spans if s.task_id}
     links = TodayLinks(db)
     out = []
+    from thirties_core import if_time
+    untimed = {t.lower() for t in if_time.items(note)}  # If there's time is its own section, not "pencilled in"
     for line in (note.get("body") or "").splitlines():
         m = CHECKBOX_REGEX.match(line)
         if not m or m.group(1):
             continue
         text = m.group(2).strip()
-        if text.lower() in routines or text.lower() in titles:
+        if text.lower() in routines or text.lower() in titles or text.lower() in untimed:
             continue
         link = links.home_of(text)
         if link and (link["home_id"] in task_ids or link["home_title"].strip().lower() in titles):
@@ -207,7 +209,7 @@ def onto_today(assistant, day: date) -> List[str]:
         known = {t.id for t in assistant.s.tasks}  # linked by its id while its list item is still there
         names = singles + [r["home_id"] if r["home_id"] in known else r["title"] for r in waiting]
         if names:
-            out = assistant.add_to_today(names)
+            out = assistant._add_to_today(names, "none")  # the morning's proposal gives them times
             if out.startswith("Added"):
                 done.append(out.rstrip("."))
         for r in waiting:

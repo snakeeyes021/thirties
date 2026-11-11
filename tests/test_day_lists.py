@@ -13,7 +13,9 @@ from thirties_core.plan_tools import PlanTools
 class TestPencilledIn(ListsTestCase):
 
     def test_on_the_list_with_no_time_is_said_as_such(self):
-        self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+        from tests.test_today import as_earlier_lines
+        with as_earlier_lines():  # lines with no time: from an earlier day, or written by hand
+            self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
         bank = next(t for t in self.services.tasks if t.title == "Call the bank" and t.parent_note_id == "n_errands")
         self.t.execute("add_event", {"title": "Bank", "start": "3:00 PM", "duration": "30 min", "task_id": bank.id})
         self.assertEqual(pencilled_in(self.t.assistant), ["Rinse the tank filter"])  # the bank has a time now
@@ -24,13 +26,16 @@ class TestPencilledIn(ListsTestCase):
         # 10-29: items asked to be pencilled in (no time) stayed on the plan, and were never on the Today note
         self.t.execute("add_event", {"title": "Walk", "start": "4:00 PM", "duration": "30 min"})
         out = self.t.execute("pencil_in", {"items": ["Walk", "Read a chapter"]})
-        self.assertEqual(out, "On today's list, no time yet: Walk, Read a chapter. Off the plan: Walk.")
+        self.assertEqual(out, "Under If there's time on today's list, no time: Walk, Read a chapter. Off the plan: Walk.")
         self.assertFalse(any(s.title == "Walk" for s in self.t.day_plan.spans))
-        self.assertEqual(self.body("n_today"), "- [ ] Walk\n- [ ] Read a chapter\n")
-        self.assertEqual(pencilled_in(self.t.assistant), ["Walk", "Read a chapter"])
-        out = self.t.execute("add_event", {"title": "Walk", "start": "5:00 PM", "duration": "30 min"})  # a time later
-        self.assertNotIn("Walk\n- [ ] Walk", self.body("n_today"))
-        self.assertEqual(pencilled_in(self.t.assistant), ["Read a chapter"])
+        self.assertEqual(self.body("n_today"), "## If there's time\n- [ ] Walk\n- [ ] Read a chapter\n")
+        from thirties_core import if_time
+        self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Walk", "Read a chapter"])
+        self.assertEqual(pencilled_in(self.t.assistant), [])  # its own section, not "pencilled in"
+        self.t.user_message = "pencil in a walk"  # the user's words: allowed
+        self.assertTrue(self.t.execute("pencil_in", {"items": ["Stretch"]}).startswith("Under If there's time"))
+        self.t.user_message = "add stretching today"  # nothing asks for no time: the model can't decide it
+        self.assertTrue(self.t.execute("pencil_in", {"items": ["Nap"]}).startswith("NOT_DONE"))
 
 
 class TestTomorrow(ListsTestCase):

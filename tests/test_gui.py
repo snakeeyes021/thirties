@@ -147,6 +147,23 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(rows("behind"), ["Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("now"), ["Dishes"])
 
+    def test_if_theres_time_comes_after_the_timed_items_with_its_actions(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.read_tool = lambda name, args: "If there's time:\n- Water the ferns\n- Oil the hinges" \
+            if name == "if_there_is_time_items" else ""
+        page.refresh(plan, at("19:20"))
+        keys = list(page.groups)
+        self.assertLess(keys.index("next"), keys.index("if_time"))  # after the day's timed items
+        self.assertEqual([r.get_title() for r in _rows(page.groups["if_time"])], ["Water the ferns", "Oil the hinges"])
+        done, schedule, later, menu = page.if_time_rows["Water the ferns"]
+        schedule.emit("clicked")
+        menu.get_last_child().emit("clicked")  # Not today → Drop
+        self.assertEqual(calls, [("if_there_is_time", {"item": "Water the ferns", "action": "schedule"}),
+                                 ("if_there_is_time", {"item": "Water the ferns", "action": "drop"})])
+
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
         done = next(s for s in self.plan.spans if s.id == "research")

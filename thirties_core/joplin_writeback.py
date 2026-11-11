@@ -106,6 +106,7 @@ def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], oc
 
 
 DONE_HEADING_RE = re.compile(r"(done|completed?|finished|archived?)\b", re.IGNORECASE)
+IF_TIME_HEADING_RE = re.compile(r"^if there'?s time\s*:?$", re.IGNORECASE)  # if_time.py: new lines go above it
 
 
 def append_task(body: str, title: str, section: Optional[str] = None, more: Optional[List[str]] = None) -> str:
@@ -114,7 +115,9 @@ def append_task(body: str, title: str, section: Optional[str] = None, more: Opti
     lines = body.splitlines()
     start, stop = 0, len(lines)
     done_head = next((i for i, l in enumerate(lines)
-                      if HEADING_REGEX.match(l) and DONE_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip())), None)
+                      if HEADING_REGEX.match(l) and (DONE_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip())
+                                                     or IF_TIME_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip()))),
+                     None)
     if done_head is not None and not section:  # a Done section is for finished things: add above it
         stop = done_head
     if section:

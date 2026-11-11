@@ -25,6 +25,15 @@ from thirties_core.plan_tools import NOT_DONE
 
 Tool = Callable[[str, dict], str]  # run a schedule tool by name; returns its result
 
+# If there's time (if_time.py): copy-madlibs T3-043 to T3-049
+IF_TIME_TITLE = "If there's time"
+IF_TIME_DONE = "Done"
+IF_TIME_SCHEDULE = "Schedule it"
+IF_TIME_NOT_TODAY = "Not today"
+IF_TIME_TOMORROW = "Tomorrow"
+IF_TIME_WEEK = "Later this week"
+IF_TIME_DROP = "Drop"
+
 
 def _flexible(span: EventSpan) -> bool:
     return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not span.tentative
@@ -138,10 +147,55 @@ class AgendaPage(Gtk.ScrolledWindow):
         upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
+        self._fill_if_time()  # after the day's timed items
         # no "on the list, no time yet" section on Today any more (11-06): today's items are placed on the
         # schedule, and what's left from before is in the Before today tab
         self._fill_routines(plan, now)
         self._fill_done(spans)
+
+    def _fill_if_time(self) -> None:
+        """Today's things with no time, because the user asked or the day was full (if_time.py): each can be done,
+        scheduled in the next gap, or put off (tomorrow, later this week, or dropped)."""
+        if self.read_tool is None:
+            return
+        try:
+            out = self.read_tool("if_there_is_time_items", {}) or ""
+        except Exception:
+            return
+        items = [line[2:] for line in out.splitlines() if line.startswith("- ")]
+        if not items:
+            return
+        group = self._group("if_time", IF_TIME_TITLE)
+        self.if_time_rows = {}
+        for title in items:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title))
+            done = Gtk.Button(icon_name="object-select-symbolic", valign=Gtk.Align.CENTER, tooltip_text=IF_TIME_DONE)
+            done.add_css_class("flat")
+            done.connect("clicked", lambda _b, t=title: self._if_time(t, "done"))
+            schedule = Gtk.Button(label=IF_TIME_SCHEDULE, valign=Gtk.Align.CENTER)
+            schedule.add_css_class("flat")
+            schedule.connect("clicked", lambda _b, t=title: self._if_time(t, "schedule"))
+            later = Gtk.MenuButton(label=IF_TIME_NOT_TODAY, valign=Gtk.Align.CENTER)
+            later.add_css_class("flat")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6, margin_bottom=6,
+                          margin_start=6, margin_end=6)
+            pop = Gtk.Popover(child=box)
+            for action, label in (("tomorrow", IF_TIME_TOMORROW), ("week", IF_TIME_WEEK), ("drop", IF_TIME_DROP)):
+                b = Gtk.Button(label=label)
+                b.add_css_class("flat")
+                b.connect("clicked", lambda _b, t=title, a=action, p=pop: (p.popdown(), self._if_time(t, a)))
+                box.append(b)
+            later.set_popover(pop)
+            for w in (done, schedule, later):
+                row.add_suffix(w)
+            group.add(row)
+            self.if_time_rows[title] = (done, schedule, later, box)
+
+    def _if_time(self, title: str, action: str) -> None:
+        if self.run_tool is not None:
+            out = self.run_tool("if_there_is_time", {"item": title, "action": action})
+            if out and self.on_notice is not None and action == "schedule":
+                self.on_notice(out)
 
     def _fill_pencilled(self, day: Optional[str]) -> None:
         """On the day's list with no time yet (pencilled in, O3): shown as such, to be given a time or not. Read

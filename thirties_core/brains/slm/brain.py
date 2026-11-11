@@ -1982,7 +1982,9 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                     missed = missed_for(self.tools, now)
                     if missed:
                         MissedTracker(self.tools._state_db).mark(now, missed)
-                    return render_schedule(plan, now, missed=missed)
+                    from thirties_core.if_time import text_for
+                    extra = text_for(self.tools.assistant) if getattr(self.tools, "assistant", None) else ""
+                    return render_schedule(plan, now, missed=missed) + extra
             items = [s for s in plan.spans_overlapping(start, end, include_tentative=True)
                      if s.category != SpanCategory.SLEEP]
             if not items:

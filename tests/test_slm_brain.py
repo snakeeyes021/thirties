@@ -725,7 +725,7 @@ class TestParityWithGemini(ParityTestCase):
     def test_put_things_on_todays_list(self):
         out = self.say("I want to get the hardware store help desk thing done, stick it on my list for today",
                        {"type": "today", "title": "hardware store help desk"})
-        self.assertEqual(out, "Added to today's list: Hardware store help desk.")
+        self.assertTrue(out.startswith("On today's plan: Hardware store help desk at "), out)  # a time at once
         self.assertEqual(self.api.notes["n_today"]["body"], "- [ ] Hardware store help desk\n")
         self.say("laundry at 7", {"type": "add", "title": "Laundry", "start": "7", "duration": "1 hour"})
         out = self.say("and put that on the list for today too", {"type": "today", "title": "that"})

@@ -318,12 +318,25 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "add_to_today",
         "description": "Put things on today's list (the user's Today note), when the user says they mean to do them "
-                       "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
-                       "item for today adds it on its own.",
+                       "today. Each one gets its time on today's plan at once (the first free time that fits); if the "
+                       "user named a time, schedule it at that time instead (add_event), or move it there after. "
+                       "Only the user's own words ('if there's time', 'no rush', 'don't schedule it', 'on deck') "
+                       "leave it with no time, under If there's time. Items from their lists stay linked: ticking "
+                       "either one ticks both. Scheduling a list item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
                                 "user's words.",
                        "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning."},
         "required": ["items"],
+    },
+    {
+        "name": "if_there_is_time",
+        "description": "Act on an item under If there's time (today's things with no time): done; schedule (the next "
+                       "free time that fits, or the time the user names); tomorrow; week (later this week); or drop "
+                       "(it stops coming back; its own list is untouched).",
+        "parameters": {"item": "The item, as worded under If there's time.",
+                       "action": "done, schedule, tomorrow, week or drop.",
+                       "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
+        "required": ["item", "action"],
     },
     {
         "name": "get_weather",
@@ -701,6 +714,13 @@ class AssistantTools(KindTools):
         return messages
 
     def add_to_today(self, items: Any, **_: Any) -> str:
+        """The tool: each thing gets its time today, unless the user's own words ask for none (if_time.py)."""
+        return self._add_to_today(items, "auto")
+
+    def _add_to_today(self, items: Any, timing: str = "auto") -> str:
+        """``timing``: "auto" (a time each, or If there's time when the user asked for no time), "untimed" (under If
+        there's time: the user asked), or "none" (plain lines, no time yet: the morning reset, whose proposal places
+        them once the routine is on)."""
         from thirties_core.today import TodayLinks, note_items
         if isinstance(items, str):
             items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
@@ -721,13 +741,23 @@ class AssistantTools(KindTools):
         on_today = {text.lower() for text, _ in note_items(note)}
         on_today |= {t.title.lower() for t in self.s.tasks if t.parent_note_id == note["id"]}
         added, already, queued = [], [], False
+        from thirties_core import if_time
+        untimed = timing == "untimed" or (timing == "auto" and if_time.asked_untimed(self.pt.user_message))
         for name in items or []:
             task = self._exact_task(str(name))  # only the same item links; anything else is new, as worded
             title = task.title if task is not None else str(name).strip()
             if title.lower() in on_today:
-                already.append(title)
+                if untimed and not if_time.is_listed(note, title):  # on Today with a line already: under the heading
+                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
+                                   "section": if_time.HEADING, "open_only": True})
+                    added.append(title)
+                else:
+                    already.append(title)
                 continue
-            status, msg = writer.submit({"op": "add_task", "note_id": note["id"], "title": title})
+            op = {"op": "add_task", "note_id": note["id"], "title": title}
+            if untimed:
+                op["section"] = if_time.HEADING
+            status, msg = writer.submit(op)
             if status in ("not_allowed", "failed"):
                 raise ToolError(msg)
             queued = queued or status == "queued"
@@ -742,10 +772,31 @@ class AssistantTools(KindTools):
         if added and self._db is not None:  # today's, never a leftover of an earlier day (carry.py)
             from thirties_core.carry import note_added_today
             note_added_today(self._db, self._today(), added)
+        timed, overflow = [], []
+        if added and timing == "auto" and not untimed and self.pt.is_current(self.pt.day_plan):
+            for title in added:  # each gets its time now, placed by Python; it moves only when the user moves it
+                if if_time.on_plan_today(self.pt, title, self._exact_task(title)) is not None:
+                    continue  # already on today's plan (scheduled first): it keeps that time
+                spot, doubled = if_time.place(self, title, self._exact_task(title))
+                if spot is None:
+                    overflow.append(title)
+                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
+                                   "section": if_time.HEADING, "open_only": True})
+                else:
+                    timed.append(f"{title} at {format_clock(spot)}" + (" (alongside another item)" if doubled else ""))
         parts = []
-        if added:
-            parts.append("Added to today's list: " + ", ".join(added) + (" (Joplin will get it when it's open)"
-                                                                            if queued else "") + ".")
+        later = " (Joplin will get it when it's open)" if queued else ""
+        if untimed and added:
+            parts.append(f"Under {if_time.HEADING} on today's list, with no time: " + ", ".join(added) + later + ".")
+        else:
+            plain = [t for t in added if t not in overflow and not any(x.startswith(t + " at ") for x in timed)]
+            if plain:
+                parts.append("Added to today's list: " + ", ".join(plain) + later + ".")
+            if timed:
+                parts.append("On today's plan: " + ", ".join(timed) + later + ".")
+        if overflow:
+            parts.append(f"Today is full, even doubled up, so {', '.join(overflow)} "
+                         f"{'is' if len(overflow) == 1 else 'are'} under {if_time.HEADING}.")
         if already:
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
@@ -2230,6 +2281,8 @@ class AssistantTools(KindTools):
             "mute_checkins": self.mute_checkins,
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
+            "if_there_is_time": lambda item="", action="", time=None, **_: __import__(
+                "thirties_core.if_time", fromlist=["act"]).act(self, item, action, time),
             "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,

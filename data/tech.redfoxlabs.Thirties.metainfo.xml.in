@@ -49,6 +49,8 @@
           <li>Private notes (tagged "private" in Joplin, or in a list named Medical, Health or Finance) go to Gemini as item titles only, never their contents</li>
           <li>Safer Joplin writes: a change never overwrites an edit you make in the note at the same moment, a change Joplin saved without answering is never applied twice, and a morning's tidy-up of Today that has to wait never runs on a later day</li>
           <li>Items keep who they are when you reword, reorder or move them in Joplin: their plans, Today links and history follow them; a finished copy of a repeated item no longer hides the next copy, and an item written again after it was done is a new item</li>
+          <li>Anything you add for today gets a time on the plan at once, in the first free time that fits; only when you say so ("if there's time", "no rush", "don't schedule it") does it go without one, under a new If there's time section at the end of the Agenda, the schedule message and the Today note</li>
+          <li>If there's time items can be done, scheduled in the next gap, or put off to tomorrow, later this week, or dropped; a full day puts new things there and says so, and what's left at the day's end comes back the next morning for this week</li>
         </ul>
       </description>
     </release>

@@ -92,8 +92,14 @@ LIST_TOOL_SPECS: List[Dict[str, Any]] = [
         "parameters": {"day": "The day, if not today."},
         "required": [],
     },
+    {
+        "name": "if_there_is_time_items",
+        "description": "Today's things under If there's time (no time: the user asked, or the day was full). Read-only.",
+        "parameters": {},
+        "required": [],
+    },
 ]
-LIST_READ_ONLY = {"dropbox_review", "triage_list", "pencilled_in"}
+LIST_READ_ONLY = {"dropbox_review", "triage_list", "pencilled_in", "if_there_is_time_items"}
 
 
 def _as_list(value: Any) -> List[str]:
@@ -515,15 +521,24 @@ class ListTools:
         if off:
             self.pt._save_plan_after_change()
         if self.pt.is_current(plan):
+            from thirties_core import if_time
+            if self.pt.user_message is not None and not if_time.asked_untimed(self.pt.user_message):
+                raise ToolError("Things for today get a time; only the user's own words ('if there's time', 'no rush', "
+                                "'pencil it in') leave one without. Schedule it instead.")
             self.a._day_begun(off + keep)
-            self.a.add_to_today(keep)
+            self.a._add_to_today(keep, "untimed")
             shown = [(self.a._exact_task(k) or TaskItem(id="", source_notebook="", title=k)).title for k in keep]
-            said = f"On today's list, no time yet: {', '.join(shown)}."
+            said = f"Under {if_time.HEADING} on today's list, no time: {', '.join(shown)}."
         elif plan.target_date > self.pt.today():
             said = add_ahead(self.a, keep)
         else:
             raise ToolError("That day is over.")
         return said + (f" Off the plan: {', '.join(off)}." if off else "")
+
+    def if_there_is_time_items(self, **_: Any) -> str:
+        from thirties_core import if_time
+        listed = if_time.items(self.a._today_note())
+        return ("If there's time:\n" + "\n".join(f"- {t}" for t in listed)) if listed else "Nothing under If there's time."
 
     def pencilled_in(self, **_: Any) -> str:
         from thirties_core.day_lists import pencilled_in
@@ -536,7 +551,8 @@ class ListTools:
         return {"edit_list_item": self.edit_list_item, "set_list_role": self.set_list_role,
                 "dropbox_review": self.dropbox_review, "reopen_item": self.reopen_item,
                 "triage_list": self.triage_list, "apply_triage_group": self.apply_triage_group,
-                "pencil_in": self.pencil_in, "pencilled_in": self.pencilled_in}
+                "pencil_in": self.pencil_in, "pencilled_in": self.pencilled_in,
+                "if_there_is_time_items": self.if_there_is_time_items}
 
 
 __all__ = ["ListTools", "LIST_TOOL_SPECS", "LIST_READ_ONLY", "rekey"]
