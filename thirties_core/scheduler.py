@@ -355,9 +355,15 @@ class StateDatabase:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM joplin_outbox WHERE id = ?", (op_id,))
 
-    def outbox_attempt(self, op_id: int, error: str) -> None:
+    def outbox_attempt(self, op_id: int, error: str, op: Optional[str] = None) -> None:
+        """One more try that failed; ``op``: the change as it now stands (what it sent, if Joplin went away)."""
         with self._get_connection() as conn:
-            conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?", (error, op_id))
+            if op is None:
+                conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?",
+                             (error, op_id))
+            else:
+                conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ?, op = ? WHERE id = ?",
+                             (error, op, op_id))
 
     def outbox_fail(self, op_id: int, error: str) -> None:
         with self._get_connection() as conn:

@@ -1005,7 +1005,8 @@ class RoutineTools:
         if steps and self.pt.is_current(self.pt.day_plan):
             today, writer = self.a._today_note(), self.a._writer()
             if today is not None and writer is not None:
-                writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
+                writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip(),
+                               "valid_until": self.a.valid_until()})  # today's group, today only
                 self.a._today_groups.pop((self.a._today().isoformat(), note["title"].strip().lower()), None)
         return f"{len(steps)} planned step{'s' if len(steps) != 1 else ''} off today's plan" if steps else ""
 

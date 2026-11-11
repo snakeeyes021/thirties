@@ -93,19 +93,23 @@ def _move_many(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
         return writer._edit_bodies([(op["note_id"], take_all),
                                     (op["to_note_id"], lambda b: ne.insert_lines(b, blocks, op.get("section")))])
     # A new note, beside the old one: read the old note, make the new one with the items, then take them out.
-    source = writer.api.get_note(op["note_id"], fields="id,title,body,parent_id")
+    source = writer.api.get_note(op["note_id"], fields="id,title,body,parent_id,updated_time")
     if not source or "body" not in source:
         return (False, "gone: the note isn't in Joplin any more.") if writer.api.ping() else \
             (False, "Couldn't read the note from Joplin.")
     rest = take_all(source["body"])
     if rest is None:
         return False, "gone: an item isn't in the note any more (it was changed in Joplin)."
+    still = writer._unchanged(source)  # never write over an edit made meanwhile
+    if not still:
+        return False, ("The note changed while Thirties wrote to it; it'll try again." if still is False
+                       else "Couldn't read the note from Joplin.")
     body = "\n".join(blocks) + "\n"
     made = writer.api.create_note(op["new_title"], body, parent_id=source.get("parent_id") or None)
     if not made or "id" not in made:
         return False, "Joplin didn't make the new note."
     writer._edits.append((made["id"], op["new_title"], "", body))
-    if not writer.api.update_note(op["note_id"], {"body": rest}):
+    if writer._put(op["note_id"], source["body"], rest) != "landed":
         # Parked, never retried: a retry would make a second new note. The log shows the half-done change.
         return False, "gone: half done (the new note was made, but the items couldn't be taken out of the old one)."
 

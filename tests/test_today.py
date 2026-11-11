@@ -333,6 +333,17 @@ class TestMorning(TodayTestCase):
         args = {"title": title, "start": start, "duration": "30 min", "day": (DAY - timedelta(days=1)).isoformat()}
         self.t.execute("add_event", {**args, **extra})
 
+    def test_the_morning_reset_is_meant_for_this_day_only(self):
+        """If Joplin can't take the morning's changes now, they never run on a later day."""
+        from datetime import datetime
+        from thirties_core.joplin_writeback import WriteLog
+        self.t.assistant.start_the_day()
+        reset = [w["op"] for w in WriteLog(self.sched.state_db).since()
+                 if w["op"]["op"] in ("untick_all", "clear_ticked", "remove")]
+        self.assertEqual({o["op"] for o in reset}, {"untick_all", "clear_ticked", "remove"})
+        for o in reset:
+            self.assertEqual(datetime.fromisoformat(o["valid_until"]), self.t.day_plan.day_end)
+
     def test_routines_start_unticked_and_leftovers_leave_today(self):
         self.t.assistant.start_the_day()
         self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] Journal\n")
