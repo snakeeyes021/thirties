@@ -228,6 +228,8 @@ Thirties/
     ├── test_*.py                      # Standard unit test suite
     ├── fixtures.py                    # Shared test fixtures (a scheduler on a temp DB for a fixed day)
     ├── frontier_eval.py               # Live-model "real day" scenarios, checked deterministically on the schedule
+    ├── study.py                       # Studies: one question per run, people with a running inner state, frictions and a one-page report
+    ├── studies/                       # Study files: the question, the change tested, the days and the budget
     ├── sim_eval.py                    # Gemini role-plays the user (hidden goals) vs either brain, then judges
     ├── interactive_eval.py            # Turn-by-turn stepping with state deltas; an agent or human is the judge
     └── legacy_slm/                    # Pre-span SLM harnesses: source material only, they do not run

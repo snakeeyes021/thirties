@@ -1,0 +1,28 @@
+{
+  "id": "morning_late_wake",
+  "question": "Does the morning give exactly one message, with the routines on, when the person wakes up late?",
+  "change": "The morning built in the person's first turn (one message), on 0.3's safe Joplin writes and item ids",
+  "why": "A late start is where a second morning message or a missing routine is most likely: the background job and the first turn both want to start the day.",
+  "brain": "slm",
+  "budget": {"days": 6, "calls": 320},
+  "scenarios": [
+    {"script": "new_dog_owner_vet_wfh", "wake": "09:30",
+     "beats": ["09:30 You overslept by three hours: the dog needs out now and work starts in minutes."],
+     "why": "a routine and work, with the morning squeezed"},
+    {"script": "language_learner_tutor_mixer", "wake": "10:15",
+     "beats": ["10:15 You slept through two alarms and feel groggy."],
+     "why": "a routine, then a fixed tutoring time"},
+    {"script": "remote_support_fixed_shift", "wake": "08:50",
+     "beats": ["08:50 Woke ten minutes before your shift; no time for the usual morning."],
+     "why": "a fixed shift that can't move"},
+    {"script": "caregiver_elderly_parent", "wake": "09:45",
+     "beats": ["09:45 Up late after a bad night with your parent; tired."],
+     "why": "a routine for someone else's care"},
+    {"script": "retiree_library_volunteer", "wake": "09:00",
+     "beats": ["09:00 You slept in, unusually, and the morning walk feels off now."],
+     "why": "a relaxed day with nothing fixed until later"},
+    {"script": "medical_resident_day_off", "wake": "12:10",
+     "beats": ["12:10 Woke after noon on your day off and you're fine with it."],
+     "why": "a very late start on a day off: the routine still belongs, the morning doesn't"}
+  ]
+}
