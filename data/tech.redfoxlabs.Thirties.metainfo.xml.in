@@ -41,6 +41,11 @@
   </branding>
 
   <releases>
+    <release version="0.3.0" date="2026-11-11" type="development">
+      <description>
+        <p>In progress.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-11" type="development">
       <description>
         <p>Dropping an item no longer changes your lists:</p>
