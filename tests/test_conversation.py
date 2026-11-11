@@ -1,5 +1,6 @@
 """Unit tests for ConversationManager and the FrontierBrain turn loop."""
 
+from tests.fixtures import temp_dir
 import unittest
 
 from tests.fixtures import DAY, TZ, at, event, make_scheduler, occupant
@@ -360,7 +361,7 @@ class TestFreshLists(unittest.TestCase):
         from unittest.mock import MagicMock
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
-        db = Path(tempfile.mkdtemp()) / "database.sqlite"
+        db = Path(temp_dir("thirties_tmp_")) / "database.sqlite"
         db.write_text("")
         joplin = MagicMock()
         joplin.config.resolve_joplin_db_path.return_value = db

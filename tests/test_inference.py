@@ -1,5 +1,6 @@
 """Unit tests for thirties_core.inference."""
 
+from tests.fixtures import temp_dir
 import json
 import subprocess
 import sys
@@ -145,7 +146,7 @@ class TestTransports(unittest.TestCase):
         sleep.assert_not_called()
 
     def setUp(self) -> None:
-        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(tempfile.mkdtemp()) / "agy_calls.log")
+        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(temp_dir("thirties_tmp_")) / "agy_calls.log")
         self.ledger = ledger.start()
         self.addCleanup(ledger.stop)
 

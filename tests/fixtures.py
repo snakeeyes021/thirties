@@ -29,10 +29,24 @@ def event(eid: str, start: str, end: str, summary: Optional[str] = None, invite:
     )
 
 
+_TEMP_DIRS: List[str] = []
+
+
+def temp_dir(prefix: str) -> str:
+    """A temporary directory that's removed when the test run ends (the suite used to leave thousands behind)."""
+    path = tempfile.mkdtemp(prefix=prefix)
+    if not _TEMP_DIRS:
+        import atexit
+        import shutil
+        atexit.register(lambda: [shutil.rmtree(p, ignore_errors=True) for p in _TEMP_DIRS])
+    _TEMP_DIRS.append(path)
+    return path
+
+
 def make_scheduler(events: Optional[List[CalendarEvent]] = None, db_path: Optional[Path] = None) -> DeterministicScheduler:
     cfg = ThirtiesConfig()
     cfg.general.timezone = "America/New_York"
-    db = StateDatabase(db_path or Path(tempfile.mkdtemp(prefix="thirties_test_")) / "state.sqlite")
+    db = StateDatabase(db_path or Path(temp_dir("thirties_test_")) / "state.sqlite")
     return DeterministicScheduler(config=cfg, state_db=db, calendar_engine=MockCalendarEngine(list(events or [])))
 
 

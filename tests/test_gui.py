@@ -747,8 +747,9 @@ class SetupAndPreferencesTests(unittest.TestCase):
         from unittest import mock
         from thirties_core.app_core import AppCore
         from thirties_core.config import ThirtiesConfig
-        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tempfile.mkdtemp(prefix="thirties_gui_data_"),
-                                           "THIRTIES_JOPLIN_PEER_HOME": tempfile.mkdtemp(prefix="thirties_gui_peer_")})
+        from tests.fixtures import temp_dir
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": temp_dir("thirties_gui_data_"),
+                                           "THIRTIES_JOPLIN_PEER_HOME": temp_dir("thirties_gui_peer_")})
         env.start()
         self.addCleanup(env.stop)
         self.core = AppCore(use_keyring=False, config=ThirtiesConfig())

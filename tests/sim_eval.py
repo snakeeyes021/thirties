@@ -680,7 +680,8 @@ def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: Li
     cfg.assistant.brain = brain
     cfg.sync.enabled = False
     events = (synthetic_calendar(scn.day) if scn.background_calendar else []) + list(scn.extra_events)
-    sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp(prefix="sim_")) / "state.sqlite"),
+    from tests.fixtures import temp_dir
+    sched = DeterministicScheduler(cfg, StateDatabase(Path(temp_dir("sim_")) / "state.sqlite"),
                                    MockCalendarEngine(events))
     plan, pending = sched.build_day_plan(scn.day)
     hidden = {h.lower() for h in scn.hide_tasks}
