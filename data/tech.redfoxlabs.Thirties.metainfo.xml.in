@@ -41,6 +41,16 @@
   </branding>
 
   <releases>
+    <release version="0.2.1" date="2026-11-11" type="development">
+      <description>
+        <p>Dropping an item no longer changes your lists:</p>
+        <ul>
+          <li>A drop only stops an item rolling over: it stays on its list in Joplin, unticked, and can be planned again; the Archive in Before today keeps the record</li>
+          <li>An item is taken off its list only when you ask for that outright ("archive it", "delete it")</li>
+          <li>Items dropped earlier, when a drop still took them off their lists, are offered back once in Before today</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-08" type="development">
       <description>
         <p>Mornings that start when you do, and a day that simply is the plan:</p>
