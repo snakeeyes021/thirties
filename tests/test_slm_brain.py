@@ -315,7 +315,7 @@ class TestSchedulingActions(SlmTestCase):
 
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
-        self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour
+        self.assertIn("4:40 PM – 5:40 PM", out)  # the user's now is this minute: never rounded into the past
 
     def test_invented_add_is_dropped_and_missing_move_becomes_add(self):
         out = self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"},
@@ -612,9 +612,11 @@ class TestFromTheMilestoneRun(SlmTestCase):
     def test_starting_something_isnt_finishing_it(self):
         self.say("laundry at 5", {"type": "add", "title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
         out = self.say("starting laundry now", {"type": "outcome", "target": "laundry", "status": "done"})
-        self.assertEqual(out, "Got it, Laundry is underway.")
+        self.assertTrue(out.startswith("Got it, Laundry is underway: moved to 4:40 PM – 5:40 PM."), out)  # the plan follows
         laundry = next(s for s in self.m.day_plan.spans if s.title == "Laundry")
         self.assertEqual(laundry.status.value, "planned")
+        out = self.say("still on laundry", {"type": "outcome", "target": "laundry", "status": "started"})
+        self.assertEqual(out, "Got it, Laundry is underway.")  # already running: nothing moves
 
     def test_done_words_win_over_starting_words(self):
         from thirties_core.brains.slm.brain import FINISHED_RE, STARTING_RE

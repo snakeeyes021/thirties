@@ -97,6 +97,15 @@ class DialogState:
                    dict(data.get("awaiting_time", {})))
 
 
+_ID_RE = re.compile(r"\s*\[id [^\]]*\]")  # an item id in a tool result: never in a reply
+FUTURE_DONE_SLACK = timedelta(minutes=10)  # "done" that ends later than this from now is a plan, not a report
+PAST_DAY_SAID_RE = re.compile(r"\b(yesterday|last night|the other day|the day before)\b", re.IGNORECASE)
+# A message that asks for something to go: without one of these, a removal the parse returned is dropped (naming an
+# appointment to plan around it is no reason to take it off)
+REMOVE_ASKED_RE = re.compile(
+    r"\b(remove|delete|drop|cancel(?:led|ed)?|scrap|skip(?:ping)?|ditch|nix|forget|clear|decline|take (?:it |that )?off|"
+    r"get rid|no longer|not (?:going|doing|happening)|won'?t (?:make|be|do|go)|can'?t (?:make|go|do)|called off|"
+    r"isn'?t happening|off the (?:plan|schedule|list)|don'?t need)\b", re.IGNORECASE)
 PUSH_BY_RE = re.compile(r"\b(?:back|later)\s+(?:by\s+)?((?:an?|one|two|three|four|five|half an?|\d+(?:\.\d+)?)\s*"
                         r"(?:hours?|hrs?|minutes?|mins?|chunks?|blocks?)(?:\s+and\s+a\s+half)?)\b", re.I)
 REDRAW_RE = re.compile(r"\b(re-?plan|redraw|re-?do (the|my) (plan|day|schedule)|push (everything|it all|the rest)"
@@ -263,6 +272,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         except Exception as e:  # never leave the user without an answer
             logger.exception("[SlmBrain] failed handling %r", user_text)
             reply = f"Sorry, something went wrong on my side ({e}). Could you try saying that another way?"
+        reply = _ID_RE.sub("", reply)  # ids are for the tools, never for the person
         self.messages.append({"role": "assistant", "content": reply, "slm_state": self.state.to_dict(),
                               "slm_actions": [{"type": a.type, **a.fields} for a in actions]})
         return reply
@@ -370,6 +380,8 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 return work.end_dt
         if raw in ("now", "right now", "asap", "next"):
             now = self._now()
+            if recent_past or raw in ("now", "right now"):  # the user's now: this minute, never rounded into the past
+                return now.replace(second=0, microsecond=0)
             return now.replace(minute=0 if now.minute < 15 else (30 if now.minute < 45 else 0), second=0,
                                microsecond=0) + (timedelta(hours=1) if now.minute >= 45 else timedelta())
         try:
@@ -518,8 +530,17 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                     a.fields["push"] = True
             # The model often spells "slide" as shifting each later item; the push does that properly.
             actions = [a for a in actions if not (a.type == "move" and a.get("shift"))]
+        # what this message reports done: an add in the same message that only restates one of them is the same
+        # thing, not a new one ("stripped the sheets" done, then "wash and change the sheets" added)
+        done_now = [{_stem(w) for w in _words(a.get("target") or "")} for a in actions
+                    if a.type == "outcome" and (a.get("status") or "done") in ("done", "partial")]
+        done_now = [d for d in done_now if len(d) >= 2]
         kept: List[Action] = []
         for a in actions:
+            if a.type == "add" and not again and any(d <= {_stem(w) for w in _words(a.get("title") or "")}
+                                                     for d in done_now):
+                logger.info("[SlmBrain] dropping an add of something just reported done: %s", a.fields)
+                continue
             if a.type in ("add", "move"):
                 bare = re.fullmatch(r"\s*(\d{1,2}(?::\d{2})?)\s*(am|pm|a\.m\.|p\.m\.)?\s*", str(a.get("duration") or ""), re.IGNORECASE)
                 if bare and (":" in bare.group(1) or bare.group(2) or int(bare.group(1)) <= 12):
@@ -531,6 +552,9 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             elif starts_no and a.type == "outcome" and a.get("status") == "skipped" and \
                     not self._span_candidates(a.get("target") or ""):
                 a = Action("reject", {})  # "nah" to a suggestion, not a report about the day
+            if a.type in ("move", "remove", "outcome") and str(a.get("day") or "").strip().lower() in (
+                    "yesterday", "last night") and not PAST_DAY_SAID_RE.search(lowered):
+                a.fields.pop("day", None)  # the parse said yesterday; the person didn't
             if a.type == "outcome":
                 for wrong, right in (("start", "started"), ("end", "finished")):
                     if a.get(wrong) and not a.get(right):
@@ -555,6 +579,9 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 if not (target_words & said) and not (SpanCategory.WORK in cats and day_off):
                     logger.info("[SlmBrain] dropping a removal the user didn't mention: %s", a.fields)
                     continue
+            if a.type == "remove" and not clear_all and not day_off and not REMOVE_ASKED_RE.search(lowered):
+                logger.info("[SlmBrain] dropping a removal the user didn't ask for: %s", a.fields)
+                continue
             placed = any(a.get(k) for k in ("start", "end", "after", "before", "duration"))
             if a.type == "add" and placed and not again and not a.get("day") and not a.get("alongside"):
                 same = [s for s in self.tools.day_plan.spans_in_view()
@@ -1013,7 +1040,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 pass
             ok, out, slot = self._place_in_window(title, minutes, stated, self._now())
             if ok:
-                return out, True
+                return self._added_line(out), True
             return (f"There's no room for {title} between {format_clock(stated[0])} and "
                     f"{format_clock(stated[1])}."), False
         if not a.get("start") and not anchor_ref:
@@ -1142,7 +1169,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 (f", after {' and '.join(before)}." if before else ".")
         m = re.match(r"Added (.+?), (.+? – .+?) \((.+?)\)", out)
         if not m:
-            return out
+            return self._humane(out)
         length = m.group(3)
         if self._user_unit():
             try:
@@ -1201,10 +1228,18 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             found = self._span_candidates(ref)
         finally:
             self.tools.day_plan = saved
+        if not found and a.get("day"):
+            found = self._span_candidates(ref)  # tagged with another day it isn't on: the one it is on, today
+            if found:
+                a.fields.pop("day", None)
         if not found and not a.get("day"):
             found, day = self._find_on_other_day(ref)
             if found:
                 a.fields["day"] = day
+        if found and a.type in ("move", "remove"):
+            named = [s for s in found if s.title.strip().lower() == ref.strip().lower() or s.id == ref]
+            if not named:  # a near name: only what's still to happen, never something done or skipped
+                found = [s for s in found if s.status == SpanStatus.PLANNED]
         if not found:
             return None, f"I don't see {ref or 'that'} on the schedule."
         if len(found) > 1:
@@ -1387,6 +1422,24 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         return [s for s in self.tools.day_plan.spans_in_view()
                 if not s.is_envelope and s.source != "calendar" and s.title.strip().lower() in text]
 
+    def _underway(self, span: EventSpan, said: Any) -> Tuple[str, bool]:
+        """Something has started: if it was planned for another time, it moves to start when it did (its length
+        kept), so the plan matches what's happening."""
+        try:
+            t = self._loose_time(said, prefer_future=False, recent_past=True) if said else None
+        except ClockError:
+            t = None
+        t = t or self._now().replace(second=0, microsecond=0)
+        self._remember(span)
+        if span.start_dt <= t < span.end_dt:
+            return f"Got it, {span.title} is underway.", False
+        ok, out = self._run("update_event", {"event": span.id, "start": self._clock_arg(t)})
+        if not ok:
+            return f"Got it, {span.title} is underway. I couldn't move it to now: {out}", False
+        moved = self.tools.day_plan.get_span(span.id) or span
+        return (f"Got it, {span.title} is underway: moved to {format_clock(moved.start_dt)} – "
+                f"{format_clock(moved.end_dt)}."), True
+
     def _do_outcome(self, a: Action) -> Tuple[str, bool]:
         ref = a.get("target") or a.get("title") or ""
         if ref.strip().lower() in COLLECTIVE:  # "both happened", "all of those are done"
@@ -1409,9 +1462,12 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             return f"{found[0].title} is on your calendar, so there's nothing to check off.", False
         found = [s for s in found if not s.is_envelope and s.source != "calendar"]
         message = getattr(self, "_message", "") or ""
-        if (a.get("status") or "done") == "done" and self._just_starting(message, ref):
-            name = found[0].title if len(found) == 1 else ref
-            return f"Got it, {name} is underway.", False  # starting something isn't finishing it
+        status = a.get("status") or "done"
+        if status == "started" or (status == "done" and self._just_starting(message, ref)):
+            if len(found) == 1:  # starting something isn't finishing it
+                return self._underway(found[0], a.get("started"))
+            if not found:
+                return f"I don't see {ref or 'that'} on the schedule.", False
         open_found = [s for s in found if s.status == SpanStatus.PLANNED]  # a tie: the ones not marked yet
         if len(found) > 1 and len(open_found) == 1:
             found = open_found
@@ -1430,8 +1486,18 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             args["duration"] = a.get("duration")
         if not (args.get("started") and args.get("finished")) and (args.get("started") or args.get("finished")):
             args["estimated"] = True
+        if args["status"] == "done" and args.get("finished") and len(found) == 1:
+            try:
+                ends = self._loose_time(args["finished"], prefer_future=False, recent_past=True)
+            except ClockError:
+                ends = None
+            if ends is not None and ends > self._now() + FUTURE_DONE_SLACK:  # "done by 2:30", said at 11: a plan
+                self._remember(found[0])
+                return f"Got it: {found[0].title} isn't done yet, so it stays on the plan.", False
         ok, out = self._run("log_outcome", args)
         if not ok:
+            if len(found) == 1:  # it's there: say what actually stopped it
+                return f"I couldn't mark {found[0].title}: {out}", False
             return f"I couldn't find {ref} on today's plan to mark it.", False
         status = args["status"]
         name = found[0].title if len(found) == 1 else ref
