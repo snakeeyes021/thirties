@@ -65,6 +65,26 @@ class RollTest(TodayTestCase):
         left = settle(self.t.assistant, DAY)
         self.assertEqual(left.get("deadlines_moved"), [])
 
+    def test_a_mark_in_the_items_own_text_counts(self):
+        from thirties_core.carry import settle
+        from thirties_core.deadlines import marked_repeat
+        self.assertEqual(marked_repeat("Renew the parking permit (quarterly)"), "quarterly")
+        self.assertEqual(marked_repeat("Quarterly-ish chores"), "")  # only the explicit mark, never the wording
+        task = next(t for t in self.services.tasks if t.id == "t_permit")
+        task.title = "Renew the parking permit (quarterly)"
+        moved = settle(self.t.assistant, DAY)["deadlines_moved"]
+        self.assertEqual([m["due"] for m in moved], ["2026-12-31"])
+
+    def test_the_miss_is_recorded_for_the_statistics(self):
+        import json
+        from thirties_core.carry import settle
+        from thirties_core.deadlines import MISSED_KEY
+        self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "quarterly"})
+        settle(self.t.assistant, DAY)
+        missed = json.loads(self.sched.state_db.get_sync_meta(MISSED_KEY))
+        self.assertEqual([(m["item"], m["due"]) for m in missed], [("t_permit", "2026-09-30")])
+        self.assertEqual(self.sched.state_db.get_task_history("t_permit").deferred_count, 1)
+
     def test_repeats_is_only_what_the_user_said(self):
         out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "fortnightly"})
         self.assertTrue(out.startswith("NOT_DONE"), out)

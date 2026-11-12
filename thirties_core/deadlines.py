@@ -1,12 +1,15 @@
 """Deadlines that come round again: a missed one moves to the next, with time to prepare planned before it.
 
-Some deadlines repeat: a filing window every quarter, a renewal every year. The user says so (set_item_facts with
-``repeats``: monthly, quarterly or yearly), and the item keeps it; Python never guesses it from the wording.
+Some deadlines repeat: a window every quarter, a renewal every year. The user says so (set_item_facts with
+``repeats``: monthly, quarterly or yearly), or the item's own text marks it ("(quarterly)"), and the item keeps
+it; Python never guesses it from the rest of the wording. Unknown, a missed deadline is like any other: the item
+goes to Before today.
 
 When such a deadline passes with the item still open, it doesn't end and isn't dropped. Python:
 
 - moves its deadline to the same point in the next period (the next quarter's, say; further on if more than one
   has passed);
+- records the miss, for the statistics (put off once more, and what was missed when);
 - plans the time to prepare backwards from it: an intense week, a session each day there's room (budgets.py),
   starting a month before the new deadline, or a third of the period if that's shorter (ten days for a monthly
   one). For a quarter, that's about two months out.
@@ -17,7 +20,9 @@ The morning says where it went, so the user can correct it (the model can move t
 from __future__ import annotations
 
 import calendar
+import json
 import logging
+import re
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -26,7 +31,17 @@ logger = logging.getLogger(__name__)
 STEP_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
 PREP_LEAD_DAYS = 30      # the prep week starts this long before the deadline, or a third of the period if shorter
 PREP_SESSIONS = 7        # an intense week: a session each day it has room
-PREP_MINUTES = 60        # each, unless the item has a usual length
+PREP_MINUTES = 60        # each, unless the item has a usual length (said, or from its history)
+MISSED_KEY = "deadlines_missed"   # sync meta: [{"item", "title", "due", "noticed"}], for the statistics
+MARK_RE = re.compile(r"\((monthly|quarterly|yearly|annually|every (month|quarter|year))\)", re.IGNORECASE)
+_MARKS = {"monthly": "monthly", "quarterly": "quarterly", "yearly": "yearly", "annually": "yearly",
+          "every month": "monthly", "every quarter": "quarterly", "every year": "yearly"}
+
+
+def marked_repeat(title: str) -> str:
+    """A repeat the item's own text states, "(quarterly)"; "" otherwise."""
+    m = MARK_RE.search(title or "")
+    return _MARKS.get(m.group(1).lower(), "") if m else ""
 
 
 def add_months(d: date, months: int) -> date:
@@ -86,7 +101,7 @@ def roll_missed(assistant, day: date) -> List[Dict[str, Any]]:
             continue
         if due >= day:
             continue
-        repeats = facts.for_item(t.title).repeats
+        repeats = facts.for_item(t.title).repeats or marked_repeat(t.title)
         nxt = next_deadline(due, repeats, day - timedelta(days=1)) if repeats else None
         if nxt is None:
             continue
@@ -97,8 +112,10 @@ def roll_missed(assistant, day: date) -> List[Dict[str, Any]]:
             t.due = nxt.isoformat()
             planner = planner or HorizonPlanner(assistant.pt)
             week = prep_week(nxt, day, planner.week_start, repeats)
-            minutes = facts.for_item(t.title).minutes or PREP_MINUTES
+            typical = assistant.typical_duration(t.title) if assistant.pt.scheduler else None
+            minutes = facts.for_item(t.title).minutes or (int(typical) if typical else 0) or PREP_MINUTES
             planner.pin(t, week, PREP_SESSIONS, minutes)
+            _record_miss(db, t, due, day)
         except Exception as e:  # one item's trouble never stops the morning
             logger.warning("Couldn't move %s to its next deadline: %s", t.title, e)
             continue
@@ -106,8 +123,19 @@ def roll_missed(assistant, day: date) -> List[Dict[str, Any]]:
     return out
 
 
+def _record_miss(db, task, due: date, noticed: date) -> None:
+    """The miss, for the statistics: put off once more, and the deadline that passed."""
+    try:
+        db.record_task_deferred(task.id)
+        missed = json.loads(db.get_sync_meta(MISSED_KEY) or "[]")
+        missed.append({"item": task.id, "title": task.title, "due": due.isoformat(), "noticed": noticed.isoformat()})
+        db.set_sync_meta(MISSED_KEY, json.dumps(missed[-200:]))
+    except Exception as e:
+        logger.warning("Couldn't record the missed deadline of %s: %s", task.title, e)
+
+
 def moved_text(moved: List[Dict[str, Any]], today: date, week_start: int = 0, short=lambda t: t) -> str:
-    """The morning's word on them: "Quarterly filing: next deadline Dec 31; a prep week from Nov 23."."""
+    """The morning's word on them: "Permit renewal: next deadline Dec 31; a prep week from Dec 1."."""
     lines = []
     for m in moved:
         due, prep = date.fromisoformat(m["due"]), date.fromisoformat(m["prep"])
