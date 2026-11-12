@@ -615,7 +615,11 @@ class Candidate:
         return {k: v for k, v in self.__dict__.items() if k != "task"}
 
 
-_SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0}
+_SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0,
+                 "someday": 5.0}
+# A year plan also offers a few someday items, so they're looked at once a year rather than never. Which ones turns
+# over each year (a stable shuffle by year), so over the years each gets its turn.
+SOMEDAY_PER_YEAR = 2
 
 
 class HorizonPlanner:
@@ -1002,6 +1006,15 @@ class HorizonPlanner:
                 add(t, "belongs", HORIZON_WHY[h])
             elif above and h == above:
                 add(t, "upper", HORIZON_WHY[h])
+
+        # 6. a year: a few someday items, so they're looked at once a year (which ones turns over by year)
+        if p.level == "year":
+            import hashlib
+            someday = [t for t in tasks.values() if t.id not in placed_elsewhere and not t.id.startswith("media:")
+                       and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"]
+            someday.sort(key=lambda t: hashlib.sha1(f"{p.start.year}|{t.id}".encode()).hexdigest())
+            for t in someday[:SOMEDAY_PER_YEAR]:
+                add(t, "someday", "someday: worth a look this year?")
 
         for c in out.values():
             c.carried = carried.get(c.task_id, 0)

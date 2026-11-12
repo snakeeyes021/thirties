@@ -290,6 +290,25 @@ class TestBubblingDown(PlannerCase):
         TodayLinks(self.sched.state_db).link("File the taxes", self.tasks[6])
         self.assertEqual(self.ids(candidates_for_day(self.t)), [])
 
+    def test_a_year_plan_offers_a_few_someday_items_and_turns_them_over(self):
+        from thirties_core.horizons import SOMEDAY_PER_YEAR
+        self.tasks += [item(f"maybe{i}", f"Someday thing {i}", someday=True) for i in range(6)]
+        self.build()
+        year = parse_period("this year", DAY)
+        offered = [c for c in self.hp.candidates(year, limit=None) if c.source == "someday"]
+        self.assertEqual(len(offered), SOMEDAY_PER_YEAR)
+        self.assertTrue(all(c.why == "someday: worth a look this year?" for c in offered))
+        self.assertNotIn("lamp", self.ids(offered))  # reference lists stay out
+        rest = [c for c in self.hp.candidates(year, limit=None) if c.source != "someday"]
+        self.assertLess(max(c.score for c in offered), min(c.score for c in rest))  # last, after everything else
+        seen = set()
+        for y in range(2027, 2032):  # over the years, each gets its turn
+            seen |= {c.task_id for c in self.hp.candidates(parse_period(str(y), DAY), limit=None)
+                     if c.source == "someday"}
+        self.assertGreater(len(seen), 4, seen)
+        week = parse_period("this week", DAY)
+        self.assertFalse([c for c in self.hp.candidates(week, limit=None) if c.source == "someday"])  # a year only
+
     def test_done_long_ago_and_open_again_is_a_new_round(self):
         self.hp.pin(self.tasks[0], parse_period("this week", DAY))
         self.sched.state_db.record_task_completed("door", DAY - timedelta(days=60))
