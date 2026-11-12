@@ -46,6 +46,8 @@ from thirties_core.scheduler import DeterministicScheduler
 logger = logging.getLogger(__name__)
 
 NOT_DONE = "NOT_DONE"
+# The user saying the time is now ("starting it now", "right now"): that minute is theirs, never rounded.
+_NOW_SAID_RE = re.compile(r"\b(?:right )?now\b|\bjust (?:started|starting|began|got going)\b", re.IGNORECASE)
 
 
 # Tool contract shared by every brain. Times are clock strings like "4:30 PM";
@@ -435,7 +437,11 @@ class PlanTools:
         if not self.user_message or dt.minute in (0, 30):
             return False
         from thirties_core.clock import real_times
-        return ((dt.hour % 12) or 12, dt.minute) in real_times(self.user_message)
+        if ((dt.hour % 12) or 12, dt.minute) in real_times(self.user_message):
+            return True
+        # "starting it now": the current minute is a time the user gave, not one Thirties picked
+        now = self._now().replace(second=0, microsecond=0)
+        return dt.replace(second=0, microsecond=0) == now and bool(_NOW_SAID_RE.search(self.user_message))
 
     def _keep_to_blocks(self, start: datetime, end: datetime) -> Tuple[datetime, datetime]:
         """A flexible item Thirties places keeps to blocks (10-28 and 10-29: items placed at odd

@@ -375,5 +375,26 @@ class TestReadOnlyAndCalendar(unittest.TestCase):
         self.assertEqual(delta.total_changes, 2)
 
 
+class TestNowIsTheUsersTime(unittest.TestCase):
+    """Shared core: "starting it now" put the item on the next half hour (Thirties rounds only times it picks)."""
+
+    def test_now_said_by_the_user_is_kept(self):
+        from tests.fixtures import at, build_day
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.plan_tools import PlanTools
+        set_debug_time(at("16:40"))
+        self.addCleanup(set_debug_time, None)
+        sched, plan, events = build_day()
+        t = PlanTools(plan, events, sched)
+        t.execute("add_event", {"title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
+        t.user_message = "starting the laundry now"
+        t.execute("update_event", {"event": "Laundry", "start": "4:40 PM"})
+        s = next(s for s in t.day_plan.spans if s.title == "Laundry")
+        self.assertEqual((s.start_dt, s.end_dt), (at("16:40"), at("17:40")))
+        t.user_message = "laundry later"
+        t.execute("update_event", {"event": "Laundry", "start": "4:50 PM"})
+        self.assertEqual(next(s for s in t.day_plan.spans if s.title == "Laundry").start_dt.minute % 30, 0)  # a time it picks keeps to blocks
+
+
 if __name__ == "__main__":
     unittest.main()
