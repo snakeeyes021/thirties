@@ -85,6 +85,40 @@ class TestBrokenTool(ConversationTestCase):
         self.assertEqual(sorted((s.id, s.start_dt) for s in tools.day_plan.spans), before)
 
 
+class TestRefusalChangesNothing(ConversationTestCase):
+    def test_a_change_that_fails_halfway_is_undone(self):
+        """update_event could change part of an item and then refuse, leaving the half change."""
+        from thirties_core.assistant_tools import ToolError
+        tools = self.manager.tools
+        tools.execute("add_event", {"title": "Repaint the shed door", "start": "5:00 PM", "duration": "1 hour"})
+        door = next(s for s in tools.day_plan.spans if s.title == "Repaint the shed door")
+        before = (door.title, door.start_dt, door.end_dt)
+
+        def refuses(*a, **k):
+            raise ToolError("it can't go there")
+        # pushing what follows refuses after the item's title and times were already changed
+        with patch.object(type(tools), "_push_wanted", lambda *a, **k: True), \
+                patch.object(type(tools), "_push_following", refuses):
+            out = tools.execute("update_event", {"event": door.id, "title": "Paint the shed door", "start": "6:00 PM",
+                                                 "push_later": True})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        door = next(s for s in tools.day_plan.spans if s.id == door.id)
+        self.assertEqual((door.title, door.start_dt, door.end_dt), before)
+
+
+class TestShiftKeepsARealTime(ConversationTestCase):
+    def test_a_time_the_user_gave_survives_a_shift(self):
+        """A 7:15 item shifted an hour later went to 8:30 instead of 8:15."""
+        from tests.fixtures import at
+        tools = self.manager.tools
+        tools.user_message = "stretching at 7:15"
+        tools.execute("add_event", {"title": "Stretching", "start": "7:15 PM", "duration": "30 min"})
+        tools.user_message = "push stretching back an hour"
+        tools.execute("update_event", {"event": "Stretching", "shift": "+1 hour"})
+        s = next(s for s in tools.day_plan.spans if s.title == "Stretching")
+        self.assertEqual(s.start_dt, at("20:15"))
+
+
 class TestPhantomDone(ConversationTestCase):
     def test_done_with_two_matches_asks_which(self):
         """Saying done with a name matching two items recorded a new item and left both open."""

@@ -893,7 +893,10 @@ class PlanTools:
             new_start, new_end, kept = self._constraints_kept(span.title, span.id, new_start, new_end)
         self._kept_note = kept
 
-        if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt:
+        # a shift of a real time (one off the half hours: Thirties only picks block times) keeps it real: 7:15 an
+        # hour later is 8:15, not 8:30
+        shifted_real = shift not in (None, "") and start in (None, "") and span.start_dt.minute not in (0, 30)
+        if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt and not shifted_real:
             new_start, new_end = self._keep_to_blocks(new_start, new_end)  # a new length alone keeps the start
         if start not in (None, "") and shift in (None, "") and not self._is_fixed(span):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
@@ -1561,6 +1564,9 @@ class PlanTools:
                 result = f"{result}{guard_note}"
             return self.shorten(result) if outermost else result  # items by their short titles (11-07)
         except (ToolError, ClockError) as e:
+            # a refusal changes nothing: anything the tool changed before it refused is put back
+            if before is not None and [s.to_dict() for s in self.day_plan.spans] != before:
+                self._roll_back(before)
             return self.shorten(f"{NOT_DONE}: {e}") if outermost else f"{NOT_DONE}: {e}"
         except TypeError as e:
             if before is not None:
