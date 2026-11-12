@@ -41,9 +41,9 @@
   </branding>
 
   <releases>
-    <release version="0.3.0" date="2026-11-11" type="development">
+    <release version="0.3.0" date="2026-11-12" type="development">
       <description>
-        <p>In progress.</p>
+        <p>Plans across weeks, months and years, a day that sorts out what was missed, and safer, quieter daily use.</p>
         <ul>
           <li>Nothing very sensitive goes to Gemini: passwords, PINs, keys and codes, card and bank numbers, ID numbers, and medication or diagnosis names are swapped for placeholders before a message leaves the computer, and put back in the reply</li>
           <li>Private notes (tagged "private" in Joplin, or in a list named Medical, Health or Finance) go to Gemini as item titles only, never their contents</li>
@@ -56,6 +56,22 @@
           <li>The first message of the day, if it goes out late because the computer was asleep, says the wake-up or sunrise time as past, never as the time now</li>
           <li>Windows and order you state for today's items ("before the 4:00 call", "only between 10 and 3") are kept wherever an item is placed, even before it's planned; a time picked for you moves to the nearest one that keeps them, and a time you name that would break one is asked about once</li>
           <li>Nothing is removed or rearranged in your lists, memory or calendars unless you ask outright: archiving an item, rewording, splitting or moving list lines, forgetting something the assistant remembers, rewriting a profile section, or changing a whole calendar. Otherwise Thirties does the gentle version (a drop, an added line, hiding just that event) and says so, or asks first</li>
+          <li>Something you missed gets its next day by itself: the first day from tomorrow with room for it, never past its deadline, or today if it can't wait ("as soon as possible"); the morning lists each one ("Keep: …, tomorrow") so you can change it</li>
+          <li>Time on a project can have a budget for a week, month, quarter, year or several years ("3 sessions this month"); it trickles down to each week and day, the week plan picks the days with room, and a deadline pulls the sessions earlier; a missed session is made up before its period ends, or counts toward the next</li>
+          <li>Long sessions go on days off first, and anything outdoors needs daylight for its whole length</li>
+          <li>Items can be in season only in some months ("only in summer", "May to September", or "(summer)" in the item); out of season they wait, and a deadline outside the season is moved to the last day in it</li>
+          <li>A deadline you say comes round again (monthly, quarterly, yearly, or "(quarterly)" in the item) moves to the next one when missed, with an intense week of preparation about a month before it</li>
+          <li>A year plan also suggests a couple of your someday items, so they get looked at once a year</li>
+          <li>Someone else's events (show-only calendars) have their own section at the end of the day, Not yours today, with Hide for today and Not mine; hiding a whole calendar still needs you to say the calendar</li>
+          <li>Routines go on as their natural parts (a half hour each, keeping their steps), and the morning message lists them</li>
+          <li>Meals keep to a sensible window: replanning the day puts them in it first, and a meal goes later only when the day is full (and says why) or you ask</li>
+          <li>Before the morning reset clears the Today note, it files what's done into your Done note, then writes Today in one safe step: a ticked line can't disappear</li>
+          <li>Only a real signal makes an item fixed to its time (a calendar event, or a time you gave); errands no longer stick at odd minutes</li>
+          <li>Time on a project ("Garden app dev") never rolls over, whatever list it's on; "Pick up meds" is a one-off, not a daily thing</li>
+          <li>What a replan can't fit waits for tomorrow instead of being deleted, a change that fails never half-happens, and a time you gave keeps its minutes when it's moved</li>
+          <li>Long or marked-up list lines go on Today by their short title; a done item doesn't leave an earlier copy asking about it; old plan pins expire; a routine never goes on as one opaque item; and done times are only ones you said (or Thirties' estimate)</li>
+          <li>Notes in memory that only stood in for rules Thirties now follows by itself are offered for removal in Profile, Memory; an agent's work-log note is planned as time on its project</li>
+          <li>The on-device Gemma brain and an experimental way of running the assistant are hidden behind a developer switch until they test better; the Gemini assistant you use is unchanged in how it works</li>
         </ul>
       </description>
     </release>

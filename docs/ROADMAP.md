@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-30. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30). In progress: 0.2 on `feature/0.2`.
+> Last revised: 2026-11-12. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30), 0.2.0 (2026-11-08), 0.2.1 (2026-11-11). Ready: 0.3.0 on `feature/0.2` (its release notes are in the metainfo).
 
 ---
 
@@ -398,7 +398,7 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 
 **0.2 soak** (AGENTS.md §6.3): started Fri Oct 30 (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
 
-## 0.3 (not started; the next version after 0.2)
+## 0.3 (0.3.0 cut 2026-11-12 on `feature/0.2`; what's below is still open)
 - **Rethink the Profile:** it overlaps with other stores. Its "preferences" section can hold near-copies of memory notes, and it also overlaps with lasting item facts, routines and anchors, Your week, calendar choices and list roles, which now hold the same kinds of things in structured, enforced form. Decide what the Profile is still for (probably the free-text "who you are": goals, life context, what matters), what moves into the structured stores, whether memory notes and the Profile merge, and how the assistant uses whatever remains. Audit the overlap first: list every place a fact about the user can live.
 - **Sleep and wake from a tracker:** read when the user fell asleep and woke from Google Health / Fitbit (or Health Connect on the phone) instead of asking every day, which quickly becomes tedious. The Sleep span and the routine's "on waking" placement then follow the real times.
 - **Scratchpad notes:** a project note used for brainstorming is not a to-do list. When an idea moves to the project's real backlog (often a file in its repo), it's deleted from the note or moved to an archived copy, so the note never holds a stale second backlog and the original idea can still be found. Thirties should support that: offer to move ripe ideas to the right backlog rather than scheduling them straight off the note, clear what's moved, and not treat a scratchpad note as a to-do list. An inbox note is a fast-capture list to sort. Test this with an invented unsorted inbox and its hand-sorted version as the answer key.

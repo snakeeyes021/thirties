@@ -118,7 +118,7 @@ The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the front
                          │
         ┌────────────────┴────────────────┐
   FrontierBrain                       SLM brain
-  (brains/frontier.py)                (brains/slm/, planned)
+  (brains/frontier.py)                (brains/slm/, parked)
   one rich prompt, full backlog,      a scaffolded pipeline: tiny constrained
   direct tool calls                   decisions, Python does the rest
         └────────────────┬────────────────┘
@@ -137,6 +137,8 @@ The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the front
 | **Backlog Strategy** | Full ingestion with taxonomy and checklist extraction. | Need to research and test various strategies, given token/context constraints of SLM. Python pre-scores; the model sees a handful of candidates. |
 | **Model's Job** | Reads the whole situation, converses, calls tools. | Makes one tiny, schema-constrained decision per call; Python handles selection, time resolution, conflicts and as much of the reply as possible. |
 | **Validation Engine**| Real daily usage, multi-turn stress dialogues, cross-device sync. | Autonomous combinatorial matrix (`run_eval_harness.py`) and stepping judge (`interactive_eval.py`), with the Frontier Brain's result on the same scenario as a reference answer. This is the real driving force of getting the SLM running correctly; in both tracks, we are leveraging MASSIVE generative intelligence; for the daily driver, we do it "because we need *something* that works *now*," and for the SLM we do it to step in where a human normally would and provide mountains of qualitative data to hone the exact workings of our SLM and the division of labor across the model and hyper efficient/effective, well curated, and smartly selected deterministic helper tools. |
+
+**Status (2026-11-12):** the scaffolded pipeline (the SLM brain, and Gemini on it) is parked after failing its studies; it stays in the code behind a developer switch (`docs/SLM_BRAIN.md`), and the Frontier Brain is the one in use.
 
 Both brains use the **same tool API** (`PlanTools`). The Frontier Brain shows in real use which tools are actually needed; the SLM Brain inherits exactly those. See `docs/ROADMAP.md` for sequencing and `docs/SLM_BRAIN.md` for the research design.
 
@@ -204,7 +206,7 @@ Thirties/
 │   ├── backlog.py                     # One loader for every task source (Joplin, media wishlists)
 │   ├── brains/                        # Model-specific layer: prompts & turn logic
 │   │   ├── frontier.py                # FrontierBrain: single rich prompt for Gemini
-│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (runtime, parse, brain, model download)
+│   │   └── slm/                       # SlmBrain: Gemma parses, Python plans (parked behind a developer switch)
 │   ├── calendar_engine.py             # Calendars via EDS / GNOME Online Accounts; events -> spans
 │   ├── clock.py                       # Clock-time & duration parsing: the model says "4:30 PM", Python does the math
 │   ├── config.py                      # TOML configuration & dataclasses
