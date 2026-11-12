@@ -164,6 +164,29 @@ class BudgetTest(TodayTestCase):
         offered = {o["title"]: o for o in _proposal_candidates(self.t.assistant.proposals, self.t.day_plan)}
         self.assertEqual(offered["Shed clear-out"]["minutes"], 90)
 
+    def test_the_week_plan_spreads_its_sessions_over_days_with_room(self):
+        from thirties_core.budgets import session_days
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 3})
+        days = session_days(self.hp, self.task, WEEK)
+        self.assertEqual(days, [DAY, DAY + timedelta(days=2), DAY + timedelta(days=3)])  # Thu, Sat, Sun: spread out
+        friday = self.hp.period((DAY + timedelta(days=1)).isoformat())
+        self.assertNotIn("Shed clear-out", {c.title for c in self.hp.candidates(friday, limit=None)})
+        self.assertIn("Shed clear-out (3 sessions of 60 min: 0 done, 0 planned, 3 left: Thu, Sat, Sun)",
+                      self.hp.describe_plan(WEEK, with_context=False))
+
+    def test_the_week_plan_bends_as_the_week_fills(self):
+        from thirties_core.budgets import session_days
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 2})
+        self.session(-2, status=SpanStatus.DONE)  # Tuesday's is done: one left
+        saturday = (DAY + timedelta(days=2)).isoformat()
+        for s in [s for s in self.t.plan_for(saturday).spans if s.title == "Work"]:
+            self.t.execute("remove_event", {"event": s.id, "day": saturday})
+        self.t.execute("add_event", {"title": "Busy", "start": "7:00 AM", "end": "11:30 PM", "day": saturday,
+                                     "fixed": True})
+        self.assertEqual(session_days(self.hp, self.task, WEEK), [DAY])  # one left, front-loaded
+        self.session(0, start="7:00 PM")  # put on today's schedule: that's the week's last one
+        self.assertEqual(session_days(self.hp, self.task, WEEK), [DAY])
+
     def test_no_budget_and_no_deadline_simply_ends(self):
         from thirties_core.carry import settle
         self.session(-1, start="3:00 PM")

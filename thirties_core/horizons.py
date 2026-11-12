@@ -723,7 +723,17 @@ class HorizonPlanner:
             status = {"done": " (done)", "gone": " (no longer on the lists)",
                       "scheduled": f" (on the plan {r['on'].strftime('%a')})" if r.get("on") else " (on the plan)"
                       }.get(r["status"], "")
-            lines.append(f"- {where}{r['title']}{status}")
+            effort = ""
+            if int(r.get("sessions") or 0):
+                from thirties_core.budgets import budget_of, budget_period, session_days
+                t = next((x for x in self.tasks if x.id == r["item_id"]), None)
+                bp = budget_period(r, self.week_start)
+                b = budget_of(self, t, bp.start, level=bp.level) if t is not None else None
+                if b is not None:
+                    effort = f" ({b.line()}"
+                    days = session_days(self, t, bp) if bp.level == "week" else []
+                    effort += (": " + ", ".join(d.strftime("%a") for d in days) if days else "") + ")"
+            lines.append(f"- {where}{r['title']}{effort}{status}")
         from thirties_core.on_track import track_line
         how = track_line(self, p) if p.level != "day" else ""  # how on track it is (C2), counted by Python
         out = head + ":\n" + (how + "\n" if how else "") + (
@@ -835,7 +845,8 @@ class HorizonPlanner:
                                   self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot,
                                   sessions=share[0] if share else 0, minutes=share[1] if share else 0, task=t)
 
-        from thirties_core.budgets import DEFAULT_SESSION_MINUTES, budget_of, budget_period, share_this
+        from thirties_core.budgets import (DEFAULT_SESSION_MINUTES, budget_of, budget_period, session_days,
+                                           share_this)
 
         def share_of(t: TaskItem, r: Dict[str, Any]) -> Optional[Tuple[int, int]]:
             """(sessions, minutes) the period gets from a budgeted plan row one level up; (0, m) when it's used up;
@@ -847,6 +858,8 @@ class HorizonPlanner:
             up = budget_of(self, t, where.start, level=where.level)
             if up is not None and up.left <= 0:
                 return 0, minutes  # every session up there is done or already on the schedule
+            if p.level == "day" and where.level == "week":  # the week plan says which days get one
+                return (1 if p.start in session_days(self, t, where) else 0), minutes
             return share_this(self, t, p) or 0, minutes
 
         placed_elsewhere = set()

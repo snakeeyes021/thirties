@@ -162,6 +162,36 @@ def share_this(planner: "HorizonPlanner", task: "TaskItem", child: "Period") -> 
     return share_for(left, max(1, len(rest)))
 
 
+def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") -> List[date]:
+    """The days this week's budget puts a session of ``task`` on: Python's week plan, worked out afresh from the
+    room each day has, so it bends as the week fills. Days that already have one count first; the rest of what's
+    left goes on the days ahead with a free stretch long enough, spread out (one a day, as far apart as they can
+    be), never past a due date."""
+    from thirties_core.replan import _free_minutes
+    b = budget_of(planner, task, week.start, level="week")
+    if b is None:
+        return []
+    pt, today = planner.pt, planner.today()
+    due = _due(task)
+    have, room = [], []
+    for d in week.days():
+        if d < today or (due is not None and d > due):
+            continue
+        plan = pt.plan_for(d)
+        if any(_same(s.title, task.title) and s.status in (SpanStatus.PLANNED, SpanStatus.DONE) for s in plan.spans):
+            have.append(d)
+        elif _free_minutes(pt, plan, b.minutes):
+            room.append(d)
+    k = min(b.left, len(room))
+    if k <= 0:
+        return have
+    if k == 1:
+        picks = [room[0]]  # front-loaded: the first day with room
+    else:
+        picks = [room[round(i * (len(room) - 1) / (k - 1))] for i in range(k)]
+    return sorted(set(have) | set(picks))
+
+
 def _due(task) -> Optional[date]:
     try:
         return date.fromisoformat(task.due[:10]) if getattr(task, "due", "") else None
@@ -169,4 +199,5 @@ def _due(task) -> Optional[date]:
         return None
 
 
-__all__ = ["Budget", "budget_of", "soft_deadline", "share_for", "share_this", "periods_left", "count_sessions"]
+__all__ = ["Budget", "budget_of", "soft_deadline", "share_for", "share_this", "periods_left", "count_sessions",
+           "session_days"]
