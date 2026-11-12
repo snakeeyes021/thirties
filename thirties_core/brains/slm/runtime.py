@@ -153,6 +153,8 @@ class LiteRtRuntime(ConversationRuntime):
         start = time.time()
         self._using = lambda phase: fit.Using(model_path.name, phase)
         try:
+            if os.environ.get("THIRTIES_SLM_CPU"):  # the GPU is someone else's right now: CPU only
+                raise RuntimeError("THIRTIES_SLM_CPU is set: not using the GPU")
             with self._using("load"):
                 self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.GPU(),
                                                max_num_tokens=max_tokens, cache_dir=cache_arg)
