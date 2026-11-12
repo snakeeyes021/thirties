@@ -1221,6 +1221,7 @@ class AssistantTools(KindTools):
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        start_dt, end_dt = self._said_times_only(start_dt, end_dt, duration)
         if st != SpanStatus.SKIPPED:
             self._not_in_future(start_dt, end_dt)
         if span is not None and span.source == "calendar" and not span.tentative:
@@ -1326,6 +1327,21 @@ class AssistantTools(KindTools):
         if st == SpanStatus.DONE and kind == ONCE:
             self._settle_copies(span)
         return result + "."
+
+    def _said_times_only(self, start_dt, end_dt, duration):
+        """In a turn with the user's words, an outcome keeps only times the user said (or now): a time the model
+        worked out is dropped, and Python estimates when it happened instead."""
+        message = self.pt.user_message
+        if message is None:
+            return start_dt, end_dt  # the app's own buttons, or a caller with no message: times as given
+        from thirties_core.facts import gave_time
+        now = self.pt._now()
+
+        def said(dt) -> bool:
+            return dt is None or gave_time(message, dt) or abs((dt - now).total_seconds()) <= 120
+        if duration not in (None, "") and start_dt is not None and end_dt is not None:
+            return (start_dt, end_dt) if said(start_dt) or said(end_dt) else (None, None)
+        return (start_dt if said(start_dt) else None), (end_dt if said(end_dt) else None)
 
     def _settle_copies(self, span: EventSpan) -> None:
         """A one-off done is done: its other copies on the day's plan whose time has passed (an earlier session
