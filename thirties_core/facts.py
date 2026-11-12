@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS span_facts (
     updated_at TEXT NOT NULL
 );
 """
+_NEWER = (("before", "TEXT NOT NULL DEFAULT '[]'"), ("done_by", "TEXT NOT NULL DEFAULT ''"))  # added in 0.3
 
 
 # Things set by someone else's clock: they keep the time they were given and never slide. The obvious ones are
@@ -51,14 +52,21 @@ class ItemFacts:
     daylight: bool = False                           # must happen between sunrise and sunset
     anchored: bool = False                           # stays at its time when the day is redrawn
     goes_with: List[str] = field(default_factory=list)  # span ids it goes right after (item_facts; never stored)
+    before: List[str] = field(default_factory=list)  # span ids it must be done before
+    done_by: Optional[datetime] = None               # it must end by then
 
     def describe(self, titles: Dict[str, str]) -> List[str]:
         out = []
         if self.after:
             out.append("after " + " and ".join(titles.get(a, "something else") for a in self.after))
+        if self.before:
+            out.append("before " + " and ".join(titles.get(a, "something else") for a in self.before))
         if self.not_before:
             from thirties_core.clock import format_clock
             out.append(f"not before {format_clock(self.not_before)}")
+        if self.done_by:
+            from thirties_core.clock import format_clock
+            out.append(f"done by {format_clock(self.done_by)}")
         if self.daylight:
             out.append("in daylight")
         if self.anchored:
@@ -71,6 +79,10 @@ class SpanFacts:
         self.db = db
         with db._get_connection() as conn:
             conn.executescript(_SCHEMA)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(span_facts)").fetchall()}
+            for name, kind in _NEWER:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE span_facts ADD COLUMN {name} {kind}")
 
     def get(self, span_id: str) -> ItemFacts:
         with self.db._get_connection() as conn:
@@ -79,15 +91,19 @@ class SpanFacts:
             return ItemFacts()
         return ItemFacts(after=json.loads(row["after"]),
                          not_before=datetime.fromisoformat(row["not_before"]) if row["not_before"] else None,
-                         daylight=bool(row["daylight"]), anchored=bool(row["anchored"]))
+                         daylight=bool(row["daylight"]), anchored=bool(row["anchored"]),
+                         before=json.loads(row["before"] or "[]"),
+                         done_by=datetime.fromisoformat(row["done_by"]) if row["done_by"] else None)
 
     def set(self, span_id: str, facts: ItemFacts) -> None:
         with self.db._get_connection() as conn:
             conn.execute("""
-            INSERT OR REPLACE INTO span_facts (span_id, after, not_before, daylight, anchored, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO span_facts (span_id, after, not_before, daylight, anchored, updated_at, before,
+                                               done_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (span_id, json.dumps(facts.after), facts.not_before.isoformat() if facts.not_before else "",
-                  int(facts.daylight), int(facts.anchored), utc_now_iso()))
+                  int(facts.daylight), int(facts.anchored), utc_now_iso(), json.dumps(facts.before),
+                  facts.done_by.isoformat() if facts.done_by else ""))
 
     # sync: last write wins
     def all_records(self) -> List[Dict[str, Any]]:
@@ -99,10 +115,11 @@ class SpanFacts:
             row = conn.execute("SELECT updated_at FROM span_facts WHERE span_id = ?", (record["span_id"],)).fetchone()
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
-            conn.execute("INSERT OR REPLACE INTO span_facts (span_id, after, not_before, daylight, anchored, updated_at)"
-                         " VALUES (?, ?, ?, ?, ?, ?)", (record["span_id"], record.get("after", "[]"),
-                                                        record.get("not_before", ""), record.get("daylight", 0),
-                                                        record.get("anchored", 0), record["updated_at"]))
+            conn.execute("INSERT OR REPLACE INTO span_facts (span_id, after, not_before, daylight, anchored, updated_at,"
+                         " before, done_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (record["span_id"], record.get("after", "[]"), record.get("not_before", ""),
+                          record.get("daylight", 0), record.get("anchored", 0), record["updated_at"],
+                          record.get("before", "[]"), record.get("done_by", "")))
         return True
 
 

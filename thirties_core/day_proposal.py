@@ -375,6 +375,14 @@ class DayProposal:
             except (ClockError, ValueError) as e:
                 raise ToolError(f"{title}: {e}")
             start, end = self.pt._snap(start, start + timedelta(minutes=minutes))
+            from thirties_core import constraints  # what the user said about its window or order: kept
+            if constraints.problem(self.pt, title, None, start, end) is not None:
+                slot = constraints.nearest(self.pt, title, None, minutes, start)
+                if slot is None:
+                    problems.append(f"{title}: {constraints.problem(self.pt, title, None, start, end)}, and no free "
+                                    "time keeps it")
+                    continue
+                start, end = slot, slot + timedelta(minutes=minutes)
             fits = any(a <= start and end <= b for a, b in free)
             clash = next((t for t in taken if t[0] < end and start < t[1]), None)
             if not fits or clash:

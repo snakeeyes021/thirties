@@ -107,14 +107,17 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "set_item_facts",
-        "description": "Record facts about an item that Python then keeps: what it has to come after, a time it "
-                       "can't start before, that it needs daylight, or that it stays put. With every_day=true they "
+        "description": "Record facts about an item that Python then keeps wherever it's placed: what it has to come "
+                       "after or be done before, a window (not before / done by), that it needs daylight, or that it "
+                       "stays put. Works for an item not planned yet too (by its title, for that day). With every_day=true they "
                        "hold for the item by name, every day (\"dinner takes an hour\", \"fish food is at 5\", "
                        "\"Journal and brush teeth go with the shower\", \"nothing outside until after the shower\": "
                        "event 'outside'), even if it isn't planned today.",
         "parameters": {"event": "The item's id or title (with every_day, its name).",
                        "after": "Item(s) it must come after, by id or title (e.g. 'Shower').",
                        "not_before": "Clock time it can't start before (e.g. '3:00 PM').",
+                       "before": "Item(s) it must be done before, by id or title (e.g. 'Client call').",
+                       "done_by": "Clock time it must be done by (e.g. '2:30 PM'); with not_before, a window.",
                        "daylight": "true if it needs daylight (outdoors).",
                        "stays_put": "true if it keeps its time when the day is redrawn (a meal at a set time).",
                        "every_day": "true if the user says it holds every day, not just today.",
@@ -780,6 +783,9 @@ class PlanTools:
             start_dt, end_dt = self._keep_to_blocks(start_dt, end_dt)  # flexible: keeps to blocks; fixed: real time
         if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
+        kept = ""
+        if not is_fixed and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            start_dt, end_dt, kept = self._constraints_kept(str(title).strip(), None, start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if self._push_wanted(span, push_later, alongside) and not span.is_envelope and not _as_bool(alongside):
             self._push_asked()
@@ -797,6 +803,7 @@ class PlanTools:
             self._set_fixed(span, True)
         self._save_plan_after_change()
         extra = f" ({'; '.join(lasting + notes)})" if lasting or notes else ""
+        extra += kept
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
@@ -854,6 +861,10 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
+        kept = ""
+        if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
+            new_start, new_end, kept = self._constraints_kept(span.title, span.id, new_start, new_end)
+        self._kept_note = kept
 
         if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt:
             new_start, new_end = self._keep_to_blocks(new_start, new_end)  # a new length alone keeps the start
@@ -880,7 +891,7 @@ class PlanTools:
         self._persist(span)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
-        return f"Changed {before} → {self.describe(span)}.{extra}"
+        return f"Changed {before} → {self.describe(span)}.{extra}{getattr(self, '_kept_note', '')}"
 
     def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any) -> str:
         source_plan = self.day_plan
@@ -969,6 +980,16 @@ class PlanTools:
                   + ", ".join(o.title for o in self._sharing(span) if o.id not in (a.id, b.id))
                   for span in (first, second) if any(o.id not in (a.id, b.id) for o in self._sharing(span))]
         return f"Swapped: {self.describe(first)}; {self.describe(second)}." + (f" ({'; '.join(shared)})" if shared else "")
+
+    def _constraints_kept(self, title: str, span_id: Optional[str], start: datetime,
+                          end: datetime) -> Tuple[datetime, datetime, str]:
+        """A placement kept to the windows and order the user stated (constraints.py): moved to the nearest time
+        that keeps them, with a note; a time the user named that breaks one is refused, to ask them once."""
+        from thirties_core import constraints
+        try:
+            return constraints.keep(self, title, span_id, start, end)
+        except ValueError as e:
+            raise ToolError(str(e))
 
     def _lasting_ok(self, span: EventSpan, new_start: datetime, new_end: datetime) -> None:
         """What the user said holds every day for an item isn't undone behind their back (10-26 and 10-28: dinner cut
@@ -1122,14 +1143,39 @@ class PlanTools:
 
     def set_item_facts(self, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                        stays_put: Any = None, every_day: Any = None, length: Any = None, at: Any = None,
-                       goes_with: Any = None, kind: Any = None, **_: Any) -> str:
+                       goes_with: Any = None, kind: Any = None, before: Any = None, done_by: Any = None,
+                       **_: Any) -> str:
         if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind)):
             from thirties_core.item_facts import record_lasting  # by name, every day (R6)
             return record_lasting(self, event, after=after, not_before=not_before, daylight=daylight,
                                   stays_put=stays_put, length=length, at=at, goes_with=goes_with, kind=kind)
-        span = self._find_span(event)
+        def names(value: Any) -> List[str]:
+            return value if isinstance(value, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(value)) if a]
+        try:
+            span = self._find_span(event)
+        except ToolError:  # not on the plan yet: kept by its name for the day, applied when it's placed
+            if self._state_db is None or not any(v not in (None, "", []) for v in (after, before, not_before, done_by)):
+                raise
+            from thirties_core import constraints
+            rec = constraints.record(self._state_db, self.day_plan.target_date, str(event).strip(),
+                                     before=names(before) if before not in (None, "", []) else [],
+                                     after=names(after) if after not in (None, "", []) else [],
+                                     not_before=self._start(not_before).strftime("%H:%M") if not_before else "",
+                                     done_by=self._start(done_by).strftime("%H:%M") if done_by else "")
+            said = ([f"after {', '.join(rec['after'])}"] if rec.get("after") else []) + \
+                ([f"before {', '.join(rec['before'])}"] if rec.get("before") else []) + \
+                ([f"not before {rec['not_before']}"] if rec.get("not_before") else []) + \
+                ([f"done by {rec['done_by']}"] if rec.get("done_by") else [])
+            return f"Noted for {rec['title']} today (it isn't planned yet; kept when it is): " + ", ".join(said) + "."
         store = self._facts()
         facts = store.get(span.id)
+        if before not in (None, "", []):
+            ids = [self._find_span(r).id for r in names(before)]
+            if span.id in ids:
+                raise ToolError("An item can't come before itself.")
+            facts.before = sorted(set(facts.before) | set(ids))
+        if done_by not in (None, ""):
+            facts.done_by = self._start(done_by)
         if after not in (None, "", []):
             refs = after if isinstance(after, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(after)) if a]
             ids = [self._find_span(r).id for r in refs]
