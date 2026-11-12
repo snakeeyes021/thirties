@@ -119,6 +119,25 @@ class TestShiftKeepsARealTime(ConversationTestCase):
         self.assertEqual(s.start_dt, at("20:15"))
 
 
+class TestDoneSettlesEarlierCopies(ConversationTestCase):
+    def test_an_earlier_copy_of_a_done_one_off_stops_being_asked_about(self):
+        """Planned again after a move failed, then done: the first copy stayed "not marked yet" all day."""
+        from tests.fixtures import at
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.models import SpanStatus
+        tools = self.manager.tools
+        tools.execute("add_event", {"title": "File the warranty claim", "start": "11:00 AM", "duration": "30 min"})
+        set_debug_time(at("13:40"))
+        tools.execute("add_event", {"title": "File the warranty claim", "start": "1:00 PM", "duration": "30 min",
+                                    "again": True})
+        second = max((s for s in tools.day_plan.spans if s.title == "File the warranty claim"), key=lambda s: s.start_dt)
+        tools.execute("log_outcome", {"event": second.id, "status": "done"})
+        first = min((s for s in tools.day_plan.spans if s.title == "File the warranty claim"), key=lambda s: s.start_dt)
+        self.assertEqual(first.status, SpanStatus.UNKNOWN)  # settled, not nagged about
+        self.assertNotIn("File the warranty claim", tools.schedule_text().split("Not marked yet")[-1]
+                         if "Not marked yet" in tools.schedule_text() else "")
+
+
 class TestPhantomDone(ConversationTestCase):
     def test_done_with_two_matches_asks_which(self):
         """Saying done with a name matching two items recorded a new item and left both open."""

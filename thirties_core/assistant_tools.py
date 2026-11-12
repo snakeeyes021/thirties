@@ -20,7 +20,7 @@ from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationSt
 from thirties_core.item_ids import line_id, new_line_id
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
 from thirties_core.kind_tools import KindTools, rollover_question
-from thirties_core.kinds import ONGOING, put_off_counts, rolls_over
+from thirties_core.kinds import ONCE, ONGOING, put_off_counts, rolls_over
 from thirties_core.stats import fact_lines, session_lines, unreviewed_spans
 
 if TYPE_CHECKING:
@@ -1310,7 +1310,21 @@ class AssistantTools(KindTools):
             result += " (a session on it; it carries on)"
         elif st == SpanStatus.DONE:  # not on any list (a routine's extra step, a meal): its Today line is ticked too
             self._tick_on_today(span.title)
+        if st == SpanStatus.DONE and kind == ONCE:
+            self._settle_copies(span)
         return result + "."
+
+    def _settle_copies(self, span: EventSpan) -> None:
+        """A one-off done is done: its other copies on the day's plan whose time has passed (an earlier session
+        that didn't happen as planned, then planned again) are settled as unknown, not left "not marked yet" all
+        day. Copies still ahead stay: those are the user's to keep or take off."""
+        now = self.pt._now()
+        for other in self.pt.day_plan.spans:
+            same = (span.task_id and other.task_id == span.task_id) or \
+                other.title.strip().lower() == span.title.strip().lower()
+            if other.id != span.id and same and other.status == SpanStatus.PLANNED and other.end_dt <= now:
+                other.status = SpanStatus.UNKNOWN
+                self.pt._persist(other)
 
     def _capture_context(self, span: EventSpan) -> None:
         """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
