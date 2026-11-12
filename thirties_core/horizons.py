@@ -717,6 +717,51 @@ class HorizonPlanner:
             self.plans.set_effort(f"{plan.key}|{task.id}", sessions, minutes or 0)
         return plan, slot
 
+    LOST_KEY = "lost_pins"  # sync meta: [{"title", "where"}] taken out because their item is on no list, to say once
+
+    def tidy_pins(self) -> None:
+        """Pins don't outlive their period: one a period has passed by more than a whole period (a week's, a week
+        after it ended) is taken out; the one just past still offers its items as left over. A pin whose item is on
+        no list any more (and no single item has its wording) is taken out too, and said once (lost_pins_text):
+        it's never found again, so it's let go rather than warned about on every look."""
+        if not self.tasks:
+            return  # the lists aren't read yet: no pin can be judged lost
+        today = self.today()
+        ids = {t.id for t in self.tasks}
+        wording: Dict[str, int] = {}
+        for t in self.tasks:
+            wording[t.title.strip().lower()] = wording.get(t.title.strip().lower(), 0) + 1
+        lost = []
+        for r in self.plans.rows():
+            where = self.where_pinned(r)
+            period = row_period(r, self.week_start)
+            after = next_period(period, self.week_start) if period.level in ("week", "month", "year") else period
+            if after.end < today:
+                self.plans.take_out(r["id"])  # its period and the one after are over: it has expired
+                continue
+            if r["item_id"] not in ids and wording.get((r["title"] or "").strip().lower(), 0) != 1:
+                self.plans.take_out(r["id"])
+                lost.append({"title": r["title"], "where": self.label(where)})
+        if lost:
+            try:
+                had = json.loads(self.db.get_sync_meta(self.LOST_KEY) or "[]")
+            except ValueError:
+                had = []
+            self.db.set_sync_meta(self.LOST_KEY, json.dumps(had + lost))
+
+    def lost_pins_text(self) -> str:
+        """The one mention of pins let go because their item is on no list; cleared once said."""
+        try:
+            lost = json.loads(self.db.get_sync_meta(self.LOST_KEY) or "[]")
+        except ValueError:
+            lost = []
+        if not lost:
+            return ""
+        self.db.set_sync_meta(self.LOST_KEY, "[]")
+        from thirties_core.titles import title_of
+        return "No longer on any list, so taken off its plan: " + "; ".join(
+            f"{title_of(x['title'])} ({x['where']})" for x in lost) + "."
+
     def unpin(self, task_id: str, p: Optional[Period] = None) -> List[Dict[str, str]]:
         """Take an item out of a period's plan (and out of any finer plan inside it), or out of every plan."""
         out = []
@@ -866,6 +911,7 @@ class HorizonPlanner:
         today = self.today()
         level = "week" if p.level == "day" else p.level  # a day is planned out of its week plan
         maps = self._horizon_maps()
+        self.tidy_pins()
         rows = self.plans.rows()
         pinned_ids = {r["item_id"] for r in rows}
         tasks = {t.id: t for t in self.tasks if not t.id.startswith("media:") or t.id in pinned_ids}
@@ -880,7 +926,7 @@ class HorizonPlanner:
                 if len(same) == 1:
                     tasks[r["item_id"]] = same[0]
                 else:
-                    logger.warning("A plan item can't be found on any list: %s (%s %s)", r["title"], r["level"],
+                    logger.debug("A plan item can't be found on any list: %s (%s %s)", r["title"], r["level"],
                                    r["period"])
         # Done lately (since the week before this period, or this week's): an item done long ago and open again
         # in the list is a new round of it (backlog.DONE_HIDES_DAYS hides the recent ones the same way).

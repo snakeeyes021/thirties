@@ -309,6 +309,26 @@ class TestBubblingDown(PlannerCase):
         week = parse_period("this week", DAY)
         self.assertFalse([c for c in self.hp.candidates(week, limit=None) if c.source == "someday"])  # a year only
 
+    def test_a_pin_expires_a_period_after_its_own(self):
+        last = parse_period("this week", DAY - timedelta(days=7))
+        older = parse_period("this week", DAY - timedelta(days=14))
+        self.hp.pin(self.tasks[0], last)
+        self.hp.pin(self.tasks[2], older)
+        week = parse_period("this week", DAY)
+        cands = self.by_id(self.hp.candidates(week, limit=None))
+        self.assertEqual(cands["door"].source, "carried")  # last week's: still offered as left over
+        live = {r["item_id"] for r in HorizonPlans(self.sched.state_db).rows()}
+        self.assertNotIn("gutter", live)  # two weeks back: expired, taken out
+
+    def test_a_pin_whose_item_is_gone_is_let_go_and_said_once(self):
+        week = parse_period("this week", DAY)
+        self.hp.pin(item("vanished", "Return the borrowed ladder"), week)  # pinned, then gone from every list
+        self.hp.candidates(week, limit=None)
+        self.assertNotIn("vanished", {r["item_id"] for r in HorizonPlans(self.sched.state_db).rows()})
+        said = self.hp.lost_pins_text()
+        self.assertIn("No longer on any list, so taken off its plan: Return the borrowed ladder (this week).", said)
+        self.assertEqual(self.hp.lost_pins_text(), "")  # once
+
     def test_done_long_ago_and_open_again_is_a_new_round(self):
         self.hp.pin(self.tasks[0], parse_period("this week", DAY))
         self.sched.state_db.record_task_completed("door", DAY - timedelta(days=60))

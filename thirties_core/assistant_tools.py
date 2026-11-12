@@ -1647,6 +1647,14 @@ class AssistantTools(KindTools):
         if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, and a prep week before it
             from thirties_core.deadlines import moved_text
             spread += "\n" + moved_text(left["deadlines_moved"], day, short=_short)
+        try:  # pins let go because their item is on no list any more: said once
+            from thirties_core.horizons import HorizonPlanner
+            planner = HorizonPlanner(self.pt)
+            planner.tidy_pins()
+            lost = planner.lost_pins_text()
+            spread += ("\n" + lost) if lost else ""
+        except Exception as e:
+            logger.warning("Couldn't tidy the plan's pins: %s", e)
         if not ask:
             if list_overflow:
                 from thirties_core.carry import notice_text
