@@ -212,6 +212,11 @@ def settle(assistant, day: date) -> Dict[str, Any]:
             replan_leftovers(assistant, day, out)  # each missed item gets the day it goes to next
         except Exception as e:
             logger.warning("Replanning what was missed failed: %s", e)
+        try:
+            from thirties_core.deadlines import roll_missed
+            out["deadlines_moved"] = roll_missed(assistant, day)  # a repeating deadline missed: on to the next
+        except Exception as e:
+            logger.warning("Moving missed repeating deadlines failed: %s", e)
         OpenPool(db).add(out["pool_items"], day - timedelta(days=1))
         db.set_sync_meta(key, json.dumps(out))
     return out

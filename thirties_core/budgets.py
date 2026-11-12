@@ -211,7 +211,7 @@ def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") ->
     pt, today = planner.pt, planner.today()
     due = _due(task)
     have, room, off = [], [], set()
-    daylight = outdoors(task.title)
+    daylight = outdoors(task.title, pt)
     for d in week.days():
         if d < today or (due is not None and d > due):
             continue

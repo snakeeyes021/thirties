@@ -1557,6 +1557,9 @@ class AssistantTools(KindTools):
              "end": day.isoformat()} for t in listed])
         ask = still_unknown(self, day, left["ask"])
         spread = "".join(f"\n{_short(r['title'])}: {r['why']}." for r in left.get("respread", []))  # ongoing time moved
+        if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, and a prep week before it
+            from thirties_core.deadlines import moved_text
+            spread += "\n" + moved_text(left["deadlines_moved"], day, short=_short)
         if not ask:
             if list_overflow:
                 from thirties_core.carry import notice_text

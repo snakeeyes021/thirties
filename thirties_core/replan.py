@@ -50,10 +50,16 @@ def _free_minutes(pt, plan, minutes: int, daylight: bool = False) -> bool:
     return False
 
 
-def outdoors(title: str) -> bool:
-    """Something done outside, by its wording (weather.OUTDOOR_RE): it needs daylight."""
+def outdoors(title: str, pt=None) -> bool:
+    """Something that needs daylight: the user said so (its daylight fact), or it's outside by its wording
+    (weather.OUTDOOR_RE)."""
     from thirties_core.weather import OUTDOOR_RE
-    return bool(OUTDOOR_RE.search(title or ""))
+    if OUTDOOR_RE.search(title or ""):
+        return True
+    try:
+        return bool(pt is not None and pt._state_db is not None and pt._lasting().for_item(title).daylight)
+    except Exception:
+        return False
 
 
 def is_day_off(plan) -> bool:
@@ -89,7 +95,7 @@ def place_once(pt, title: str, minutes: int, today: date, due: Optional[date] = 
     """A missed one-off task: the first day from tomorrow with room, never past its deadline (with none, up to
     ``last``, a week ahead by default)."""
     last = due if due is not None else last if last is not None else today + timedelta(days=WEEK_DAYS)
-    d = first_day_with_room(pt, minutes, today + timedelta(days=1), last, daylight=outdoors(title))
+    d = first_day_with_room(pt, minutes, today + timedelta(days=1), last, daylight=outdoors(title, pt))
     if d is None:
         if due is not None:
             return Placement(None, f"no day before it's due ({due.strftime('%a %b %-d')}) has room")
