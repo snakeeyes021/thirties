@@ -8,6 +8,8 @@ an effort gets there ("Shed clear-out: 6 sessions this quarter", "2 sessions thi
   ahead in it;
 - a level's share for the next level down: what's left, spread evenly over the periods left in it (6 left this
   quarter with 2 months to go: 3 this month);
+- a deadline pulls the pieces earlier: with a due date inside the period, what's left is spread only over the
+  periods before it (and none after);
 - a soft deadline: the end of the period a budget belongs to. A missed session is re-spread within what's left of
   that period if there's room; if there isn't, it's let go at that level, and the next level up has one more
   session left, so its next share grows.
@@ -151,8 +153,20 @@ def share_this(planner: "HorizonPlanner", task: "TaskItem", child: "Period") -> 
     # what's already done or planned inside this child period counts toward its share
     done_here, planned_here = count_sessions(planner.pt, task.title, child.start, child.end, planner.today())
     left = up.left + done_here + planned_here
-    n = len(periods_left(up.period, child.level, max(planner.today(), child.start), planner.week_start))
-    return share_for(left, max(1, n))
+    rest = periods_left(up.period, child.level, max(planner.today(), child.start), planner.week_start)
+    due = _due(task)
+    if due is not None:  # a deadline inside the period pulls the pieces earlier: only the periods before it count
+        if child.start > due:
+            return 0
+        rest = [c for c in rest if c.start <= due]
+    return share_for(left, max(1, len(rest)))
+
+
+def _due(task) -> Optional[date]:
+    try:
+        return date.fromisoformat(task.due[:10]) if getattr(task, "due", "") else None
+    except ValueError:
+        return None
 
 
 __all__ = ["Budget", "budget_of", "soft_deadline", "share_for", "share_this", "periods_left", "count_sessions"]

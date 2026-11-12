@@ -146,6 +146,13 @@ class BudgetTest(TodayTestCase):
         self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this year", "sessions": 12})
         self.assertEqual(share_this(self.hp, self.task, MONTH), 4)  # 12 over the three months left
 
+    def test_a_deadline_pulls_the_pieces_earlier(self):
+        self.task.due = date(2026, 10, 25).isoformat()  # this Sunday week: two weeks of October left before it
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this month", "sessions": 6})
+        self.assertEqual(share_this(self.hp, self.task, WEEK), 3)  # 6 over 2 weeks, not over all 3
+        after = period_of("week", date(2026, 10, 26))
+        self.assertEqual(share_this(self.hp, self.task, after), 0)  # nothing after it's due
+
     def test_the_week_trickles_into_the_day(self):
         from thirties_core.day_proposal import _proposal_candidates
         self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 3,
