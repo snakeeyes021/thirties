@@ -147,6 +147,20 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(rows("behind"), ["Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("now"), ["Dishes"])
 
+    def test_a_calendar_that_couldnt_be_read_is_said_first(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.calendar_unread = ["Evening classes"]
+        page = AgendaPage()
+        page.refresh(plan, at("19:20"))
+        first = next(iter(page.groups))
+        self.assertEqual(first, "calendar_unread")
+        self.assertEqual([r.get_title() for r in _rows(page.groups[first])],
+                         ["Couldn't read the calendar Evening classes, so its events may be missing."])
+        plan.calendar_unread = []
+        page.refresh(plan, at("19:20"))
+        self.assertNotIn("calendar_unread", page.groups)
+
     def test_if_theres_time_comes_after_the_timed_items_with_its_actions(self) -> None:
         from thirties.views.agenda import AgendaPage
         plan, _ = self.sched.build_day_plan(DAY)

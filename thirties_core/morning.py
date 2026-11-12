@@ -57,7 +57,9 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
         offered = [re.sub(r" \(since [^)]*\)$", "", line[2:].split(" – ", 1)[-1])
                    for line in text.splitlines() if line.startswith("- ")]
         ahead = planned_ahead_text(assistant, skip=offered)
-    facts = "\n\n".join(t for t in (holiday, ahead if level != "off" or text else "", text) if t)
+    from thirties_core.calendar_engine import unread_text
+    unread = unread_text(manager.day_plan.calendar_unread)  # an empty-looking day may not be free
+    facts = "\n\n".join(t for t in (holiday, unread, ahead if level != "off" or text else "", text) if t)
     brief = assistant.leftover_brief() if assistant is not None else ""
     return facts, brief
 

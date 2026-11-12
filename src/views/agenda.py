@@ -116,6 +116,12 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.groups = {}
         self.skip_menus = {}
         self.not_yours_rows = {}
+        from thirties_core.calendar_engine import unread_text
+        unread = unread_text(plan.calendar_unread)
+        if unread:  # first: an empty-looking day may not be free
+            row = Adw.ActionRow(title=unread, use_markup=False)
+            row.add_prefix(Gtk.Image(icon_name="dialog-warning-symbolic"))
+            self._group("calendar_unread", "").add(row)
         theirs = [s for s in plan.spans_in_view() if s.shown_only]
         spans = [s for s in plan.spans_in_view() if not s.shown_only]  # someone else's: their own section, last
         if now is None:  # another day: the plan as it stands, and its record if it's past

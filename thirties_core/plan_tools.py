@@ -1455,7 +1455,10 @@ class PlanTools:
         from thirties_core.if_time import text_for as if_time_text
         from thirties_core.not_yours import text_for as not_yours_text
         behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
-        return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
+        from thirties_core.calendar_engine import unread_text
+        unread = unread_text(plan.calendar_unread)
+        return ((unread + " Free time below may not be free.\n" if unread else "")
+                + "Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
