@@ -187,6 +187,21 @@ class BudgetTest(TodayTestCase):
         self.session(0, start="7:00 PM")  # put on today's schedule: that's the week's last one
         self.assertEqual(session_days(self.hp, self.task, WEEK), [DAY])
 
+    def test_the_trickle_reads_from_the_quarter_down_to_the_days(self):
+        from thirties_core.budgets import trickle_line
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "Q4", "sessions": 6})
+        self.assertEqual(trickle_line(self.hp, self.task), "6 sessions in Q4 2026 → 2 sessions this month (October)")
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 1})
+        self.assertEqual(trickle_line(self.hp, self.task),
+                         "6 sessions in Q4 2026 → 2 sessions this month (October) → 1 session this week → today")
+        shown = self.hp.describe_plan(MONTH, with_context=False)
+        self.assertIn("  Shed clear-out: 6 sessions in Q4 2026 → ", shown)  # a budget from above reaches the month
+        self.assertTrue(shown.startswith("This month (October)"), shown)  # the month's name keeps its capital
+
+    def test_no_budget_no_trickle(self):
+        from thirties_core.budgets import trickle_line
+        self.assertEqual(trickle_line(self.hp, self.task), "")
+
     def test_no_budget_and_no_deadline_simply_ends(self):
         from thirties_core.carry import settle
         self.session(-1, start="3:00 PM")

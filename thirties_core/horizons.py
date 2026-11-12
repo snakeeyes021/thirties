@@ -214,6 +214,11 @@ def parse_period(text: Any, today: date, week_start: int = 0) -> Period:
                          "'November', 'Q1' or 'next year'.") from None
 
 
+def _upper_first(text: str) -> str:
+    """'this month (October)' → 'This month (October)': only the first letter changes."""
+    return text[:1].upper() + text[1:]
+
+
 def period_label(p: Period, today: date, week_start: int = 0) -> str:
     """How a period reads to the user: 'today', 'Thursday', 'this week', 'the week of Nov 9', 'November', '2027'."""
     if p.level == "day":
@@ -715,7 +720,7 @@ class HorizonPlanner:
 
     def describe_plan(self, p: Period, with_context: bool = True) -> str:
         items = self.plan_items(p)
-        head = f"{self.label(p).capitalize()} ({_span_text(p)})"
+        head = f"{_upper_first(self.label(p))} ({_span_text(p)})"
         lines = []
         for r in items:
             slot = slot_period(r, self.week_start)
@@ -734,6 +739,18 @@ class HorizonPlanner:
                     days = session_days(self, t, bp) if bp.level == "week" else []
                     effort += (": " + ", ".join(d.strftime("%a") for d in days) if days else "") + ")"
             lines.append(f"- {where}{r['title']}{effort}{status}")
+        if p.level != "day":  # each budget reaching this period (its own or one from above), down to the days
+            from thirties_core.budgets import budget_period, trickle_line
+            seen = set()
+            for r in self.plans.rows():
+                t = next((x for x in self.tasks if x.id == r["item_id"]), None)
+                if t is None or t.id in seen or not int(r.get("sessions") or 0) or \
+                        not budget_period(r, self.week_start).overlaps(p):
+                    continue
+                seen.add(t.id)
+                way = trickle_line(self, t, max(p.start, self.today()))
+                if way:
+                    lines.append(f"  {r['title']}: {way}")
         from thirties_core.on_track import track_line
         how = track_line(self, p) if p.level != "day" else ""  # how on track it is (C2), counted by Python
         out = head + ":\n" + (how + "\n" if how else "") + (
@@ -766,8 +783,8 @@ class HorizonPlanner:
             while w.start <= p.end:
                 if w.end >= today:
                     n = len(self.plans.in_period(w))
-                    lines.append(f"{self.label(w).capitalize()}: {_brief(self, w) or f'{n} planned'}" if n else
-                                 f"{self.label(w).capitalize()}: nothing planned yet")
+                    lines.append(f"{_upper_first(self.label(w))}: {_brief(self, w) or f'{n} planned'}" if n else
+                                 f"{_upper_first(self.label(w))}: nothing planned yet")
                 w = next_period(w, self.week_start)
             return lines
         if p.level == "year":
@@ -1054,7 +1071,7 @@ class HorizonPlanner:
             if not data:
                 raise ToolError(f"There's no proposal for {self.label(p)}; make one with propose_period first.")
             if data.get("state") == "applied":
-                return f"{self.label(p).capitalize()} is already planned like that."
+                return f"{_upper_first(self.label(p))} is already planned like that."
             words = _stem_words(" ".join(map(str, skip)) if isinstance(skip, list) else str(skip or ""))
             by_id = {t.id: t for t in self.tasks}
             chosen = []
@@ -1133,7 +1150,7 @@ class HorizonPlanner:
                 continue
             from thirties_core.on_track import summary, track
             how = summary(track(self, p))
-            lines.append(f"{self.label(p).capitalize()}" + (f" ({how})" if how else "") + ":")
+            lines.append(f"{_upper_first(self.label(p))}" + (f" ({how})" if how else "") + ":")
             for r in rows[:15]:
                 slot = slot_period(r, self.week_start)
                 lines.append(f"- {r['title']}" + (f" ({self.label(slot)})" if slot else "")

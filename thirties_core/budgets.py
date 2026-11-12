@@ -162,6 +162,34 @@ def share_this(planner: "HorizonPlanner", task: "TaskItem", child: "Period") -> 
     return share_for(left, max(1, len(rest)))
 
 
+def trickle_line(planner: "HorizonPlanner", task: "TaskItem", d: Optional[date] = None) -> str:
+    """How an effort's budget trickles down to the day, worked out by Python: "6 sessions in Q4 2026 → 2 this
+    month (October) → 1 this week → Thursday". Each level shows its own budget if it has one, else its share of
+    the level above; the week ends in the days its sessions go on. "" with no budget."""
+    from thirties_core.horizons import period_of
+    d = d or planner.today()
+    parts: List[str] = []
+    for level in ("year", "quarter", "month", "week"):
+        p = period_of(level, d, planner.week_start)
+        own = budget_of(planner, task, d, level=level)
+        if own is not None:
+            n = own.sessions
+        elif parts:
+            n = share_this(planner, task, p)
+            if n is None:
+                continue
+        else:
+            continue  # nothing budgeted this high up yet
+        label = planner.label(p)
+        parts.append(f"{n} session{'s' if n != 1 else ''} " + (label if label.startswith(("this ", "next ")) else
+                                                                f"in {label}"))
+        if level == "week" and own is not None:
+            days = session_days(planner, task, p)
+            if days:
+                parts.append(", ".join(planner.label(period_of("day", x)) for x in days))
+    return " → ".join(parts)
+
+
 def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") -> List[date]:
     """The days this week's budget puts a session of ``task`` on: Python's week plan, worked out afresh from the
     room each day has, so it bends as the week fills. Days that already have one count first; the rest of what's
@@ -200,4 +228,4 @@ def _due(task) -> Optional[date]:
 
 
 __all__ = ["Budget", "budget_of", "soft_deadline", "share_for", "share_this", "periods_left", "count_sessions",
-           "session_days"]
+           "session_days", "trickle_line"]
