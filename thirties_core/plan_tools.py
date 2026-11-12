@@ -1404,6 +1404,10 @@ class PlanTools:
         args = dict(arguments or {})
         if "_parse_error" in args:
             return f"{NOT_DONE}: {name} {args['_parse_error']}. Write the arguments as a JSON object."
+        from thirties_core.intents import guard  # destructive only on the user's explicit words (intents.py)
+        guarded, args, guard_note = guard(name, args, self.user_message)
+        if not guarded:
+            return guard_note
         saved = self.day_plan
         outermost = self._home_plan is None
         if outermost:
@@ -1421,6 +1425,8 @@ class PlanTools:
                 self.outcomes_logged += 1  # "I've logged it as done" needs one of these (frontier.py)
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
+            if guard_note and not str(result).startswith(NOT_DONE):
+                result = f"{result}{guard_note}"
             return self.shorten(result) if outermost else result  # items by their short titles (11-07)
         except (ToolError, ClockError) as e:
             return self.shorten(f"{NOT_DONE}: {e}") if outermost else f"{NOT_DONE}: {e}"

@@ -53,6 +53,7 @@
           <li>If there's time items can be done, scheduled in the next gap, or put off to tomorrow, later this week, or dropped; a full day puts new things there and says so; when a free gap opens, a notice already being sent may name one of them; and what's left at the day's end comes back the next morning for this week</li>
           <li>Gemma on smaller devices: under 8 GB of memory, or after the bigger model fails to fit, Preferences offers the smaller model (Gemma 4 E2B); it's downloaded, checked and tested before the bigger one is removed, and Thirties never switches by itself</li>
           <li>Model downloads come from a fixed release of each file, so a new download is exactly the build that was tested</li>
+          <li>Nothing is removed for good unless you ask outright: archiving an item, forgetting something the assistant remembers, or hiding a whole calendar; otherwise Thirties does the gentle version (a drop) or asks first</li>
         </ul>
       </description>
     </release>
