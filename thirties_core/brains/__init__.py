@@ -30,9 +30,11 @@ class Brain(Protocol):
         ...
 
 
-BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud, for developers)"}
+BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud, for developers)",
+          "pipeline": "Gemini on the shared pipeline (being tested)"}
 BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontier",
-                 "slm": "slm", "gemma": "slm", "local": "slm", "device": "slm", "on-device": "slm"}
+                 "slm": "slm", "gemma": "slm", "local": "slm", "device": "slm", "on-device": "slm",
+                 "pipeline": "pipeline", "gemini-pipeline": "pipeline"}
 
 
 def brain_choice(config, state_db=None) -> str:
@@ -50,7 +52,7 @@ def brain_unavailable_reason(name: str, config) -> "str | None":
     """Why a brain can't be chosen on this device, or None if it can."""
     if name == "slm":
         from thirties_core.brains.slm.runtime import slm_unavailable_reason
-        return slm_unavailable_reason(config)
+        return slm_unavailable_reason(config)  # the pipeline brain needs Gemini, like the frontier one, below
     from thirties_core.inference import GeminiSourcesEngine
     if not GeminiSourcesEngine(config).is_available():
         return "no Gemini source is set up: add an API key, or install the Antigravity CLI as `agy` and sign in."
@@ -64,6 +66,10 @@ def make_brain(config, tools, inference_engine, tasks=None, active_notes=None, c
     if choice == "slm":
         from thirties_core.brains.slm import SlmBrain
         return SlmBrain(tools, tasks=tasks, config=config)
+    if choice == "pipeline":  # the same pipeline as Gemma's, with Gemini making the small decisions
+        from thirties_core.brains.slm import SlmBrain
+        from thirties_core.brains.slm.cloud_runtime import CloudRuntime
+        return SlmBrain(tools, tasks=tasks, config=config, runtime=CloudRuntime(inference_engine))
     return FrontierBrain(tools, inference_engine, tasks=tasks, active_notes=active_notes)
 
 

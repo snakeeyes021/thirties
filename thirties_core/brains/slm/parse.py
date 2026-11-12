@@ -14,6 +14,15 @@ ACTION_TYPES = ["add", "move", "remove", "swap", "outcome", "confirm", "reject",
                 "remember", "profile", "energy", "chat", "today", "urgency", "fact", "routine", "horizon", "times"]
 URGENCIES = ["now", "soon", "whenever", "someday"]
 
+# Each action the on-device model returns is one of the shared intents (intents.py): the same set every brain
+# understands into, with the same destructive guard where the tools run.
+ACTION_INTENT = {
+    "add": "add", "move": "move", "swap": "move", "remove": "take_off_plan", "outcome": "outcome",
+    "confirm": "answer", "reject": "answer", "choose": "answer", "suggest": "suggest", "question": "show",
+    "remember": "remember", "profile": "remember", "energy": "energy", "chat": "chat", "today": "today",
+    "urgency": "facts", "fact": "facts", "routine": "routine", "horizon": "facts", "times": "facts",
+}
+
 ACTION_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,

@@ -282,7 +282,7 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
             reply = run.manager.send_user_message(text)
             last_tools = tool_lines(run.manager.brain.messages[before:])
             run.log += [(_hhmm(now), "tool", t) for t in last_tools]
-            if run.brain == "frontier":
+            if run.brain in ("frontier", "pipeline"):
                 raise_if_agy_failed(reply)
             run.latencies.append(round(time_mod.time() - start, 1))
             run.log.append((_hhmm(now), "assistant", reply))
@@ -520,7 +520,7 @@ def main() -> None:
     ap.add_argument("--max-moves", type=int, default=MAX_MOVES)
     ap.add_argument("--until", default="", help="start no day that might not finish by this time (HH:MM, local)")
     ap.add_argument("--resume", default="", help="a run directory cut short earlier: keep its days, run the rest")
-    ap.add_argument("--brain", choices=["slm", "frontier"], default="",
+    ap.add_argument("--brain", choices=["slm", "frontier", "pipeline"], default="",
                     help="test another brain than the study names (the on-device one needs the GPU)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING, format="      [%(name)s] %(message)s")

@@ -444,7 +444,7 @@ class ConversationManager:
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:
-            if self.brain_name == "slm":  # its parse reads one message: give it the burst as one
+            if self.brain_name in ("slm", "pipeline"):  # its parse reads one message: give it the burst as one
                 reply = self.brain.respond(merged)
             else:  # the model sees each message as the user sent it, and answers them together
                 for i in batch[:-1]:
@@ -488,7 +488,7 @@ class ConversationManager:
         users = [m for m in self.brain.messages[before:] if m.get("role") == "user" and "at" not in m
                  and not str(m.get("content", "")).startswith("[System check")]
         from thirties_core import build
-        if self.brain_name == "slm" and users:
+        if self.brain_name in ("slm", "pipeline") and users:
             users[0]["at"], users[0]["via"], users[0]["build"] = batch[0].at, batch[0].via, build.BUILD
             return
         for item, m in zip(batch, users):

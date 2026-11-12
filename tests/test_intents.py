@@ -58,5 +58,38 @@ class CatalogueTest(TodayTestCase):
         self.assertTrue(out.startswith("NOT_DONE"), out)
 
 
+class PipelineTest(TodayTestCase):
+    """The on-device brain's actions are the shared intents, and Gemini can run on the same pipeline."""
+
+    def test_every_on_device_action_is_an_intent(self):
+        from thirties_core.brains.slm.parse import ACTION_INTENT, ACTION_TYPES
+        self.assertEqual(set(ACTION_INTENT), set(ACTION_TYPES))
+        self.assertTrue(set(ACTION_INTENT.values()) <= set(INTENTS))
+
+    def test_gemini_on_the_pipeline_answers_through_the_same_steps(self):
+        import json
+        from thirties_core.brains import make_brain
+        from thirties_core.brains.slm import SlmBrain
+        from thirties_core.brains.slm.cloud_runtime import CloudRuntime
+        from thirties_core.inference import MockInferenceEngine
+        engine = MockInferenceEngine()
+        replies = iter([json.dumps({"actions": [{"type": "add", "title": "Water the ferns", "start": "5:30 PM",
+                                                 "duration": "30 minutes"}]})] + ["Done."] * 10)
+        engine.chat = lambda messages, tools=None: {"role": "assistant", "content": next(replies), "tool_calls": []}
+        brain = make_brain(None, self.t, engine, tasks=self.services.tasks, choice="pipeline")
+        self.assertIsInstance(brain, SlmBrain)
+        self.assertIsInstance(brain.runtime, CloudRuntime)
+        brain.respond("water the ferns at 5:30")
+        self.assertTrue(any(s.title == "Water the ferns" for s in self.t.day_plan.spans))
+
+    def test_a_cloud_failure_isnt_taken_for_an_answer(self):
+        from thirties_core.brains.slm.cloud_runtime import CloudRuntime
+        from thirties_core.inference import MockInferenceEngine
+        engine = MockInferenceEngine()
+        engine.chat = lambda messages, tools=None: {"content": "Error contacting model: offline", "tool_calls": []}
+        with self.assertRaises(RuntimeError):
+            CloudRuntime(engine).json_call("sys", "user", {"type": "object"})
+
+
 if __name__ == "__main__":
     unittest.main()
