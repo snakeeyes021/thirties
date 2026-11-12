@@ -113,6 +113,14 @@ class TestLivingADay(unittest.TestCase):
         ])
         self.assertEqual(day.frictions[0].reply, "(nothing new from the app)")
 
+    def test_the_morning_greeting_waits_on_the_phone_with_its_own_time(self):
+        """Someone who wakes at 9 finds the greeting stamped when it was sent, not as if sent at 9."""
+        day, actor = self.run_day([{"felt": felt(), "move": {"do": "sleep"}}])
+        greetings = [(t, x) for t, w, x in day.run.log if w == "app"]
+        self.assertTrue(greetings, day.run.log)
+        self.assertLess(greetings[0][0], "09:00")
+        self.assertIn(f"[{greetings[0][0]}] App:", actor.prompts[0])
+
     def test_giving_up_ignores_the_app_for_a_while(self):
         day, _ = self.run_day([
             {"felt": felt(p=1, t=1, annoyance="too many pings"), "move": {"do": "give_up", "wait_minutes": 180}},

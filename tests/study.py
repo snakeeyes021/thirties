@@ -262,6 +262,12 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
     bed = at(script.day, script.bed, 1 if script.bed < script.wake else 0)
     life = "\n".join(f"- {b}" for b in script.life)
     constraints = "\n".join(f"- {c}" for c in script.constraints) or "(none)"
+    # The app runs from the start of the day, like a phone left on overnight: what it sends before the person wakes
+    # (the morning greeting at its time) arrives stamped with that time, and is waiting when they pick up the phone.
+    t = min(run.plan(0).day_start, now)
+    set_debug_time(t)
+    while t < now:
+        t = advance(run, t, now)
     run.service.tick(now)
     just, show_agenda, last_tools, last_reply, messages = "You've just woken up.", False, [], "", 0
     seen = 0  # the log up to here was there at the person's previous move
