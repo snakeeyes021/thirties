@@ -1310,6 +1310,7 @@ class PlanTools:
             if span.id in placed:
                 span.start_dt, span.end_dt = placed[span.id]
                 self._persist(span)
+        waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
         for span in no_room:  # it can't stay where it was: something else may be there now
             self._drop(span)
         plan.spans.sort(key=lambda s: s.start_dt)
@@ -1319,13 +1320,28 @@ class PlanTools:
         out = ["Redrew the rest of today:" if lines else "Nothing to redraw: nothing flexible is left today."] + lines
         if no_room:
             out.append("Doesn't fit before bedtime, so it's off today's plan: " + ", ".join(s.title for s in no_room)
-                       + (". Plan it tomorrow, or let it go?" if len(no_room) == 1 else
-                          ". Plan them tomorrow, or let them go?"))
+                       + (". It waits for tomorrow (Before today), where it can be moved or dropped."
+                          if waiting and len(no_room) == 1 else
+                          ". They wait for tomorrow (Before today), where each can be moved or dropped."
+                          if waiting else ". Plan it tomorrow, or let it go?"))
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
         out += late
         return "\n".join(out)
+
+    def _wait_for_tomorrow(self, spans: List[EventSpan]) -> bool:
+        """Items a redraw couldn't fit, put in the open pool for tomorrow (carry.py), so nothing it takes off the
+        plan is lost. False without the app's storage."""
+        if self._state_db is None or not spans:
+            return False
+        from thirties_core.carry import TODAY, OpenPool
+        day = self.day_plan.target_date
+        tomorrow = (day + timedelta(days=1)).isoformat()
+        OpenPool(self._state_db).add([{"title": s.title, "task_id": s.task_id or "", "horizon": TODAY,
+                                       "when": "tomorrow", "start": tomorrow, "end": tomorrow,
+                                       "why": "didn't fit when the day was redrawn"} for s in spans], day)
+        return True
 
     @staticmethod
     def _in_fact_order(spans: List[EventSpan], facts) -> List[EventSpan]:
@@ -1346,12 +1362,17 @@ class PlanTools:
                 span.start_dt, span.end_dt = (datetime.fromisoformat(x) for x in before["moved"][span.id])
                 self._persist(span)
                 restored.append(span.title)
+        back_on = []
         for data in before["removed"]:
             if not any(s.id == data["id"] for s in self.day_plan.spans):
                 span = EventSpan.from_dict(data)
                 self.day_plan.spans.append(span)
                 self._persist(span)
                 restored.append(span.title)
+                back_on.append(span.title)
+        if back_on and self._state_db is not None:  # back on today's plan: no longer waiting for tomorrow
+            from thirties_core.carry import OpenPool
+            OpenPool(self._state_db).drop(back_on)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._state_db.set_sync_meta(f"redraw_undo:{self.day_plan.target_date.isoformat()}", "")
         return "Put back as it was before the redraw: " + (", ".join(restored) or "nothing to restore") + "."
