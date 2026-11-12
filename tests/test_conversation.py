@@ -246,9 +246,7 @@ class TestTurnLoop(ConversationTestCase):
         for _ in range(5):
             self.engine.set_next_response(reply("CALL list_schedule"))
         self.manager.send_user_message("show me")
-        # three rounds, then the ask for the missing reply, whose rounds are checked like the rest (a lookup gets its
-        # follow-up): bounded at 3 + 2
-        self.assertEqual(len(self.engine.call_history), 5)
+        self.assertEqual(len(self.engine.call_history), 4)  # three rounds, then one ask for the missing reply
 
 
 class TestPersistence(ConversationTestCase):

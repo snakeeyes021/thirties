@@ -1181,7 +1181,9 @@ class AssistantTools(KindTools):
                 self.pt.day_plan = saved
             return f"[{e.plan.target_date.strftime('%A, %B %d')}] {result}"
         except ToolError as e:
-            if "matches several items" in str(e):
+            bookkeeping = bool(getattr(getattr(getattr(self.pt.scheduler, "config", None), "assistant", None),
+                                       "turn_bookkeeping", False))
+            if bookkeeping and "matches several items" in str(e):
                 raise  # which one is the user's to say: never a new "done" item beside the real ones
             span = None
         except Exception:

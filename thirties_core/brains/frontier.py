@@ -414,8 +414,20 @@ RULES
         return [m for i, m in enumerate(self.messages) if (i >= cutoff or m.get("role") != "tool")
                 and not m.get("display_only") and not m.get("spent")]
 
+    def _bookkeeping_on(self) -> bool:
+        """The turn bookkeeping (failures per item, every round checked, spent drafts): off by default until its
+        study passes ([assistant] turn_bookkeeping)."""
+        scheduler = getattr(self.tools, "scheduler", None)
+        return bool(getattr(getattr(getattr(scheduler, "config", None), "assistant", None), "turn_bookkeeping", False))
+
     def respond(self, user_text: str) -> str:
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
+        if not self._bookkeeping_on():
+            return self._respond_baseline(user_text)
+        return self._respond_checked(user_text)
+
+    def _respond_checked(self, user_text: str) -> str:
+        """One turn with the turn bookkeeping on."""
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         changes_before = self.tools.successful_changes
         outcomes_before = self.tools.outcomes_logged
@@ -579,6 +591,146 @@ RULES
         if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes(turn_start)):
             return fixed
         return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
+
+    # --- the turn as it was before the bookkeeping (the switch's "off") ---
+
+    def _respond_baseline(self, user_text: str) -> str:
+        """The one-prompt turn as it was before the turn bookkeeping (kept verbatim while that waits for its study
+        behind the turn_bookkeeping switch)."""
+        self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
+        changes_before = self.tools.successful_changes
+        outcomes_before = self.tools.outcomes_logged
+        logger.info("[FrontierBrain] User message: %r", user_text)
+        self.messages.append({"role": "user", "content": user_text})
+        turn_start = len(self.messages)
+
+        reply = ""
+        last_results: List[str] = []
+        reflected = False
+        for round_index in range(MAX_ROUNDS):
+            response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+            content = response.get("content", "") or ""
+            calls = response.get("tool_calls", []) or []
+            self.messages.append(response)
+            if content.strip():
+                reply = content
+
+            results = []
+            for call in calls:
+                name, args = call.get("name"), call.get("arguments", {})
+                output = self.tools.execute(name, args)
+                logger.info("[FrontierBrain] %s(%s) -> %s", name, args, output)
+                results.append(output)
+                self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"), "name": name, "content": output})
+            if results:
+                last_results = results
+
+            changed = self.tools.successful_changes - changes_before
+            if not calls:
+                if (self._claims_outcome(content) and self.tools.outcomes_logged == outcomes_before
+                        and not reflected):  # 10-30 sim: the model said a session was logged as done, with nothing logged
+                    reflected = True
+                    logger.warning("[FrontierBrain] Model claimed an outcome without log_outcome; asking it to correct.")
+                    self.messages.append({"role": "user", "content": (
+                        "[System check, not from the user] Your reply says something was marked done (or skipped), "
+                        "but no log_outcome went through this turn, so nothing was recorded. Call log_outcome now, "
+                        "or correct your reply."
+                    )})
+                    continue
+                if self._claims_change(content) and changed == 0 and not reflected:
+                    reflected = True
+                    logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
+                    self.messages.append({"role": "user", "content": (
+                        "[System check, not from the user] Your reply says the schedule changed, but you made no "
+                        "CALLs, so nothing changed. Make the CALLs now, or correct your reply."
+                    )})
+                    continue
+                break
+            needs_follow_up = (
+                any(c.get("name") in READ_ONLY_TOOLS for c in calls)
+                or any(r.startswith(NOT_DONE) for r in results)
+                or not content.strip()
+            )
+            if not needs_follow_up or round_index == MAX_ROUNDS - 1:
+                break
+            if any(r.startswith(NOT_DONE) for r in results):
+                reply = ""  # the draft was written before the refusal; don't show it
+
+        for attempt in range(2):  # a reply that's empty, or that narrates the conversation, gets one more try
+            problem = "empty" if not reply.strip() else ("meta" if self._is_meta(reply) else "")
+            if not problem or attempt == 1:
+                break
+            logger.warning("[FrontierBrain] Reply was %s; asking again: %r", problem, reply[:300])
+            self.messages.append({"role": "user", "content": (
+                "[System check, not from the user] " + (
+                    "You didn't write a reply. Reply to the user now, in your own words." if problem == "empty" else
+                    "Your reply described the conversation, your instructions or tool results. Write only the "
+                    "message the user should read.")
+            )})
+            response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+            self.messages.append(response)
+            for call in response.get("tool_calls", []) or []:
+                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
+                                      "name": call.get("name"), "content": output})
+            reply = response.get("content", "") or ""
+        if self._is_meta(reply):
+            kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
+            reply = "\n\n".join(kept)
+        reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
+                          if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
+        if self._claims_change(reply) and self.tools.successful_changes == changes_before:
+            logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
+            reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
+        if not reply.strip():
+            reply = ("Done." if self.tools.successful_changes > changes_before else
+                     "Sorry, I lost my train of thought there. Could you say that again?")
+        reply = self._own_up_baseline(turn_start, reply)
+        self._show_only(turn_start, reply)
+        logger.info("[FrontierBrain] Final reply: %r", reply)
+        return reply
+
+
+    def _failed_changes_baseline(self, turn_start: int) -> List[str]:
+        """Changes that failed this turn with nothing after them that worked: a refusal the model got around
+        another way (moving a break with a fresh add) isn't a failure the user needs to hear about."""
+        failed: List[str] = []
+        for m in self.messages[turn_start:]:
+            if m.get("role") != "tool" or m.get("name") in READ_ONLY_TOOLS:
+                continue
+            out = str(m.get("content") or "")
+            if out.startswith(NOT_DONE):
+                failed.append(out[len(NOT_DONE):].lstrip(": ").strip())
+            else:
+                failed = []
+                joplin = re.search(r"\((couldn'?t [^:]*Joplin.*)\)\.?$", out)  # done here, but not in Joplin
+                if joplin:
+                    failed.append(re.sub(r"\s+", " ", joplin.group(1)))
+        return failed
+
+
+    def _own_up_baseline(self, turn_start: int, reply: str) -> str:
+        """A reply that says a change happened, when the change failed, gets one more try with the failures
+        named ("It is marked done now" over a failed write, "All set" over three refusals: 10-22, 10-24). If it
+        still claims it, a plain line is added; the model's tool wording never reaches the user."""
+        failed = self._failed_changes_baseline(turn_start)
+        if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
+            return reply
+        logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
+        self.messages.append({"role": "user", "content": (
+            "[System check, not from the user] These didn't go through: " + " | ".join(failed) + ". Your reply "
+            "says otherwise. Rewrite it so it's true: say plainly what didn't happen and what you'll do instead.")})
+        response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+        self.messages.append(response)
+        for call in response.get("tool_calls", []) or []:
+            output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+            self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
+                                  "name": call.get("name"), "content": output})
+        fixed = str(response.get("content") or "").strip()
+        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes_baseline(turn_start)):
+            return fixed
+        return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
+
 
     _META_RE = re.compile(
         r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"

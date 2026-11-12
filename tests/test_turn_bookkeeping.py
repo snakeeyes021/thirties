@@ -12,18 +12,49 @@ from thirties_core.plan_tools import NOT_DONE
 
 class TestGluedCalls(unittest.TestCase):
     def test_text_glued_after_the_arguments_is_kept_and_the_call_runs(self):
-        text, calls = parse_model_directives('CALL list_schedule {}Sorry about that, here is the day.')
+        text, calls = parse_model_directives('CALL list_schedule {}Sorry about that, here is the day.',
+                                             split_glued=True)
         self.assertEqual([c["name"] for c in calls], ["list_schedule"])
         self.assertNotIn("_parse_error", calls[0]["arguments"])
         self.assertEqual(text, "Sorry about that, here is the day.")
 
     def test_arguments_then_text(self):
-        text, calls = parse_model_directives('CALL add_event {"title": "Walk", "start": "5:00 PM"} Added it.')
+        text, calls = parse_model_directives('CALL add_event {"title": "Walk", "start": "5:00 PM"} Added it.',
+                                             split_glued=True)
         self.assertEqual(calls[0]["arguments"], {"title": "Walk", "start": "5:00 PM"})
         self.assertEqual(text, "Added it.")
 
 
-class TestTurnBookkeeping(ConversationTestCase):
+class BookkeepingOn(ConversationTestCase):
+    """The turn bookkeeping switched on ([assistant] turn_bookkeeping)."""
+
+    def setUp(self):
+        super().setUp()
+        self.manager.scheduler.config.assistant.turn_bookkeeping = True
+
+
+class TestSwitchedOffIsTheTurnAsItWas(unittest.TestCase):
+    """Off by default, and off is the turn loop as it was before the bookkeeping: each scripted turn gives the same
+    reply, the same number of model calls and the same context as the recorded baseline (turn_baseline.json)."""
+
+    def test_off_by_default(self):
+        from thirties_core.config import ThirtiesConfig
+        self.assertFalse(ThirtiesConfig().assistant.turn_bookkeeping)
+
+    def test_off_equals_the_baseline(self):
+        import json
+        from pathlib import Path
+        from tests import turn_scenarios
+        pinned = json.loads((Path(__file__).parent / "turn_baseline.json").read_text())
+        for name in turn_scenarios.SCENARIOS:
+            self.assertEqual(turn_scenarios.run(name), pinned[name], name)
+
+    def test_a_glued_reply_is_a_parse_error_when_off(self):
+        text, calls = parse_model_directives('CALL list_schedule {}Sorry about that, here is the day.')
+        self.assertIn("_parse_error", calls[0]["arguments"])  # as before
+
+
+class TestTurnBookkeeping(BookkeepingOn):
 
     def add(self, title, start):
         return self.manager.tools.execute("add_event", {"title": title, "start": start, "duration": "30 min"})
@@ -45,6 +76,12 @@ class TestTurnBookkeeping(ConversationTestCase):
         self.engine.set_next_response(reply("Moved Stretch to 6."))
         out = self.manager.send_user_message("stretch at 6")
         self.assertEqual(out, "Moved Stretch to 6.")
+
+    def test_rounds_are_capped_with_the_retry_checked(self):
+        for _ in range(6):
+            self.engine.set_next_response(reply("CALL list_schedule"))
+        self.manager.send_user_message("show me")
+        self.assertEqual(len(self.engine.call_history), 5)  # three rounds, then the retry and its follow-up
 
     def test_a_retry_s_calls_are_checked_too(self):
         """The empty-reply retry's calls used to run with no follow-up and no check."""
@@ -157,7 +194,7 @@ class TestOnlySaidTimes(ConversationTestCase):
         self.assertEqual(ferns.actual_end, at("18:25"))  # said: kept
 
 
-class TestPhantomDone(ConversationTestCase):
+class TestPhantomDone(BookkeepingOn):
     def test_done_with_two_matches_asks_which(self):
         """Saying done with a name matching two items recorded a new item and left both open."""
         tools = self.manager.tools

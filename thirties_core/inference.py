@@ -406,7 +406,7 @@ class AntigravityInferenceEngine:
                 "tool_calls": [],
             }
 
-        clean_text, tool_calls = parse_model_directives(raw_reply)
+        clean_text, tool_calls = parse_model_directives(raw_reply, _split_glued_on(self.config))
         return privacy.SHIELD.restore_reply({
             "role": "assistant",
             "content": clean_text,
@@ -492,7 +492,7 @@ class GeminiInferenceEngine:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 raw_text = "".join(p.get("text", "") for p in parts)
 
-            clean_text, tool_calls = parse_model_directives(raw_text)
+            clean_text, tool_calls = parse_model_directives(raw_text, _split_glued_on(self.config))
             return privacy.SHIELD.restore_reply({
                 "role": "assistant",
                 "content": clean_text,
@@ -712,7 +712,7 @@ class LiteRTInferenceEngine:
         if not raw_reply:
             raw_reply = "I'm ready to help you plan your day. Let me know what you'd like to work on!"
 
-        clean_text, tool_calls = parse_model_directives(raw_reply)
+        clean_text, tool_calls = parse_model_directives(raw_reply, _split_glued_on(self.config))
         return {
             "role": "assistant",
             "content": clean_text,
@@ -739,7 +739,11 @@ def _split_glued(line: str, start: "re.Match") -> Optional[tuple]:
     return start.group(1), args, rest.strip()
 
 
-def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
+def _split_glued_on(config) -> bool:
+    return bool(getattr(getattr(config, "assistant", None), "turn_bookkeeping", False))
+
+
+def parse_model_directives(raw_reply: str, split_glued: bool = False) -> tuple[str, list[dict[str, Any]]]:
     """Extract tool calls from a text reply and return (visible_text, tool_calls).
 
     Text transports express a tool call as one line: ``CALL tool_name {json arguments}``.
@@ -765,7 +769,7 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
                 stripped += " " + lines[i].strip().strip("`")
                 i += 1
         m = _CALL_LINE_RE.match(stripped)
-        if not m and start:  # text glued after the arguments ("CALL show_schedule {}Sorry, ..."): the call, then the text
+        if not m and start and split_glued:  # text glued after the arguments ("CALL x {}Sorry, ..."): call, then text
             glued = _split_glued(stripped, start)
             if glued is not None:
                 name, args, rest = glued
