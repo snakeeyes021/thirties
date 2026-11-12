@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS item_facts (
 );
 """
 _COLUMNS = ["name", "title", "kind", "minutes", "fixed_at", "not_before", "after", "goes_with", "daylight",
-            "updated_at", "repeats"]
+            "updated_at", "repeats", "months"]
 # How often an item's deadline comes round again, when the user says so ("the filing window is every quarter"):
 # a missed one then moves to the next (deadlines.py), never guessed from the wording
 REPEATS = ("monthly", "quarterly", "yearly")
@@ -125,10 +125,11 @@ class Lasting:
     daylight: bool = False
     updated_at: str = ""
     repeats: str = ""                                   # its deadline comes round again: monthly, quarterly, yearly
+    months: str = ""                                    # the months it's in season ("6,7,8"); empty: all year
 
     def is_empty(self) -> bool:
         return not (self.kind or self.minutes or self.fixed_at or self.not_before or self.after or self.goes_with
-                    or self.daylight or self.repeats)
+                    or self.daylight or self.repeats or self.months)
 
     def fixed_time(self, day_start: datetime) -> Optional[datetime]:
         """The fixed time on the day that starts at ``day_start`` (an early-morning time is the next morning's)."""
@@ -157,6 +158,9 @@ class Lasting:
             out.append("needs daylight")
         if self.repeats:
             out.append(f"its deadline comes round {self.repeats}")
+        if self.months:
+            from thirties_core.seasons import describe, from_text
+            out.append(f"in season {describe(from_text(self.months))}")
         return [x for x in out if x]
 
 
@@ -175,8 +179,10 @@ class LastingFacts:
         self.db = db
         with db._get_connection() as conn:
             conn.executescript(_SCHEMA)
-            if "repeats" not in {r[1] for r in conn.execute("PRAGMA table_info(item_facts)").fetchall()}:
-                conn.execute("ALTER TABLE item_facts ADD COLUMN repeats TEXT NOT NULL DEFAULT ''")
+            have = {r[1] for r in conn.execute("PRAGMA table_info(item_facts)").fetchall()}
+            for col in ("repeats", "months"):
+                if col not in have:
+                    conn.execute(f"ALTER TABLE item_facts ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
     def _row(row) -> Lasting:
@@ -184,6 +190,7 @@ class LastingFacts:
                        fixed_at=row["fixed_at"], not_before=row["not_before"], after=json.loads(row["after"] or "[]"),
                        goes_with=json.loads(row["goes_with"] or "[]"), daylight=bool(row["daylight"]),
                        repeats=(row["repeats"] if "repeats" in row.keys() else "") or "",
+                       months=(row["months"] if "months" in row.keys() else "") or "",
                        updated_at=row["updated_at"])
 
     def all(self) -> List[Lasting]:
@@ -225,7 +232,7 @@ class LastingFacts:
     @staticmethod
     def _values(f: Lasting) -> list:
         return [f.name, f.title, f.kind, int(f.minutes), f.fixed_at, f.not_before, json.dumps(sorted(set(f.after))),
-                json.dumps(sorted(set(f.goes_with))), int(f.daylight), f.updated_at, f.repeats or ""]
+                json.dumps(sorted(set(f.goes_with))), int(f.daylight), f.updated_at, f.repeats or "", f.months or ""]
 
     def kind_override(self, title: Any, *aliases: Any) -> str:
         own = next((f for f in (self.get(t) for t in (title,) + aliases if t) if f is not None), None)
@@ -242,7 +249,7 @@ class LastingFacts:
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             defaults = {"title": "", "kind": "", "minutes": 0, "fixed_at": "", "not_before": "", "after": "[]",
-                        "goes_with": "[]", "daylight": 0, "repeats": ""}
+                        "goes_with": "[]", "daylight": 0, "repeats": "", "months": ""}
             conn.execute(f"INSERT OR REPLACE INTO item_facts ({', '.join(_COLUMNS)}) "
                          f"VALUES ({', '.join('?' * len(_COLUMNS))})",
                          [record.get(c, defaults.get(c)) for c in _COLUMNS])
@@ -372,7 +379,7 @@ def _names(value: Any) -> List[str]:
 
 def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                    stays_put: Any = None, length: Any = None, at: Any = None, goes_with: Any = None,
-                   kind: Any = None, repeats: Any = None) -> str:
+                   kind: Any = None, repeats: Any = None, season: Any = None) -> str:
     """set_item_facts with every_day: what the user says holds for an item every day, kept by its name. The item
     needn't be planned; if it is, its title is the name. Returns the tool result."""
     from thirties_core.clock import format_clock, format_duration, parse_duration_minutes
@@ -410,6 +417,15 @@ def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = Non
             from thirties_core.assistant_tools import ToolError
             raise ToolError("repeats must be 'monthly', 'quarterly' or 'yearly' (or 'never' to clear it).")
         facts.repeats = r
+    if season not in (None, ""):
+        from thirties_core.seasons import parse as parse_season, to_text
+        scheduler = getattr(pt, "scheduler", None)
+        latitude = float(scheduler.config.general.latitude) if scheduler is not None else 0.0  # its hemisphere
+        months = parse_season(str(season), latitude)
+        if months is None:
+            from thirties_core.assistant_tools import ToolError
+            raise ToolError("season must name a season ('summer'), months ('May to September') or 'all year'.")
+        facts.months = to_text(months)
     if length not in (None, ""):
         facts.minutes = parse_duration_minutes(length)
     if at not in (None, ""):

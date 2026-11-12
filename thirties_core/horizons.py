@@ -717,6 +717,18 @@ class HorizonPlanner:
             self.plans.set_effort(f"{plan.key}|{task.id}", sessions, minutes or 0)
         return plan, slot
 
+    def months_of(self, t: TaskItem) -> set:
+        """The months an item is in season (seasons.py): what the user said, or its own text's mark; empty for
+        all year."""
+        from thirties_core.item_facts import LastingFacts
+        from thirties_core.seasons import from_text, marked
+        if not hasattr(self, "_months"):
+            self._months: Dict[str, set] = {}
+        if t.id not in self._months:
+            said = from_text(LastingFacts(self.db).for_item(t.title).months)
+            self._months[t.id] = said or marked(t.title, float(self.pt.scheduler.config.general.latitude))
+        return self._months[t.id]
+
     LOST_KEY = "lost_pins"  # sync meta: [{"title", "where"}] taken out because their item is on no list, to say once
 
     def tidy_pins(self) -> None:
@@ -935,11 +947,15 @@ class HorizonPlanner:
         on_today = self._on_today() if p.level == "day" else set()
         out: Dict[str, Candidate] = {}
 
+        from thirties_core.seasons import overlaps as season_overlaps, pulled_due
+
         def add(t: TaskItem, source: str, why: str, slot: str = "", share: Optional[Tuple[int, int]] = None
                 ) -> None:
             # an effort with sessions left isn't placed by one session on the schedule, nor done by one
             if share is None and (t.id in done or t.id in scheduled or t.id in on_today):
                 return
+            if not season_overlaps(self.months_of(t), p.start, p.end):
+                return  # out of season: it waits for its months (not someday, not missed, never offered daily)
             c = out.get(t.id)
             if c is not None and _SOURCE_SCORE[c.source] >= _SOURCE_SCORE[source]:
                 return
@@ -993,7 +1009,7 @@ class HorizonPlanner:
         # pressing): due tomorrow means today is when there's still room for it
         due_by = p.end + timedelta(days=2 if p.level == "day" else 0)
         for t in tasks.values():
-            due = _as_date(t.due)
+            due = pulled_due(self.months_of(t), _as_date(t.due))  # a deadline out of season: its last in-season day
             if due and due <= due_by and t.id not in placed_elsewhere and self._plannable(t):
                 add(t, "due", "overdue" if due < today else f"due {self.label(period_of('day', due))}")
 

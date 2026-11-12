@@ -131,6 +131,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
                        "repeats": "When the user says its deadline comes round again: 'monthly', 'quarterly' or "
                                   "'yearly' (a missed one then moves to the next, with time to prepare planned "
                                   "before it). Never guess it.",
+                       "season": "When the user says it only makes sense in some months: a season ('summer', "
+                                 "'a winter thing') or months ('May to September'); 'all year' clears it. It's then "
+                                 "planned only in those months. Never guess it.",
                        "day": "The day it's on (default: the day being planned)."},
         "required": ["event"],
     },
@@ -1183,12 +1186,12 @@ class PlanTools:
     def set_item_facts(self, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                        stays_put: Any = None, every_day: Any = None, length: Any = None, at: Any = None,
                        goes_with: Any = None, kind: Any = None, before: Any = None, done_by: Any = None,
-                       repeats: Any = None, **_: Any) -> str:
-        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind, repeats)):
+                       repeats: Any = None, season: Any = None, **_: Any) -> str:
+        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind, repeats, season)):
             from thirties_core.item_facts import record_lasting  # by name, every day (R6)
             return record_lasting(self, event, after=after, not_before=not_before, daylight=daylight,
                                   stays_put=stays_put, length=length, at=at, goes_with=goes_with, kind=kind,
-                                  repeats=repeats)
+                                  repeats=repeats, season=season)
         def names(value: Any) -> List[str]:
             return value if isinstance(value, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(value)) if a]
         try:

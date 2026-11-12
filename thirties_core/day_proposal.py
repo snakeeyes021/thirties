@@ -475,6 +475,13 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
                     "minutes": minutes})
         seen.add(c.title.lower())
     out += [c for c in own if c["title"].lower() not in seen]
+    try:  # out of season, an item waits for its months: never offered day after day (seasons.py)
+        from thirties_core.horizons import HorizonPlanner
+        from thirties_core.seasons import in_season
+        planner = HorizonPlanner(dp.a.pt)
+        out = [c for c in out if c.get("task") is None or in_season(planner.months_of(c["task"]), plan.target_date)]
+    except Exception as e:
+        logger.warning("Couldn't check the seasons of the day's candidates: %s", e)
     return out[:MAX_CANDIDATES]
 
 
