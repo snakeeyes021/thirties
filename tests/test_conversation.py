@@ -318,6 +318,8 @@ class TestChoosingTheBrain(ConversationTestCase):
         sched = self.manager.scheduler
         with patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
             self.assertNotIn("slm", offered_brains(sched.config))
+            self.assertNotIn("pipeline", offered_brains(sched.config))  # parked: behind the switch too
+            self.assertIn("Unknown brain", self.manager.send_user_message("/brain pipeline"))
             out = self.manager.send_user_message("/brain gemma")
             self.assertIn("Unknown brain", out)
             self.assertEqual(self.manager.brain_name, "frontier")

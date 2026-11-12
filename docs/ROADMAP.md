@@ -87,6 +87,8 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
   - other people's calendars need a decision
 
 ### SLM brain (see `docs/SLM_BRAIN.md`)
+**Parked 11-12:** rounds 1–4 of the study comparing the scaffolded pipeline with the one-prompt brain failed their bar (round 4 held the model fixed: Gemini on both); see the study reports in `docs/eval_reports/studies/pipeline_vs_one_prompt/`. Its code remains in the repository, inert: the on-device brain and Gemini on the pipeline are offered only behind the developer switch (`[assistant] offer_gemma`, or `THIRTIES_OFFER_GEMMA=1`), are never the default, and aren't maintained. Whether to keep or remove it is reconsidered after 0.3.0. The shared-core fixes found on the way stay.
+
 - **Gemma parses; Python does the rest.** One parse per message, in a long-lived session that reuses the KV cache: about 12 s for the first message and about 3.5 s after that in the benchmark. The context window is 8k tokens, with a safe budget and a fresh session if a call fails.
 - **Python handles:**
   - references ("it", "the first X", "the 9 PM one")

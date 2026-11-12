@@ -37,7 +37,7 @@ BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontie
                  "pipeline": "pipeline", "gemini-pipeline": "pipeline"}
 
 
-GEMMA_FLAG_ENV = "THIRTIES_OFFER_GEMMA"
+GEMMA_FLAG_ENV = "THIRTIES_OFFER_GEMMA"  # also brings back the pipeline brain (parked: docs/SLM_BRAIN.md)
 
 
 def gemma_offered(config=None) -> bool:
@@ -51,8 +51,9 @@ def gemma_offered(config=None) -> bool:
 
 
 def offered_brains(config=None) -> Dict[str, str]:
-    """The brains a user can pick on this device."""
-    return {k: v for k, v in BRAINS.items() if k != "slm" or gemma_offered(config)}
+    """The brains a user can pick on this device: the one-prompt brain, and the pipeline brains (Gemma, and Gemini
+    on the same pipeline) only behind the developer switch; the pipeline design is parked."""
+    return {k: v for k, v in BRAINS.items() if k == "frontier" or gemma_offered(config)}
 
 
 def brain_choice(config, state_db=None) -> str:
