@@ -98,12 +98,38 @@ class TestLivingADay(unittest.TestCase):
         self.assertIn("Walk", actor.prompts[1])
         self.assertTrue(any("(in the app) ticked Walk" in x for _, w, x in day.run.log if w == "user"))
 
+    def test_at_zero_patience_and_trust_the_person_gives_up_for_the_day(self):
+        day, _ = self.run_day([{"felt": felt(p=0, t=0, annoyance="useless"), "move": {"do": "wait", "wait_minutes": 30}},
+                               {"felt": felt(), "move": {"do": "message", "message": "never reached"}}])
+        self.assertEqual(day.run.end_reason, "gave up")
+        self.assertEqual(len(day.frictions), 1)
+        self.assertFalse(any(x == "never reached" for _, w, x in day.run.log if w == "user"))
+
+    def test_a_friction_carries_only_what_the_app_said_since_the_last_move(self):
+        day, _ = self.run_day([
+            {"felt": felt(), "move": {"do": "message", "message": "walk at 10"}},
+            {"felt": felt(), "move": {"do": "wait", "wait_minutes": 20}},
+            {"felt": felt(p=3, annoyance="nothing happened"), "move": {"do": "sleep"}},
+        ])
+        self.assertEqual(day.frictions[0].reply, "(nothing new from the app)")
+
     def test_giving_up_ignores_the_app_for_a_while(self):
         day, _ = self.run_day([
             {"felt": felt(p=1, t=1, annoyance="too many pings"), "move": {"do": "give_up", "wait_minutes": 180}},
             {"felt": felt(p=2, t=1), "move": {"do": "sleep"}},
         ])
         self.assertEqual(len(day.frictions), 1)  # giving up is always a friction
+
+
+class TestStartStates(unittest.TestCase):
+    def test_a_sick_person_starts_low_and_a_new_user_slow_to_trust(self):
+        from tests.study import START_STATE, start_state_for
+        sick = DayScript(**{**SCRIPT.__dict__, "situation": "Home with a bad cold."})
+        new = DayScript(**{**SCRIPT.__dict__, "persona": "Just installed the app this morning; first day."})
+        self.assertEqual(start_state_for(SCRIPT), START_STATE)
+        self.assertEqual((start_state_for(sick)["energy"], start_state_for(sick)["patience"]), (3, 5))
+        self.assertEqual(start_state_for(new)["trust"], 4)
+        self.assertEqual(start_state_for(sick, {"energy": 9})["energy"], 9)  # the study's own word wins
 
 
 class TestCatalogueAndReport(unittest.TestCase):

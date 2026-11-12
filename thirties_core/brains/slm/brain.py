@@ -41,6 +41,15 @@ from thirties_core.plan_tools import NOT_DONE, PlanTools
 logger = logging.getLogger(__name__)
 
 PRONOUNS = {"it", "that", "this", "them", "those", "the thing", "that one", "this one"}
+# A reference to several things at once: the items the app's last message named (a check-in's question), never a
+# title of its own ("they is done")
+COLLECTIVE = {"they", "them", "those", "these", "both", "both of them", "all", "all of them", "all of those",
+              "all of it", "everything", "each", "the rest", "all three", "all two", "all those"}
+# A part of a message that's talk, not a request: acknowledged, never sent back with "say that again"
+CHATTY_RE = re.compile(
+    r"\b(going to (sleep|bed)|heading to bed|off to bed|good ?night|night night|exhausted|tired|wiped|beat|"
+    r"my head|headache|feel(ing)?|sick|thanks|thank you|ok(ay)?|cool|great|nice|lol|haha|ugh|phew|long day|"
+    r"what a day|it'?s (midnight|late|been)|i'?m (done|beat|wiped|out|spent)|whew|yay|sigh)\b", re.IGNORECASE)
 ENVELOPE_WORDS = {"work": SpanCategory.WORK, "job": SpanCategory.WORK, "shift": SpanCategory.WORK,
                   "sleep": SpanCategory.SLEEP, "bed": SpanCategory.SLEEP, "bedtime": SpanCategory.SLEEP}
 CHAT_SYSTEM = ("You are Thirties, a warm, concise personal planning assistant that can see and change the user's "
@@ -107,7 +116,7 @@ TODAY_LIST_RE = re.compile(r"\b(?:add|put)\s+(?P<items>.+?)\s+(?:on|to)\s+(?:my\
 URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgent|is pressing|isn'?t urgent|is not urgent|"
                         r"can wait|is no rush|is a someday thing|has to happen by \w+|needs to happen by \w+|"
                         r"is due by \w+|by \w+ at the latest)\b", re.I)
-STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to|into)|going to start|getting started|now doing|"
+STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to(?! (?:bed|sleep))|into)|going to start|getting started|now doing|"
                          r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
 FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed|made|sent|submitted|"
                          r"placed|ordered|picked up|got (it|back|home)|back from|returned|is in|are in|went)\b", re.I)
@@ -459,13 +468,19 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                     best = (overlap, t)
         return best[1] if best else None
 
-    @staticmethod
-    def _humane(error: str) -> str:
+    # A sentence written for a model, never for the person: a tool name, an argument, an id, an instruction to it
+    _FOR_MODEL_RE = re.compile(r"\b[a-z]+_[a-z_]+\b|\w+=(?:true|false|\w+)|\bwith (?:that|its|the) id\b|\btask_id\b|"
+                               r"\bCALL\b|\bNOT_DONE\b|\bthe user\b|\bretry\b", re.IGNORECASE)
+
+    @classmethod
+    def _humane(cls, error: str) -> str:
         """Tool errors are written for models; keep the fact, drop the instructions and ids."""
         error = re.sub(r"\s*\[id [0-9a-z:@.-]+\]", "", error)
-        error = re.sub(r"\s*Ask the user, then retry.*$", "", error)
+        error = re.sub(r"\s*\(blocks [^)]*\)", "", error)
         error = re.sub(r"\s*\(\d+h(?: \d+m)?\)|\s*\(\d+m\)", "", error)
-        return error.strip()
+        sentences = re.split(r"(?<=[.!?])\s+|;\s+(?=[A-Za-z])", error.strip())
+        kept = [s for s in sentences if s and not cls._FOR_MODEL_RE.search(s)]
+        return " ".join(kept).strip() or (sentences[0] if sentences else "").strip()
 
     def _run(self, name: str, args: Dict[str, Any]) -> Tuple[bool, str]:
         out = self.tools.execute(name, args)
@@ -817,7 +832,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         return reply
 
     def _unclear_note(self) -> str:
-        parts = [p for p in getattr(self, "_unclear", []) if p]
+        parts = [p for p in getattr(self, "_unclear", []) if p and not CHATTY_RE.search(p)]
         if not parts:
             return ""
         quoted = " and ".join(f'"{p[:80]}"' for p in parts[:2])
@@ -962,6 +977,19 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             return "What should I call it, and when?", False
         day = a.get("day")
         anchor_ref = a.get("after") or a.get("before")
+        stated = self._stated_window(getattr(self, "_message", "") or "") if not a.get("start") and not anchor_ref \
+            else None
+        if stated is not None:  # no time, but a window the user gave: Python places it inside
+            minutes = 60
+            try:
+                minutes = parse_duration_minutes(a.get("duration")) if a.get("duration") else 60
+            except ClockError:
+                pass
+            ok, out, slot = self._place_in_window(title, minutes, stated, self._now())
+            if ok:
+                return out, True
+            return (f"There's no room for {title} between {format_clock(stated[0])} and "
+                    f"{format_clock(stated[1])}."), False
         if not a.get("start") and not anchor_ref:
             self.state.proposal, self.state.proposal_kind = [], ""
             self.state.awaiting_time = {k: v for k, v in a.fields.items() if k in ("title", "duration", "day", "alongside")}
@@ -1309,8 +1337,32 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         self.state.last_ids = [i for i in self.state.last_ids if i != span.id]
         return f"Removed {span.title} ({format_clock(span.start_dt)} – {format_clock(span.end_dt)}).", True
 
+    def _named_in_last_message(self) -> List[EventSpan]:
+        """The plan items the app's latest message names (a check-in: "did A and B happen?")."""
+        last = next((m for m in reversed(self.messages[:-1]) if m.get("role") == "assistant"), None)
+        text = str((last or {}).get("content") or "").lower()
+        if not text:
+            return []
+        return [s for s in self.tools.day_plan.spans_in_view()
+                if not s.is_envelope and s.source != "calendar" and s.title.strip().lower() in text]
+
     def _do_outcome(self, a: Action) -> Tuple[str, bool]:
         ref = a.get("target") or a.get("title") or ""
+        if ref.strip().lower() in COLLECTIVE:  # "both happened", "all of those are done"
+            named = self._named_in_last_message() or [s for s in (self.tools.day_plan.get_span(i)
+                                                                   for i in self.state.last_ids) if s is not None]
+            if not named:
+                return "Which ones? Say their names and I'll mark them.", False
+            said = []
+            for span in named:
+                ok, _ = self._run("log_outcome", {"event": span.id, "status": a.get("status") or "done"})
+                if ok:
+                    said.append(span.title)
+            if not said:
+                return "I couldn't mark those.", False
+            self._remember(*named)
+            verb = {"done": "done", "partial": "partly done", "skipped": "skipped"}.get(a.get("status") or "done", "done")
+            return f"Noted: {', '.join(said)} {verb}.", True
         found = self._span_candidates(ref) if ref.lower() not in PRONOUNS or self.state.last_ids else []
         if found and all(s.source == "calendar" for s in found):
             return f"{found[0].title} is on your calendar, so there's nothing to check off.", False
@@ -1319,6 +1371,12 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         if (a.get("status") or "done") == "done" and STARTING_RE.search(message) and not FINISHED_RE.search(message):
             name = found[0].title if len(found) == 1 else ref
             return f"Got it, {name} is underway.", False  # starting something isn't finishing it
+        open_found = [s for s in found if s.status == SpanStatus.PLANNED]  # a tie: the ones not marked yet
+        if len(found) > 1 and len(open_found) == 1:
+            found = open_found
+        if len(found) > 1:  # still more than one: one question, never "couldn't find it"
+            names = [s.title for s in found[:3]]
+            return "Which one: " + " or ".join(names) + "?", False
         event = found[0].id if len(found) == 1 else ref
         args: Dict[str, Any] = {"event": event, "status": a.get("status") or "done"}
         for key in ("started", "finished"):
@@ -1824,6 +1882,56 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
     MEAL_WINDOWS = {"breakfast": (time(7, 0), time(11, 0), 30), "lunch": (time(11, 30), time(14, 30), 30),
                     "dinner": (time(17, 30), time(20, 30), 60), "supper": (time(17, 30), time(20, 30), 60)}
 
+    _TIME = r"(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|noon)"
+    _WINDOW_RES = (
+        re.compile(rf"\b(?:between|from)\s+{_TIME}\s*(?:and|to|-|–)\s*{_TIME}", re.IGNORECASE),
+        re.compile(rf"\b{_TIME}\s*(?:-|–|to)\s*{_TIME}\s+(?:\w+\s+)?(?:window|block|stretch)\b", re.IGNORECASE),
+    )
+    _WORK_WINDOW_RE = re.compile(r"\b(?:during|in|within|into)\s+(?:my|the)?\s*work(?:\s+(?:window|block|hours|time))?\b"
+                                 r"|\bwhile (?:the )?kids are at school\b", re.IGNORECASE)
+
+    def _stated_window(self, message: str) -> Optional[Tuple[datetime, datetime]]:
+        """A stretch the user said things must fit in ("between 9 and 2:30", "in my work block"): Python keeps
+        what it places inside it."""
+        for pattern in self._WINDOW_RES:
+            m = pattern.search(message or "")
+            if m:
+                try:
+                    a = self._loose_time(m.group(1))
+                    b = self._loose_time(m.group(2), after=a)
+                    if b > a:
+                        return a, b
+                except ClockError:
+                    pass
+        if self._WORK_WINDOW_RE.search(message or ""):
+            work = [s for s in self.tools.day_plan.spans if s.category == SpanCategory.WORK and s.is_envelope]
+            if work:
+                return min(s.start_dt for s in work), max(s.end_dt for s in work)
+        return None
+
+    def _slot_in(self, lo: datetime, hi: datetime, length: timedelta) -> Optional[datetime]:
+        """The first whole-thirty start in [lo, hi) with nothing but envelopes (Work) under it for ``length``."""
+        t = thirty_ceil(lo)
+        busy = [s for s in self.tools.day_plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
+                and not s.shown_only and not s.tentative]
+        while t + length <= hi:
+            if not any(s.start_dt < t + length and s.end_dt > t for s in busy):
+                return t
+            t += timedelta(minutes=30)
+        return None
+
+    def _place_in_window(self, title: str, minutes: int, window: Tuple[datetime, datetime],
+                         now: datetime) -> Tuple[bool, str, Optional[datetime]]:
+        lo = max(window[0], thirty_ceil(now)) if self._is_today() else window[0]
+        slot = self._slot_in(lo, window[1], timedelta(minutes=minutes))
+        if slot is None:
+            return False, "", None
+        args = {"title": title, "start": self._clock_arg(slot), "duration": f"{minutes} minutes"}
+        ok, out = self._run("add_event", args)
+        if not ok:  # inside Work: beside it, as the user asked
+            ok, out = self._run("add_event", {**args, "alongside": True})
+        return ok, out, slot if ok else None
+
     def _lay_out(self, adds: List[Action]) -> str:
         """Place several things with no times, in Python: a routine first, as its steps (put_routine, never one
         item), meals in their usual windows, everything else from now in the order given, with a free block after
@@ -1865,8 +1973,19 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 learned = assistant.typical_duration(title)
                 minutes = learned or 0
             items.append((title, minutes or (meal[2] if meal else 60), (meal[0], meal[1]) if meal else None))
+        stated = self._stated_window(getattr(self, "_message", "") or "")
         for title, minutes, window in sorted(items, key=lambda i: i[2] is None):  # meals first: they're anchored
             length = timedelta(minutes=minutes)
+            if stated is not None and window is None:  # the user's own window: kept, never placed outside it
+                ok, out, slot = self._place_in_window(title, minutes, stated, now)
+                if ok:
+                    span = next((s for s in plan.spans if s.title == title and s.start_dt == slot), None)
+                    if span is not None:
+                        placed.append((span.start_dt, span.end_dt, span.title, ""))
+                        self._remember(span)
+                else:
+                    missed.append(title)
+                continue
             lo = max(cursor, datetime.combine(plan.day_start.date(), window[0], tzinfo=tz)) if window else cursor
             hi = datetime.combine(plan.day_start.date(), window[1], tzinfo=tz) if window else plan.day_end
             ok, out = False, ""

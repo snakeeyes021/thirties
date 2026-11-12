@@ -150,12 +150,13 @@ First, privately note how that landed. Then decide your next move. Return ONLY a
            "annoyance": <3-8 words naming what bugged you, or null>, "why": <one short line, your own words>}},
  "move": {{"do": "message" | "wait" | "open_app" | "tick" | "give_up" | "sleep",
            "message": <what you type, if do is message>, "tick": <the item you tick in the app, if do is tick>,
-           "wait_minutes": <minutes until you next pick up the phone>, "engineer_note": <optional: a note to the app's makers>}}}}
+           "wait_minutes": <minutes until you next pick up the phone>, "engineer_note": <optional: what you'd grumble to the app's makers, in your own words as this person, never as a tester or a bug report>}}}}
 Be a person, not a tester:
 - Your feelings carry over and move with what happens: a wrong or nagging reply costs patience; a false claim ("done!" when it isn't) costs trust; a good, short answer restores some. Energy drops through the day and after hassle.
 - Low patience: shorter, sharper messages; you repeat yourself when you weren't understood, or correct it twice. Low trust: you check the app yourself (open_app) or just tick things there (tick). Very low: you ignore it for a while (give_up), or leave a note to the makers.
 - Text like a real person: often short, sometimes several things at once, sometimes vague or late about times. Reply to check-ins late or not at all if you're busy.
-- Don't fill time: if nothing is due, wait until the next thing in your day (up to 180 minutes)."""
+- Don't fill time: if nothing is due, wait until the next thing in your day (up to 180 minutes).
+- With patience and trust both at zero, a real person stops using the app for the day: say "sleep" and give up on it."""
 
 
 def phone_view(text: str) -> str:
@@ -198,6 +199,25 @@ class Person:
             except (TypeError, ValueError):
                 pass
         return {k: before[k] - self.state[k] for k in ("patience", "trust")}
+
+
+_LOW_START = re.compile(r"\b(sick|ill|cold|flu|fever|migraine|headache|exhausted|bad night|no sleep|hungover|"
+                        r"overslept|burn(ed|t) out|grieving|injured)\b", re.IGNORECASE)
+_NEW_USER = re.compile(r"\b(first day|just installed|new to the app|new user|trying (it|the app) out|onboarding)\b",
+                       re.IGNORECASE)
+
+
+def start_state_for(script: "DayScript", given: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+    """How this person starts the day: a sick or wiped-out person low on energy and patience, a new user slow to
+    trust; else the usual. A study's own start_state wins."""
+    text = " ".join([script.persona, script.situation] + list(script.life[:3]))
+    state = dict(START_STATE)
+    if _LOW_START.search(text):
+        state.update(energy=3, patience=5)
+    if _NEW_USER.search(text):
+        state["trust"] = 4
+    state.update(given or {})
+    return state
 
 
 def is_friction(felt: Dict[str, Any], move: Dict[str, Any], drop: Dict[str, int]) -> bool:
@@ -244,6 +264,7 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
     constraints = "\n".join(f"- {c}" for c in script.constraints) or "(none)"
     run.service.tick(now)
     just, show_agenda, last_tools, last_reply, messages = "You've just woken up.", False, [], "", 0
+    seen = 0  # the log up to here was there at the person's previous move
     for _ in range(max_moves):
         if not budget_left():
             run.end_reason = "budget"
@@ -263,11 +284,20 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
             move = {"do": "wait", "wait_minutes": 15}
         drop = person.feel(felt)
         person.notes.append({"at": _hhmm(now), **felt, "state": dict(person.state), "do": move.get("do")})
-        if is_friction(felt, move, drop):
+        new = run.log[seen:]
+        seen = len(run.log)
+        said = [x for _, w, x in new if w in ("assistant", "app")]  # what the person was reacting to, and only that
+        did = [x for _, w, x in new if w == "tool"]
+        gave_up = person.state["patience"] == 0 and person.state["trust"] == 0
+        if is_friction(felt, move, drop) or gave_up:
             day.frictions.append(Friction(
                 day=script.id, at=_hhmm(now), label=str(felt.get("annoyance") or felt.get("why") or "")[:120],
                 quote=str(move.get("message") or move.get("engineer_note") or felt.get("why") or "")[:300],
-                app_did=list(last_tools), reply=last_reply[:300], cause=str(felt.get("why") or "")[:300]))
+                app_did=did, reply=(said[-1] if said else "(nothing new from the app)")[:300],
+                cause=str(felt.get("why") or "")[:300]))
+        if gave_up:  # at zero patience and trust, a real person stops using the app for the day
+            run.end_reason = "gave up"
+            return day
         if move.get("engineer_note"):
             run.log.append((_hhmm(now), "user", f"(note to the makers) {move['engineer_note']}"))
         do = move.get("do") or "wait"
@@ -499,7 +529,7 @@ def run_study(study: Study, actor: Callable[[str], str], reviewer: Callable[[str
         print(f"\n== {script.id} [{study.brain}]", flush=True)
         try:
             run = start_day(script, study.brain, list(tasks), list(notes), engine)
-            person = Person(state={**START_STATE, **study.start_state})
+            person = Person(state=start_state_for(script, study.start_state))
             before_calls = calls["n"]
             day = live_study_day(run, actor, person, max_moves, budget_left=lambda: calls["n"] < limit - 2)
             day.calls = calls["n"] - before_calls

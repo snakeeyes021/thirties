@@ -966,3 +966,40 @@ class TestHelpersForGemma(ParityTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPipelineGaps(SlmTestCase):
+    """The frictions the first pipeline study found (invented examples)."""
+
+    def test_tool_text_meant_for_the_model_never_reaches_the_person(self):
+        error = ("Procreate sketching, 9:00 – 10:30 is already planned. To move it, use update_event with that id; "
+                 "to plan a second session as well, add it with again=true.")
+        self.assertEqual(SlmBrain._humane(error), "Procreate sketching, 9:00 – 10:30 is already planned.")
+
+    def test_both_or_all_of_those_means_the_items_just_asked_about(self):
+        self.say("walk at 7", {"type": "add", "title": "Walk", "start": "7", "duration": "30 min"})
+        self.say("dishes at 8", {"type": "add", "title": "Dishes", "start": "8", "duration": "30 min"})
+        self.m.brain.messages.append({"role": "assistant", "content": "Before bed: did Walk and Dishes happen?"})
+        out = self.say("both happened", {"type": "outcome", "target": "both", "status": "done"})
+        done = {s.title for s in self.m.tools.day_plan.spans if s.status.value == "done"}
+        self.assertTrue({"Walk", "Dishes"} <= done, out)
+        self.assertNotIn("both is done", out.lower())
+
+    def test_a_tie_asks_one_question(self):
+        self.say("kestrel icons at 7", {"type": "add", "title": "Kestrel icon concepts", "start": "7",
+                                        "duration": "30 min"})
+        self.say("kestrel deck at 8", {"type": "add", "title": "Kestrel presentation deck", "start": "8",
+                                       "duration": "30 min"})
+        out = self.say("kestrel is done", {"type": "outcome", "target": "kestrel", "status": "done"})
+        self.assertTrue(out.startswith("Which one: "), out)
+
+    def test_talk_isnt_sent_back_as_a_request(self):
+        self.brain._unclear = ["going to sleep soon", "my head is pounding"]
+        self.assertEqual(self.brain._unclear_note(), "")
+        self.brain._unclear = ["the blue one"]
+        self.assertIn("say that part again", self.brain._unclear_note())
+
+    def test_a_stated_window_is_kept(self):
+        out = self.say("add laundry between 7 and 9 pm", {"type": "add", "title": "Laundry"})
+        laundry = next(s for s in self.m.tools.day_plan.spans if s.title == "Laundry")
+        self.assertTrue(at("19:00") <= laundry.start_dt and laundry.end_dt <= at("21:00"), (out, laundry.start_dt))
