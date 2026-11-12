@@ -158,6 +158,16 @@ class BackgroundService:
         (a block starting, a check-in) ``expires``: if Telegram can't take it before then, it's dropped rather than
         sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower, Journal", 33 minutes late)."""
         from thirties_core.clock import real_times, to_thirties, trim_meridiems
+        if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
+            try:
+                from thirties_core.if_time import gap_line
+                assistant = self.manager().tools.assistant
+                line = gap_line(assistant, now or self.now()) if assistant is not None else ""
+                if line:
+                    text += "\n" + line
+                    telegram_text = (telegram_text + "\n" + line) if telegram_text else None
+            except Exception as e:
+                logger.warning("Couldn't add the If there's time line: %s", e)
         try:
             now = now or self.now()
             keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)

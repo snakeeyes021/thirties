@@ -222,6 +222,41 @@ def _move_out(writer, note, title: str) -> None:
                        "open_only": True})
 
 
+GAP_NAMED_KEY = "if_time_gap_named"  # {day: [(gap end, title)]}: one item named per gap, never the same gap twice
+
+
+def gap_line(assistant, now: datetime) -> str:
+    """When the day has a real gap now (half an hour or more free from now), a line naming one item from If there's
+    time, for a notice that's being sent anyway (never a message of its own). Once per gap; a different item for
+    each gap until the list comes round again."""
+    import json
+    from thirties_core.clock import format_clock, thirty_of
+    db = assistant._db
+    if db is None:
+        return ""
+    try:
+        listed = items(assistant._today_note())
+    except Exception:
+        return ""
+    if not listed:
+        return ""
+    end = next((b for a, b in assistant.pt.open_windows(after=now) if a <= thirty_of(now) < b), None)
+    if end is None or end - now < timedelta(minutes=30):
+        return ""
+    day = assistant._today().isoformat()
+    try:
+        named = json.loads(db.get_sync_meta(GAP_NAMED_KEY) or "{}").get(day, [])
+    except ValueError:
+        named = []
+    if any(g == end.isoformat() for g, _ in named):
+        return ""  # this gap has had its line
+    said = [t for _, t in named]
+    last = {t: i for i, t in enumerate(said)}  # when each was last named
+    pick = next((t for t in listed if t not in last), None) or min(listed, key=lambda t: last[t])
+    db.set_sync_meta(GAP_NAMED_KEY, json.dumps({day: named + [[end.isoformat(), pick]]}))
+    return f"Free until {format_clock(end)}; if there's time: {pick}."
+
+
 def text_for(assistant) -> str:
     """The section in a schedule message: plain lines, after the day's timed items."""
     try:
@@ -232,4 +267,4 @@ def text_for(assistant) -> str:
 
 
 __all__ = ["HEADING", "asked_untimed", "items", "is_listed", "first_slot", "doubled_slot", "place", "act",
-           "ACTIONS", "text_for"]
+           "ACTIONS", "text_for", "gap_line"]

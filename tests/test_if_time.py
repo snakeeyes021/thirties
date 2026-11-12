@@ -125,6 +125,44 @@ class ActionsTest(Base):
             "NOT_DONE"))
 
 
+class GapTest(Base):
+    """A real gap: a notice being sent anyway may name one item; never a message of its own, never twice a gap."""
+
+    def setUp(self):
+        super().setUp()
+        self.say("water the ferns and oil the hinges if there's time", "add_to_today",
+                 {"items": ["Water the ferns", "Oil the hinges"]})
+
+    def test_one_item_per_gap_and_a_different_one_next_gap(self):
+        free = [(at("16:00"), at("18:00"))]
+        with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: free):
+            first = if_time.gap_line(self.t.assistant, at("16:00"))
+            again = if_time.gap_line(self.t.assistant, at("16:10"))
+        self.assertEqual(first, "Free until 6:00 PM; if there's time: Water the ferns.")
+        self.assertEqual(again, "")  # this gap has had its line
+        later = [(at("19:00"), at("20:00"))]
+        with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: later):
+            self.assertIn("Oil the hinges", if_time.gap_line(self.t.assistant, at("19:00")))
+
+    def test_no_gap_no_line(self):
+        with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: [(at("16:00"), at("16:20"))]):
+            self.assertEqual(if_time.gap_line(self.t.assistant, at("16:00")), "")
+
+    def test_the_line_rides_on_a_notice_and_never_alone(self):
+        from types import SimpleNamespace
+        from thirties_core.background import BackgroundService
+        sent = []
+        service = BackgroundService(self.sched.config, lambda title, text, kind: sent.append((kind, text)),
+                                    scheduler=self.sched, joplin_engine=self.services.joplin,
+                                    inference_engine=None, sync_engine=SimpleNamespace(sync=lambda: None))
+        service.manager = lambda: SimpleNamespace(tools=self.t, day_plan=self.t.day_plan)
+        free = [(at("16:00"), at("18:00"))]
+        with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: free):
+            service.send("👋 Since 3:00 PM: did you get to Fix the gate?", "checkin", now=at("16:00"))
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0][1].endswith("if there's time: Water the ferns."), sent[0][1])
+
+
 class DayEndTest(Base):
     def test_whats_left_goes_to_the_morning_as_this_week(self):
         from thirties_core.carry import settle
