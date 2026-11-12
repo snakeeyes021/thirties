@@ -33,7 +33,7 @@ from thirties_core.brains.slm import steps
 from thirties_core.brains.slm.fatigue import TIRED_MAX_ITEMS, TiredDay
 from thirties_core.brains.slm.horizon_talk import HorizonTalk
 from thirties_core.brains.slm.parity import ParityActions
-from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes,
+from thirties_core.clock import (ClockError, agenda_lines, format_clock, parse_clock, parse_duration_minutes, resolve_clock,
                                  thirty_ceil, thirty_of)
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
@@ -119,6 +119,7 @@ URGENCY_RE = re.compile(r"^(?:the\s+)?(?P<what>[^.?!]{3,60}?)\s+(?P<how>is urgen
 STARTING_RE = re.compile(r"\b(starting|about to|heading (out|to(?! (?:bed|sleep))|into)|going to start|getting started|now doing|"
                          r"on my way|beginning|jumping (in|into)|hopping (in|into))\b", re.I)
 FINISHED_RE = re.compile(r"\b(done|finished|did|completed|wrapped up|got through|ate|fed|made|sent|submitted|"
+                         r"paid|organi[sz]ed|sorted|cleaned|fixed|repotted|all set|handled|taken care of|over with|"
                          r"placed|ordered|picked up|got (it|back|home)|back from|returned|is in|are in|went)\b", re.I)
 DAY_WORD_RE = re.compile(r"\b(tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 LEFT_TODAY_RE = re.compile(r"\b(left|remaining|still (to do|got|have|need)|what else)\b", re.I)
@@ -470,17 +471,20 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
 
     # A sentence written for a model, never for the person: a tool name, an argument, an id, an instruction to it
     _FOR_MODEL_RE = re.compile(r"\b[a-z]+_[a-z_]+\b|\w+=(?:true|false|\w+)|\bwith (?:that|its|the) id\b|\btask_id\b|"
-                               r"\bCALL\b|\bNOT_DONE\b|\bthe user\b|\bretry\b", re.IGNORECASE)
+                               r"\bCALL\b|\bNOT_DONE\b|\bretry\b|\bask (them|you)\b", re.IGNORECASE)
 
     @classmethod
     def _humane(cls, error: str) -> str:
         """Tool errors are written for models; keep the fact, drop the instructions and ids."""
         error = re.sub(r"\s*\[id [0-9a-z:@.-]+\]", "", error)
         error = re.sub(r"\s*\(blocks [^)]*\)", "", error)
+        error = re.sub(r"\bthe user's\b", "your", error)
+        error = re.sub(r"\bthe user\b", "you", error)
         error = re.sub(r"\s*\(\d+h(?: \d+m)?\)|\s*\(\d+m\)", "", error)
-        sentences = re.split(r"(?<=[.!?])\s+|;\s+(?=[A-Za-z])", error.strip())
+        sentences = re.split(r"(?<=[.!?;])\s+", error.strip())  # the separator stays with its sentence
         kept = [s for s in sentences if s and not cls._FOR_MODEL_RE.search(s)]
-        return " ".join(kept).strip() or (sentences[0] if sentences else "").strip()
+        out = " ".join(kept).strip() or (sentences[0] if sentences else "").strip()
+        return re.sub(r"[;,]$", ".", out)
 
     def _run(self, name: str, args: Dict[str, Any]) -> Tuple[bool, str]:
         out = self.tools.execute(name, args)
@@ -831,8 +835,16 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             reply = f"{reply}\n{unclear}"  # a part of the message nothing covered: ask, rather than drop it
         return reply
 
+    _REQUEST_RE = re.compile(
+        r"\?|\b(please|can you|could you|would you|will you|can i|should i|need to|i need|i want|i'?d like|let'?s|"
+        r"help me)\b|^\s*(add|put|move|push|schedule|plan|remind|cancel|remove|delete|drop|swap|shift|make|set|"
+        r"block|book|change|clear|find|show|tell)\b", re.IGNORECASE)
+
     def _unclear_note(self) -> str:
-        parts = [p for p in getattr(self, "_unclear", []) if p and not CHATTY_RE.search(p)]
+        """Ask again only about a part that asks for something; narration ("heading out now", "tool chest is
+        organized") is taken in, not sent back."""
+        parts = [p for p in getattr(self, "_unclear", []) if p and not CHATTY_RE.search(p)
+                 and self._REQUEST_RE.search(p)]
         if not parts:
             return ""
         quoted = " and ".join(f'"{p[:80]}"' for p in parts[:2])
@@ -971,6 +983,20 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
     def _day_label(self, day: Optional[str]) -> str:
         return f" ({day})" if day and day.lower() not in ("today", "tonight") else ""
 
+    def _only_envelopes_under(self, args: Dict[str, Any]) -> bool:
+        """The stretch an add asks for holds nothing but Work or Sleep (an item before drop-off, inside work)."""
+        try:
+            plan = self.tools.plan_for(args.get("day"))
+            start = resolve_clock(str(args["start"]), plan.day_start)
+            if args.get("end"):
+                end = resolve_clock(str(args["end"]), plan.day_start, after=start)
+            else:
+                end = start + timedelta(minutes=parse_duration_minutes(args.get("duration") or "30 minutes"))
+        except (ClockError, KeyError, ValueError):
+            return False
+        under = [s for s in plan.spans if s.status == SpanStatus.PLANNED and s.start_dt < end and s.end_dt > start]
+        return bool(under) and all(s.is_envelope for s in under)
+
     def _do_add(self, a: Action, alternatives: bool = True) -> Tuple[str, bool]:
         title = a.get("title") or a.get("target")
         if not title:
@@ -1053,6 +1079,12 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         ok, out = self._run("add_event", args)
         if ok:
             return self._added_reply(out, day, guessed, learned)
+        if "is already planned" in out:  # it's there already: that's what they want, not an error
+            return f"{args['title']} is already on the plan.", False
+        if "would overlap" in out and not args.get("alongside") and self._only_envelopes_under(args):
+            ok, out2 = self._run("add_event", {**args, "alongside": True})  # beside Work or Sleep, as asked
+            if ok:
+                return self._added_reply(out2, day, guessed, learned)
         if "would overlap" in out and "fixed calendar commitment" not in out and not args.get("push_later"):
             ok, pushed = self._run("add_event", {**args, "push_later": True})  # slide what follows, like Gemini
             if ok:
@@ -1337,6 +1369,15 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         self.state.last_ids = [i for i in self.state.last_ids if i != span.id]
         return f"Removed {span.title} ({format_clock(span.start_dt)} – {format_clock(span.end_dt)}).", True
 
+    @staticmethod
+    def _just_starting(message: str, ref: str) -> bool:
+        """The part of the message about this item says it's starting, not finished ("bills are paid, starting on
+        the garage": the bills are done)."""
+        clauses = [c for c in re.split(r"[.!?;,\n]+|\b(?:and|then|but|now)\b", message or "") if c.strip()]
+        words = {_stem(w) for w in _words(ref)}
+        near = [c for c in clauses if words & {_stem(w) for w in _words(c)}] or clauses
+        return any(STARTING_RE.search(c) for c in near) and not any(FINISHED_RE.search(c) for c in near)
+
     def _named_in_last_message(self) -> List[EventSpan]:
         """The plan items the app's latest message names (a check-in: "did A and B happen?")."""
         last = next((m for m in reversed(self.messages[:-1]) if m.get("role") == "assistant"), None)
@@ -1368,7 +1409,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             return f"{found[0].title} is on your calendar, so there's nothing to check off.", False
         found = [s for s in found if not s.is_envelope and s.source != "calendar"]
         message = getattr(self, "_message", "") or ""
-        if (a.get("status") or "done") == "done" and STARTING_RE.search(message) and not FINISHED_RE.search(message):
+        if (a.get("status") or "done") == "done" and self._just_starting(message, ref):
             name = found[0].title if len(found) == 1 else ref
             return f"Got it, {name} is underway.", False  # starting something isn't finishing it
         open_found = [s for s in found if s.status == SpanStatus.PLANNED]  # a tie: the ones not marked yet

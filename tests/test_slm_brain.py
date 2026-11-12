@@ -996,10 +996,39 @@ class TestPipelineGaps(SlmTestCase):
     def test_talk_isnt_sent_back_as_a_request(self):
         self.brain._unclear = ["going to sleep soon", "my head is pounding"]
         self.assertEqual(self.brain._unclear_note(), "")
-        self.brain._unclear = ["the blue one"]
+        self.brain._unclear = ["the blue one", "can you sort the blue one"]  # only the request is asked about
         self.assertIn("say that part again", self.brain._unclear_note())
 
     def test_a_stated_window_is_kept(self):
         out = self.say("add laundry between 7 and 9 pm", {"type": "add", "title": "Laundry"})
         laundry = next(s for s in self.m.tools.day_plan.spans if s.title == "Laundry")
         self.assertTrue(at("19:00") <= laundry.start_dt and laundry.end_dt <= at("21:00"), (out, laundry.start_dt))
+
+
+class TestPipelineGapsRound2(SlmTestCase):
+    """The second study round's frictions (invented examples)."""
+
+    def test_narration_is_taken_in_not_sent_back(self):
+        self.brain._unclear = ["Heading out now, will check in when I'm at the cafe!", "Tool chest is organized."]
+        self.assertEqual(self.brain._unclear_note(), "")
+
+    def test_done_in_one_clause_and_starting_in_another(self):
+        self.assertFalse(SlmBrain._just_starting("Bills are paid, starting on the garage now", "Bills"))
+        self.assertTrue(SlmBrain._just_starting("Starting on the bills now", "Bills"))
+
+    def test_an_item_already_on_the_plan_isnt_an_error(self):
+        self.say("rest at 7", {"type": "add", "title": "Rest break", "start": "7", "duration": "30 min"})
+        out = self.say("add a rest break at 7", {"type": "add", "title": "Rest break", "start": "7",
+                                                 "duration": "30 min"})
+        self.assertNotIn("couldn't", out.lower())
+
+    def test_a_tool_message_keeps_its_fact_and_speaks_to_you(self):
+        self.assertEqual(SlmBrain._humane("Plumber window is on the user's calendar; change it there."),
+                         "Plumber window is on your calendar; change it there.")
+
+    def test_the_first_message_is_the_morning_so_no_second_one_comes_later(self):
+        from thirties_core import morning
+        db = self.sched.state_db
+        db.set_sync_meta(morning.done_key(self.m.day_plan.target_date), "")
+        self.say("morning! walk at 7", {"type": "add", "title": "Walk", "start": "7", "duration": "30 min"})
+        self.assertTrue(morning.is_done(db, self.m.day_plan.target_date))

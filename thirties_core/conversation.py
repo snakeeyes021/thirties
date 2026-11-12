@@ -407,8 +407,8 @@ class ConversationManager:
         to make its reply the morning's one message. True when that's this turn's job."""
         from thirties_core import morning
         db = self.scheduler.state_db if self.scheduler is not None else None
-        if db is None or self.brain_name != "frontier" or not self.tools.is_current(self.day_plan) \
-                or morning.is_done(db, self.day_plan.target_date):
+        self._morning_facts = ""
+        if db is None or not self.tools.is_current(self.day_plan) or morning.is_done(db, self.day_plan.target_date):
             return False
         try:
             level = getattr(self.scheduler.config.assistant, "message_level", "medium")
@@ -416,6 +416,9 @@ class ConversationManager:
         except Exception as e:  # the background tries again later
             logger.warning("Preparing the morning failed: %s", e)
             return False
+        if self.brain_name != "frontier":  # the pipeline: the day is built now, and its facts go after the reply
+            self._morning_facts = facts
+            return True
         self.brain.messages.append({"role": "user", "content": morning.in_turn_instruction(facts, brief),
                                     "hidden": True})
         return True
@@ -453,6 +456,9 @@ class ConversationManager:
         except BrainUnavailable as e:
             logger.warning("The model couldn't be reached: %s", e)
             return self._lost(batch, before, changes_before, e, via, attempts), False
+        if morning_now and getattr(self, "_morning_facts", "") and isinstance(reply, str) \
+                and not reply.startswith(("Error contacting model", "Sorry, I couldn't reach")):
+            reply = f"{reply}\n\n{self._morning_facts}"  # the pipeline's morning: what the day holds, from Python
         if morning_now:  # it went out with this reply: the background doesn't send a second one
             from thirties_core import morning
             morning.mark_done(self.scheduler.state_db, self.day_plan.target_date,
