@@ -31,8 +31,10 @@ if TYPE_CHECKING:
     from thirties_core.models import TaskItem
 
 DEFAULT_SESSION_MINUTES = 60
-CHILD = {"year": "quarter", "quarter": "month", "month": "week", "week": "day"}
-UP = {"day": ("week",), "week": ("month",), "month": ("quarter", "year"), "quarter": ("year",)}
+CHILD = {"years": "year", "year": "quarter", "quarter": "month", "month": "week", "week": "day"}
+# where a period looks for the budget it takes a share of: the nearest level above that has one
+UP = {"day": ("week",), "week": ("month", "quarter", "year", "years"), "month": ("quarter", "year", "years"),
+      "quarter": ("year", "years"), "year": ("years",)}
 
 
 def budget_period(r, week_start: int = 0) -> "Period":
@@ -95,7 +97,7 @@ def budget_of(planner: "HorizonPlanner", task: "TaskItem", d: date, level: Optio
               ) -> Optional[Budget]:
     """The finest budget pinned for ``task`` whose period holds day ``d`` (or the one at ``level``), with what
     happened in it."""
-    order = {lv: i for i, lv in enumerate(("day", "week", "month", "quarter", "year"))}
+    order = {lv: i for i, lv in enumerate(("day", "week", "month", "quarter", "year", "years"))}
     best = None
     for r in planner.plans.rows(item_id=task.id):
         if not int(r.get("sessions") or 0):
@@ -169,9 +171,14 @@ def trickle_line(planner: "HorizonPlanner", task: "TaskItem", d: Optional[date] 
     from thirties_core.horizons import period_of
     d = d or planner.today()
     parts: List[str] = []
-    for level in ("year", "quarter", "month", "week"):
-        p = period_of(level, d, planner.week_start)
+    for level in ("years", "year", "quarter", "month", "week"):
         own = budget_of(planner, task, d, level=level)
+        if level == "years":  # a span of years has no fixed shape: only its own budget says which
+            if own is None:
+                continue
+            p = own.period
+        else:
+            p = period_of(level, d, planner.week_start)
         if own is not None:
             n = own.sessions
         elif parts:

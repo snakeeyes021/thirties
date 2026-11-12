@@ -417,7 +417,8 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
         if not placed.extended and placed.day is None and miss.get("level"):
             from thirties_core.horizons import PARENT
             up = PARENT.get(miss["level"])
-            why = f"no room left this {miss['level']}" + (f", so it counts toward this {up}'s plan" if up else "")
+            plan = "the multi-year plan" if up == "years" else f"this {up}'s plan" if up else ""
+            why = f"no room left this {miss['level']}" + (f", so it counts toward {plan}" if plan else "")
         respread.append({"title": miss["title"], "why": why,
                          "day": placed.day.isoformat() if placed.day else ""})
     out["respread"] = respread

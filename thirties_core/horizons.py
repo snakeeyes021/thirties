@@ -58,7 +58,11 @@ HORIZONS = {
 }
 LEVELS = ("day", "week", "month", "year")  # the plannable horizons, finest first
 _RANK = {h: i for i, h in enumerate(LEVELS + ("someday",))}
-PARENT = {"day": "week", "week": "month", "month": "year"}
+PARENT = {"day": "week", "week": "month", "month": "year", "year": "years"}
+# Above the year: a span of years ("2027 to 2029", "the next 3 years"), for efforts that outlast one. It's a plan
+# level only (an item's horizon is at most a year); its rows keep the span's last day in the slot.
+YEARS = "years"
+_NUMBER_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
 # Urgency is the older, coarser axis; each maps onto a horizon and back, so callers that read urgency keep working.
 # "whenever" is "no particular hurry": the year, not the month (most items on a list are "whenever"; a month plan
@@ -195,6 +199,18 @@ def parse_period(text: Any, today: date, week_start: int = 0) -> Period:
         if not m.group(2) and p.end < today:
             p = period_of("quarter", date(year + 1, 3 * q - 2, 1), week_start)
         return p
+    m = re.fullmatch(r"(\d{4}) ?(?:-|–|to|through|thru|until) ?(\d{4})", raw)
+    if m and int(m.group(2)) > int(m.group(1)):
+        return years_period(int(m.group(1)), int(m.group(2)))
+    m = re.fullmatch(r"(?:the )?next (\d+|[a-z]+) years", raw)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else _NUMBER_WORDS.get(m.group(1), 0)
+        if n >= 2:
+            return years_period(today.year, today.year + n - 1)
+    m = re.fullmatch(r"(?:by|until|through|before) (\d{4})", raw)
+    if m and int(m.group(1)) > today.year:
+        last = int(m.group(1)) - (1 if raw.startswith("before") else 0)
+        return years_period(today.year, last) if last > today.year else period_of("year", today, week_start)
     m = re.fullmatch(r"(\d{4})", raw)
     if m:
         return period_of("year", date(int(m.group(1)), 1, 1), week_start)
@@ -245,6 +261,8 @@ def period_label(p: Period, today: date, week_start: int = 0) -> str:
         return f"Q{(p.start.month - 1) // 3 + 1} {p.start.year}"
     if p.level == "year":
         return "this year" if p.start.year == today.year else str(p.start.year)
+    if p.level == YEARS:
+        return f"{p.start.year}–{p.end.year}"
     return p.key
 
 
@@ -537,13 +555,21 @@ class HorizonPlans:
         return True
 
 
+def years_period(first: int, last: int) -> Period:
+    return Period(YEARS, date(first, 1, 1), date(last, 12, 31))
+
+
 def row_period(r: Dict[str, str], week_start: int = 0) -> Period:
+    if r["level"] == YEARS:
+        start = date.fromisoformat(r["period"])
+        last = date.fromisoformat(r["slot"]).year if r.get("slot") else start.year + 2
+        return years_period(start.year, last)
     return period_of(r["level"], date.fromisoformat(r["period"]), week_start)
 
 
 def slot_period(r: Dict[str, str], week_start: int = 0) -> Optional[Period]:
     """A week plan's day, or a year plan's quarter; None when the item is in the period as a whole."""
-    if not r.get("slot"):
+    if not r.get("slot") or r["level"] == YEARS:  # a span of years keeps its last day there, not a slot
         return None
     level = "day" if r["level"] == "week" else "quarter"
     return period_of(level, date.fromisoformat(r["slot"]), week_start)
@@ -669,6 +695,8 @@ class HorizonPlanner:
         the same level, or anything that doesn't overlap the new one) are taken out: one place per thing."""
         if p.level == "day":
             plan, slot = period_of("week", p.start, self.week_start), p.start.isoformat()
+        elif p.level == YEARS:
+            plan, slot = p, p.end.isoformat()
         elif p.level == "quarter":
             plan, slot = period_of("year", p.start, self.week_start), p.start.isoformat()
         else:
@@ -796,6 +824,13 @@ class HorizonPlanner:
                 n = len(self.plans.in_period(month))
                 if n:
                     lines.append(f"{month.start.strftime('%B')}: {_brief(self, month) or f'{n} planned'}")
+            return lines
+        if p.level == YEARS:
+            lines = []
+            for y in range(max(p.start.year, today.year), p.end.year + 1):
+                year = period_of("year", date(y, 1, 1), self.week_start)
+                n = len(self.plans.in_period(year))
+                lines.append(f"{y}: {_brief(self, year) or f'{n} planned'}" if n else f"{y}: nothing planned yet")
             return lines
         return []
 
@@ -1225,7 +1260,8 @@ def day_context(pt: "PlanTools", day: Optional[date] = None) -> List[str]:
 
 # --- tools for the model ---------------------------------------------------------------------------------------------
 
-_PERIOD_HELP = "'this week', 'Thursday', 'next week', 'the week of Nov 9', 'this month', 'November', 'Q1', 'next year'"
+_PERIOD_HELP = ("'this week', 'Thursday', 'next week', 'the week of Nov 9', 'this month', 'November', 'Q1', 'next year', "
+                "or several years for a long effort ('2027 to 2029', 'the next 3 years')")
 
 HORIZON_TOOL_SPECS: List[Dict[str, Any]] = [
     {
@@ -1380,7 +1416,7 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
             "apply_period_proposal": apply_period_proposal}
 
 
-__all__ = ["HORIZONS", "LEVELS", "URGENCY_HORIZON", "HORIZON_URGENCY", "Period", "period_of", "parse_period",
+__all__ = ["YEARS", "years_period", "HORIZONS", "LEVELS", "URGENCY_HORIZON", "HORIZON_URGENCY", "Period", "period_of", "parse_period",
            "period_label", "due_horizon", "HorizonCatalog", "HorizonPlans", "HorizonPlanner", "Candidate",
            "sort_horizons", "candidates_for_day", "candidates_for_week", "candidates_for_month",
            "candidates_for_year", "day_context", "HORIZON_TOOL_SPECS", "HORIZON_READ_ONLY", "horizon_handlers"]

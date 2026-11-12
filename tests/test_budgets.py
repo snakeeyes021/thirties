@@ -190,13 +190,33 @@ class BudgetTest(TodayTestCase):
     def test_the_trickle_reads_from_the_quarter_down_to_the_days(self):
         from thirties_core.budgets import trickle_line
         self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "Q4", "sessions": 6})
-        self.assertEqual(trickle_line(self.hp, self.task), "6 sessions in Q4 2026 → 2 sessions this month (October)")
+        self.assertEqual(trickle_line(self.hp, self.task),
+                         "6 sessions in Q4 2026 → 2 sessions this month (October) → 1 session this week")
         self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 1})
         self.assertEqual(trickle_line(self.hp, self.task),
                          "6 sessions in Q4 2026 → 2 sessions this month (October) → 1 session this week → today")
         shown = self.hp.describe_plan(MONTH, with_context=False)
         self.assertIn("  Shed clear-out: 6 sessions in Q4 2026 → ", shown)  # a budget from above reaches the month
         self.assertTrue(shown.startswith("This month (October)"), shown)  # the month's name keeps its capital
+
+    def test_a_span_of_years_reads_and_trickles_into_each_year(self):
+        from thirties_core.budgets import trickle_line
+        from thirties_core.horizons import parse_period, years_period
+        for said, span in (("2026 to 2028", (2026, 2028)), ("the next 3 years", (2026, 2028)),
+                           ("by 2029", (2026, 2029)), ("2027-2030", (2027, 2030))):
+            self.assertEqual(parse_period(said, DAY), years_period(*span), said)
+        self.assertEqual(parse_period("2027", DAY).level, "year")  # one year is still a year
+        out = self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "the next 3 years", "sessions": 90})
+        self.assertIn("2026–2028: 90 sessions", out)
+        year = period_of("year", DAY)
+        self.assertEqual(share_this(self.hp, self.task, year), 30)  # 90 over the three years
+        self.assertTrue(trickle_line(self.hp, self.task).startswith("90 sessions in 2026–2028 → 30 sessions this "
+                                                                    "year → "), trickle_line(self.hp, self.task))
+        c = {c.title: c for c in self.hp.candidates(year, limit=None)}["Shed clear-out"]
+        self.assertEqual(c.sessions, 30)  # planning the year draws its share from the span
+        shown = self.hp.describe_plan(years_period(2026, 2028), with_context=True)
+        self.assertIn("Shed clear-out", shown)
+        self.assertIn("2027: nothing planned yet", shown)
 
     def test_no_budget_no_trickle(self):
         from thirties_core.budgets import trickle_line
