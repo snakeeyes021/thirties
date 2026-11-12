@@ -800,8 +800,11 @@ class PlanTools:
         if end_dt is None:
             raise ToolError("Give an end time or a duration.")
 
-        from thirties_core.facts import looks_fixed
-        is_fixed = looks_fixed(str(title)) if fixed in (None, "") else _as_bool(fixed)
+        from thirties_core.facts import gave_time, looks_fixed
+        # fixed needs a real signal: the model or user saying so, a time kept every day, or an appointment-like
+        # item whose time the user gave; the wording alone only suggests it ("pick up groceries" isn't fixed)
+        is_fixed = (looks_fixed(str(title)) and gave_time(self.user_message, start_dt)) if fixed in (None, "") \
+            else _as_bool(fixed)
         is_fixed = is_fixed or bool(self._state_db is not None and self._lasting().for_item(str(title)).fixed_at)
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
             start_dt, end_dt = self._keep_to_blocks(start_dt, end_dt)  # flexible: keeps to blocks; fixed: real time

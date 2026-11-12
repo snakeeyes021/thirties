@@ -105,9 +105,15 @@ class TestAddEvent(unittest.TestCase):
 
     def test_fixed_things_keep_their_minutes_and_flexible_ones_keep_to_blocks(self) -> None:
         t = tools_for()
+        t.user_message = "the Uber to the airport is at 12:15"  # someone else's clock, and the user gave the time
         out = t.execute("add_event", {"title": "Uber to the airport", "start": "12:15 PM", "duration": "30 min"})
         self.assertTrue(out.startswith("Added Uber to the airport, 12:15 PM – 12:45 PM (30m) (blocks 12:00 PM – "
                                        "1:00 PM, fixed)"), out)
+        t.user_message = "add picking up the dry cleaning"  # worded like an errand at a set time, but no time given
+        out = t.execute("add_event", {"title": "Pick up the dry cleaning", "start": "1:15 PM", "duration": "30 min"})
+        self.assertNotIn("fixed", out)  # the wording alone only suggests it: flexible, on blocks
+        self.assertIn("1:30 PM", out)
+        t.user_message = None
         out = t.execute("add_event", {"title": "Packing", "start": "3:45 PM", "duration": "1 hour"})
         self.assertTrue(out.startswith("Added Packing, 4:00 PM – 5:00 PM (1h)"), out)  # flexible: the next block
         out = t.execute("add_event", {"title": "Hold music", "start": "5:15 PM", "duration": "1 hour", "fixed": True})
@@ -294,7 +300,8 @@ class TestInsertAndSwap(unittest.TestCase):
 
     def test_swap_refuses_to_land_on_a_fixed_thing(self) -> None:
         t = self.day()
-        t.execute("add_event", {"title": "Vet", "start": "5:30 PM", "duration": "30 min"})  # fixed by its name
+        t.user_message = "vet at 5:30"
+        t.execute("add_event", {"title": "Vet", "start": "5:30 PM", "duration": "30 min"})  # its time, as the user gave it
         out = t.execute("swap_events", {"first": "Upgrades", "second": "Reading"})
         self.assertTrue(out.startswith(NOT_DONE) and "Vet" in out, out)
 

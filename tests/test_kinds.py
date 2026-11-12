@@ -199,7 +199,9 @@ class TestTheMorningRollover(KindsTestCase):
         for title, start in (("Breakfast", "9:00 AM"), ("Feed the fish", "9:30 AM"), ("Garden app dev", "1:00 PM"),
                              ("Clean the garage shelves", "7:00 PM"), ("Fish food", "5:00 PM"), ("Journal", "10:00 AM")):
             self.add(title, start, day=Y)
+        self.t.user_message = "the dentist appointment was at 3"
         dentist = self.add("Dentist appointment", "3:00 PM", day=Y)
+        self.t.user_message = None
         self.assertTrue(self.t._is_fixed(dentist))
         done = self.add("Email back the landlord", "8:00 PM", day=Y)
         self.t.execute("log_outcome", {"event": done.id, "status": "done", "day": Y})

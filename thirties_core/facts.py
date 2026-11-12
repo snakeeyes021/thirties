@@ -41,8 +41,24 @@ FIXED_RE = re.compile(
 
 
 def looks_fixed(title: str) -> bool:
-    """Obviously set by someone else's clock (an appointment, a flight, a ride, a show, a meeting)."""
+    """Worded like something set by someone else's clock (an appointment, a flight, a ride, a show, a meeting).
+    Only a suggestion: on its own it never makes an item fixed (gave_time says when it does)."""
     return bool(FIXED_RE.search(title or ""))
+
+
+_SAID_TIME_RE = re.compile(r"(?:\b(?:at|@|by|from)\s*)(\d{1,2})(?::(\d{2}))?\b|\b(\d{1,2})(?::(\d{2}))?\s*"
+                           r"(?:am|pm|a\.m\.|p\.m\.|o'?clock)\b|\b(\d{1,2}):(\d{2})\b", re.IGNORECASE)
+
+
+def gave_time(message, start) -> bool:
+    """The user's message gives this start time ("at 3", "3:15", "3pm"): a time from someone else's clock that
+    the user passed on, which is what makes an appointment-like item fixed."""
+    for m in _SAID_TIME_RE.finditer(message or ""):
+        h = m.group(1) or m.group(3) or m.group(5)
+        mm = m.group(2) or m.group(4) or m.group(6) or "0"
+        if h and int(h) % 12 == start.hour % 12 and int(mm) == start.minute:
+            return True
+    return False
 
 
 @dataclass

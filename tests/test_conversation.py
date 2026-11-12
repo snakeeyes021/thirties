@@ -237,10 +237,10 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.responses = [reply('CALL add_event {"title": "Uber to the airport", "start": "12:15 PM", '
                                        '"duration": "30 min"}'),
                                  reply("Your Uber is at 12:15, in the 12:00 block. Packing at 11:45 fits.")]
-        self.assertEqual(self.manager.send_user_message("I'm leaving for the airport then"),
+        self.assertEqual(self.manager.send_user_message("my Uber to the airport is at 12:15"),
                          "Your Uber is at 12:15, in the 12:00 block. Packing in the 11:30 block fits.")  # 10-23
         uber = next(s for s in self.manager.day_plan.spans if s.title == "Uber to the airport")
-        self.assertEqual(uber.start_dt, at("12:15"))  # a ride is fixed: it keeps its real time
+        self.assertEqual(uber.start_dt, at("12:15"))  # a ride at the time the user gave is fixed: it keeps it
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
