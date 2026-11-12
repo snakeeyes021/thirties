@@ -311,7 +311,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "parts": "The thirties, as a list of {start, items}: e.g. [{\"start\": \"9:00 AM\", \"items\": "
                                 "[\"Feed the fish\", \"Make coffee\"]}, {\"start\": \"3:00 PM\", \"items\": [\"Shower\"]}]. "
                                 "Items are the routine's steps, worded as in the note.",
-                       "start": "Instead of parts: one thirty for every step.",
+                       "start": "Instead of parts: when it starts; Python splits it into its natural parts (a "
+                                "thirty each, one after another), or one thirty if it fits.",
                        "day": "The day, if not today."},
         "required": ["routine"],
     },
@@ -911,8 +912,14 @@ class AssistantTools(KindTools):
                 raise ToolError("parts must be a list of {start, items}.")
         if not parts:
             if start in (None, ""):
-                raise ToolError("Give start (one thirty for all of it) or parts (a start and the steps for each thirty).")
-            parts = [{"start": start, "items": steps}]
+                raise ToolError("Give start (its parts go on one thirty after another from there) or parts (a start "
+                                "and the steps for each thirty).")
+            from thirties_core.routines import natural_parts  # its natural parts, one thirty each, in order
+            lasting = self.pt._lasting()
+            first = self.pt._start(start)
+            parts = [{"start": format_clock(first + timedelta(minutes=30 * k)), "items": group}
+                     for k, group in enumerate(natural_parts(note, (lambda s: lasting.for_item(s).minutes)
+                                                             if lasting is not None else None))]
         by_text = {s.lower(): s for s in steps}
         placed, already, lines, extra = [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan

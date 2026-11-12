@@ -228,6 +228,32 @@ class TestTheMorningSetUp(RoutineCase):
         self.assertIn("- [ ] Lunch", self.body("n_today"))
 
 
+class TestNaturalParts(RoutineCase):
+    """A routine is placed as its parts: about a thirty each, in order, never all crammed into one."""
+
+    def test_the_notes_own_groups_are_its_parts(self):
+        from thirties_core.routines import natural_parts
+        body = "".join(f"- [ ] {s}\n" for s in FIRST) + "\n" + "".join(f"- [ ] {s}\n" for s in STEPS[5:])
+        self.assertEqual(natural_parts({"body": body}), [FIRST, STEPS[5:]])
+        headed = "## Kitchen\n" + "".join(f"- [ ] {s}\n" for s in FIRST) + "## Bathroom\n- [ ] Shower\n"
+        self.assertEqual(natural_parts({"body": headed}), [FIRST, ["Shower"]])
+
+    def test_without_groups_the_steps_split_evenly_by_length(self):
+        from thirties_core.routines import natural_parts
+        self.assertEqual(natural_parts({"body": self.routine_body}), [STEPS[:4], STEPS[4:]])  # 40 min: two thirties
+        self.assertEqual(natural_parts({"body": "- [ ] Vacuum\n- [ ] Mop\n"}), [["Vacuum", "Mop"]])  # fits one
+        long = {"Shower": 20, "Make bed": 10}
+        parts = natural_parts({"body": "- [ ] Make bed\n- [ ] Shower\n- [ ] Journal\n"}, long.get)
+        self.assertEqual(parts, [["Make bed", "Shower"], ["Journal"]])  # 35 minutes: two
+
+    def test_a_start_alone_places_each_part_in_its_own_thirty(self):
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        self.assertIn("9:00 AM: " + ", ".join(STEPS[:4]), out)
+        self.assertIn("9:30 AM: " + ", ".join(STEPS[4:]), out)
+        from thirties_core.clock import thirty_of
+        self.assertEqual(thirty_of(self.spans(self.t, "Shower")[0].start_dt), at("09:30"))  # in the second thirty
+
+
 class TestDailyAnchors(RoutineCase):
 
     def setUp(self):

@@ -280,6 +280,47 @@ class RoutineBook:
         return True
 
 
+STEP_MINUTES = 5   # a routine step's length when nothing says otherwise (a quick step: feed the fish, make the bed)
+
+
+def natural_parts(note: Dict[str, Any], minutes_of=None) -> List[List[str]]:
+    """A routine's steps in the parts it naturally falls into, each about a thirty, in the note's order: the note's
+    own groups (steps separated by a blank line or a heading) if it has them, else the steps by their usual lengths
+    (``minutes_of``, else STEP_MINUTES each) split evenly over as many thirties as they need. A routine that fits
+    one thirty is one part; one opaque item with no steps never happens (it has its steps, always)."""
+    import math
+    from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX
+    groups: List[List[str]] = [[]]
+    for line in (note.get("body") or "").splitlines():
+        m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
+        if m:
+            groups[-1].append(m.group(2).strip())
+        elif (not line.strip() or line.lstrip().startswith("#")) and groups[-1]:
+            groups.append([])  # a blank line or a heading ends a group
+    groups = [g for g in groups if g]
+
+    def length(step: str) -> int:
+        n = minutes_of(step) if minutes_of else 0
+        return n or STEP_MINUTES
+
+    def split(steps: List[str]) -> List[List[str]]:
+        total = sum(length(s) for s in steps)
+        n = max(1, math.ceil(total / 30))
+        if n == 1:
+            return [steps]
+        out, part, done = [], [], 0
+        for s in steps:  # cut where the running length passes each even share
+            part.append(s)
+            done += length(s)
+            if done >= total * (len(out) + 1) / n and len(out) < n - 1:
+                out.append(part)
+                part = []
+        return out + ([part] if part else [])
+    if len(groups) > 1:
+        return [p for g in groups for p in split(g)]
+    return split(groups[0]) if groups else []
+
+
 def _hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
