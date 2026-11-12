@@ -1024,9 +1024,22 @@ class AssistantTools(KindTools):
                             "Which one? Give it as list.")
         return hits[0] if hits else None
 
+    def refuse_routine_as_item(self, title: str) -> None:
+        """A routine never goes on as one item named after it ("Morning Routine" with no steps): it goes on as
+        its parts, with put_routine."""
+        try:
+            routines = self._routines()
+        except Exception:
+            return
+        for note in routines:
+            if _same_words(note["title"], title) or _same_words(note["title"] + " routine", title):
+                raise ToolError(f"{note['title']} is a routine: put it on with put_routine, as its parts (each a "
+                                "thirty with its steps), never as one item.")
+
     def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
                  day: Any = None, schedule_as: str = "", reason: str = "", urgency: str = "", due: Any = None,
                  kind: Any = None, **_: Any) -> str:
+        self.refuse_routine_as_item(str(title))
         if kind not in (None, ""):  # the item's kind, stored when it's made (the wording only ever suggests one)
             from thirties_core.kinds import KINDS
             if str(kind).strip().lower() not in KINDS:

@@ -228,6 +228,19 @@ class TestTheMorningSetUp(RoutineCase):
         self.assertIn("- [ ] Lunch", self.body("n_today"))
 
 
+class TestNoOpaqueRoutine(RoutineCase):
+    def test_a_routine_never_goes_on_as_one_item(self):
+        for tool, args in (("add_event", {"title": "Morning Routine", "start": "9:00 AM", "duration": "1 hour"}),
+                           ("add_event", {"title": "Deep Clean", "start": "6:00 PM", "duration": "1 hour"}),
+                           ("add_task", {"title": "Morning Routine", "list": "Errands/Admin"})):
+            out = self.t.execute(tool, args)
+            self.assertTrue(out.startswith(NOT_DONE), out)
+            self.assertIn("put_routine", out)
+        self.assertFalse(self.spans(self.t, "Morning Routine"))
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)  # the way it goes on: as its parts
+
+
 class TestNaturalParts(RoutineCase):
     """A routine is placed as its parts: about a thirty each, in order, never all crammed into one."""
 

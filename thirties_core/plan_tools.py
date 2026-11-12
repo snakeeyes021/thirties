@@ -758,6 +758,8 @@ class PlanTools:
     ) -> str:
         if not str(title or "").strip():
             raise ToolError("The item needs a title.")
+        if self.assistant is not None:
+            self.assistant.refuse_routine_as_item(str(title))
         from thirties_core.titles import is_raw_id, resolve_raw
         if is_raw_id(title):  # 11-06: an item went on the plan as 31a1d3808b2c9b79: never a raw id as a title
             known = resolve_raw(self.scheduler.state_db if self.scheduler else None, str(title),
