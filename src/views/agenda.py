@@ -33,6 +33,10 @@ IF_TIME_NOT_TODAY = "Not today"
 IF_TIME_TOMORROW = "Tomorrow"
 IF_TIME_WEEK = "Later this week"
 IF_TIME_DROP = "Drop"
+# Not yours today (not_yours.py)
+NOT_YOURS_TITLE = "Not yours today"
+NOT_YOURS_HIDE = "Hide for today"
+NOT_YOURS_NOT_MINE = "Not mine"
 
 
 def _flexible(span: EventSpan) -> bool:
@@ -111,12 +115,15 @@ class AgendaPage(Gtk.ScrolledWindow):
             self.page.remove(group)
         self.groups = {}
         self.skip_menus = {}
-        spans = plan.spans_in_view()
+        self.not_yours_rows = {}
+        theirs = [s for s in plan.spans_in_view() if s.shown_only]
+        spans = [s for s in plan.spans_in_view() if not s.shown_only]  # someone else's: their own section, last
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
             self._fill_done(spans)
+            self._fill_not_yours(theirs, today=False)
             return
         # In blocks, as the cards say (10-31: one 11:00 block was split across Now and Next, and a 9:00 item was
         # "past" at 9:06): an item is now through its whole last thirty, and past only once that's over.
@@ -152,6 +159,45 @@ class AgendaPage(Gtk.ScrolledWindow):
         # schedule, and what's left from before is in the Before today tab
         self._fill_routines(plan, now)
         self._fill_done(spans)
+        self._fill_not_yours(theirs, today=True)
+
+    def _fill_not_yours(self, theirs: List[EventSpan], today: bool) -> None:
+        """Someone else's events (not_yours.py), always last: each can be hidden for today, or marked not mine for
+        every time it comes up. Never the actions of the user's own items."""
+        if today and self.read_tool is not None:  # minus those hidden for today
+            try:
+                shown = {line[2:] for line in (self.read_tool("not_yours_today", {}) or "").splitlines()
+                         if line.startswith("- ")}
+                theirs = [s for s in theirs if s.id in shown]
+            except Exception:
+                pass
+        if not theirs:
+            return
+        group = self._group("not_yours", NOT_YOURS_TITLE)
+        for s in sorted(theirs, key=lambda s: s.start_dt):
+            row = Adw.ActionRow(title=GLib.markup_escape_text(self.title_for(s)),
+                                subtitle=f"{short_clock(s.start_dt)} – {short_clock(s.end_dt)}")
+            row.add_css_class("dim-label")
+            buttons = []
+            if today:
+                hide = Gtk.Button(label=NOT_YOURS_HIDE, valign=Gtk.Align.CENTER)
+                hide.add_css_class("flat")
+                hide.connect("clicked", lambda _b, i=s.id: self._not_yours("hide_for_today", {"event": i}))
+                buttons.append(hide)
+            mine = Gtk.Button(label=NOT_YOURS_NOT_MINE, valign=Gtk.Align.CENTER,
+                              tooltip_text="Not shown again, every time it comes up")
+            mine.add_css_class("flat")
+            mine.connect("clicked", lambda _b, i=s.id: self._not_yours(
+                "resolve_calendar_event", {"event": i, "attend": False, "series": True}))
+            buttons.append(mine)
+            for b in buttons:
+                row.add_suffix(b)
+            group.add(row)
+            self.not_yours_rows[s.id] = buttons
+
+    def _not_yours(self, tool: str, args: Dict[str, Any]) -> None:
+        if self.run_tool is not None:
+            self.run_tool(tool, args)
 
     def _fill_if_time(self) -> None:
         """Today's things with no time, because the user asked or the day was full (if_time.py): each can be done,

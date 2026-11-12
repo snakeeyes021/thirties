@@ -164,6 +164,25 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(calls, [("if_there_is_time", {"item": "Water the ferns", "action": "schedule"}),
                                  ("if_there_is_time", {"item": "Water the ferns", "action": "drop"})])
 
+    def test_not_yours_today_has_only_its_own_two_actions(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.spans.append(EventSpan("cal-c", "Choir practice", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        plan.spans.append(EventSpan("cal-h", "Hidden thing", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.read_tool = lambda name, args: "- cal-c" if name == "not_yours_today" else ""  # cal-h: hidden today
+        page.refresh(plan, at("19:20"))
+        self.assertEqual([r.get_title() for r in _rows(page.groups["not_yours"])], ["Choir practice"])
+        self.assertNotIn("Choir practice", [r.get_title() for r in _rows(page.groups["next"])])
+        hide, mine = page.not_yours_rows["cal-c"]
+        hide.emit("clicked")
+        mine.emit("clicked")
+        self.assertEqual(calls, [("hide_for_today", {"event": "cal-c"}),
+                                 ("resolve_calendar_event", {"event": "cal-c", "attend": False, "series": True})])
+
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
         done = next(s for s in self.plan.spans if s.id == "research")
@@ -261,12 +280,12 @@ class DayViewTests(unittest.TestCase):
         self.assertIn(("1 PM", ["Garden app dev"]), _blocks(view.agenda.groups["done"]))
         self.assertEqual(done["Dinner"], "not reported")
         now = self.action_rows(view.agenda.groups["now"])
-        self.assertEqual(now[0], ("Free until 8 PM", ""))  # someone else's event doesn't make the user busy
-        self.assertEqual(now[1], ("Book group", "not yours (shown only)"))
+        self.assertEqual(now, [("Free until 8 PM", "")])  # someone else's event doesn't make the user busy
         blocks = _blocks(view.agenda.groups["now"])  # 11-05: "Free" has a time too (when it began), so rows line up
-        self.assertEqual([b for b in blocks if b[1] == ["Book group"]], [("7 PM", ["Book group"])])
         self.assertEqual(blocks[0][1], ["Free until 8 PM"])
         self.assertTrue(blocks[0][0])
+        self.assertEqual(list(view.agenda.groups)[-1], "not_yours")  # its own section, always last
+        self.assertEqual(self.action_rows(view.agenda.groups["not_yours"]), [("Book group", "7 PM – 9 PM")])
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Garden app dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Garden app dev"].title_label.get_label())  # a session isn't struck through

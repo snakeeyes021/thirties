@@ -231,6 +231,20 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         },
         "required": ["event", "attend"],
     },
+    {
+        "name": "hide_for_today",
+        "description": "Hide one of someone else's events (Not yours today) for today only (\"hide that one\"). "
+                       "Nothing else changes; it's back tomorrow. For every time it comes up, use "
+                       "resolve_calendar_event with attend=false.",
+        "parameters": {"event": "The event's id or title."},
+        "required": ["event"],
+    },
+    {
+        "name": "not_yours_today",
+        "description": "The ids of today's Not yours today events, as listed. Read-only.",
+        "parameters": {},
+        "required": [],
+    },
 ]
 
 from thirties_core.day_proposal import PROPOSAL_READ_ONLY, PROPOSAL_TOOL_SPECS  # noqa: E402
@@ -240,7 +254,8 @@ from thirties_core.routines import ROUTINE_TOOL_SPECS  # noqa: E402
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
 TOOL_SPECS = (SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS + MESSAGE_TOOL_SPECS
               + LIST_TOOL_SPECS)
-READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
+READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options", "not_yours_today"} | ASSISTANT_READ_ONLY
+                   | PROPOSAL_READ_ONLY
                    | MESSAGE_READ_ONLY | LIST_READ_ONLY)
 
 
@@ -1384,13 +1399,15 @@ class PlanTools:
         from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
         from thirties_core.day_lists import pencilled_text
         from thirties_core.if_time import text_for as if_time_text
+        from thirties_core.not_yours import text_for as not_yours_text
         behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
         return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
-                   + "\n".join(missed_lines(behind)) if behind else ""))
+                   + "\n".join(missed_lines(behind)) if behind else "")
+                + not_yours_text(plan, self._state_db))  # someone else's: always last, never the user's own
 
     def _title(self, span) -> str:
         """The short title the chat says (11-06): the headline of a long line, never a raw id."""
@@ -1399,6 +1416,15 @@ class PlanTools:
             return title_of(resolve_raw(self.scheduler.state_db if self.scheduler else None, span.title,
                                         self.services.tasks if self.services is not None else []) or "an item")
         return title_of(span.title)
+
+    def hide_for_today(self, event: Any = None, **_: Any) -> str:
+        """Someone else's event, hidden for today only (not_yours.py)."""
+        from thirties_core.not_yours import hide
+        return hide(self, event)
+
+    def not_yours_today(self, **_: Any) -> str:
+        from thirties_core.not_yours import ids_text
+        return ids_text(self.day_plan, self._state_db)
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
@@ -1444,6 +1470,8 @@ class PlanTools:
             "find_open_time": self.find_open_time,
             "list_schedule": self.list_schedule,
             "resolve_calendar_event": self.resolve_calendar_event,
+            "hide_for_today": self.hide_for_today,
+            "not_yours_today": self.not_yours_today,
             "set_item_facts": self.set_item_facts,
             "redraw": self.redraw,
             "undo_redraw": self.undo_redraw,
