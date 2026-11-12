@@ -58,11 +58,16 @@ _MEAL_WITH_RE = re.compile(r"\b(breakfast|brunch|lunch|dinner|supper)\s+(with|at
 DAILY_RE = re.compile(
     r"\b(breakfast|brunch|lunch|dinner|supper|snack|"
     r"feed(ing)?\s+(the\s+)?(cats?|kitt(y|ies)|dogs?|pets?|fish)|(cats?|kitt(y|ies)|dogs?|pets?)'?\s+(dinner|breakfast|food)|"
-    r"fish|meds|medications?|vitamins?|pills|brush(ing)?\s+(my\s+)?teeth|floss(ing)?|shower|make coffee|"
+    r"fish food|fish|meds|medications?|vitamins?|pills|brush(ing)?\s+(my\s+)?teeth|floss(ing)?|shower|make coffee|"
     r"pack lunch|bedtime|wind(ing)? down|walk the dog|make the bed|make bed)\b", re.IGNORECASE)
+# Words that can sit beside a daily phrase without making it something else ("take my meds", "morning shower");
+# any other word means it's a one-off about it ("Pick up meds", "Baby shower gift").
+_DAILY_FILLER = {"take", "taking", "do", "have", "eat", "my", "the", "a", "morning", "evening", "night", "nightly",
+                 "daily", "quick", "and", "then", "&"}
 # Time on something that goes on: "Garden app dev", "Thirties session", "work on the album", "practice piano".
 ONGOING_RE = re.compile(
-    r"^(?:(?P<project>.+?)\s+(dev|development|work|session|sessions|time|block|practice|study|studying|writing)"
+    r"^(?:(?P<project>(?!(?:yard|lawn|house|home|paper|garden|school|leg|prep|road|body)\s+work$).+?)\s+"
+    r"(dev|development|work|session|sessions|time|block|practice|study|studying|writing)"
     r"|(work(ing)?|time)\s+on\s+.+|practi[cs]e\s+.+)$", re.IGNORECASE)
 
 
@@ -78,12 +83,24 @@ def is_meal(title: str) -> bool:
         re.search(r"\b(cats?|kitt(y|ies)|dogs?|pets?)'?s?\b", title or "", re.IGNORECASE)
 
 
+# Time on a project, said outright ("Garden app dev", "Thesis session", "work on the garden app"): stronger than the
+# role of the list it's on.
+PROJECT_TIME_RE = re.compile(r"^\S.*\s(dev|development|sessions?)$|^(work(ing)?|time)\s+on\s+\S", re.IGNORECASE)
+
+
+def _only_daily(t: str) -> bool:
+    """The title is a daily phrase and nothing else of substance (filler words aside)."""
+    rest = DAILY_RE.sub(" ", t.lower())
+    return all(w in _DAILY_FILLER for w in re.findall(r"[a-z&']+", rest))
+
+
 def kind_by_wording(title: str) -> Optional[str]:
-    """The obvious cases, from the words alone; None when the wording doesn't say."""
+    """The obvious cases, from the words alone; None when the wording doesn't say. Only a suggestion: a kind the
+    user or the model gave is stored with the item and wins."""
     t = str(title or "").strip()
     if not t or t.lower() in ("work", "sleep"):
         return None
-    if DAILY_RE.search(t) and not _MEAL_WITH_RE.search(t) and not _CHORE_RE.match(t):
+    if DAILY_RE.search(t) and _only_daily(t) and not _MEAL_WITH_RE.search(t) and not _CHORE_RE.match(t):
         return DAILY
     if ONGOING_RE.match(t):
         return ONGOING
@@ -96,6 +113,8 @@ def kind_of(title: str, task: Optional[TaskItem] = None, *, home: Optional[TaskI
     step, the obvious wording, else once."""
     if stored in KINDS:
         return stored
+    if any(t and PROJECT_TIME_RE.match(t.strip()) for t in (title, task.title if task is not None else None)):
+        return ONGOING  # time on a project, said outright, whatever list it's on: it never rolls over
     role = (home.list_role if home is not None else "") or home_role or (task.list_role if task is not None else "")
     if role in ROLE_KIND:
         return ROLE_KIND[role]

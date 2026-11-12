@@ -186,7 +186,10 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                                 "done on the plan means ticked in the list.",
                        "duration": "How long, when scheduling it, e.g. '30 minutes'.",
                        "day": "The day, when scheduling it for another day.",
-                       "schedule_as": "A shorter name for the schedule, when the list wording is long."},
+                       "schedule_as": "A shorter name for the schedule, when the list wording is long.",
+                       "kind": "What kind of thing it is, when the user said or it's clear: 'once' (done means "
+                               "finished), 'ongoing' (time on a project; never rolls over) or 'daily'. Stored with "
+                               "the item."},
         "required": ["title", "list"],
     },
     {
@@ -1010,7 +1013,17 @@ class AssistantTools(KindTools):
 
     def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
                  day: Any = None, schedule_as: str = "", reason: str = "", urgency: str = "", due: Any = None,
-                 **_: Any) -> str:
+                 kind: Any = None, **_: Any) -> str:
+        if kind not in (None, ""):  # the item's kind, stored when it's made (the wording only ever suggests one)
+            from thirties_core.kinds import KINDS
+            if str(kind).strip().lower() not in KINDS:
+                raise ToolError("kind must be 'once', 'ongoing' or 'daily'.")
+            if self._db is not None:
+                from thirties_core.item_facts import Lasting, LastingFacts, item_name
+                store = LastingFacts(self._db)
+                facts = store.get(title) or Lasting(name=item_name(title))
+                facts.title, facts.kind = facts.title or str(title).strip(), str(kind).strip().lower()
+                store.set(facts)
         # Which list and section: Python lists and checks, the model picks; never the user's job (placement_lists).
         from thirties_core.placement_lists import Placement
         placement = Placement.for_assistant(self)

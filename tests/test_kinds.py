@@ -28,8 +28,15 @@ class TestReadingTheKind(unittest.TestCase):
         for title in ("Garden app dev", "Thirties session", "Work on the album", "Garden app work"):
             self.assertEqual(kind_by_wording(title), ONGOING, title)
         for title in ("Email back the landlord", "Clean the garage shelves", "Dinner with Kim", "Clean the shower", "Buy floss",
-                      "Work", "Sleep"):
-            self.assertIsNone(kind_by_wording(title), title)
+                      "Work", "Sleep", "Pick up meds", "Baby shower gift", "Yard work"):
+            self.assertIsNone(kind_by_wording(title), title)  # a one-off about a daily thing, or a chore
+        for title in ("Take my meds", "Morning shower"):
+            self.assertEqual(kind_by_wording(title), DAILY, title)
+
+    def test_project_time_on_a_plain_list_never_rolls_over(self):
+        item = TaskItem(id="g", source_notebook="Home", title="Garden app dev", list_role="list")
+        self.assertEqual(kind_of(item.title, item), ONGOING)  # said outright: stronger than the list's role
+        self.assertEqual(kind_of(item.title, item, stored=ONCE), ONCE)  # what the user said wins over both
 
     def test_the_list_role_wins_over_wording_and_the_users_word_wins_over_both(self):
         ticket = TaskItem(id="t", source_notebook="Dev", title="Fix the sync bug", list_role="backlog")
@@ -229,6 +236,21 @@ class TestTheMorningRollover(KindsTestCase):
         self.assertEqual(out, "Kept 1 from before (0 on today's plan): see Before today.\nKeep: Clean the garage shelves, tomorrow.")  # a notice
         self.assertEqual([r["title"] for r in self.t.assistant.before.rows()["keep"]], ["Clean the garage shelves"])
         self.assertNotIn("today at", out)
+
+
+
+from tests.test_today import TodayTestCase  # noqa: E402
+
+
+class TestKindStoredWhenMade(TodayTestCase):
+    def test_a_kind_given_with_a_new_item_is_kept_with_it(self):
+        from thirties_core.item_facts import LastingFacts
+        out = self.t.execute("add_task", {"title": "Bird feeder build", "list": "Errands/Admin", "kind": "ongoing",
+                                          "reason": "a project"})
+        self.assertFalse(out.startswith("NOT_DONE"), out)
+        self.assertEqual(LastingFacts(self.sched.state_db).get("Bird feeder build").kind, ONGOING)
+        out = self.t.execute("add_task", {"title": "Oil the gate", "list": "Errands/Admin", "kind": "weekly"})
+        self.assertTrue(out.startswith("NOT_DONE"), out)
 
 
 if __name__ == "__main__":
