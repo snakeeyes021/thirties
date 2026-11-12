@@ -296,6 +296,19 @@ class TestFetchAllMediaAndCache(unittest.TestCase):
         payload = json.loads((self.cache_dir / "letterboxd-samplefan-watchlist.json").read_text())
         self.assertEqual(payload["fetched_at"], self.now.isoformat())
 
+    def test_a_refresh_that_finds_nothing_keeps_the_cache(self) -> None:
+        fresh = fetch_all_media(self.config, opener=FakeOpener(self.routes), now=self.now,
+                                cache_dir=self.cache_dir)
+        empty = dict(self.routes)
+        empty[LB1] = b"<html><body><p>Nothing here yet.</p></body></html>"
+        with self.assertLogs("thirties_core.media_sources", logging.WARNING) as logs:
+            later = fetch_all_media(self.config, opener=FakeOpener(empty), now=self.now + timedelta(days=2),
+                                    cache_dir=self.cache_dir)
+        self.assertTrue(any("refresh came back empty" in line for line in logs.output), logs.output)
+        self.assertEqual(sorted(i.title for i in later), sorted(i.title for i in fresh))
+        payload = json.loads((self.cache_dir / "letterboxd-samplefan-watchlist.json").read_text())
+        self.assertEqual(payload["fetched_at"], self.now.isoformat())  # not overwritten: tried again next time
+
     def test_network_failure_without_cache_returns_empty(self) -> None:
         with self.assertLogs("thirties_core.media_sources", logging.WARNING):
             items = fetch_all_media(self.config, opener=failing_opener, now=self.now,
