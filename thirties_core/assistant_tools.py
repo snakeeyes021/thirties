@@ -506,6 +506,13 @@ class AssistantTools(KindTools):
             if len(short) > 1:  # its Today copies share the title: the item on its own list is the one
                 short = [t for t in short if t.list_role != "today"]
             exact = short if len(short) == 1 else []
+        if exact and exact[0].list_role == "today" and self._db is not None:  # a Today line twinned with its home
+            from thirties_core.titles import title_of                        # item (by its short title): the home
+            from thirties_core.today import TodayLinks
+            link = TodayLinks(self._db).home_of(exact[0].title)
+            home = next((t for t in self.s.tasks if link and t.id == link.get("home_id")), None)
+            if home is not None and _same_words(title_of(home.title), exact[0].title):
+                return home
         return exact[0] if exact else None
 
     def _no_exact_match(self, ref: str, what: str = "item") -> ToolError:
@@ -747,9 +754,14 @@ class AssistantTools(KindTools):
         added, already, queued = [], [], False
         from thirties_core import if_time
         untimed = timing == "untimed" or (timing == "auto" and if_time.asked_untimed(self.pt.user_message))
+        homes: Dict[str, Any] = {}  # each line's home item, by its Today wording
         for name in items or []:
             task = self._exact_task(str(name))  # only the same item links; anything else is new, as worded
-            title = task.title if task is not None else str(name).strip()
+            # a long or marked-up list line goes on Today by its short title (no raw markdown or links on screen);
+            # the link keeps it tied to the full line on its list
+            from thirties_core.titles import title_of
+            title = title_of(task.title) if task is not None else str(name).strip()
+            homes[title.lower()] = task
             if title.lower() in on_today:
                 if untimed and not if_time.is_listed(note, title):  # on Today with a line already: under the heading
                     writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
@@ -779,9 +791,10 @@ class AssistantTools(KindTools):
         timed, overflow = [], []
         if added and timing == "auto" and not untimed and self.pt.is_current(self.pt.day_plan):
             for title in added:  # each gets its time now, placed by Python; it moves only when the user moves it
-                if if_time.on_plan_today(self.pt, title, self._exact_task(title)) is not None:
+                home = homes.get(title.lower()) or self._exact_task(title)  # the item it was added for
+                if if_time.on_plan_today(self.pt, title, home) is not None:
                     continue  # already on today's plan (scheduled first): it keeps that time
-                spot, doubled = if_time.place(self, title, self._exact_task(title))
+                spot, doubled = if_time.place(self, title, home)
                 if spot is None:
                     overflow.append(title)
                     writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,

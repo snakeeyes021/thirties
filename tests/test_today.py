@@ -54,6 +54,20 @@ class TodayTestCase(unittest.TestCase):
 
 class TestAddingToToday(TodayTestCase):
 
+    def test_a_long_marked_up_line_goes_on_today_by_its_short_title(self):
+        long_line = "**Shelf brackets: measured** (see the sketch, https://example.org/plan). Next: buy screws"
+        self.api.notes["n_errands"]["body"] += f"- [ ] {long_line}\n"
+        from thirties_core.models import TaskItem
+        self.services.tasks.append(TaskItem(id="t_shelf", source_notebook="1. Tasks", title=long_line,
+                                            is_checkbox_item=True, parent_note_title="Errands/Admin",
+                                            parent_note_id="n_errands", list_role="list"))
+        self.t.execute("add_to_today", {"items": [long_line]})
+        self.assertIn("- [ ] Shelf brackets: measured\n", self.body("n_today"))
+        self.assertNotIn("**", self.body("n_today"))
+        self.assertNotIn("https://", self.body("n_today"))
+        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Shelf brackets: measured")["home_id"], "t_shelf")
+
+
     def test_list_items_go_on_linked_and_new_things_go_on_as_they_are(self):
         out = self.t.execute("add_to_today", {"items": ["call the bank", "Rinse the tank filter", "Buy stamps for the trip"]})
         self.assertTrue(out.startswith("On today's plan: Call the bank at "), out)  # each gets its time at once
