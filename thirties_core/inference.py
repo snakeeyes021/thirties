@@ -724,6 +724,21 @@ _CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*(\{.*
 _CALL_START_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
+def _split_glued(line: str, start: "re.Match") -> Optional[tuple]:
+    """A call whose JSON arguments are followed straight away by text: (name, args, the text), or None."""
+    brace = line.find("{", start.end())
+    if brace < 0 or line[start.end():brace].strip(" (") != "":
+        return None
+    try:
+        args, end = json.JSONDecoder().raw_decode(line, brace)
+    except ValueError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    rest = line[end:].lstrip(" );")
+    return start.group(1), args, rest.strip()
+
+
 def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
     """Extract tool calls from a text reply and return (visible_text, tool_calls).
 
@@ -750,6 +765,14 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
                 stripped += " " + lines[i].strip().strip("`")
                 i += 1
         m = _CALL_LINE_RE.match(stripped)
+        if not m and start:  # text glued after the arguments ("CALL show_schedule {}Sorry, ..."): the call, then the text
+            glued = _split_glued(stripped, start)
+            if glued is not None:
+                name, args, rest = glued
+                calls.append({"id": f"call_{len(calls) + 1}", "name": name, "arguments": args})
+                if rest:
+                    visible.append(rest)
+                continue
         if not m:
             if start:  # still a call, but not one we can read ("CALL redraw()" went to Telegram, 10-27): never shown
                 calls.append({"id": f"call_{len(calls) + 1}", "name": start.group(1), "arguments": {

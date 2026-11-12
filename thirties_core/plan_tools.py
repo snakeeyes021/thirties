@@ -1519,8 +1519,10 @@ class PlanTools:
         if outermost:
             self._home_plan = saved
         from thirties_core.plan_log import tool_call
+        before: Optional[List[Dict[str, Any]]] = None
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
+            before = [s.to_dict() for s in self.day_plan.spans]  # to put the plan back if the tool breaks halfway
             with tool_call(name, self.user_message):  # every change it makes is logged with its cause (plan_log)
                 result = handler(**args)
                 if name == "update_event" and self.assistant and not args.get("to_day"):
@@ -1537,11 +1539,32 @@ class PlanTools:
         except (ToolError, ClockError) as e:
             return self.shorten(f"{NOT_DONE}: {e}") if outermost else f"{NOT_DONE}: {e}"
         except TypeError as e:
+            if before is not None:
+                self._roll_back(before)
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
+        except Exception as e:  # anything unexpected: the plan as it was, and a plain refusal, never half a change
+            logger.exception("Tool %s failed unexpectedly", name)
+            if before is not None:
+                self._roll_back(before)
+            return f"{NOT_DONE}: {name} hit a problem ({type(e).__name__}), so nothing was changed. Try another way."
         finally:
             self.day_plan = saved
             if outermost:
                 self._home_plan = None
+
+    def _roll_back(self, before: List[Dict[str, Any]]) -> None:
+        """The day's items exactly as they were before a tool that failed: those it added go, the rest are restored
+        (in memory and in the database)."""
+        try:
+            was = {d["id"]: EventSpan.from_dict(d) for d in before}
+            for s in list(self.day_plan.spans):
+                if s.id not in was:
+                    self._drop(s)
+            for span in was.values():
+                self._persist(span)
+            self.day_plan.spans = sorted(was.values(), key=lambda s: s.start_dt)
+        except Exception:
+            logger.exception("Couldn't put the plan back after a failed tool")
 
     def shorten(self, text: str) -> str:
         """Long item lines in ``text`` said by their short titles (titles.py): what the model reads and passes on
