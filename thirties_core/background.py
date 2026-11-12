@@ -591,7 +591,7 @@ class BackgroundService:
         except ValueError:
             recent = []
         engine = self.inference_engine if getattr(self.config.assistant, "brain", "frontier") == "frontier" else None
-        line = write_hello(engine, mode, at, recent)  # the model writes it fresh each morning (11-05)
+        line = write_hello(engine, mode, at, recent, now)  # the model writes it fresh each morning (11-05)
         db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
         self.send(hello_text(line, titles), "morning", now=now)
 

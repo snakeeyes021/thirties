@@ -434,9 +434,10 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         kinds = [k for k, _ in self.sent]
         self.assertEqual(kinds, ["morning", "reminder"], self.sent)  # no heads-up, check-in or block notice
         first = self.sent[0][1]
-        from thirties_core.wake import FALLBACK
+        from thirties_core.wake import FALLBACK_LATE
         line, items = first.split("\n\n", 1)
-        self.assertEqual(line, FALLBACK["wake"].format(clock="7:00"))  # the mock model: the plain fallback (AM trimmed)
+        # sent at 7:30 for a 7:00 wake-up (the computer was asleep): the time said as past, never as now
+        self.assertEqual(line, FALLBACK_LATE["wake"].format(clock="7:00"))  # the mock model: the plain fallback
         self.assertEqual(items, "On the plate today:\nJournal\nDentist\nCall")  # one per line, no bullets, no times
         self.assertNotIn("Taxes", first)  # yesterday's leftover isn't today's by default (carry.py)
         self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built

@@ -52,7 +52,7 @@ class TestDaySim(unittest.TestCase):
         live_day(run, sim)
         asked = [(t, x) for t, w, x in run.log if w == "app" and "For the record" in x]
         self.assertEqual(asked, [])  # waking isn't asked (10-31), and a day off has no work to ask about
-        hello = [(t, x) for t, w, x in run.log if w == "app" and "your wake-up time" in x]
+        hello = [(t, x) for t, w, x in run.log if w == "app" and "wake-up time" in x]
         self.assertEqual(len(hello), 1)  # the first message, at the wake-up time
         morning = [(t, x) for t, w, x in run.log if w == "app" and x.startswith("☀️ Good morning")]
         self.assertEqual(morning, [])  # no second morning message after the reply (A1)
@@ -60,7 +60,7 @@ class TestDaySim(unittest.TestCase):
         self.assertTrue(any(str(m.get("content", "")).startswith("[System check") and "Already planned for today"
                             in str(m.get("content", "")) for m in prompt))  # the reply was told the morning (O2)
         app = [(t, x) for t, w, x in run.log if w == "app" and "For the record" not in x
-               and not x.startswith("☀️ Good morning") and "your wake-up time" not in x]
+               and not x.startswith("☀️ Good morning") and "wake-up time" not in x]
         self.assertEqual(app[0][0], "10:00")
         self.assertIn("Walk", app[0][1])
         self.assertIn("Walk", app[1][1])  # the check-in, after the walk's thirty ended
