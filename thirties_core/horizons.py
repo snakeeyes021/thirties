@@ -835,7 +835,7 @@ class HorizonPlanner:
                                   self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot,
                                   sessions=share[0] if share else 0, minutes=share[1] if share else 0, task=t)
 
-        from thirties_core.budgets import DEFAULT_SESSION_MINUTES, budget_of, share_this
+        from thirties_core.budgets import DEFAULT_SESSION_MINUTES, budget_of, budget_period, share_this
 
         def share_of(t: TaskItem, r: Dict[str, Any]) -> Optional[Tuple[int, int]]:
             """(sessions, minutes) the period gets from a budgeted plan row one level up; (0, m) when it's used up;
@@ -843,7 +843,8 @@ class HorizonPlanner:
             if not int(r.get("sessions") or 0):
                 return None
             minutes = int(r.get("minutes") or 0) or DEFAULT_SESSION_MINUTES
-            up = budget_of(self, t, row_period(r, self.week_start).start, level=r["level"])
+            where = budget_period(r, self.week_start)
+            up = budget_of(self, t, where.start, level=where.level)
             if up is not None and up.left <= 0:
                 return 0, minutes  # every session up there is done or already on the schedule
             return share_this(self, t, p) or 0, minutes
@@ -911,8 +912,9 @@ class HorizonPlanner:
                 if share is not None:
                     if share[0] <= 0:
                         continue  # the budget up there is used up (done or already planned)
-                    b = budget_of(self, t, where.start, level=where.level)
-                    add(t, "from_plan", f"from the plan for {self.label(where)}"
+                    bp = budget_period(r, self.week_start)
+                    b = budget_of(self, t, bp.start, level=bp.level)
+                    add(t, "from_plan", f"from the plan for {self.label(bp)}"
                         + (f", {b.left} of {b.sessions} sessions still to place" if b is not None else ""),
                         share=share)
                     continue

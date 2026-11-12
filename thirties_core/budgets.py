@@ -30,6 +30,15 @@ if TYPE_CHECKING:
 
 DEFAULT_SESSION_MINUTES = 60
 CHILD = {"year": "quarter", "quarter": "month", "month": "week", "week": "day"}
+UP = {"day": ("week",), "week": ("month",), "month": ("quarter", "year"), "quarter": ("year",)}
+
+
+def budget_period(r, week_start: int = 0) -> "Period":
+    """The period a plan row's budget covers: a quarter of a year plan when it's slotted there, else the row's own."""
+    from thirties_core.horizons import period_of, row_period
+    if r["level"] == "year" and r.get("slot"):
+        return period_of("quarter", date.fromisoformat(r["slot"]), week_start)
+    return row_period(r, week_start)
 
 
 @dataclass
@@ -84,13 +93,12 @@ def budget_of(planner: "HorizonPlanner", task: "TaskItem", d: date, level: Optio
               ) -> Optional[Budget]:
     """The finest budget pinned for ``task`` whose period holds day ``d`` (or the one at ``level``), with what
     happened in it."""
-    from thirties_core.horizons import LEVELS, row_period
-    order = {lv: i for i, lv in enumerate(LEVELS)}
+    order = {lv: i for i, lv in enumerate(("day", "week", "month", "quarter", "year"))}
     best = None
     for r in planner.plans.rows(item_id=task.id):
         if not int(r.get("sessions") or 0):
             continue
-        p = row_period(r, planner.week_start)
+        p = budget_period(r, planner.week_start)
         if not p.contains(d) or (level and p.level != level):
             continue
         if best is None or order.get(p.level, 9) < order.get(best[0].level, 9):
@@ -132,12 +140,12 @@ def periods_left(p: "Period", child_level: str, today: date, week_start: int = 0
 
 def share_this(planner: "HorizonPlanner", task: "TaskItem", child: "Period") -> Optional[int]:
     """What ``task``'s budget one level up gives the period ``child`` (a month's budget for this week, say)."""
-    from thirties_core.horizons import period_of
-    parent_level = {v: k for k, v in CHILD.items()}.get(child.level)
-    if parent_level is None:
-        return None
-    up = budget_of(planner, task, child.start, level=parent_level) or \
-        budget_of(planner, task, child.end, level=parent_level)
+    up = None
+    for parent_level in UP.get(child.level, ()):  # the nearest level up with a budget (a month: its quarter, else
+        up = budget_of(planner, task, child.start, level=parent_level) or \
+            budget_of(planner, task, child.end, level=parent_level)  # the year)
+        if up is not None:
+            break
     if up is None:
         return None
     # what's already done or planned inside this child period counts toward its share

@@ -133,6 +133,19 @@ class BudgetTest(TodayTestCase):
         cands = {c.title for c in self.hp.candidates(WEEK, limit=None)}
         self.assertNotIn("Shed clear-out", cands)
 
+    def test_a_quarter_trickles_into_the_month(self):
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "Q4", "sessions": 6})
+        q = budget_of(self.hp, self.task, DAY)
+        self.assertEqual((q.period.level, q.period.start, q.sessions), ("quarter", date(2026, 10, 1), 6))
+        self.assertEqual(share_this(self.hp, self.task, MONTH), 2)  # 6 over October, November, December
+        c = {c.title: c for c in self.hp.candidates(MONTH, limit=None)}["Shed clear-out"]
+        self.assertEqual(c.sessions, 2)
+        self.assertIn("6 of 6 sessions still to place", c.why)
+
+    def test_a_year_with_no_quarter_trickles_into_the_month(self):
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this year", "sessions": 12})
+        self.assertEqual(share_this(self.hp, self.task, MONTH), 4)  # 12 over the three months left
+
     def test_the_week_trickles_into_the_day(self):
         from thirties_core.day_proposal import _proposal_candidates
         self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 3,
