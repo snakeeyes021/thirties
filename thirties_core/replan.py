@@ -37,7 +37,10 @@ def _free_minutes(pt, plan, minutes: int) -> bool:
     from thirties_core.if_time import _waking_end
     end = _waking_end(plan)
     need = timedelta(minutes=minutes)
+    now = pt._now()
     for a, b in pt.open_windows_for(plan):
+        if plan.day_start <= now < plan.day_end:
+            a = max(a, now)  # today: only the free time still ahead
         if min(b, end) - a >= need:
             return True
     return False
@@ -65,29 +68,35 @@ def _day_word(d: date, today: date) -> str:
     return d.strftime("%a %b %-d")
 
 
-def place_once(pt, title: str, minutes: int, today: date, due: Optional[date] = None) -> Placement:
-    """A missed one-off task: the first day from tomorrow with room, never past its deadline."""
-    last = due if due is not None else today + timedelta(days=WEEK_DAYS)
+def place_once(pt, title: str, minutes: int, today: date, due: Optional[date] = None,
+               last: Optional[date] = None) -> Placement:
+    """A missed one-off task: the first day from tomorrow with room, never past its deadline (with none, up to
+    ``last``, a week ahead by default)."""
+    last = due if due is not None else last if last is not None else today + timedelta(days=WEEK_DAYS)
     d = first_day_with_room(pt, minutes, today + timedelta(days=1), last)
     if d is None:
         if due is not None:
             return Placement(None, f"no day before it's due ({due.strftime('%a %b %-d')}) has room")
-        return Placement(None, "no day this week has room")
+        return Placement(None, "no day this week has room")  # it waits at its horizon
     why = _day_word(d, today)
     if d != today + timedelta(days=1):
         why += " (the days before are full)"
     return Placement(d, why)
 
 
-def spread_ongoing(pt, title: str, minutes: int, today: date) -> Placement:
+def spread_ongoing(pt, title: str, minutes: int, today: date, until: Optional[date] = None) -> Placement:
     """Missed time on something ongoing: added to its next sessions this week where there's room (an extra half
-    hour or hour each), else a session on the first day with room."""
+    hour or hour each), else a session on the first day with room; never past ``until`` (its deadline, or the end
+    of the period its time was budgeted for). With no room by then it's let go at this level."""
+    horizon = today + timedelta(days=WEEK_DAYS)
+    if until is not None:
+        horizon = min(horizon, until)
     from thirties_core.models import SpanStatus
     left = max(STEP, int(round(minutes / STEP)) * STEP)
     extended: List[str] = []
     per = max(STEP, int(round(left / SPREAD_SESSIONS / STEP)) * STEP)
     d = today + timedelta(days=1)
-    while d <= today + timedelta(days=WEEK_DAYS) and left > 0 and len(extended) < SPREAD_SESSIONS:
+    while d <= horizon and left > 0 and len(extended) < SPREAD_SESSIONS:
         plan = pt.plan_for(d)
         sessions = [s for s in plan.spans if s.status == SpanStatus.PLANNED and s.title.strip().lower() ==
                     title.strip().lower()]
@@ -102,7 +111,7 @@ def spread_ongoing(pt, title: str, minutes: int, today: date) -> Placement:
     if extended and left <= 0:
         return Placement(None, f"its next {len(extended)} session{'s' if len(extended) > 1 else ''} got the time",
                          extended)
-    rest = place_once(pt, title, left, today)
+    rest = place_once(pt, title, left, today, due=until)
     if extended:
         rest.why = f"{len(extended)} session{'s' if len(extended) > 1 else ''} got some of the time; the rest {rest.why}"
         rest.extended = extended

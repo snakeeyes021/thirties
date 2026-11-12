@@ -1556,10 +1556,13 @@ class AssistantTools(KindTools):
             {"title": t, "task_id": getattr(tasks_by_title.get(t.lower()), "id", ""), "start": day.isoformat(),
              "end": day.isoformat()} for t in listed])
         ask = still_unknown(self, day, left["ask"])
+        spread = "".join(f"\n{_short(r['title'])}: {r['why']}." for r in left.get("respread", []))  # ongoing time moved
         if not ask:
             if list_overflow:
                 from thirties_core.carry import notice_text
-                return notice_text(0, 0, 0, [_short(o["title"]) for o in list_overflow])
+                return notice_text(0, 0, 0, [_short(o["title"]) for o in list_overflow]) + spread
+            if spread:
+                return spread.strip()
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         mark_asked(self._db, ask, day)  # proposed now: never again
         week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
@@ -1567,8 +1570,10 @@ class AssistantTools(KindTools):
         keep = []
         for t in ask:
             item = by_title.get(t.lower()) or {"title": t, "task_id": "", "horizon": "week", "due": ""}
-            keep.append({**item, **default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start),
-                         "why": "", "proposed_on": day.isoformat()})
+            when = default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start)
+            if item.get("start"):  # the day replanning found for it (replan.py) wins over the horizon's window
+                when = {"when": item.get("when") or when.get("when", ""), "start": item["start"], "end": item["end"]}
+            keep.append({**item, **when, "why": item.get("why", ""), "proposed_on": day.isoformat()})
         OpenPool(self._db).add(keep, day - timedelta(days=1))
         placed, overflow = self.before.place_today(keep)  # today's Keeps are on the schedule now
         overflow += list_overflow
@@ -1576,7 +1581,7 @@ class AssistantTools(KindTools):
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
             "leftovers": {"keep": keep, "drop": []}, "overflow": [o["title"] for o in overflow],
             "offered_at": self.pt._now().isoformat()}))
-        return self.leftover_notice()
+        return self.leftover_notice() + spread
 
     def leftover_notice(self) -> str:
         """The morning's word on the leftovers, as Python says it (the model says it in its own words)."""
@@ -1589,7 +1594,8 @@ class AssistantTools(KindTools):
         on_today = [k for k in lo.get("keep", []) if k.get("end") and k["end"] <= today
                     and k["title"] not in data.get("overflow", [])]
         return notice_text(len(lo.get("keep", [])), len(on_today), len(lo.get("drop", [])),
-                           [_short(t) for t in data.get("overflow", [])])
+                           [_short(t) for t in data.get("overflow", [])],
+                           [(_short(k["title"]), k["when"]) for k in lo.get("keep", []) if k.get("when")])
 
     def leftover_brief(self) -> str:
         """For the morning model: each leftover as proposed, with what it carries, and what doesn't fit today."""

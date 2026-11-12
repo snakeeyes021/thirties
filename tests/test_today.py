@@ -381,10 +381,11 @@ class TestMorning(TodayTestCase):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
         # 11-06: in effect by itself; today's keep is on today's schedule already, and the morning says so
-        self.assertEqual(out, "Kept 3 from before (1 on today's plan): see Before today.")
+        self.assertEqual(out.split("\n")[0], "Kept 3 from before (1 on today's plan): see Before today.")
+        self.assertIn("Keep: Buy stamps, today.", out)
         rows = {r["title"]: r for r in self.t.assistant.before.rows()["keep"]}
         self.assertIsNotNone(rows["Buy stamps"]["at"])  # placed
-        self.assertEqual(rows["Call the bank"]["when"], "this week")
+        self.assertEqual(rows["Call the bank"]["when"], "tomorrow")  # replanned: the first day with room, not today
         self.assertIn("Buy stamps", [s.title for s in self.t.day_plan.spans])
         self.assertIn("The rest wait where proposed.", self.t.execute("apply_rollover", {}))
         # the next morning, still unmarked: never asked again
@@ -393,12 +394,15 @@ class TestMorning(TodayTestCase):
         self.assertTrue(self.t.execute("rollover_proposal", {}).startswith("Nothing from yesterday"))
 
     def test_not_done_waits_in_the_pool_and_is_offered_only_as_an_option(self):
+        from datetime import timedelta
         from thirties_core.carry import OpenPool
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         self.assertIn("call the bank", OpenPool(self.sched.state_db).all(DAY))
+        self.assertEqual(OpenPool(self.sched.state_db).all(DAY)["call the bank"]["start"],
+                         (DAY + timedelta(days=1)).isoformat())  # replanned for tomorrow: never today by itself
         cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
-        self.assertTrue(cands["Call the bank"].startswith("left open since "), cands)
+        self.assertNotIn("Call the bank", cands)  # never before its day
         self.assertFalse(cands["Buy stamps"].startswith("left open"))  # urgent things still come first
         self.assertNotIn("Call the bank", [s.title for s in self.t.day_plan.spans])
 
@@ -428,9 +432,9 @@ class TestMorning(TodayTestCase):
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertEqual(out, "Kept 2 from before (0 on today's plan): see Before today.")  # a notice
-        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
-        self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
+        self.assertEqual(out.split("\n")[0], "Kept 2 from before (0 on today's plan): see Before today.")  # a notice
+        cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertNotIn("Call the bank", cands)  # replanned for tomorrow: not drawn today
         self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))
         cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertNotIn("Call the bank", cands)  # someday: not in daily plans unless asked

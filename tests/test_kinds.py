@@ -224,7 +224,7 @@ class TestTheMorningRollover(KindsTestCase):
         # carry.py (11-05): unmarked means unknown; one short question, nothing put on today
         self.api.notes["n_today"]["body"] = "- [ ] Clean the garage shelves\n"
         out = self.t.execute("rollover_proposal", {})
-        self.assertEqual(out, "Kept 1 from before (0 on today's plan): see Before today.")  # a notice
+        self.assertEqual(out, "Kept 1 from before (0 on today's plan): see Before today.\nKeep: Clean the garage shelves, tomorrow.")  # a notice
         self.assertEqual([r["title"] for r in self.t.assistant.before.rows()["keep"]], ["Clean the garage shelves"])
         self.assertNotIn("today at", out)
 

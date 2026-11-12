@@ -513,9 +513,10 @@ class TestRollover(unittest.TestCase):
     def test_a_notice_and_nothing_moved_into_today(self):
         text = self.m.execute_tool("rollover_proposal", {})
         # 11-06: in effect by itself, said as a notice; Email Mom and Dishes are tasks too (no item is "on no list")
-        self.assertEqual(text, "Kept 3 from before (0 on today's plan): see Before today.")
+        self.assertEqual(text.split("\n")[0], "Kept 3 from before (0 on today's plan): see Before today.")
+        self.assertIn("Keep: Taxes, tomorrow.", text)  # each placement said, so it can be corrected
         keep = {r["title"]: r["when"] for r in self.m.tools.assistant.before.rows()["keep"]}
-        self.assertEqual(keep, {"Taxes": "this week", "Email Mom": "this week", "Dishes": "this week"})
+        self.assertEqual(keep, {"Taxes": "tomorrow", "Email Mom": "tomorrow", "Dishes": "tomorrow"})
         out = self.m.execute_tool("apply_rollover", {})
         self.assertIn("The rest wait where proposed.", out)
         self.assertNotIn("Taxes", [s.title for s in self.sched.build_day_plan(DAY)[0].spans])
