@@ -11,23 +11,43 @@
   "scenarios": [
     {
       "script": "freelance_designer_cafe",
-      "why": "work, errands and changes of plan in one day"
+      "why": "work, errands and changes of plan in one day",
+      "beats": [
+        "09:05 Tell the app the icon concepts must be done before the 4:00 call, and only between 10 and 3.",
+        "16:45 Report the icon concepts and the call as done in one short message (\"both done\")."
+      ]
     },
     {
       "script": "parent_two_kids_solo",
-      "why": "many small requests, several at once"
+      "why": "many small requests, several at once",
+      "beats": [
+        "06:35 Say work only fits between 9 and 2:30 while the kids are at school, and ask for your three work tasks inside it.",
+        "14:20 Say \"all of those are done\" about the work tasks."
+      ]
     },
     {
       "script": "homeowner_late_contractor",
-      "why": "something runs late and the day has to move"
+      "why": "something runs late and the day has to move",
+      "beats": [
+        "12:35 Say lunch is just a sandwich, ten minutes.",
+        "13:50 Report two errands as done with \"both happened earlier\"."
+      ]
     },
     {
       "script": "sick_day_cold_recovery",
-      "why": "a low-energy day: fewer, shorter messages"
+      "why": "a low-energy day: fewer, shorter messages",
+      "beats": [
+        "09:20 Ask for at least an hour of rest between anything that makes you stand up.",
+        "19:00 Say \"everything is done, I am exhausted, going to bed\"."
+      ]
     },
     {
       "script": "new_user_onboarding_today_only",
-      "why": "a first day with the app"
+      "why": "a first day with the app",
+      "beats": [
+        "10:00 Ask to rename one of your items and to move another to a different list, in plain words.",
+        "20:30 Report two things done using shorthand for their names."
+      ]
     }
   ],
   "bar": "Written after the one-prompt run had started (its first two day lines were seen, nothing else). The pipeline is no worse if, on the same days: every friction kind is on at most one more day than with the one-prompt brain; the total of days with any friction is at most one more; no new kind is about wrong list changes, a destructive action, or the app's internal text shown to the person; the Joplin checks stay clean (nothing written into a routine, no line twice, nothing done left open); and median trust at bed is no more than 1 lower."
