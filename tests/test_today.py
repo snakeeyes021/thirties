@@ -38,7 +38,7 @@ class TodayTestCase(unittest.TestCase):
         joplin = MagicMock()
         joplin.api_client = self.api
         joplin.fetch_active_notes.side_effect = lambda: [
-            {"id": nid, "title": TITLES[nid], "source_notebook": "1. Tasks", "body": n["body"]}
+            {"id": nid, "title": TITLES.get(nid) or n.get("title", ""), "source_notebook": "1. Tasks", "body": n["body"]}
             for nid, n in self.api.notes.items()]
         catalog = ListCatalog(self.sched.state_db)
         catalog.set_role("n_today", "today", "Today To-Do")
@@ -318,6 +318,22 @@ class TestRoutinesOnToday(TodayTestCase):
 from datetime import timedelta
 
 
+def morning_today(case) -> None:
+    """A morning's Today: two lines from an earlier day, a daily step done yesterday, a routine with done steps."""
+    with as_earlier_lines():
+        case.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+    case.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + case.body("n_today")
+    case.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
+    catalog = ListCatalog(case.sched.state_db)
+    catalog.set_role("n_routine", "routine", "Morning Routine")
+    catalog.set_urgency("t_stamps", "now")
+    case.services.tasks = catalog.apply(case.services.tasks)
+    with case.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
+        conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
+    from tests.fixtures import DAY
+    case.sched.state_db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
+
+
 class TestMorning(TodayTestCase):
     """Yesterday's unmarked items (carry.py; 11-05): unmarked means unknown; some things never roll; a
     one-off to-do is asked about once, in one question; not done, it waits on its list for a day it fits; the
@@ -325,18 +341,7 @@ class TestMorning(TodayTestCase):
 
     def setUp(self):
         super().setUp()
-        with as_earlier_lines():
-            self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
-        self.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + self.body("n_today")
-        self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
-        catalog = ListCatalog(self.sched.state_db)
-        catalog.set_role("n_routine", "routine", "Morning Routine")
-        catalog.set_urgency("t_stamps", "now")
-        self.services.tasks = catalog.apply(self.services.tasks)
-        with self.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
-            conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
-        from tests.fixtures import DAY
-        self.sched.state_db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
+        morning_today(self)
 
     def yesterday(self, title, start, **extra):
         from datetime import timedelta
@@ -350,8 +355,8 @@ class TestMorning(TodayTestCase):
         from thirties_core.joplin_writeback import WriteLog
         self.t.assistant.start_the_day()
         reset = [w["op"] for w in WriteLog(self.sched.state_db).since()
-                 if w["op"]["op"] in ("untick_all", "clear_ticked", "remove")]
-        self.assertEqual({o["op"] for o in reset}, {"untick_all", "clear_ticked", "remove"})
+                 if w["op"]["op"] in ("untick_all", "today_reset", "file_done")]
+        self.assertLessEqual({"untick_all", "today_reset"}, {o["op"] for o in reset})  # Today: one write
         for o in reset:
             self.assertEqual(datetime.fromisoformat(o["valid_until"]), self.t.day_plan.day_end)
 

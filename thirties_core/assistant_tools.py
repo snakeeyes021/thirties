@@ -1481,12 +1481,25 @@ class AssistantTools(KindTools):
                     writer.submit({**until, "op": "untick_all", "note_id": note["id"], "title": note["title"]})
                     done.append(f"unticked {note['title']}")
         today = self._today_note()
+        removes: List[Dict[str, Any]] = []  # the morning's change to Today, written once at the end
+        clear_only: List[str] = []
+        to_file: List[str] = []
+        if today:
+            from thirties_core.today import TodayLinks as _Links, note_items as _items
+            _links = _Links(self._db)
+            _daily = self.routines.daily_titles() | {n["title"].strip().lower()
+                                                     for n in notes_with_role(roles, notes, "routine")}
+            ticked_now = [t for t, ticked in _items(today) if ticked]
+
+            def kept_elsewhere(text: str) -> bool:
+                """Its record lives on: a home list item it's linked to, or a daily thing (done means today)."""
+                return bool(_links.home_of(text)) or text.strip().lower() in _daily
         if today:
             from thirties_core.today import group_items
             mine = self.routines.on_today_for(day)  # put on for this day already (Joplin was closed till now)
             for note in notes_with_role(roles, notes, "routine"):  # routines never carry over: yesterday's group goes
                 if group_items(today, note["title"]) is not None and note["title"].strip().lower() not in mine:
-                    writer.submit({**until, "op": "remove", "note_id": today["id"], "title": note["title"].strip()})
+                    removes.append({"title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
             from thirties_core.today import note_items
             daily = self.routines.daily_titles() - mine - {n["title"].strip().lower() for n in
@@ -1496,13 +1509,20 @@ class AssistantTools(KindTools):
             for text, ticked in note_items(today):
                 if not ticked and text.lower() in daily and text not in done_lines and re.search(
                         r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M):
-                    writer.submit({**until, "op": "remove", "note_id": today["id"], "title": text, "state": "open"})
+                    removes.append({"title": text, "state": "open"})
                     self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
                     done.append(f"took yesterday's {text} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
             for text in self._done_on_plan(today, day):
-                writer.submit({**until, "op": "remove", "note_id": today["id"], "title": text})
-                done.append(f"took {text} (done) off {today['title']}")
+                if kept_elsewhere(text):
+                    removes.append({"title": text})
+                    done.append(f"took {text} (done) off {today['title']}")
+                elif text in ticked_now:
+                    pass  # ticked already: it is filed in the next step
+                else:  # only on Today: ticked, then filed into Done, so the record is in Joplin too
+                    writer.submit({**until, "op": "complete", "is_checkbox_item": True, "note_id": today["id"],
+                                   "title": text})
+                    to_file.append(text)
         if today:  # yesterday's leftovers wait on their own lists, or simply end: Today is today's plan (carry.py)
             from thirties_core.today import TodayLinks, note_items
             handled = {t.lower() for t in self._done_on_plan(today, day)} | self.routines.daily_titles() | {
@@ -1512,13 +1532,29 @@ class AssistantTools(KindTools):
             for text in leftovers.get("off_today", []):
                 if text.lower() in handled or text.lower() in getattr(self, "_adding", set()) or text not in open_now:
                     continue
-                writer.submit({**until, "op": "remove", "note_id": today["id"], "title": text, "state": "open"})
+                removes.append({"title": text, "state": "open"})
                 self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
                 links.unlink(text)
                 done.append(f"took {text} off {today['title']} (left from before)")
-        if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
-            writer.submit({**until, "op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
-            done.append(f"cleared what was done from {today['title']}")
+        if today:
+            # what's ticked: kept on its home list (or a daily thing), it's simply cleared; only on Today, it's filed
+            # into Done first, and a line whose filing doesn't land stays where it is: nothing vanishes
+            for text in ticked_now:
+                if kept_elsewhere(text):
+                    clear_only.append(text)
+                elif text not in to_file:
+                    to_file.append(text)
+            if getattr(writer.cfg, "file_done", True):
+                from thirties_core.done_log import file_done_op
+                for text in to_file:
+                    writer.submit({**until, **file_done_op(today["id"], text, today.get("title", ""),
+                                                           day - timedelta(days=1))})  # done the day before
+                    done.append(f"filed {text} from {today['title']} into Done")
+            if removes or clear_only:  # the rest of the morning's change to Today: one version-checked write
+                writer.submit({**until, "op": "today_reset", "note_id": today["id"], "title": today["title"],
+                               "removes": removes, "clear_only": clear_only})
+                if clear_only:
+                    done.append(f"cleared what was done from {today['title']}")
         if today:  # what was planned ahead for this day reaches Today now, never before (O2)
             from thirties_core.day_lists import onto_today
             done += onto_today(self, day)

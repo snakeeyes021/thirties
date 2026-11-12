@@ -49,7 +49,7 @@ class RoutineCase(unittest.TestCase):
         joplin.api_client = self.api
         joplin.config.resolve_joplin_db_path.return_value = None  # the lists aren't re-read from a real Joplin
         joplin.fetch_active_notes.side_effect = lambda: [
-            {"id": nid, "title": TITLES[nid], "source_notebook": "1. Tasks", "body": n["body"]}
+            {"id": nid, "title": TITLES.get(nid) or n.get("title", ""), "source_notebook": "1. Tasks", "body": n["body"]}
             for nid, n in self.api.notes.items()]
         self.catalog = ListCatalog(self.sched.state_db)
         for nid, role in (("n_today", "today"), ("n_errands", "list"), ("n_routine", "routine"),

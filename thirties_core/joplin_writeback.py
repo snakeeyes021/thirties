@@ -179,17 +179,30 @@ def open_copies(body: str, title: str) -> int:
     return sum(1 for line in body.splitlines() if _open_item(line, title))
 
 
+def today_reset(body: str, removes: List[Dict[str, Any]], clear_only: List[str]) -> str:
+    """The morning's whole change to Today, worked out on one fresh copy and written once (version-checked): each
+    line to take off (one already gone is skipped), then the ticked lines that are safe to clear."""
+    for r in removes:
+        new = remove_item(body, r["title"], int(r.get("occurrence") or 0), r.get("state") or "any")
+        if new is not None:
+            body = new
+    return clear_ticked(body, clear_only)
+
+
 def untick_all(body: str) -> str:
     """Every item open again (a routine note, each morning)."""
     return "".join(re.sub(r"^([ \t]*)-\s*\[[xX]\]", r"\1- [ ]", line) for line in body.splitlines(keepends=True))
 
 
-def clear_ticked(body: str) -> str:
-    """Drop ticked items and what's nested under them (the day's list, once the day is over)."""
+def clear_ticked(body: str, only: Optional[List[str]] = None) -> str:
+    """Drop ticked items and what's nested under them (the day's list, once the day is over). With ``only``, just
+    the ticked items worded so: a ticked line nobody has filed yet stays."""
+    keep_out = {t.strip() for t in only} if only is not None else None
     lines = body.splitlines()
     out, i = [], 0
     while i < len(lines):
-        if DONE_CHECKBOX_REGEX.match(lines[i]):
+        m = DONE_CHECKBOX_REGEX.match(lines[i])
+        if m and (keep_out is None or m.group(2).strip() in keep_out):
             i = _item_end(lines, i)
             continue
         out.append(lines[i])
@@ -350,7 +363,8 @@ class JoplinWriter:
     VERSION_TRIES = 3  # a note that keeps changing under a write: start again from a fresh read this many times
     # A day's housekeeping is meant for that day only (an end-of-day clear queued while Joplin was closed ran
     # the next morning on the new day's ticks). Callers that know the day's end pass valid_until themselves.
-    DAY_BOUND = {"untick_all": timedelta(hours=12), "clear_ticked": timedelta(hours=12)}
+    DAY_BOUND = {"untick_all": timedelta(hours=12), "clear_ticked": timedelta(hours=12),
+                 "today_reset": timedelta(hours=12)}
 
     def __init__(self, config, state_db, api: Optional[JoplinAPIClient] = None) -> None:
         self.cfg = config.joplin
@@ -651,7 +665,10 @@ class JoplinWriter:
         if kind == "untick_all":
             return self._edit_body(op["note_id"], untick_all)
         if kind == "clear_ticked":
-            return self._edit_body(op["note_id"], clear_ticked)
+            return self._edit_body(op["note_id"], lambda b: clear_ticked(b, op.get("only")))
+        if kind == "today_reset":
+            return self._edit_body(op["note_id"], lambda b: today_reset(b, op.get("removes") or [],
+                                                                         op.get("clear_only") or []))
         if kind == "break_down":
             return self._edit_body(op["note_id"], lambda b: insert_subtasks(b, op.get("parent_title"), op["steps"],
                                                                               op.get("occurrence", 0),
