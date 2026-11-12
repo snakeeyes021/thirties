@@ -1,0 +1,34 @@
+{
+  "id": "pipeline_vs_one_prompt",
+  "question": "Is Gemini on the shared pipeline no worse than the one-prompt Gemini brain, on the same days?",
+  "change": "Gemini on the understand, decide and act, say pipeline (brain 'pipeline'), against the one-prompt brain ('frontier')",
+  "why": "The pipeline replaces the one-prompt brain only if it's no worse; run once with --brain frontier, then with --brain pipeline, and compare the catalogues.",
+  "brain": "frontier",
+  "budget": {
+    "days": 5,
+    "calls": 700
+  },
+  "scenarios": [
+    {
+      "script": "freelance_designer_cafe",
+      "why": "work, errands and changes of plan in one day"
+    },
+    {
+      "script": "parent_two_kids_solo",
+      "why": "many small requests, several at once"
+    },
+    {
+      "script": "homeowner_late_contractor",
+      "why": "something runs late and the day has to move"
+    },
+    {
+      "script": "sick_day_cold_recovery",
+      "why": "a low-energy day: fewer, shorter messages"
+    },
+    {
+      "script": "new_user_onboarding_today_only",
+      "why": "a first day with the app"
+    }
+  ],
+  "bar": "Written after the one-prompt run had started (its first two day lines were seen, nothing else). The pipeline is no worse if, on the same days: every friction kind is on at most one more day than with the one-prompt brain; the total of days with any friction is at most one more; no new kind is about wrong list changes, a destructive action, or the app's internal text shown to the person; the Joplin checks stay clean (nothing written into a routine, no line twice, nothing done left open); and median trust at bed is no more than 1 lower."
+}

@@ -80,6 +80,7 @@ class Study:
     frontier_model: str = "gemini-3.8-flash-low"  # the app's own model, when the brain under test is "frontier"
     reviewer_model: str = "gemini-4-argon"      # a different model from the actors
     start_state: Dict[str, int] = field(default_factory=dict)
+    bar: str = ""                             # what counts as success, written before any result is seen
 
     @classmethod
     def load(cls, path: Path) -> "Study":
@@ -406,6 +407,7 @@ def report(study: Study, days: List[Dict[str, Any]], groups: List[Dict[str, Any]
     """The one-page report: readable in two minutes."""
     lines = [f"# {study.question}", "",
              f"**Change tested:** {study.change}  " + (f"\n**Why:** {study.why}  " if study.why else ""),
+             (f"**Bar (set before the results):** {study.bar}  \n" if study.bar else "") +
              f"**Days:** {len(days)} ({', '.join(d['script'] for d in days)}), brain {study.brain}; "
              f"{calls} model calls of a budget of {study.budget.get('calls')}.", "", "## What it found", ""]
     if not groups:
@@ -430,6 +432,25 @@ def report(study: Study, days: List[Dict[str, Any]], groups: List[Dict[str, Any]
 def previous_run(study_dir: Path, exclude: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     runs = [r for r in sorted(study_dir.glob("*/result.json")) if exclude is None or r.parent != Path(exclude)]
     return json.loads(runs[-1].read_text()) if runs else None
+
+
+QUOTA_KEEP = 0.33  # Gemini is Thirties' own budget too: a study stops while a third of each window is left
+
+
+def quota_low(keep: float = QUOTA_KEEP) -> str:
+    """Why a study should stop for quota (a Gemini window under ``keep`` remaining), or "" to carry on."""
+    try:
+        from tests.sim_eval import agy_quota
+        quota = agy_quota()
+    except Exception:
+        return ""
+    for group, windows in quota.items():
+        if not group.startswith("Gemini"):
+            continue
+        for window, (remaining, reset) in windows.items():
+            if remaining < keep:
+                return f"{group} {window} at {remaining:.0%} left (resets {reset})"
+    return ""
 
 
 DAY_ROOM = timedelta(minutes=40)  # a day isn't started with less than this left before the run's end time
@@ -470,6 +491,10 @@ def run_study(study: Study, actor: Callable[[str], str], reviewer: Callable[[str
             break
         if until is not None and datetime.now(until.tzinfo) > until - DAY_ROOM:
             stopped = "time window"
+            break
+        low = quota_low()
+        if low:
+            stopped = f"agy quota: {low}"
             break
         print(f"\n== {script.id} [{study.brain}]", flush=True)
         try:
