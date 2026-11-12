@@ -37,15 +37,36 @@ BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontie
                  "pipeline": "pipeline", "gemini-pipeline": "pipeline"}
 
 
+GEMMA_FLAG_ENV = "THIRTIES_OFFER_GEMMA"
+
+
+def gemma_offered(config=None) -> bool:
+    """Whether the on-device model may be offered or chosen at all: a developer switch (``[assistant]
+    offer_gemma``, or THIRTIES_OFFER_GEMMA=1) until a study shows it's no worse than the cloud brain. Everything
+    behind it stays built and tested; it's only never shown or picked without it."""
+    import os
+    if os.environ.get(GEMMA_FLAG_ENV, "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return bool(getattr(getattr(config, "assistant", None), "offer_gemma", False))
+
+
+def offered_brains(config=None) -> Dict[str, str]:
+    """The brains a user can pick on this device."""
+    return {k: v for k, v in BRAINS.items() if k != "slm" or gemma_offered(config)}
+
+
 def brain_choice(config, state_db=None) -> str:
-    """The brain to use: this device's choice from the app (if any), else ``[assistant] brain`` in config."""
+    """The brain to use: this device's choice from the app (if any), else ``[assistant] brain`` in config. Gemma
+    only while it's offered (gemma_offered); a device that chose it earlier uses the cloud brain meanwhile."""
+    offered = offered_brains(config)
     if state_db is not None:
         from thirties_core.settings import Settings
         chosen = Settings(state_db).get("assistant.brain")
-        if chosen in BRAINS:
+        if chosen in offered:
             return chosen
     configured = (getattr(getattr(config, "assistant", None), "brain", "frontier") or "frontier").lower()
-    return BRAIN_ALIASES.get(configured, "frontier")
+    name = BRAIN_ALIASES.get(configured, "frontier")
+    return name if name in offered else "frontier"
 
 
 def brain_unavailable_reason(name: str, config) -> "str | None":
@@ -73,4 +94,5 @@ def make_brain(config, tools, inference_engine, tasks=None, active_notes=None, c
     return FrontierBrain(tools, inference_engine, tasks=tasks, active_notes=active_notes)
 
 
-__all__ = ["BRAINS", "BRAIN_ALIASES", "Brain", "FrontierBrain", "brain_choice", "brain_unavailable_reason", "make_brain"]
+__all__ = ["BRAINS", "BRAIN_ALIASES", "Brain", "FrontierBrain", "brain_choice", "brain_unavailable_reason", "make_brain",
+           "gemma_offered", "offered_brains", "GEMMA_FLAG_ENV"]

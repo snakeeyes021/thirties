@@ -8,7 +8,7 @@ import random
 import threading
 from datetime import datetime, time as dtime
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from thirties_core.clock import format_clock
 from thirties_core.config import load_config
@@ -300,10 +300,14 @@ def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 # --- the assistant ---
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
-    from thirties_core.brains import brain_unavailable_reason
+    from thirties_core.brains import brain_unavailable_reason, gemma_offered
     from thirties_core.brains.slm.runtime import find_model
     group = Adw.PreferencesGroup(title="Assistant",
                                  description="Gemma runs privately on this computer. Nothing you say leaves it.")
+    if not gemma_offered(ctx.config()):  # the on-device model isn't offered yet: no choice to make here
+        group.set_visible(False)
+        group.refresh = lambda: None
+        return group
     chosen = ctx.get("assistant.brain") or "slm"  # Gemma unless the user chose otherwise
     gemma = Adw.ActionRow(title="Gemma (on this computer)")
     gemma_check = Gtk.CheckButton(active=chosen == "slm", valign=Gtk.Align.CENTER)
@@ -395,6 +399,19 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     group.refresh = refresh_all
     refresh_all()
     return group
+
+
+def drop_brain_section(menu) -> bool:
+    """Take the Assistant section (the brain choice) out of the main menu: while the on-device model isn't
+    offered, there's only one brain to use."""
+    if not isinstance(menu, Gio.Menu):
+        return False
+    for i in range(menu.get_n_items()):
+        if menu.get_item_attribute_value(i, "label", GLib.VariantType.new("s")) is not None and \
+                menu.get_item_attribute_value(i, "label", GLib.VariantType.new("s")).get_string() == "Assistant":
+            menu.remove(i)
+            return True
+    return False
 
 
 SMALL_MODEL_TITLE = "Smaller model (Gemma 4 E2B)"

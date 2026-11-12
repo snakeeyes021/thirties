@@ -449,7 +449,7 @@ class ThirtiesTelegramBridge:
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
             "• `/status` – System, model, and sync status\n"
-            "• `/brain` – Which brain answers; `/brain gemma` or `/brain gemini` to switch\n"
+            "• `/brain` – Which brain answers, and how to switch\n"
             "• `/help` – Show this guide\n\n"
             "💬 *Conversation*:\n"
             "Simply send natural messages to schedule and plan:\n"

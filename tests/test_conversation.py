@@ -307,6 +307,27 @@ class TestChoosingTheBrain(ConversationTestCase):
         warm = patch.object(ConversationManager, "warm_in_background")  # don't load Gemma in unit tests
         warm.start()
         self.addCleanup(warm.stop)
+        offered = patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": "1"})  # the developer switch: Gemma can be picked
+        offered.start()
+        self.addCleanup(offered.stop)
+
+    def test_gemma_is_hidden_without_the_developer_switch(self) -> None:
+        from unittest.mock import patch
+        from thirties_core.brains import brain_choice, offered_brains
+        from thirties_core.settings import Settings
+        sched = self.manager.scheduler
+        with patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
+            self.assertNotIn("slm", offered_brains(sched.config))
+            out = self.manager.send_user_message("/brain gemma")
+            self.assertIn("Unknown brain", out)
+            self.assertEqual(self.manager.brain_name, "frontier")
+            self.assertNotIn("gemma", self.manager.send_user_message("/brain").lower())
+            Settings(sched.state_db).set("assistant.brain", "slm")  # chosen before it was hidden
+            self.assertEqual(brain_choice(sched.config, sched.state_db), "frontier")
+            sched.config.assistant.brain = "slm"
+            self.assertEqual(brain_choice(sched.config), "frontier")
+            sched.config.assistant.offer_gemma = True  # the switch in config
+            self.assertEqual(brain_choice(sched.config), "slm")
 
     def test_switching_keeps_the_conversation_and_sticks_on_this_device(self) -> None:
         self.engine.set_next_response(reply("Morning!"))

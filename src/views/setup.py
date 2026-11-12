@@ -143,7 +143,8 @@ class SetupWindow(Adw.ApplicationWindow):
             self.nav.pop_to_page(self._pages[0])
             return
         if not settings.is_set("assistant.brain"):
-            settings.set("assistant.brain", "slm")
+            from thirties_core.brains import gemma_offered
+            settings.set("assistant.brain", "slm" if gemma_offered(self.core.config) else "frontier")
         if settings.get("background.enabled", True):
             self.app.request_background_permission()
         settings.set("setup.done", True)

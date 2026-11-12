@@ -38,6 +38,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     chat_toggle_btn = Gtk.Template.Child()
     split_view = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
+    main_menu_btn = Gtk.Template.Child()
     content_toolbar = Gtk.Template.Child()
     chat_toolbar = Gtk.Template.Child()
     chat_header = Gtk.Template.Child()
@@ -125,6 +126,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             GLib.Variant("s", brain_choice(self.config, self.scheduler.state_db)))
         brain.connect("change-state", self._on_brain_change)
         self.add_action(brain)
+        from thirties_core.brains import gemma_offered
+        if not gemma_offered(self.config):  # one brain to use: no Assistant section in the menu
+            from thirties.views.settings_rows import drop_brain_section
+            drop_brain_section(self.main_menu_btn.get_menu_model())
 
         profile = Gio.SimpleAction.new("profile-memory", None)
         profile.connect("activate", lambda *_: self._show_profile_dialog())

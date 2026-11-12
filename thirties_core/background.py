@@ -310,7 +310,8 @@ class BackgroundService:
         from thirties_core.brains.slm import fit
         record = fit.FitRecord(self.scheduler.state_db)
         record.check_startup()
-        if (self.config.assistant.brain or "") != "slm":
+        from thirties_core.brains import gemma_offered
+        if (self.config.assistant.brain or "") != "slm" or not gemma_offered(self.config):
             return
         if record.should_offer(current_model=self.config.assistant.slm_model or ""):
             record.offered()

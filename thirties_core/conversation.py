@@ -82,9 +82,11 @@ class ConversationManager:
 
     def set_brain(self, choice: str) -> str:
         """Switch this device to another brain, keeping the conversation. Returns the brain's name."""
+        from thirties_core.brains import offered_brains
+        offered = offered_brains(self.scheduler.config if self.scheduler else None)
         name = BRAIN_ALIASES.get(str(choice).strip().lower())
-        if name is None:
-            raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(BRAINS)}.")
+        if name is None or name not in offered:
+            raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(offered)}.")
         if self.scheduler is not None:
             from thirties_core.settings import Settings
             Settings(self.scheduler.state_db).set("assistant.brain", name)
@@ -384,7 +386,11 @@ class ConversationManager:
         elif cmd.split()[0] == "/brain":
             arg = clean_text.split(maxsplit=1)[1] if len(clean_text.split()) > 1 else ""
             if not arg:
-                reply = (f"Using {BRAINS[self.brain_name]}. Switch with /brain gemini or /brain gemma.")
+                from thirties_core.brains import offered_brains
+                others = [n for n in offered_brains(self.scheduler.config if self.scheduler else None)
+                          if n != self.brain_name]
+                reply = f"Using {BRAINS[self.brain_name]}." + (
+                    " Switch with " + " or ".join(f"/brain {n}" for n in others) + "." if others else "")
             else:
                 try:
                     reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."

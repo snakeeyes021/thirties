@@ -784,9 +784,28 @@ class SetupAndPreferencesTests(unittest.TestCase):
         win._finish(None)
         self.assertEqual(done, [True])
         self.assertTrue(self.core.setup_done)
-        self.assertEqual(self.core.settings.get("assistant.brain"), "slm")  # Gemma unless chosen otherwise
+        self.assertEqual(self.core.settings.get("assistant.brain"), "frontier")  # Gemma isn't offered yet
         self.assertEqual(self.core.config.general.work_days, ["sat", "sun"])  # applied live
         self.app.request_background_permission.assert_called_once()
+
+    def test_the_main_menu_loses_its_brain_choice(self):
+        import re
+        from pathlib import Path
+        from gi.repository import Gtk
+        ui = Path(__file__).resolve().parent.parent / "src" / "window.ui"
+        menu_xml = re.search(r'<menu id="primary_menu">.*?</menu>', ui.read_text(), re.S).group(0)
+        menu = Gtk.Builder.new_from_string(f"<interface>{menu_xml}</interface>", -1).get_object("primary_menu")
+        n = menu.get_n_items()
+        self.assertTrue(settings_rows.drop_brain_section(menu))
+        self.assertEqual(menu.get_n_items(), n - 1)
+        self.assertFalse(settings_rows.drop_brain_section(menu))  # gone: nothing else is taken
+
+    def test_gemma_is_offered_only_with_the_developer_switch(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": ""}):
+            self.assertFalse(settings_rows.brain_group(settings_rows.SettingsContext(self.core)).get_visible())
+        with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": "1"}):
+            self.assertTrue(settings_rows.brain_group(settings_rows.SettingsContext(self.core)).get_visible())
 
     def test_setup_sorts_the_lists_and_shows_its_guesses(self):
         from unittest import mock
