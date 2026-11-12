@@ -51,6 +51,19 @@ WORKAROUNDS: List[Tuple[str, str]] = [
      "check-ins follow the message level now (0.1 §4); downtime belongs in the core, not a note (C1)"),
     (r"\b(?:never|don'?t|do not)\b.*\boffer\b.*\b(?:meal|routine)",
      "routines and daily anchors now set up the day on their own (0.2 item 8)"),
+    # rules a note had to carry that are now built in (0.3)
+    (r"\bhalf[- ]?hour\b.*\bblocks?\b|\bblocks?\b.*\bhalf[- ]?hour\b|\bschedul\w*\b.*\b(?:by|in) (?:the )?blocks?\b",
+     "Thirties places what it picks on half-hour blocks by itself; the times the user gives stay as they are"),
+    (r"\bappl(?:y|ies|ied)\b.*\b(?:proposals?|plans?)\b.*\b(?:without|instead of|rather than)\b.*\bask|"
+     r"\bproposals?\b.*\b(?:directly|right away|straight away)\b",
+     "a proposed schedule is the schedule: it goes on at once and is said as a notice"),
+    (r"\btickets?\b.*\b(?:schedul\w*|plan\w*)\b|\b(?:schedul\w*|plan\w*)\b.*\btickets?\b",
+     "a project's backlog (an agent's work log too) is planned as time on the project, never ticket by ticket"),
+    (r"\broutines?\b.*\b(?:overviews?|summar(?:y|ies)|morning (?:message|schedule))\b|"
+     r"\b(?:overviews?|summar(?:y|ies))\b.*\broutines?\b",
+     "the morning's schedule lists the routines, part by part"),
+    (r"\broutines?\b.*\b(?:same|usual|right) order\b|\border of (?:the )?routine",
+     "routines go on as their parts, in the routine's order, where the user last put them"),
 ]
 _COMPILED = [(re.compile(p, re.IGNORECASE), why) for p, why in WORKAROUNDS]
 

@@ -632,7 +632,8 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
+        self.assertIn("4:00 – Call the bank", self.sent[0][1])
+        self.assertIn("- 3:00 PM – Morning Routine: Make bed, Shower, Journal", self.sent[0][1])  # routines are listed
         visible = [h["content"] for h in self.m.history()]
         self.assertFalse(any("the bank at 4" in v for v in visible))
 

@@ -83,6 +83,16 @@ class TestMemoryAudit(unittest.TestCase):
         flagged = [n for n in self.NOTES if why_outdated(n)]
         self.assertEqual(flagged, [self.NOTES[0], self.NOTES[1], self.NOTES[2], self.NOTES[5]])
 
+    def test_rules_now_built_in_are_offered_for_removal(self):
+        built_in = ["Line the cleaning up with the half-hour blocks.",
+                    "Applies new plans without needing to ask me first.",
+                    "Garden tickets get planned as project time.",
+                    "Evening summaries should mention the routines.",
+                    "Laundry routine in the same order as the note."]
+        for note in built_in:
+            self.assertIsNotNone(why_outdated(note), note)
+        self.assertIsNone(why_outdated("Prefers tea to coffee after lunch."))  # a real preference stays
+
     def test_listed_until_deleted_or_kept_and_never_deleted_on_its_own(self):
         sched = make_scheduler()
         services = Services.for_db(sched.state_db)

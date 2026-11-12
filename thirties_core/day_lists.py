@@ -17,8 +17,8 @@
 from __future__ import annotations
 
 import re
-from datetime import date
-from typing import Any, Dict, Iterable, List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from thirties_core.clock import format_clock, thirty_of
 from thirties_core.joplin_engine import CHECKBOX_REGEX
@@ -224,13 +224,24 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
     (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
     pt = assistant.pt
     plan = pt.day_plan
-    daily = assistant.routines.daily_titles()  # routines and meals go on by themselves every day: not news
+    from thirties_core.today import note_items
+    steps = {text.strip().lower(): note["title"].strip() for note in assistant._routines()
+             for text, _ in note_items(note)}  # each routine's steps, by the routine they belong to
+    daily = assistant.routines.daily_titles() - set(steps)  # meals and anchors go on by themselves: not news
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
                     and s.end_dt > pt._now() and s.title.strip().lower() not in daily), key=lambda s: s.start_dt)
-    lines = []
+    rows: List[Tuple[datetime, str]] = []  # (when, line)
+    parts: Dict[Tuple[datetime, str], List[str]] = {}  # the morning's routines are part of the day's plan, by part
     for s in items:
+        routine = steps.get(s.title.strip().lower())
+        if routine is not None:
+            parts.setdefault((thirty_of(s.start_dt), routine), []).append(s.title)
+            continue
         when = format_clock(s.start_dt) if pt._is_fixed(s) else format_clock(thirty_of(s.start_dt))
-        lines.append(f"- {when} – {s.title}")
+        rows.append((s.start_dt, f"- {when} – {s.title}"))
+    rows += [(block, f"- {format_clock(block)} – {routine}: {', '.join(titles)}")
+             for (block, routine), titles in parts.items()]
+    lines = [line for _, line in sorted(rows, key=lambda r: r[0])]
     out = ("Already planned for today:\n" + "\n".join(lines)) if lines else ""
     skip = {t.strip().lower() for t in skip}
     loose = [t for t in pencilled_in(assistant, plan) if t.strip().lower() not in skip]

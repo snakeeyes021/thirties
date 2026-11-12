@@ -4,8 +4,8 @@ The user shouldn't have to manage the daily items by hand, or work out what has 
 on track (10-30). Each morning, once the routines and anchors are on (routines.py), the assistant offers
 one short, concrete plan for the open time: what's pressing, not the whole backlog. Python gathers the candidates
 (due dates, urgency now / soon, what's on the Today note, a little project time) and the free time; the model picks
-and says why (propose_day); the proposal is remembered and goes on the plan, exactly as offered, on "yes"
-(apply_day_proposal), like the rollover.
+and says why (propose_day); the proposal is the schedule: it goes on the plan at once, exactly as proposed, and
+is said as a notice, which the user can still change, as with the rollover.
 
 Items put off again and again are offered kindly: as a 30-minute start, with a note saying so. When no model can
 pick (the on-device brain, or a failed call), Python makes the obvious proposal itself (default_items).
@@ -82,7 +82,8 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "apply_day_proposal",
-        "description": "Put the day's proposal on the plan, as proposed (after the user agrees). Items from the "
+        "description": "Put a stored day proposal on the plan, as proposed (propose_day already does this by itself; "
+                       "use this only for one still waiting). Items from the "
                        "lists stay linked.",
         "parameters": {"skip": "Titles or words of items to leave out (optional)."},
         "required": [],
@@ -484,7 +485,8 @@ MORNING_FACTS = (
     "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
     "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
     "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
-    "morning!\". Don't list the routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
+    "morning!\". The morning's routines are on the morning schedule: say them, as Python lists them (each part with "
+    "its steps). Meals needn't be listed.\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:
