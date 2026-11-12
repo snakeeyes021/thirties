@@ -170,10 +170,12 @@ def _rekey_horizons(conn, old: TaskItem, new_id: str, new_title: str, new_note_i
         return
     for r in conn.execute("SELECT * FROM horizon_plan WHERE item_id = ? AND state = 'in'", (old.id,)).fetchall():
         row_id = r["id"][:-len(old.id)] + new_id if r["id"].endswith(old.id) else f"{r['id']}>{new_id}"
+        keys = r.keys()
         conn.execute("""INSERT OR REPLACE INTO horizon_plan (id, item_id, title, note_id, list_title, level, period,
-                        slot, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'in', ?)""",
+                        slot, state, updated_at, sessions, minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'in', ?, ?, ?)""",
                      (row_id, new_id, new_title, new_note_id, new_note_title or r["list_title"], r["level"],
-                      r["period"], r["slot"], now))
+                      r["period"], r["slot"], now, r["sessions"] if "sessions" in keys else 0,
+                      r["minutes"] if "minutes" in keys else 0))
         conn.execute("UPDATE horizon_plan SET state = 'out', updated_at = ? WHERE id = ?", (now, r["id"]))
     mark = conn.execute("SELECT * FROM horizon_marks WHERE ref = ?", (f"item:{old.id}",)).fetchone()
     if mark is not None:

@@ -297,13 +297,16 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
                 or never_rolls(s.title, s)):
             ended.append(s.title)
             # project time comes round again anyway; only an ongoing effort with a deadline gets its missed time
-            # spread over the next sessions
+            # spread over the next sessions: a hard one (its due date) or a soft one (the end of the period its
+            # time was budgeted for, budgets.py)
             project = tasks.get(s.task_id or "") or listed.get(low)
             if s.category != SpanCategory.CALENDAR and not s.is_firm and not pt._is_fixed(s) \
                     and low not in daily and low not in routine_steps and low not in routine_names \
-                    and project is not None and project.due and assistant.kind_of(s, ctx) == ONGOING:
-                ongoing_missed.append({"title": s.title, "due": project.due[:10],
-                                       "minutes": int((s.end_dt - s.start_dt).total_seconds() // 60)})
+                    and project is not None and assistant.kind_of(s, ctx) == ONGOING:
+                until, level = _deadline_of(assistant, project, day - timedelta(days=1))
+                if until is not None:
+                    ongoing_missed.append({"title": s.title, "due": until.isoformat(), "level": level,
+                                           "minutes": int((s.end_dt - s.start_dt).total_seconds() // 60)})
             continue
         if low not in asked_before:
             ask.append(s.title)
@@ -352,6 +355,27 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed}
 
 
+def _deadline_of(assistant, task, missed_on: date) -> tuple:
+    """(the date missed time on an ongoing effort must fit before, the budget's level or "" for a due date): its
+    due date, or the end of the budgeted period (budgets.py) that held the missed day, whichever comes first."""
+    due = None
+    if task.due:
+        try:
+            due = date.fromisoformat(task.due[:10])
+        except ValueError:
+            due = None
+    budget = None
+    try:
+        from thirties_core.budgets import budget_of
+        from thirties_core.horizons import HorizonPlanner
+        budget = budget_of(HorizonPlanner(assistant.pt), task, missed_on)
+    except Exception as e:
+        logger.warning("Couldn't read %s's budget: %s", task.title, e)
+    if budget is not None and (due is None or budget.period.end < due):
+        return budget.period.end, budget.period.level
+    return due, ""
+
+
 def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     """Where each missed item goes next (replan.py), recorded on it: a one-off waits for the first day from today
     with room (never past its deadline), and that day's morning puts it on; missed time on something ongoing is
@@ -385,11 +409,16 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     for miss in out.get("ongoing_missed", []):
         try:
             until = date.fromisoformat(miss["due"][:10]) if miss.get("due") else None
-            placed = spread_ongoing(pt, miss["title"], miss["minutes"], day - timedelta(days=1), until=until)
+            placed = spread_ongoing(pt, miss["title"], miss["minutes"], day, until=until)  # from tomorrow: never today
         except Exception as e:
             logger.warning("Couldn't spread %s: %s", miss["title"], e)
             continue
-        respread.append({"title": miss["title"], "why": placed.why,
+        why = placed.why
+        if not placed.extended and placed.day is None and miss.get("level"):
+            from thirties_core.horizons import PARENT
+            up = PARENT.get(miss["level"])
+            why = f"no room left this {miss['level']}" + (f", so it counts toward this {up}'s plan" if up else "")
+        respread.append({"title": miss["title"], "why": why,
                          "day": placed.day.isoformat() if placed.day else ""})
     out["respread"] = respread
 

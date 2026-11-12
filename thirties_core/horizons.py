@@ -477,6 +477,16 @@ class HorizonPlans:
         self.db = db
         with db._get_connection() as conn:
             conn.executescript(_SCHEMA)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(horizon_plan)").fetchall()}
+            for col in ("sessions", "minutes"):  # an effort budget (budgets.py); 0 means none
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE horizon_plan ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+
+    def set_effort(self, row_id: str, sessions: int, minutes: int) -> None:
+        """How much the item gets in that period: ``sessions`` of ``minutes`` each (0 clears it)."""
+        with self.db._get_connection() as conn:
+            conn.execute("UPDATE horizon_plan SET sessions = ?, minutes = ?, updated_at = ? WHERE id = ?",
+                         (max(0, int(sessions)), max(0, int(minutes)), utc_now_iso(), row_id))
 
     def rows(self, level: Optional[str] = None, item_id: Optional[str] = None, active: bool = True
              ) -> List[Dict[str, str]]:
@@ -511,13 +521,14 @@ class HorizonPlans:
         return self.rows(active=False)
 
     def merge_record(self, record: Dict[str, Any]) -> bool:
-        cols = ["id", "item_id", "title", "note_id", "list_title", "level", "period", "slot", "state", "updated_at"]
+        cols = ["id", "item_id", "title", "note_id", "list_title", "level", "period", "slot", "state", "updated_at",
+                "sessions", "minutes"]
         with self.db._get_connection() as conn:
             row = conn.execute("SELECT updated_at FROM horizon_plan WHERE id = ?", (record["id"],)).fetchone()
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             conn.execute(f"INSERT OR REPLACE INTO horizon_plan ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                         [record.get(c, "") for c in cols])
+                         [record.get(c, 0 if c in ("sessions", "minutes") else "") for c in cols])
         return True
 
 
@@ -643,7 +654,8 @@ class HorizonPlanner:
             raise ToolError(f"There is no item '{ref}' on the user's lists.")
         return found
 
-    def pin(self, task: TaskItem, p: Period) -> Tuple[Period, str]:
+    def pin(self, task: TaskItem, p: Period, sessions: Optional[int] = None, minutes: Optional[int] = None
+            ) -> Tuple[Period, str]:
         """Drop an item into a period: a day goes into its week's plan on that day; a quarter into its year's plan;
         a week, month or year into its own plan. Its other placements that this one replaces (another period at
         the same level, or anything that doesn't overlap the new one) are taken out: one place per thing."""
@@ -661,6 +673,8 @@ class HorizonPlanner:
                 self.plans.take_out(r["id"])
         note_id = task.parent_note_id if task.is_checkbox_item else task.id
         self.plans.put(task.id, task.title, note_id or "", task.parent_note_title or "", plan, slot)
+        if sessions is not None:  # an effort budget for the period (budgets.py)
+            self.plans.set_effort(f"{plan.key}|{task.id}", sessions, minutes or 0)
         return plan, slot
 
     def unpin(self, task_id: str, p: Optional[Period] = None) -> List[Dict[str, str]]:
@@ -1160,7 +1174,10 @@ HORIZON_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Drop an item from the user's lists into a period's plan: a day (it goes into that week's "
                        "plan on that day), a week, a month, a quarter or a year. It then comes up when that period "
                        "is planned. Moving it to another period takes it out of the old one.",
-        "parameters": {"task": "The item (title or task_id).", "when": f"The period: {_PERIOD_HELP}."},
+        "parameters": {"task": "The item (title or task_id).", "when": f"The period: {_PERIOD_HELP}.",
+                       "sessions": "Optional, for ongoing efforts: how many sessions it gets in that period "
+                                   "(\"3 sessions this month\"). Python counts what's done and what's left.",
+                       "length": "Optional, with sessions: how long each one is (\"1 hour\")."},
         "required": ["task", "when"],
     },
     {
@@ -1238,13 +1255,32 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
         t.horizon, t.urgency, t.someday = h, HORIZON_URGENCY[h], h == "someday"
         return f"Noted: '{t.title}' is {HORIZON_WHY[h]}."
 
-    def pin_to_period(task: str = "", when: Any = "", **_: Any) -> str:
+    def pin_to_period(task: str = "", when: Any = "", sessions: Any = None, length: Any = None, **_: Any) -> str:
         hp = planner()
         t = hp.find_task(task)
         p = hp.period(when)
         if p.end < hp.today():
             raise ToolError(f"{hp.label(p)} is over.")
-        hp.pin(t, p)
+        n = minutes = None
+        if sessions not in (None, ""):
+            try:
+                n = int(str(sessions).strip())
+            except ValueError:
+                raise ToolError(f"sessions is a whole number of sessions, not '{sessions}'.")
+            if p.level == "day":
+                raise ToolError("A budget of sessions is for a week, month, quarter or year, not a day.")
+            if length not in (None, ""):
+                from thirties_core.clock import parse_duration_minutes
+                try:
+                    minutes = parse_duration_minutes(str(length))
+                except (ValueError, TypeError):
+                    minutes = 0
+                if not minutes:
+                    raise ToolError(f"length is how long each session is ('1 hour', '90 min'), not '{length}'.")
+        hp.pin(t, p, n, minutes)
+        if n:
+            each = f" of {minutes} min" if minutes else ""
+            return f"'{t.title}' is planned for {hp.label(p)}: {n} session{'s' if n != 1 else ''}{each}."
         return f"'{t.title}' is planned for {hp.label(p)}."
 
     def unpin_from_period(task: str = "", when: Any = None, **_: Any) -> str:
