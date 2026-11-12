@@ -48,7 +48,7 @@ class TestBackground(unittest.TestCase):
         from tests.fixtures import mark_up
         mark_up(self.sched.state_db, at("08:30"))  # the user's first message of the day
         self.svc.rollover(at("09:00"))
-        self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n- 5:00 PM – Taxes")])
+        self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n5:00 PM Taxes")])
 
     def test_the_drop_box_is_offered_in_the_afternoon_twice_an_hour_at_most(self):
         from unittest.mock import patch

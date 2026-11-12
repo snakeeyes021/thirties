@@ -623,7 +623,7 @@ class TestTheMorningMessage(RoutineCase):
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
         self.assertTrue(text.startswith("☀️ Good morning! "), text)
-        self.assertRegex(text, r"On the plan for the free time:\n- 4:00( PM)? – Call the bank$")  # a notice
+        self.assertRegex(text, r"On the plan for the free time:\n4:00( PM)? Call the bank$")  # a notice
         self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))
 
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
@@ -632,8 +632,10 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("4:00 – Call the bank", self.sent[0][1])
-        self.assertIn("- 3:00 PM – Morning Routine: Make bed, Shower, Journal", self.sent[0][1])  # routines are listed
+        self.assertIn("\n4:00 Call the bank", self.sent[0][1])
+        self.assertIn("\n3:00 Make bed, Shower, Journal", self.sent[0][1])  # routines are listed, by part
+        self.assertIn("\n12:00 PM Lunch", self.sent[0][1])  # and the meals
+        self.assertNotIn("\n- ", self.sent[0][1])  # plain lines
         visible = [h["content"] for h in self.m.history()]
         self.assertFalse(any("the bank at 4" in v for v in visible))
 

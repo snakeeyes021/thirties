@@ -220,16 +220,16 @@ def onto_today(assistant, day: date) -> List[str]:
 
 
 def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
-    """For the morning message: what's already planned for today, by block, and what's on the list with no time
-    (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
+    """For the morning message: the whole day already planned, one plain line each (no bullets), time first: each
+    routine part with its steps, the meals and other anchors, and anything else on; then what's on the list with no
+    time (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
     pt = assistant.pt
     plan = pt.day_plan
     from thirties_core.today import note_items
     steps = {text.strip().lower(): note["title"].strip() for note in assistant._routines()
              for text, _ in note_items(note)}  # each routine's steps, by the routine they belong to
-    daily = assistant.routines.daily_titles() - set(steps)  # meals and anchors go on by themselves: not news
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
-                    and s.end_dt > pt._now() and s.title.strip().lower() not in daily), key=lambda s: s.start_dt)
+                    and s.end_dt > pt._now()), key=lambda s: s.start_dt)
     rows: List[Tuple[datetime, str]] = []  # (when, line)
     parts: Dict[Tuple[datetime, str], List[str]] = {}  # the morning's routines are part of the day's plan, by part
     for s in items:
@@ -238,9 +238,8 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
             parts.setdefault((thirty_of(s.start_dt), routine), []).append(s.title)
             continue
         when = format_clock(s.start_dt) if pt._is_fixed(s) else format_clock(thirty_of(s.start_dt))
-        rows.append((s.start_dt, f"- {when} – {s.title}"))
-    rows += [(block, f"- {format_clock(block)} – {routine}: {', '.join(titles)}")
-             for (block, routine), titles in parts.items()]
+        rows.append((s.start_dt, f"{when} {s.title}"))
+    rows += [(block, f"{format_clock(block)} {', '.join(titles)}") for (block, _), titles in parts.items()]
     lines = [line for _, line in sorted(rows, key=lambda r: r[0])]
     out = ("Already planned for today:\n" + "\n".join(lines)) if lines else ""
     skip = {t.strip().lower() for t in skip}

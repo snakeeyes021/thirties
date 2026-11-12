@@ -63,7 +63,7 @@ class TestTomorrow(ListsTestCase):
         self.assertEqual(TodayLinks(self.sched.state_db).home_of("Buy stamps")["home_note_id"], "n_errands")
         self.assertEqual(AheadLists(self.sched.state_db).for_day(DAY + timedelta(days=1)), [])
         morning = planned_ahead_text(t2.assistant)
-        self.assertIn("Already planned for today:\n- 10:00 AM – Dentist call", morning)
+        self.assertIn("Already planned for today:\n10:00 AM Dentist call", morning)
         self.assertIn("On today's list, no time yet: Buy stamps, Water plants.", morning)
         # what yesterday's offer names is said there, once (10-31 sim: four items listed three times)
         self.assertIn("On today's list, no time yet: Water plants.", planned_ahead_text(t2.assistant, skip=["Buy stamps"]))

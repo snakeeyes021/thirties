@@ -45,7 +45,7 @@ MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
     "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
-    "on, as a list, and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
+    "on, one plain line each (time first, never '- ' bullets), and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
     "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
     "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
@@ -314,7 +314,7 @@ class DayProposal:
     @staticmethod
     def _lines(items: List[Dict[str, Any]]) -> List[str]:
         from thirties_core.assistant_tools import _short  # a list line said in brief (11-05: whole paragraphs)
-        return [f"- {format_clock(datetime.fromisoformat(i['start']))} – {_short(i['title'])}" for i in items]
+        return [f"{format_clock(datetime.fromisoformat(i['start']))} {_short(i['title'])}" for i in items]
 
     def _store(self, items: List[Dict[str, Any]], why: str = "") -> str:
         day = self.pt.day_plan.target_date
@@ -492,8 +492,8 @@ MORNING_FACTS = (
     "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
     "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
     "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
-    "morning!\". The morning's routines are on the morning schedule: say them, as Python lists them (each part with "
-    "its steps). Meals needn't be listed.\n---\n{facts}\n---")
+    "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
+    "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:
