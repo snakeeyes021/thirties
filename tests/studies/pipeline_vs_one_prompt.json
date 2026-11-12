@@ -1,7 +1,7 @@
 {
   "id": "pipeline_vs_one_prompt",
   "question": "Is Gemini on the shared pipeline no worse than the one-prompt Gemini brain, on the same days?",
-  "change": "Gemini on the understand, decide and act, say pipeline (brain 'pipeline'), against the one-prompt brain ('frontier')",
+  "change": "Round 4, the model held fixed: Gemini on the understand, decide and act, say pipeline (brain 'pipeline'), after round 3's Python-owned failures were fixed as scenario tests, against the one-prompt Gemini brain ('frontier'), both run fresh at the same commit",
   "why": "The pipeline replaces the one-prompt brain only if it's no worse; run once with --brain frontier, then with --brain pipeline, and compare the catalogues.",
   "brain": "frontier",
   "budget": {
@@ -50,5 +50,5 @@
       ]
     }
   ],
-  "bar": "Written after the one-prompt run had started (its first two day lines were seen, nothing else). The pipeline is no worse if, on the same days: every friction kind is on at most one more day than with the one-prompt brain; the total of days with any friction is at most one more; no new kind is about wrong list changes, a destructive action, or the app's internal text shown to the person; the Joplin checks stay clean (nothing written into a routine, no line twice, nothing done left open); and median trust at bed is no more than 1 lower."
+  "bar": "Written before either round 4 run started, nothing of either seen. The pipeline is no worse if, on the same 5 days: no friction kind appears that the one-prompt run doesn't have; every friction kind is on at most one more day than with the one-prompt brain; the total of days with any friction is at most one more, and frictions per day are no higher on average; no internal text reaches the person; done items recorded are within 2 of the one-prompt run's; the Joplin checks stay clean (nothing written into a routine, no line twice, nothing done left open); median trust at bed is no more than 1 lower; and the unit tests are green at the run's commit. Failing any one parks the pipeline design."
 }
