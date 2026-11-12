@@ -105,6 +105,45 @@ class BudgetTest(TodayTestCase):
                                                           "month's plan")
         self.assertEqual(spread["Shed clear-out"]["day"], "")
 
+    def test_the_month_trickles_into_the_week(self):
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this month", "sessions": 6,
+                                         "length": "2 hours"})
+        share = share_this(self.hp, self.task, WEEK)
+        cands = {c.title: c for c in self.hp.candidates(WEEK, limit=None)}
+        c = cands["Shed clear-out"]
+        self.assertEqual((c.sessions, c.minutes), (share, 120))
+        self.assertIn(f"{share} sessions of 120 min", c.line())
+        self.assertIn("6 of 6 sessions still to place", c.why)
+        self.hp.propose(WEEK)
+        out = self.hp.apply(WEEK)
+        self.assertIn(f"Shed clear-out ({share} sessions)", out)
+        week = budget_of(self.hp, self.task, DAY, level="week")
+        self.assertEqual((week.sessions, week.minutes), (share, 120))  # the week now holds its share
+
+    def test_a_session_on_the_schedule_doesnt_take_a_budget_off_the_plan(self):
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this month", "sessions": 6})
+        self.session(1)  # one session already on Friday
+        cands = {c.title for c in self.hp.candidates(WEEK, limit=None)}
+        self.assertIn("Shed clear-out", cands)
+
+    def test_a_spent_budget_offers_nothing(self):
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this month", "sessions": 2})
+        self.session(-3, status=SpanStatus.DONE)
+        self.session(-2, status=SpanStatus.DONE)
+        cands = {c.title for c in self.hp.candidates(WEEK, limit=None)}
+        self.assertNotIn("Shed clear-out", cands)
+
+    def test_the_week_trickles_into_the_day(self):
+        from thirties_core.day_proposal import _proposal_candidates
+        self.t.execute("pin_to_period", {"task": "Shed clear-out", "when": "this week", "sessions": 3,
+                                         "length": "90 min"})
+        day = self.hp.period("today")
+        c = {c.title: c for c in self.hp.candidates(day, limit=None)}["Shed clear-out"]
+        self.assertEqual((c.sessions, c.minutes), (1, 90))  # 3 left over the 4 days left: one today
+        self.assertIn("3 of 3 sessions still to place", c.why)
+        offered = {o["title"]: o for o in _proposal_candidates(self.t.assistant.proposals, self.t.day_plan)}
+        self.assertEqual(offered["Shed clear-out"]["minutes"], 90)
+
     def test_no_budget_and_no_deadline_simply_ends(self):
         from thirties_core.carry import settle
         self.session(-1, start="3:00 PM")

@@ -559,11 +559,14 @@ class Candidate:
     deferred: int = 0       # times put off on a day (task history)
     carried: int = 0        # earlier periods at this level it was planned for and not done
     slot: str = ""          # for a week: the day it's pinned to (ISO date)
+    sessions: int = 0       # an effort budget's share for this period (budgets.py): sessions of ``minutes``
+    minutes: int = 0
     score: float = 0.0
     task: Optional[TaskItem] = field(default=None, repr=False, compare=False)
 
     def facts(self) -> str:
-        bits = [self.why]
+        bits = [f"{self.sessions} session{'s' if self.sessions != 1 else ''} of {self.minutes} min"
+                if self.sessions else "", self.why]
         if self.due and "due" not in self.why:
             bits.append(f"due {_as_date(self.due).strftime('%a %b %-d')}" if _as_date(self.due) else "")
         if self.deferred:
@@ -820,14 +823,30 @@ class HorizonPlanner:
         on_today = self._on_today() if p.level == "day" else set()
         out: Dict[str, Candidate] = {}
 
-        def add(t: TaskItem, source: str, why: str, slot: str = "") -> None:
-            if t.id in done or t.id in scheduled or t.id in on_today:
+        def add(t: TaskItem, source: str, why: str, slot: str = "", share: Optional[Tuple[int, int]] = None
+                ) -> None:
+            # an effort with sessions left isn't placed by one session on the schedule, nor done by one
+            if share is None and (t.id in done or t.id in scheduled or t.id in on_today):
                 return
             c = out.get(t.id)
             if c is not None and _SOURCE_SCORE[c.source] >= _SOURCE_SCORE[source]:
                 return
             out[t.id] = Candidate(t.id, t.title, t.parent_note_title or "", source, why,
-                                  self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot, task=t)
+                                  self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot,
+                                  sessions=share[0] if share else 0, minutes=share[1] if share else 0, task=t)
+
+        from thirties_core.budgets import DEFAULT_SESSION_MINUTES, budget_of, share_this
+
+        def share_of(t: TaskItem, r: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+            """(sessions, minutes) the period gets from a budgeted plan row one level up; (0, m) when it's used up;
+            None for an item with no budget there."""
+            if not int(r.get("sessions") or 0):
+                return None
+            minutes = int(r.get("minutes") or 0) or DEFAULT_SESSION_MINUTES
+            up = budget_of(self, t, row_period(r, self.week_start).start, level=r["level"])
+            if up is not None and up.left <= 0:
+                return 0, minutes  # every session up there is done or already on the schedule
+            return share_this(self, t, p) or 0, minutes
 
         placed_elsewhere = set()
         for r in rows:
@@ -846,7 +865,13 @@ class HorizonPlanner:
                     add(t, "pinned", f"pinned to {self.label(p)}", r["slot"])
             elif r["level"] == p.level and r["period"] == p.start.isoformat():
                 slot = r["slot"]
-                add(t, "pinned", f"pinned to {self.label(where) if slot else self.label(p)}", slot)
+                share = None
+                if int(r.get("sessions") or 0):
+                    b = budget_of(self, t, p.start, level=p.level)
+                    if b is not None and b.left <= 0 and b.done >= b.sessions:
+                        continue  # its budget here is spent
+                    share = (int(r["sessions"]), int(r.get("minutes") or 0) or DEFAULT_SESSION_MINUTES)
+                add(t, "pinned", f"pinned to {self.label(where) if slot else self.label(p)}", slot, share)
 
         # 2. due by the end of the period (or overdue); for a day, within two days (what today_carryover calls
         # pressing): due tomorrow means today is when there's still room for it
@@ -882,6 +907,15 @@ class HorizonPlanner:
                 if p.level == "day" and slot is not None:
                     continue  # pinned to this very day: step 1
                 where = row_period(r, self.week_start)
+                share = share_of(t, r)
+                if share is not None:
+                    if share[0] <= 0:
+                        continue  # the budget up there is used up (done or already planned)
+                    b = budget_of(self, t, where.start, level=where.level)
+                    add(t, "from_plan", f"from the plan for {self.label(where)}"
+                        + (f", {b.left} of {b.sessions} sessions still to place" if b is not None else ""),
+                        share=share)
+                    continue
                 if p.level == "day" and where.end <= p.end + timedelta(days=1):
                     # The plan's period ends today or tomorrow ("this weekend", asked on Friday night): there's
                     # still room only now, so it's pressing, like something due (10-31)
@@ -999,7 +1033,8 @@ class HorizonPlanner:
                 ref, when = (entry.get("task") or entry.get("item") or "", entry.get("when")) if isinstance(entry, dict) \
                     else (str(entry), None)
                 t = self.find_task(ref)
-                chosen.append((t, self.period(when) if when else p))
+                n = entry.get("sessions") if isinstance(entry, dict) else None
+                chosen.append((t, self.period(when) if when else p, int(n) if n not in (None, "") else None, None))
         else:
             if not data:
                 raise ToolError(f"There's no proposal for {self.label(p)}; make one with propose_period first.")
@@ -1014,13 +1049,16 @@ class HorizonPlanner:
                 t = by_id.get(c["task_id"]) or TaskItem(id=c["task_id"], source_notebook="", title=c["title"],
                                                           parent_note_title=c.get("list") or None)
                 slot = period_of("day", date.fromisoformat(c["slot"])) if c.get("slot") else p
-                chosen.append((t, slot if p.level == "week" else p))
+                chosen.append((t, slot if p.level == "week" else p, c.get("sessions") or None, c.get("minutes") or None))
         names = []
-        for t, where in chosen:
+        for t, where, sessions, minutes in chosen:
             if not where.overlaps(p):
                 raise ToolError(f"{self.label(where)} isn't within {self.label(p)}.")
-            self.pin(t, where)
-            names.append(t.title + (f" ({self.label(where)})" if where != p else ""))
+            if sessions and where.level == "day":
+                sessions = None  # a day takes no budget: the week's share stays on the week
+            self.pin(t, where, sessions, minutes)
+            names.append(t.title + (f" ({self.label(where)})" if where != p else "")
+                         + (f" ({sessions} session{'s' if sessions != 1 else ''})" if sessions else ""))
         if data:
             self.db.set_sync_meta(self._proposal_key(p), json.dumps({**data, "state": "applied"}))
         if self.db.get_sync_meta("horizon_pending") == p.key:

@@ -464,6 +464,8 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         if c.title.strip().lower() in on_plan or c.task_id in on_plan:
             continue  # already on the day
         why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
+        if c.sessions and c.minutes:
+            minutes = c.minutes  # a session of a budgeted effort: the budget says how long (budgets.py)
         if c.deferred >= DEFERRED_OFTEN:
             why += f"; put off {c.deferred} times: offer a 30-minute start or breaking it down, kindly"
             minutes = 30
