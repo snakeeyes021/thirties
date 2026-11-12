@@ -166,9 +166,9 @@ class AgendaPage(Gtk.ScrolledWindow):
         every time it comes up. Never the actions of the user's own items."""
         if today and self.read_tool is not None:  # minus those hidden for today
             try:
-                shown = {line[2:] for line in (self.read_tool("not_yours_today", {}) or "").splitlines()
-                         if line.startswith("- ")}
-                theirs = [s for s in theirs if s.id in shown]
+                ids = {row[2:] for row in (self.read_tool("not_yours_today", {}) or "").splitlines()
+                       if row.startswith("- ")}
+                theirs = [s for s in theirs if s.id in ids]
             except Exception:
                 pass
         if not theirs:

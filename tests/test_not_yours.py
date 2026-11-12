@@ -1,4 +1,4 @@
-"""Not yours today (not_yours.py): someone else's events in their own last section, each hideable for the day.
+"""Not yours today (not_yours.py): someone else's events in a section of their own, at the end, each hideable.
 Invented events throughout."""
 
 import unittest
@@ -11,7 +11,7 @@ from thirties_core.plan_tools import PlanTools
 class NotYoursTest(unittest.TestCase):
     def setUp(self):
         self.sched = make_scheduler([partners("play", "19:00", "21:00", title="School play"),
-                                     partners("choir", "13:00", "16:00", title="Choir rehearsal")])
+                                     partners("band", "14:00", "15:30", title="Band practice")])
         self.sched.config.calendar.modes = {"jamie": "show"}
         plan, pending = self.sched.build_day_plan(DAY)
         self.t = PlanTools(plan, pending, self.sched)
@@ -19,8 +19,8 @@ class NotYoursTest(unittest.TestCase):
     def test_its_own_section_last_in_time_order(self):
         text = self.t.schedule_text()
         section = text.split("Not yours today:\n")[1]
-        self.assertEqual(section, "Choir rehearsal, 1:00 PM – 4:00 PM\nSchool play, 7:00 PM – 9:00 PM")
-        self.assertNotIn("Choir", text.split("Not yours today:")[0])
+        self.assertEqual(section, "Band practice, 2:00 PM – 3:30 PM\nSchool play, 7:00 PM – 9:00 PM")
+        self.assertNotIn("Band", text.split("Not yours today:")[0])
 
     def test_hide_that_one_for_today_only(self):
         out = self.t.execute("hide_for_today", {"event": "the play"})

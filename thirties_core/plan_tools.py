@@ -1026,6 +1026,13 @@ class PlanTools:
                              self.user_message, [s.title for s in self.day_plan.spans], self.day_plan.day_start)
         if why:
             raise ToolError(why)
+        from thirties_core.meals import window as meal_window
+        from thirties_core.item_facts import mentions
+        w = meal_window(span.title, self.day_plan.day_start)
+        if w is not None and new_end > w[1] and new_end > span.end_dt and self.user_message is not None \
+                and not mentions(self.user_message, span.title, [s.title for s in self.day_plan.spans]):
+            raise ToolError(f"{span.title}'s window ends at {format_clock(w[1])} (meals stay in their window), so it "
+                            "doesn't go later unless the user says so. Fit the rest around it, or ask the user.")
 
     def _envelope_ok(self, span: EventSpan) -> None:
         """Work and sleep change only when the user talks about them (10-27: placing the morning routine moved Work
@@ -1235,6 +1242,12 @@ class PlanTools:
                           and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not facts[s.id].anchored
                           and (s.start_dt >= start_from or s.end_dt <= now)), key=lambda s: s.start_dt)
         movable = self._in_fact_order(movable, facts)
+        # meals first, each at the earliest room inside its window (meals.py); the rest flows around them
+        from thirties_core.meals import late_line, window as meal_window
+        windows = {s.id: w for s in movable if not facts[s.id].after
+                   for w in [meal_window(s.title, plan.day_start)] if w is not None and w[1] > start_from}
+        movable = [s for s in movable if s.id in windows] + [s for s in movable if s.id not in windows]
+        late: List[str] = []
         ids = {s.id for s in movable}
         original = {s.id: (s.start_dt, s.end_dt) for s in movable}
         blockers = [s for s in plan.active_spans() if s.id not in ids and not s.tentative and s.end_dt > start_from
@@ -1254,9 +1267,13 @@ class PlanTools:
                 placed[span.id] = (t, t + length)
                 ends[span.id] = t + length
                 continue
-            earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
-                           + ([f.not_before] if f.not_before else [])
-                           + [ends[a] for a in f.after if a in ends])
+            meal = windows.get(span.id)
+            if meal is not None:  # from the window's opening (or now), never from where the rest has got to
+                earliest = max([start_from, meal[0]] + ([f.not_before] if f.not_before else []))
+            else:
+                earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
+                               + ([f.not_before] if f.not_before else [])
+                               + [ends[a] for a in f.after if a in ends])
             if f.daylight:
                 earliest = max(earliest, plan.sunrise)
             t = earliest
@@ -1276,6 +1293,10 @@ class PlanTools:
                 continue
             placed[span.id] = (t, end)
             ends[span.id] = end
+            if meal is not None:
+                if end > meal[1]:  # the window was full: it gives way, and the reply says so
+                    late.append(late_line(span.title, meal[1], "no free stretch for it"))
+                continue  # a meal doesn't move the rest along: they flow around it
             cursor = end
         if self._state_db is not None:
             self._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}", json.dumps(
@@ -1300,6 +1321,7 @@ class PlanTools:
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
+        out += late
         return "\n".join(out)
 
     @staticmethod

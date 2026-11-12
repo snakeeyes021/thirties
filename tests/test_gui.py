@@ -167,7 +167,7 @@ class DayViewTests(unittest.TestCase):
     def test_not_yours_today_has_only_its_own_two_actions(self) -> None:
         from thirties.views.agenda import AgendaPage
         plan, _ = self.sched.build_day_plan(DAY)
-        plan.spans.append(EventSpan("cal-c", "Choir practice", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+        plan.spans.append(EventSpan("cal-c", "Band practice", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
                                     source="calendar", shown_only=True))
         plan.spans.append(EventSpan("cal-h", "Hidden thing", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
                                     source="calendar", shown_only=True))
@@ -175,8 +175,8 @@ class DayViewTests(unittest.TestCase):
         page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
         page.read_tool = lambda name, args: "- cal-c" if name == "not_yours_today" else ""  # cal-h: hidden today
         page.refresh(plan, at("19:20"))
-        self.assertEqual([r.get_title() for r in _rows(page.groups["not_yours"])], ["Choir practice"])
-        self.assertNotIn("Choir practice", [r.get_title() for r in _rows(page.groups["next"])])
+        self.assertEqual([r.get_title() for r in _rows(page.groups["not_yours"])], ["Band practice"])
+        self.assertNotIn("Band practice", [r.get_title() for r in _rows(page.groups["next"])])
         hide, mine = page.not_yours_rows["cal-c"]
         hide.emit("clicked")
         mine.emit("clicked")
