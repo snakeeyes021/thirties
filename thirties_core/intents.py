@@ -11,6 +11,9 @@ Each intent says whether it's **destructive**: whether it changes the user's own
 instead, and the reply says what was done, so the user can correct it. "Drop it" about tonight's item means "not
 today"; "drop it, I'm never doing that" means archive.
 
+Destructive here: archiving an item, rewording, splitting or moving list lines, moving a group of items to
+another list, changing a whole calendar's mode, forgetting a memory note, and rewriting a whole profile section.
+
 The guard is applied where the tools run (PlanTools.execute), so it holds for every brain and every path.
 """
 
@@ -43,9 +46,11 @@ INTENTS: Dict[str, Intent] = {i.name: i for i in (
     Intent("today", "put something on today: with a time, unless the user asks for none", ("title",),
            tools=("add_to_today", "if_there_is_time")),
     Intent("list_add", "add something to one of the user's lists", ("title", "list"), tools=("add_task",)),
-    Intent("list_edit", "reword, split, move or break down a list item", ("target", "rename_to", "split_into",
-                                                                          "to_list"),
-           tools=("edit_list_item", "break_down_task", "apply_triage_group")),
+    Intent("list_edit", "add steps under a list item, or break it down", ("target", "add_under"),
+           tools=("edit_list_item", "break_down_task")),
+    Intent("list_restructure", "reword, split or move list items to another list or section", ("target", "rename_to",
+                                                                                              "split_into", "to_list"),
+           destructive=True, safe="", tools=("edit_list_item", "apply_triage_group")),
     Intent("drop", "stop rolling something over (its list is untouched)", ("target",), tools=("leftover_action",)),
     Intent("archive", "take an item off its list for good: ticked and filed", ("target",), destructive=True,
            safe="drop", tools=("leftover_action",)),
@@ -53,6 +58,8 @@ INTENTS: Dict[str, Intent] = {i.name: i for i in (
            tools=("forget",)),
     Intent("hide_calendar", "hide a whole calendar", ("target",), destructive=True, safe="",
            tools=("set_calendar_mode",)),
+    Intent("profile_rewrite", "rewrite a whole section of the user's profile", ("section", "text"), destructive=True,
+           safe="remember", tools=("update_profile",)),
     Intent("facts", "how pressing an item is, when it belongs, rules it must keep", ("target", "urgency", "when",
                                                                                      "after", "fixed", "daylight"),
            tools=("set_urgency", "set_horizon", "set_item_facts", "pin_to_period")),
@@ -73,13 +80,26 @@ EXPLICIT_REMOVAL = re.compile(
     r"\b(archive|delete|remove it|get rid of|drop (it|that|this) (completely|for good|entirely)|for good|"
     r"never (going to|gonna|doing|do)|not ever)\b", re.IGNORECASE)
 EXPLICIT_FORGET = re.compile(r"\b(forget|delete|remove|erase|stop remembering)\b", re.IGNORECASE)
-EXPLICIT_HIDE = re.compile(r"\b(hide|ignore|don'?t show|stop showing|not mine|isn'?t mine)\b", re.IGNORECASE)
+EXPLICIT_HIDE = re.compile(r"\b(hide|ignore|don'?t show|stop showing|not mine|isn'?t mine|show[- ]only|only show)\b",
+                           re.IGNORECASE)
+EXPLICIT_CALENDAR = re.compile(r"\bcalendars?\b", re.IGNORECASE)  # about the calendar itself, not one event
+EXPLICIT_RESTRUCTURE = re.compile(
+    r"\b(rename|reword|retitle|call (it|that|this)|split|break (it|this|that) (up|into)|move|put (it|that|this|them) "
+    r"(in|on|under|into)|file (it|that|them)|change (it|the wording)|rewrite|merge|combine)\b", re.IGNORECASE)
+EXPLICIT_YES = re.compile(r"\b(yes|yeah|yep|sure|ok|okay|do it|go ahead|sounds good|please do|split|move)\b",
+                          re.IGNORECASE)
+EXPLICIT_REWRITE = re.compile(r"\b(rewrite|replace|start over|scrap|clear|wipe|delete|remove)\b", re.IGNORECASE)
 
 
 def explicit(intent: str, said: Optional[str]) -> bool:
     """The user's words ask for this destructive intent outright."""
-    pattern = {"archive": EXPLICIT_REMOVAL, "forget": EXPLICIT_FORGET, "hide_calendar": EXPLICIT_HIDE}.get(intent)
-    return bool(said and pattern is not None and pattern.search(said))
+    if not said:
+        return False
+    if intent == "hide_calendar":
+        return bool(EXPLICIT_HIDE.search(said) and EXPLICIT_CALENDAR.search(said))
+    pattern = {"archive": EXPLICIT_REMOVAL, "forget": EXPLICIT_FORGET, "list_restructure": EXPLICIT_RESTRUCTURE,
+               "triage": EXPLICIT_YES, "profile_rewrite": EXPLICIT_REWRITE}.get(intent)
+    return bool(pattern is not None and pattern.search(said))
 
 
 def destructive_intent(tool: str, args: Dict[str, Any]) -> Optional[str]:
@@ -88,8 +108,15 @@ def destructive_intent(tool: str, args: Dict[str, Any]) -> Optional[str]:
         return "archive"
     if tool == "forget":
         return "forget"
-    if tool == "set_calendar_mode" and str(args.get("mode") or "").strip().lower() in ("ignore", "hide", "hidden"):
+    if tool == "set_calendar_mode" and str(args.get("mode") or "").strip().lower() in (
+            "ignore", "hide", "hidden", "show", "show only", "show-only"):
         return "hide_calendar"
+    if tool == "edit_list_item" and any(args.get(k) for k in ("rename_to", "split_into", "to_section", "to_list")):
+        return "list_restructure"
+    if tool == "apply_triage_group":
+        return "triage"
+    if tool == "update_profile" and str(args.get("replace") or "").strip().lower() in ("true", "1", "yes"):
+        return "profile_rewrite"
     return None
 
 
@@ -100,10 +127,16 @@ def guard(tool: str, args: Dict[str, Any], said: Optional[str]) -> Tuple[str, Di
     intent = destructive_intent(tool, args)
     if intent is None or said is None or explicit(intent, said):
         return tool, args, ""
-    safe = INTENTS[intent].safe
-    if intent == "archive" and safe == "drop":
+    if intent == "archive":
         return tool, {**args, "action": "drop"}, " Say \"archive it\" to take it off its list too."
-    return "", args, (f"NOT_DONE: that would {INTENTS[intent].means}, and the user didn't ask for that outright. "
+    if intent == "profile_rewrite":  # the non-destructive reading: add the line, keep what's there
+        return tool, {**args, "replace": False}, " (Added, not rewritten: say \"rewrite it\" to replace the section.)"
+    if intent == "hide_calendar":  # "don't show me the rehearsal" is that event, never the whole calendar
+        return "", args, ("NOT_DONE: that would change the whole calendar, and the user only talked about an event. "
+                          "Hide that event instead (resolve_calendar_event with attend=false, for this time or the "
+                          "series), and say so; change the calendar only if they say the calendar.")
+    means = INTENTS[intent].means if intent in INTENTS else "move a group of items to another list"
+    return "", args, (f"NOT_DONE: that would {means}, and the user didn't ask for that outright. "
                       "Ask them first, in one short question.")
 
 

@@ -27,14 +27,33 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(tool, "")
         self.assertTrue(note.startswith("NOT_DONE"))
         self.assertEqual(guard("forget", {"note": "n1"}, "forget that I hate mornings")[0], "forget")
-        self.assertEqual(guard("set_calendar_mode", {"calendar": "Team", "mode": "ignore"}, "busy day")[0], "")
+        tool, _, note = guard("set_calendar_mode", {"calendar": "Team", "mode": "ignore"}, "don't show me the rehearsal")
+        self.assertEqual(tool, "")
+        self.assertIn("resolve_calendar_event", note)  # one event hidden, never the whole calendar
         self.assertEqual(guard("set_calendar_mode", {"calendar": "Team", "mode": "ignore"},
                                "that calendar isn't mine")[0], "set_calendar_mode")
         self.assertEqual(guard("set_calendar_mode", {"calendar": "Team", "mode": "mine"}, "busy day")[0],
                          "set_calendar_mode")  # not destructive
 
+    def test_list_lines_change_only_when_asked(self):
+        self.assertEqual(guard("edit_list_item", {"item": "x", "rename_to": "y"}, "the bank thing is done")[0], "")
+        self.assertEqual(guard("edit_list_item", {"item": "x", "rename_to": "y"}, "rename it to y")[0],
+                         "edit_list_item")
+        self.assertEqual(guard("edit_list_item", {"item": "x", "add_under": ["a"]}, "steps: a")[0], "edit_list_item")
+        self.assertEqual(guard("apply_triage_group", {"list": "L"}, "hmm")[0], "")
+        self.assertEqual(guard("apply_triage_group", {"list": "L"}, "yes, do it")[0], "apply_triage_group")
+
+    def test_a_profile_section_is_added_to_unless_a_rewrite_is_asked(self):
+        tool, args, note = guard("update_profile", {"section": "Goals", "text": "Run a 10k", "replace": True},
+                                 "I want to run a 10k")
+        self.assertEqual((tool, args["replace"]), ("update_profile", False))
+        self.assertIn("rewrite it", note)
+        self.assertTrue(guard("update_profile", {"section": "Goals", "text": "x", "replace": True},
+                              "rewrite my goals: x")[1]["replace"])
+
     def test_only_these_are_destructive(self):
-        self.assertEqual({i.name for i in INTENTS.values() if i.destructive}, {"archive", "forget", "hide_calendar"})
+        self.assertEqual({i.name for i in INTENTS.values() if i.destructive},
+                         {"archive", "forget", "hide_calendar", "list_restructure", "profile_rewrite"})
         self.assertIsNone(destructive_intent("remove_event", {"event": "x"}))  # off the plan, never off a list
         self.assertIsNone(destructive_intent("leftover_action", {"action": "drop"}))
         self.assertFalse(explicit("archive", "drop it"))
