@@ -64,6 +64,7 @@
           <li>A year plan also suggests a couple of your someday items, so they get looked at once a year</li>
           <li>Someone else's events (show-only calendars) have their own section at the end of the day, Not yours today, with Hide for today and Not mine; hiding a whole calendar still needs you to say the calendar</li>
           <li>A calendar that can't be read no longer makes the day look free: it keeps what it showed last, or the Agenda, the assistant and the morning message say it couldn't be read; cancelled events and events marked free take no time</li>
+          <li>On Telegram, editing a message that was already answered never repeats what it did: a typo fix passes quietly, and any other change gets a note to send it as a new message; after a restart the bridge carries on from the last message it read, and a reply that didn't get through is still sent if Telegram answers again within a few hours</li>
           <li>Routines go on as their natural parts (a half hour each, keeping their steps), and the morning message lists the whole day, one plain line each with its time: each part with its steps, the meals and other anchors, then what was put on</li>
           <li>Meals keep to a sensible window: replanning the day puts them in it first, and a meal goes later only when the day is full (and says why) or you ask</li>
           <li>Before the morning reset clears the Today note, it files what's done into your Done note, then writes Today in one safe step: a ticked line can't disappear</li>
