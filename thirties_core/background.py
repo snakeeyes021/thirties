@@ -300,6 +300,22 @@ class BackgroundService:
         if soon:
             self._remember("heads_up", told, now)
 
+    def model_fit(self, now: datetime) -> None:
+        """Once per start: record a death while the on-device model was working (its marker left behind), and, if
+        the bigger model doesn't fit this device, offer the smaller one (at most once a week; never switched by
+        itself). Only for someone using the on-device model."""
+        if getattr(self, "_fit_checked", False):
+            return
+        self._fit_checked = True
+        from thirties_core.brains.slm import fit
+        record = fit.FitRecord(self.scheduler.state_db)
+        record.check_startup()
+        if (self.config.assistant.brain or "") != "slm":
+            return
+        if record.should_offer(current_model=self.config.assistant.slm_model or ""):
+            record.offered()
+            self.send(fit.OFFER_TEXT + " " + fit.OFFER_WHERE, "notice", now=now)
+
     def stretches(self, now: datetime) -> None:
         """Medium: at the start of each stretch of the day, what's planned in it; once it's over (plus the grace
         period), one question about whatever in it isn't reported."""
@@ -792,9 +808,9 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
-        waits = {self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+        waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
-        for duty in (self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+        for duty in (self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
             if not up and duty in waits:

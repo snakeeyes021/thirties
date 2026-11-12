@@ -702,6 +702,10 @@ class LiteRTInferenceEngine:
                         raw_reply = raw_stdout.strip()
                 else:
                     logger.error("Host runner exited with code %s: %s", res.returncode, res.stderr)
+                    from thirties_core.brains.slm import fit  # out of memory, killed, or a bug: recorded (fit.py)
+                    kind = fit.classify_exit(res.returncode, (res.stderr or "") + (res.stdout or "")[-2000:])
+                    if kind != "ok":
+                        fit.note_event(kind, f"host runner exit {res.returncode}")
             except Exception as runner_err:
                 logger.error("Host runner execution failed: %s", runner_err)
 

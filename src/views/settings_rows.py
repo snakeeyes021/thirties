@@ -361,9 +361,46 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
     download.connect("clicked", on_download)
     group.connect("destroy", lambda *_: cancel.set())
-    group.refresh = refresh
-    refresh()
+
+    # The smaller model (fit.py): offered on a device under 8 GB, or once the bigger one has failed to fit
+    from thirties_core.brains.slm import fit
+    small = Adw.ActionRow(title=SMALL_MODEL_TITLE, subtitle=SMALL_MODEL_HINT)
+    small_btn = Gtk.Button(valign=Gtk.Align.CENTER)
+    small.add_suffix(small_btn)
+    group.add(small)
+
+    def refresh_small():
+        using = (ctx.get("assistant.slm_model") or "") == fit.SMALL_MODEL
+        offered = fit.FitRecord(ctx.core.scheduler.state_db).should_offer() if hasattr(ctx.core, "scheduler") else False
+        small.set_visible(using or fit.small_device() or offered)
+        small_btn.set_label(SMALL_MODEL_BACK if using else SMALL_MODEL_USE)
+
+    def on_small(_btn):
+        from thirties_core.brains.slm import model_download as md
+        to_small = (ctx.get("assistant.slm_model") or "") != fit.SMALL_MODEL
+        gpu = (md.models_dir() / md.GEMMA_E4B.filename).exists() or (md.models_dir() / md.GEMMA_E2B.filename).exists()
+        small_btn.set_sensitive(False)
+
+        def finished(said, error):
+            small_btn.set_sensitive(True)
+            ctx.toast(str(error) if error else said)
+            refresh_small()
+        ctx.run_async(lambda: fit.swap(to_small, ctx.set, gpu=gpu, cancel=cancel), finished)
+
+    small_btn.connect("clicked", on_small)
+
+    def refresh_all():
+        refresh()
+        refresh_small()
+    group.refresh = refresh_all
+    refresh_all()
     return group
+
+
+SMALL_MODEL_TITLE = "Smaller model (Gemma 4 E2B)"
+SMALL_MODEL_HINT = "2.6 GB and faster, but noticeably less accurate. For devices with less memory."
+SMALL_MODEL_USE = "Use it"
+SMALL_MODEL_BACK = "Switch back"
 
 
 def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:
