@@ -222,6 +222,32 @@ class BudgetTest(TodayTestCase):
         from thirties_core.budgets import trickle_line
         self.assertEqual(trickle_line(self.hp, self.task), "")
 
+    def pin_week(self, title, sessions, length):
+        self.services.tasks.append(TaskItem(id="t_" + title[:6].lower(), source_notebook="1. Tasks", title=title,
+                                            is_checkbox_item=True, parent_note_title="Errands/Admin",
+                                            parent_note_id="n_errands"))
+        self.t.execute("pin_to_period", {"task": title, "when": "this week", "sessions": sessions, "length": length})
+        hp = HorizonPlanner(self.t)
+        return hp, hp.find_task(title)
+
+    def test_long_sessions_go_on_days_off_first(self):
+        from thirties_core.budgets import session_days
+        hp, task = self.pin_week("Shed clear-out", 2, "2 hours")
+        self.assertEqual(session_days(hp, task, WEEK), [DAY + timedelta(days=2), DAY + timedelta(days=3)])  # Sat, Sun
+        hp, task = self.pin_week("Sort the photo boxes", 2, "1 hour")
+        self.assertEqual(session_days(hp, task, WEEK)[0], DAY)  # a short one still starts today
+
+    def test_something_outdoors_needs_its_stretch_in_daylight(self):
+        from thirties_core.budgets import session_days
+        self.t.execute("add_event", {"title": "School pickup", "start": "4:00 PM", "end": "5:30 PM", "fixed": True})
+        hp, task = self.pin_week("Weed the garden beds", 1, "90 min")
+        indoor_hp, indoor = self.pin_week("Sort the photo boxes", 1, "90 min")
+        self.assertEqual(session_days(indoor_hp, indoor, WEEK), [DAY])  # this evening has room
+        first = session_days(hp, task, WEEK)[0]
+        self.assertNotEqual(first, DAY)  # but only an hour of daylight is left today (5:30 to sunset)
+        plan = self.t.plan_for(first.isoformat())
+        self.assertGreaterEqual((plan.sunset - plan.sunrise).total_seconds(), 90 * 60)
+
     def test_no_budget_and_no_deadline_simply_ends(self):
         from thirties_core.carry import settle
         self.session(-1, start="3:00 PM")

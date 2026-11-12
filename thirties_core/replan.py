@@ -32,8 +32,9 @@ class Placement:
     extended: List[str] = field(default_factory=list)  # ongoing: the sessions (span ids) that got the time
 
 
-def _free_minutes(pt, plan, minutes: int) -> bool:
-    """The day has one free stretch of ``minutes`` before bedtime."""
+def _free_minutes(pt, plan, minutes: int, daylight: bool = False) -> bool:
+    """The day has one free stretch of ``minutes`` before bedtime (in daylight, for something outdoors: short
+    winter days have less of it)."""
     from thirties_core.if_time import _waking_end
     end = _waking_end(plan)
     need = timedelta(minutes=minutes)
@@ -41,19 +42,34 @@ def _free_minutes(pt, plan, minutes: int) -> bool:
     for a, b in pt.open_windows_for(plan):
         if plan.day_start <= now < plan.day_end:
             a = max(a, now)  # today: only the free time still ahead
-        if min(b, end) - a >= need:
+        b = min(b, end)
+        if daylight:
+            a, b = max(a, plan.sunrise), min(b, plan.sunset)
+        if b - a >= need:
             return True
     return False
 
 
-def first_day_with_room(pt, minutes: int, start: date, last: date) -> Optional[date]:
+def outdoors(title: str) -> bool:
+    """Something done outside, by its wording (weather.OUTDOOR_RE): it needs daylight."""
+    from thirties_core.weather import OUTDOOR_RE
+    return bool(OUTDOOR_RE.search(title or ""))
+
+
+def is_day_off(plan) -> bool:
+    """No work on the day (a weekend, a day off, or a holiday that took Work off)."""
+    from thirties_core.models import SpanCategory
+    return not any(s.category == SpanCategory.WORK for s in plan.spans)
+
+
+def first_day_with_room(pt, minutes: int, start: date, last: date, daylight: bool = False) -> Optional[date]:
     d = start
     while d <= last:
         try:
             plan = pt.plan_for(d)
         except Exception:
             plan = None
-        if plan is not None and _free_minutes(pt, plan, minutes):
+        if plan is not None and _free_minutes(pt, plan, minutes, daylight):
             return d
         d += timedelta(days=1)
     return None
@@ -73,7 +89,7 @@ def place_once(pt, title: str, minutes: int, today: date, due: Optional[date] = 
     """A missed one-off task: the first day from tomorrow with room, never past its deadline (with none, up to
     ``last``, a week ahead by default)."""
     last = due if due is not None else last if last is not None else today + timedelta(days=WEEK_DAYS)
-    d = first_day_with_room(pt, minutes, today + timedelta(days=1), last)
+    d = first_day_with_room(pt, minutes, today + timedelta(days=1), last, daylight=outdoors(title))
     if d is None:
         if due is not None:
             return Placement(None, f"no day before it's due ({due.strftime('%a %b %-d')}) has room")
@@ -147,4 +163,4 @@ def replan(assistant, title: str, kind: str, minutes: int, today: date, due: Opt
     return place_once(pt, title, minutes, today, due)
 
 
-__all__ = ["Placement", "replan", "place_once", "spread_ongoing", "first_day_with_room"]
+__all__ = ["Placement", "replan", "place_once", "spread_ongoing", "first_day_with_room", "outdoors", "is_day_off"]

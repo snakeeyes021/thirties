@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from thirties_core.models import TaskItem
 
 DEFAULT_SESSION_MINUTES = 60
+LONG_SESSION_MINUTES = 120  # a session this long goes on days off first, where there's one with room
 CHILD = {"years": "year", "year": "quarter", "quarter": "month", "month": "week", "week": "day"}
 # where a period looks for the budget it takes a share of: the nearest level above that has one
 UP = {"day": ("week",), "week": ("month", "quarter", "year", "years"), "month": ("quarter", "year", "years"),
@@ -201,25 +202,32 @@ def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") ->
     """The days this week's budget puts a session of ``task`` on: Python's week plan, worked out afresh from the
     room each day has, so it bends as the week fills. Days that already have one count first; the rest of what's
     left goes on the days ahead with a free stretch long enough, spread out (one a day, as far apart as they can
-    be), never past a due date."""
-    from thirties_core.replan import _free_minutes
+    be), never past a due date. Calendar sense: something outdoors needs its stretch in daylight, and a long
+    session goes on days off first (a weekend, or a holiday that took Work off)."""
+    from thirties_core.replan import _free_minutes, is_day_off, outdoors
     b = budget_of(planner, task, week.start, level="week")
     if b is None:
         return []
     pt, today = planner.pt, planner.today()
     due = _due(task)
-    have, room = [], []
+    have, room, off = [], [], set()
+    daylight = outdoors(task.title)
     for d in week.days():
         if d < today or (due is not None and d > due):
             continue
         plan = pt.plan_for(d)
         if any(_same(s.title, task.title) and s.status in (SpanStatus.PLANNED, SpanStatus.DONE) for s in plan.spans):
             have.append(d)
-        elif _free_minutes(pt, plan, b.minutes):
+        elif _free_minutes(pt, plan, b.minutes, daylight):
             room.append(d)
+            if is_day_off(plan):
+                off.add(d)
     k = min(b.left, len(room))
     if k <= 0:
         return have
+    if b.minutes >= LONG_SESSION_MINUTES and off:  # long sessions: days off first, then the rest if needed
+        rest = [d for d in room if d not in off]
+        room = sorted(off) if len(off) >= k else sorted(off) + rest[:k - len(off)]
     if k == 1:
         picks = [room[0]]  # front-loaded: the first day with room
     else:
