@@ -15,6 +15,11 @@ like that), else "common" (everyday wording that also turns up in anyone's notes
 It prints counts and the places in the diff only (word positions in our own line), never the matching text, so
 nothing private reaches a log. Exit status 1 when anything matched.
 
+It also counts review labels in what was added: a capital letter followed by one or two digits, or a decision
+id (a capital D, a dash and digits). Those belong to private reviews; the public repository describes the
+behaviour instead. Quarter names and copy-list ids (a label followed by a dash and digits) don't count. The labels
+are looked for in this file too, so its own examples stay in words.
+
 No check catches a paraphrase: fixtures are written from scratch, never adapted from examples in plans, reviews
 or transcripts, which describe the user's real days.
 """
@@ -44,8 +49,14 @@ def words(text: str) -> List[str]:
     return WORD.findall(text.lower())
 
 
+LABEL = re.compile(r"\b[A-HJ-PR-Z][0-9]{1,2}\b(?!-[0-9])|\bD-[0-9]{2,3}\b")  # review labels (not Q1-Q4, not I/O)
+BREAK = " | "  # between separate pieces of text on one line (two strings): no phrase runs across it
+
+
 def phrases(text: str) -> Set[str]:
-    """Two to four word runs with at least two content words (not only common words)."""
+    """Two to four word runs with at least two content words (not only common words), within each piece."""
+    if BREAK in text:
+        return set().union(*(phrases(piece) for piece in text.split(BREAK)))
     w = words(text)
     out = set()
     for n in (2, 3, 4):
@@ -61,6 +72,21 @@ def git(*args: str) -> str:
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, check=True).stdout
 
 
+_CODE = re.compile(r"[()=\[\]{}]|^\s*(def|class|return|import|from|if|elif|else|for|while|with|try|except)\b")
+_STRING = re.compile(r"[rbfu]*(\"\"\"|'\'\'|\"|')(.*?)\1")
+
+
+def prose(line: str) -> str:
+    """The words in a line of Python that are text, not code: its comment, its strings, or the whole line when
+    it's a docstring line with no code in it. Names in code are never examples."""
+    code, _, comment = line.partition("  #") if "  #" in line else (line, "", "")
+    if code.lstrip().startswith("#"):
+        return code.lstrip()[1:]
+    if not _CODE.search(code) and not _STRING.search(code):
+        return line  # a docstring's or a long string's continuation line
+    return BREAK.join([m.group(2) for m in _STRING.finditer(code)] + [comment])  # never a phrase across two
+
+
 def added_lines(base: str) -> List[Tuple[str, int, str]]:
     """(file, line, text) for every line added since ``base``, plus each commit message line."""
     out: List[Tuple[str, int, str]] = []
@@ -72,8 +98,9 @@ def added_lines(base: str) -> List[Tuple[str, int, str]]:
             m = re.search(r"\+(\d+)", raw)
             line = int(m.group(1)) if m else 0
         elif raw.startswith("+") and not raw.startswith("+++"):
-            if path != SELF:  # this checker's own code holds no examples
-                out.append((path, line, raw[1:]))
+            text = prose(raw[1:]) if path.endswith(".py") else raw[1:]
+            if text:  # this checker's own code is read for labels only (below), never for phrases
+                out.append((path, line, text))
             line += 1
     for sha in git("rev-list", f"{base}..HEAD").split():
         for k, text in enumerate(git("log", "-1", "--format=%B", sha).splitlines(), 1):
@@ -160,19 +187,22 @@ def main(argv: List[str]) -> int:
     strong = 0
     for path, line, text in added:
         w = words(text)
-        for p in phrases(text):
+        for p in (phrases(text) if path != SELF else ()):
             if f" {p} " in data and f" {p} " not in known:
                 n = len(p.split())  # where in the line, as word positions: the line is ours to read, the data isn't
                 at = next((i for i in range(len(w) - n + 1) if " ".join(w[i:i + n]) == p), 0)
                 new_word = any(x not in vocab for x in p.split())
                 strong += new_word
                 hits.setdefault((path, line), []).append(f"words {at + 1}-{at + n}{' STRONG' if new_word else ''}")
+    labels = [(path, line) for path, line, text in added if LABEL.search(text)]
     total = sum(len(v) for v in hits.values())
     print(f"real-data self-check: {total} hits ({strong} strong, {total - strong} common) in {len(hits)} added "
-          f"lines (since {base})")
+          f"lines (since {base}); review labels: {len(labels)}")
+    for path, line in labels:
+        print(f"  label at {path}:{line}")
     for (path, line), where in sorted(hits.items()):
         print(f"  {path}:{line}  ({', '.join(sorted(where))})")
-    return 1 if total else 0
+    return 1 if total or labels else 0
 
 
 if __name__ == "__main__":
