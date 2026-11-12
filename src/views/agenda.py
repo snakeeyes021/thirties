@@ -25,7 +25,7 @@ from thirties_core.plan_tools import NOT_DONE
 
 Tool = Callable[[str, dict], str]  # run a schedule tool by name; returns its result
 
-# If there's time (if_time.py): copy-madlibs T3-043 to T3-049
+# If there's time (if_time.py)
 IF_TIME_TITLE = "If there's time"
 IF_TIME_DONE = "Done"
 IF_TIME_SCHEDULE = "Schedule it"
