@@ -128,7 +128,10 @@ class MessageTools:
         if tools.services is not None:
             for conv in tools.services.conversations.for_day(tools.day_plan.target_date):
                 for m in conv.messages:
-                    if m.get("role") == "user" and title in str(m.get("content", "")).lower():
+                    # a hidden message is Thirties' own (a system check), never the user's words
+                    if (m.get("role") == "user" and not m.get("hidden")
+                            and not str(m.get("content", "")).startswith("[System check")
+                            and title in str(m.get("content", "")).lower()):
                         at = m.get("at", "")
                         when = format_clock(datetime.fromisoformat(at).astimezone(tz)) if at else "earlier"
                         lines.append(f"{when}: the user said \"{str(m['content'])[:200]}\"")

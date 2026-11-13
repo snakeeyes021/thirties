@@ -189,6 +189,20 @@ class TestItemHistory(MessagesCase):
         self.assertIn("list write 'complete' to Today (ok), caused by: [telegram] had lunch", out)
         self.assertIn('the user said "lunch was great"', out)
 
+    def test_thirties_own_checks_are_never_what_the_user_said(self):
+        from thirties_core.memory import ConversationStore
+        store = ConversationStore(self.sched.state_db)
+        conv = store.create(DAY)
+        conv.messages = [{"role": "user", "hidden": True, "at": at("09:00").isoformat(),
+                          "content": "[System check, not from the user] Plan the free time; Lunch is at noon."},
+                         {"role": "user", "at": at("09:20").isoformat(),
+                          "content": "[System check, not from the user] Your reply mentions Lunch."},
+                         {"role": "user", "at": at("09:30").isoformat(), "content": "make lunch a long one"}]
+        store.save(conv)
+        out = self.manager().execute_tool("item_history", {"item": "Lunch"})
+        self.assertIn('the user said "make lunch a long one"', out)
+        self.assertNotIn("System check", out)
+
 
 if __name__ == "__main__":
     unittest.main()
