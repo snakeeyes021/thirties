@@ -162,6 +162,27 @@ class PrivateNotesTest(unittest.TestCase):
         self.assertIn(PRIVATE_BODY, out)
         self.assertIn("Paint the shed before the first frost arrives", out)  # not private
 
+    def test_what_was_private_stays_private_after_it_leaves_its_note(self):
+        """Filed as done into a note that isn't private, a long private line was sent in full from then on."""
+        line = "**Book the dentist** (cleaning overdue since the spring, use the new insurance card)"
+        self.s.set_private_notes(self.NOTES)
+        moved = [dict(self.NOTES[0], body="Buy vitamins\n"), self.NOTES[2],
+                 {"id": "d4", "source_notebook": "Thirties", "title": "Done 2026-10", "tags": [],
+                  "body": f"- [x] 2026-10-14: {line}\n"}]
+        self.s.set_private_notes(moved)  # the next read: the line is in a Done note now
+        out = self.s.redact(f"Earlier you said: {line}")
+        self.assertNotIn("insurance card", out)
+        self.assertIn("Book the dentist", out)
+
+    def test_it_stays_private_across_a_restart(self):
+        from tests.fixtures import make_scheduler
+        from thirties_core.backlog import remember_private
+        sched = make_scheduler()
+        remember_private(sched, self.NOTES, self.s)
+        later = Shield()  # the app started again; the note was unmarked meanwhile
+        remember_private(sched, [dict(self.NOTES[1], tags=[]), self.NOTES[2]], later)
+        self.assertNotIn("flowerpot", later.redact("The spare key sits under the blue flowerpot by the door"))
+
     def setUp(self):
         self.s = Shield()
 

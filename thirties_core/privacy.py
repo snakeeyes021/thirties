@@ -186,10 +186,18 @@ class Shield:
 
     # -- private notes --
 
-    def set_private_notes(self, notes: Iterable[Dict[str, Any]]) -> int:
-        """Remember which note bodies are private (from the latest read of the lists). Returns how many notes."""
+    def set_private_notes(self, notes: Iterable[Dict[str, Any]], remembered: Optional[Dict[str, Any]] = None) -> int:
+        """Remember which note bodies are private, from this read of the lists. What was private stays private:
+        a line that leaves its private note (filed as done, edited, moved, or the note unmarked) is still in the
+        conversation history, which is sent again each turn, so it's never forgotten (``remembered``: what earlier
+        runs kept, private_state()). Returns how many private notes this read had."""
         from thirties_core.titles import split_title
         lines, items, count = set(), {}, 0
+        with self._lock:
+            lines.update(self._private_lines)
+            items.update(dict(self._private_items))
+        lines.update((remembered or {}).get("lines") or [])
+        items.update({long: short for long, short in (remembered or {}).get("items") or []})
         for note in notes or []:
             if not is_private_note(note):
                 continue
@@ -209,6 +217,11 @@ class Shield:
             self._private_lines = sorted(lines, key=len, reverse=True)
             self._private_items = sorted(items.items(), key=lambda kv: len(kv[0]), reverse=True)
         return count
+
+    def private_state(self) -> Dict[str, Any]:
+        """What's remembered as private, to keep across restarts (on this device only)."""
+        with self._lock:
+            return {"lines": list(self._private_lines), "items": [list(kv) for kv in self._private_items]}
 
     # -- placeholders --
 

@@ -47,8 +47,28 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
         done = scheduler.state_db.completed_since(date.today() - timedelta(days=DONE_HIDES_DAYS))
         tasks = [t for t in tasks if t.id not in done or t.list_role == "routine"]  # done is done, even if
     from thirties_core.privacy import SHIELD                                        # Joplin didn't get the tick
-    SHIELD.set_private_notes(notes)  # what a cloud model must never see in full, as of this read
+    remember_private(scheduler, notes, SHIELD)  # what a cloud model must never see in full, ever
     return tasks, notes
+
+
+PRIVATE_KEY = "private_text"  # this device's: the private lines seen so far (kept, so a restart still hides them)
+
+
+def remember_private(scheduler, notes: List[Dict[str, Any]], shield) -> None:
+    """Private notes, as of this read, added to what was private before (kept on this device across restarts)."""
+    import json
+    db = getattr(scheduler, "state_db", None) if scheduler is not None else None
+    remembered = None
+    if db is not None:
+        try:
+            remembered = json.loads(db.get_setting(PRIVATE_KEY) or "{}")
+        except ValueError:
+            remembered = None
+    shield.set_private_notes(notes, remembered)
+    if db is not None:
+        state = shield.private_state()
+        if state != remembered:
+            db.set_setting(PRIVATE_KEY, json.dumps(state))
 
 
 def load_media_tasks(config: ThirtiesConfig, opener=None) -> List[TaskItem]:
