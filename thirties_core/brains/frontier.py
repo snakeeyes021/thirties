@@ -477,6 +477,8 @@ RULES
                     m["spent"] = True
             elif self._is_check(m):
                 m["spent"] = True
+            elif m.get("display_only"):  # the drafts are spent: the reply as shown is what the model said
+                del m["display_only"]
         for m in self.messages[:turn_start]:  # a check placed before the message (the day's first turn) is spent too
             if self._is_check(m):
                 m["spent"] = True

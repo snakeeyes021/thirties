@@ -56,6 +56,17 @@ class TestSwitchedOffIsTheTurnAsItWas(unittest.TestCase):
 
 class TestTurnBookkeeping(BookkeepingOn):
 
+    def test_a_cleaned_up_reply_is_what_the_model_sees_it_said_next_turn(self):
+        for _ in range(2):  # asked again, it does the same: the reply shown is the cleaned one, unlike either draft
+            self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9.\n\n"
+                                                "You're free all afternoon."))
+        self.assertEqual(self.manager.send_user_message("am I free later?"), "You're free all afternoon.")
+        self.engine.set_next_response(reply("Sure."))
+        self.manager.send_user_message("thanks")
+        said = [m["content"] for m in self.engine.call_history[-1] if m.get("role") == "assistant"]
+        self.assertIn("You're free all afternoon.", said)  # the turn isn't missing from what the model sees
+        self.assertFalse(any("rule 9" in s for s in said))  # and the draft it replaced never comes back
+
     def add(self, title, start):
         return self.manager.tools.execute("add_event", {"title": title, "start": start, "duration": "30 min"})
 
