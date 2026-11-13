@@ -495,6 +495,21 @@ class PlanTools:
         except ToolError:
             return False
 
+    def _is_routine(self, span: EventSpan) -> bool:
+        """A fixed routine: something at its own time every day (a daily anchor, or an item that's always at one
+        time). It keeps its time, but it never stops anything being set across it, by the user or the assistant:
+        the two share the time, and whether to plan around it is the assistant's judgement."""
+        if span.source == "calendar" or span.is_firm or span.is_envelope or self._state_db is None:
+            return False
+        if self._lasting().for_item(span.title).fixed_at:
+            return True
+        from thirties_core.routines import RoutineBook
+        return span.title.strip().lower() in {a.key for a in RoutineBook(self._state_db).anchors()}
+
+    def _blocks(self, span: EventSpan) -> bool:
+        """Fixed, and not a routine: something new may not overlap it without alongside."""
+        return self._is_fixed(span) and not self._is_routine(span)
+
     def _set_fixed(self, span: EventSpan, fixed: bool) -> None:
         if self._state_db is None:
             return
@@ -581,12 +596,12 @@ class PlanTools:
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
         # a fixed thing that's already happened (or gone by unreported) has no time left to protect: it shares
-        return [s for s in others if not s.is_envelope and s.status == SpanStatus.PLANNED and self._is_fixed(s)]
+        return [s for s in others if not s.is_envelope and s.status == SpanStatus.PLANNED and self._blocks(s)]
 
     def _sharing(self, span: EventSpan) -> List[EventSpan]:
-        """The other planned items this span shares time with (not work or sleep, not fixed ones)."""
+        """The other planned items this span shares time with (not work or sleep; of the fixed ones, only routines)."""
         return [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
-                and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._is_fixed(s)]
+                and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._blocks(s)]
 
     def _sharing_rules(self):
         if self._state_db is None:
@@ -675,7 +690,8 @@ class PlanTools:
             ask = not alongside and not said_together(self.user_message)
             rules = self._sharing_rules()
             return [f"alongside {self.describe(s)} [id {s.id}], both kept"
-                    + (f"; if they can't happen together, push_later=true moves {s.title} and what follows (ask the "
+                    + (" (a routine: it keeps its time)" if self._is_fixed(s) else
+                       f"; if they can't happen together, push_later=true moves {s.title} and what follows (ask the "
                        f"user if it isn't clear)" if ask and needs_a_word(span, s, rules) else "")
                     for s in sharing]
         if self.user_message is not None and not REPLACE_WORDS_RE.search(self.user_message):
@@ -685,6 +701,8 @@ class PlanTools:
         for s in sharing:
             if s.status != SpanStatus.PLANNED:
                 notes.append(f"{s.title} already happened, kept")
+            elif self._is_fixed(s):  # a routine keeps its time: never trimmed or removed by what's put across it
+                notes.append(f"{self.describe(s)} keeps its time, so it stays alongside")
             elif s.start_dt < span.start_dt and span.end_dt < s.end_dt:
                 notes.append(f"{self.describe(s)} runs around it and stays (an item is never split)")
             elif self._cut_short(s, span):  # its usual length holds unless the user said otherwise
@@ -726,7 +744,7 @@ class PlanTools:
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
-                    if c.id != span.id and not c.is_envelope and self._is_fixed(c)]
+                    if c.id != span.id and not c.is_envelope and self._blocks(c)]
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
@@ -832,7 +850,7 @@ class PlanTools:
         if self._push_wanted(span, push_later, alongside) and not span.is_envelope and not _as_bool(alongside):
             self._push_asked()
             firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
-                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
+                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._blocks(c)]
             if firm:
                 raise ToolError(f"{span.title} would overlap {self.describe(firm[0])}, which is fixed.")
             notes = self._push_following(span)

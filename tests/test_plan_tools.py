@@ -145,6 +145,30 @@ class TestUpdateEvent(unittest.TestCase):
                          (at("13:00"), at("21:00")))  # the same item (its id and record), now longer
         self.assertEqual(t.day_plan.get_span(span_id(t, "Vet call")).start_dt, at("17:00"))  # it keeps its time
 
+    def test_a_fixed_routine_never_blocks_but_keeps_its_time(self) -> None:
+        from thirties_core.routines import Anchor, RoutineBook
+        t = tools_for()
+        RoutineBook(t._state_db).save_anchor(Anchor("Water the ferns", "17:00", 15, fixed=True))  # every day at 5
+        t.execute("add_event", {"title": "Water the ferns", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        quilting, ferns = span_id(t, "Quilting"), span_id(t, "Water the ferns")
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM"})  # no alongside, no permission asked
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("alongside Water the ferns", out)
+        self.assertIn("a routine: it keeps its time", out)
+        self.assertEqual(t.day_plan.get_span(quilting).end_dt, at("21:00"))
+        self.assertEqual((t.day_plan.get_span(ferns).start_dt, t.day_plan.get_span(ferns).end_dt),
+                         (at("17:00"), at("17:15")))  # it stays at its own time, sharing it
+        t.user_message = "put sorting the seeds there instead"
+        out = t.execute("add_event", {"title": "Sorting seeds", "start": "4:30 PM", "duration": "1 hour",
+                                      "replace_overlaps": True})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(t.day_plan.get_span(ferns).start_dt, at("17:00"))  # never trimmed or removed
+        t.user_message = None
+        t.execute("add_event", {"title": "Vet call", "start": "7:00 PM", "duration": "15 min", "fixed": True})
+        out = t.execute("add_event", {"title": "Glazing", "start": "6:30 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Vet call" in out, out)  # a one-off fixed time still holds
+
     def test_a_fixed_item_already_done_no_longer_blocks_the_time(self) -> None:
         from thirties_core.models import SpanStatus
         t = tools_for()
