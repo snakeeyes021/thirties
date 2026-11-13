@@ -399,6 +399,21 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 **0.2 soak** (AGENTS.md §6.3): started Fri Oct 30 (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
 
 ## 0.3 (0.3.0 cut 2026-11-12 on `feature/0.2`; what's below is still open)
+**Small things from a second look at 0.3.0** (none harms data; each is rare; for 0.3.x):
+- Making a new note while moving several items checks the source note before the new note is made, not again just before the source note is written.
+- Clearing ticked lines from Today matches them by wording, so a same-worded line ticked later the same day can be cleared with it; store how many of each were ticked.
+- A write whose reply is lost, read back as changed by the user in the meantime, can apply an added or ticked line twice; remember what was sent in that case too.
+- Ticking a duplicated item by its open-copy number shifts when the user ticks an earlier copy; tie it to the item id instead.
+- A private item is shortened to its title one way only, so a rename or split from the cloud brain may drop its hidden detail; give it a restorable placeholder, or refuse those on private items.
+- A labelled secret's value stops at the first space or comma ("password: correct horse battery staple"); take the rest of the line.
+- The private-note list is empty until the lists are first read in a process; a cloud call before that has only the pattern filters.
+- Pushing items back past bedtime leaves the one that can't move where it was, possibly overlapping one moved into its place; say so, or find it a gap.
+- Meal windows are built on the day's start date, not the plan's date (matters only if a day can start before midnight).
+- "Put on Today today" and the undo of a drop compare calendar dates, not the diurnal day, after midnight.
+- Leftover-pool lookups fall back to a substring match; require a unique match or ask.
+- A tick 15 or more minutes past a half hour can store a finish time later than now; never end after now.
+- Asked for the on-device brain while it's switched off, the chat answers "Unknown brain"; name the switch instead.
+
 **Switched off in 0.3.0** (each stays off until its study passes):
 - `[assistant] turn_bookkeeping`: off. The one-prompt turn's bookkeeping (failures tracked per item, retries checked like any other round, history keeping only the final reply, a reply glued onto a call read as both). Off is the turn loop as it was before, pinned by `tests/turn_baseline.json`. The shared rollback (a refused or broken change leaves the plan as it was) is not behind the switch.
 - `[assistant] offer_gemma` (or `THIRTIES_OFFER_GEMMA=1`): off. The on-device brain and the scaffolded pipeline (parked, see the SLM brain section above).
