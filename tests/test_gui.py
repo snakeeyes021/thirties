@@ -901,13 +901,18 @@ class SetupAndPreferencesTests(unittest.TestCase):
 
     def test_setup_sorts_the_lists_and_shows_its_guesses(self):
         from unittest import mock
+        private = "Bring the blood test results to the next appointment"
         notes = [{"id": "n1", "title": "Errands", "source_notebook": "1. Tasks", "body": "- [ ] Call the bank"},
-                 {"id": "n2", "title": "Cheat sheet", "source_notebook": "5. Misc", "body": "# Python"}]
+                 {"id": "n2", "title": "Cheat sheet", "source_notebook": "5. Misc", "body": "# Python"},
+                 {"id": "n3", "title": "Health", "source_notebook": "1. Tasks", "body": f"- {private}"}]
         self.core.joplin_engine = mock.MagicMock()
         self.core.joplin_engine.fetch_active_notes.return_value = notes
         self.core.joplin_engine.fetch_tasks.return_value = []
         sorter = mock.MagicMock()
-        sorter.role.side_effect = lambda note: {"n1": "list", "n2": "ignore"}[note["id"]]
+        from thirties_core.privacy import SHIELD
+        sent = []
+        sorter.role.side_effect = lambda note: sent.append(SHIELD.redact(note["body"])) or \
+            {"n1": "list", "n2": "ignore", "n3": "ignore"}[note["id"]]
         with mock.patch("thirties_core.brains.list_sorter.list_sorter_for", return_value=sorter):
             win = SetupWindow(application=None, core=self.core, on_done=lambda: None)
             page = next(p for p in win._pages if p.get_title() == "Your Lists")
@@ -917,6 +922,7 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertTrue(page.lists.notebook_switches["1. Tasks"].get_active())
         self.assertFalse(page.lists.notebook_switches["5. Misc"].get_active())  # nothing to do in it, it seems
         sorter.urgencies.assert_not_called()  # left for the background
+        self.assertNotIn(private, " ".join(sent))  # a private note is hidden even on the very first run
 
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)

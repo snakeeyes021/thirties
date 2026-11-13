@@ -274,8 +274,22 @@ class TestTransports(unittest.TestCase):
 
         cfg_litert = ThirtiesConfig()
         cfg_litert.inference.backend = "litert"
+        cfg_litert.assistant.offer_gemma = True  # the on-device model, behind its developer switch
         with patch.object(LiteRTInferenceEngine, "is_available", return_value=True):
             self.assertIsInstance(get_inference_engine(cfg_litert), LiteRTInferenceEngine)
+
+    def test_the_on_device_model_never_runs_with_its_switch_off(self) -> None:
+        with patch.object(LiteRTInferenceEngine, "is_available", return_value=True), \
+                patch("thirties_core.inference.find_agy_binary", return_value=None), \
+                patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": ""}):
+            cfg = ThirtiesConfig()
+            cfg.inference.backend = "litert"  # asked for, but not offered: Gemini (here, nothing set up: mock)
+            self.assertNotIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
+            cfg = ThirtiesConfig()
+            cfg.inference.backend = "antigravity"  # no agy and no key: never a fallback to the on-device model
+            self.assertNotIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
+            cfg.assistant.offer_gemma = True
+            self.assertIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
 
         cfg_mock = ThirtiesConfig()
         cfg_mock.inference.backend = "mock"

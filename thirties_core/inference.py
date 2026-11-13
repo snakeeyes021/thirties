@@ -871,9 +871,15 @@ class GeminiSourcesEngine:
 
 
 def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEngine:
-    """Factory creating the appropriate inference engine backend based on configuration."""
+    """Factory creating the appropriate inference engine backend based on configuration. The on-device model
+    (LiteRT) only while it's offered (the developer switch, brains.gemma_offered): never picked or fallen back on
+    without it."""
+    from thirties_core.brains import gemma_offered
     cfg = config or ThirtiesConfig()
     backend = (cfg.inference.backend or "gemini").lower()
+    if backend == "litert" and not gemma_offered(cfg):
+        logger.warning("The on-device model isn't offered (developer switch off): using Gemini instead of LiteRT.")
+        backend = "gemini"
 
     if backend == "gemini":
         sources = GeminiSourcesEngine(cfg)
@@ -898,9 +904,10 @@ def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEn
             "Checking LiteRT fallback.",
             backend,
         )
-        litert = LiteRTInferenceEngine(cfg)
-        if litert.is_available():
-            return litert
+        if gemma_offered(cfg):
+            litert = LiteRTInferenceEngine(cfg)
+            if litert.is_available():
+                return litert
         return MockInferenceEngine()
 
     elif backend in ("gemini_api", "gemini-api"):

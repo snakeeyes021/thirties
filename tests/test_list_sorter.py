@@ -43,6 +43,23 @@ class FakeEngine:
         return {"role": "assistant", "content": self.replies.pop(0) if self.replies else "", "tool_calls": []}
 
 
+class TestTheOnDeviceSorterIsBehindItsSwitch(unittest.TestCase):
+    def test_no_gemini_and_the_switch_off_means_no_sorter_never_the_on_device_model(self):
+        from unittest.mock import patch
+        from thirties_core.brains import list_sorter
+        from thirties_core.config import ThirtiesConfig
+        cfg = ThirtiesConfig()
+        loaded = []
+        with patch("thirties_core.brains.slm.runtime.slm_unavailable_reason", return_value=None), \
+                patch("thirties_core.brains.slm.runtime.GemmaRuntime.shared", lambda path: loaded.append(path) or object()), \
+                patch("thirties_core.inference.GeminiSourcesEngine.is_available", return_value=False), \
+                patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
+            self.assertIsNone(list_sorter.list_sorter_for(cfg))
+            self.assertEqual(loaded, [])  # the model file is never loaded
+            cfg.assistant.offer_gemma = True
+            self.assertIsInstance(list_sorter.list_sorter_for(cfg), GemmaListSorter)
+
+
 class TestOutline(unittest.TestCase):
 
     def test_the_note_as_its_owner_sees_it(self):

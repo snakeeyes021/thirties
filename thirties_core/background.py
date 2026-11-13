@@ -591,7 +591,8 @@ class BackgroundService:
             recent = json.loads(db.get_sync_meta(RECENT_KEY) or "[]")
         except ValueError:
             recent = []
-        engine = self.inference_engine if getattr(self.config.assistant, "brain", "frontier") == "frontier" else None
+        from thirties_core.brains import brain_choice  # the brain actually in use (Gemma only behind its switch)
+        engine = self.inference_engine if brain_choice(self.config, db) == "frontier" else None
         line = write_hello(engine, mode, at, recent, now)  # the model writes it fresh each morning (11-05)
         db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
         self.send(hello_text(line, titles), "morning", now=now)
@@ -789,6 +790,10 @@ class BackgroundService:
                 notes, tasks = self.joplin_engine.fetch_active_notes(), self.joplin_engine.fetch_tasks()
                 if not notes:
                     return
+                from thirties_core.backlog import remember_private
+                from thirties_core.privacy import SHIELD
+                # privacy first: hidden lines are learnt before the sorter reads a single note
+                remember_private(self.scheduler, notes, SHIELD)
                 sorter = list_sorter_for(self.config, self.scheduler.state_db, self.inference_engine)
                 if sorter is None:
                     return
