@@ -73,6 +73,10 @@
           <li>An item whose time went by with nothing said waits under Not marked yet, with Done and Skip, never under Done today</li>
           <li>Dragging or stretching an item in the Timeline over a fixed one keeps both, and so does asking the assistant to stretch it (the same item, not a new copy); a fixed item that's already happened no longer blocks its time</li>
           <li>A routine at a set time every day never stops anything being set across it, by you or by the assistant: it keeps its time and shows alongside</li>
+          <li>A change to your lists that Joplin cut off halfway is finished cleanly when Joplin is back, and one that fails never holds up the others; rewording or splitting a private item keeps the detail the cloud model never saw; and your own words in brackets in a list item are never mistaken for a hidden detail</li>
+          <li>Private notes are hidden from the cloud model from the very first sorting of your lists at setup, and a line added to a private note later is hidden before the next sorting</li>
+          <li>On the Day page, a calendar event past its time with nothing said waits under Not marked yet instead of vanishing, and items not marked on another day can be marked there</li>
+          <li>A new deadline you set for a repeating item becomes the day its later deadlines follow</li>
           <li>Time on a project ("Garden app dev") never rolls over, whatever list it's on; "Pick up meds" is a one-off, not a daily thing</li>
           <li>What a replan can't fit waits for tomorrow instead of being deleted, a change that fails never half-happens, and a time you gave keeps its minutes when it's moved</li>
           <li>Long or marked-up list lines go on Today by their short title; a done item doesn't leave an earlier copy asking about it; old plan pins expire; a routine never goes on as one opaque item; and done times are only ones you said (or Thirties' estimate)</li>
