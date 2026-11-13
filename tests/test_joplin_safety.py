@@ -229,5 +229,70 @@ class ExpiryAndIdentityTest(unittest.TestCase):
         self.assertEqual(api.notes["t"]["body"], "- [x] Lunch\n")
 
 
+class TwoNoteChangesTest(unittest.TestCase):
+    """A change across two notes (a move, filing a done item): a half-done one is undone only where the note still
+    holds what Thirties wrote, and a retry after a lost reply that both writes survived counts as done."""
+
+    HOME = "## Home\n- [ ] Fix the gate\n"
+
+    def api(self):
+        api = VersionedJoplin({"n1": {"id": "n1", "title": "Errands", "body": ERRANDS},
+                               "n2": {"id": "n2", "title": "Home", "body": self.HOME}})
+        return api
+
+    def test_undoing_a_half_done_move_never_writes_over_an_edit_made_meanwhile(self):
+        api = self.api()
+        writer, _ = writer_for(api)
+        real_update = api.update_note
+        edited = []
+
+        def update(note_id, data):
+            if note_id == "n1":
+                return False  # Joplin refuses the second write: the move is half done
+            ok = real_update(note_id, data)
+            if not edited:  # typed right after Thirties' write landed, before it tries to undo it
+                edited.append(1)
+                api.user_edit("n2", api.notes["n2"]["body"] + "- [ ] Oil the hinges\n")
+            return ok
+        api.update_note = update
+        state, _ = writer.submit({"op": "move", "note_id": "n1", "to_note_id": "n2", "title": "Buy stamps",
+                                  "section": "Home"})
+        self.assertNotEqual(state, "done")
+        self.assertIn("Oil the hinges", api.notes["n2"]["body"])  # the user's edit survives the undo
+
+    def test_a_half_done_move_is_undone_when_nothing_else_changed(self):
+        api = self.api()
+        writer, _ = writer_for(api)
+        real_update = api.update_note
+        api.update_note = lambda note_id, data: False if note_id == "n1" else real_update(note_id, data)
+        writer.submit({"op": "move", "note_id": "n1", "to_note_id": "n2", "title": "Buy stamps", "section": "Home"})
+        self.assertEqual(api.notes["n2"]["body"], self.HOME)  # the copy was taken back out
+        self.assertIn("Buy stamps", api.notes["n1"]["body"])
+
+    def test_a_move_both_of_whose_writes_landed_before_joplin_went_away_is_done_on_the_retry(self):
+        api = self.api()
+        writer, db = writer_for(api)
+        real_update = api.update_note
+        calls = []
+
+        def update(note_id, data):
+            calls.append(note_id)
+            if len(calls) == 2:  # the second write is saved, then Joplin goes away before answering
+                api.crash_after_put = True
+            return real_update(note_id, data)
+        api.update_note = update
+        state, _ = writer.submit({"op": "move", "note_id": "n1", "to_note_id": "n2", "title": "Buy stamps",
+                                  "section": "Home"})
+        self.assertEqual(state, "queued")
+        api.up = True
+        writer.flush(launch=False)
+        with db._get_connection() as conn:
+            states = [r["state"] for r in conn.execute("SELECT state FROM joplin_outbox")]
+        self.assertNotIn("failed", states)  # it landed: not reported as a failure
+        self.assertEqual(db.outbox_pending(), [])
+        self.assertEqual(api.notes["n2"]["body"].count("Buy stamps"), 1)
+        self.assertNotIn("Buy stamps", api.notes["n1"]["body"])
+
+
 if __name__ == "__main__":
     unittest.main()

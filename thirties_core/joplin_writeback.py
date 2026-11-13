@@ -578,12 +578,18 @@ class JoplinWriter:
                         return False, why
                     notes[note_id] = note
             bodies = {nid: n["body"] for nid, n in notes.items()}
+            # sent before Joplin went away, and exactly as sent: those notes are done, and their edits aren't worked
+            # out again (the item they move is already gone from where it was)
+            landed = {nid for nid, n in notes.items() if self._landed_before(n)}
+            if landed == set(notes):
+                return True, "already in Joplin"
             for note_id, edit in edits:
+                if note_id in landed:
+                    continue
                 new = edit(bodies[note_id])
                 if new is None:
                     return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
                 bodies[note_id] = new
-            landed = {nid for nid, n in notes.items() if self._landed_before(n)}  # sent before Joplin went away
             order = [nid for nid in dict.fromkeys(nid for nid, _ in reversed(edits))
                      if bodies[nid] != notes[nid]["body"] and nid not in landed]
             if not order:
@@ -605,9 +611,10 @@ class JoplinWriter:
                     for nid in written + [note_id]:
                         self._sent()[nid] = _digest(bodies[nid])
                     return False, "Couldn't confirm the change with Joplin."
-                # Half done: put back what was written, so a retry can't add the copy twice. If that fails too,
-                # the change is parked (never retried) and the log shows the copy.
-                undone = all(self._put(nid, bodies[nid], notes[nid]["body"]) == "landed" for nid in reversed(written))
+                # Half done: put back what was written, so a retry can't add the copy twice; but only where the
+                # note still holds exactly what Thirties wrote (an edit made meanwhile is never written over). If
+                # that can't be done, the change is parked (never retried) and the log shows the copy.
+                undone = all(self._revert(nid, bodies[nid], notes[nid]["body"]) for nid in reversed(written))
                 if not undone:
                     return False, "gone: half done (the copy was written, the original couldn't be taken out)."
                 self._edits = [e for e in self._edits if e[0] not in written]
@@ -617,6 +624,13 @@ class JoplinWriter:
             else:
                 return True, ""
         return False, "The notes kept changing while Thirties wrote to them; it'll try again."
+
+    def _revert(self, note_id: str, written: str, original: str) -> bool:
+        """Put a note back as it was, only if it still holds exactly what was written to it."""
+        now = self.api.get_note(note_id, fields="id,body,updated_time")
+        if not now or now.get("body") != written:
+            return False
+        return self._put(note_id, written, original) == "landed"
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
         self._edits: List[Tuple[Optional[str], str, str, str]] = []
