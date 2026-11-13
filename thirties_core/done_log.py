@@ -141,37 +141,58 @@ def merge_done_bodies(older: str, newer: str) -> str:
 
 def _merge_duplicates(api, db, title: str, notes: List[Dict[str, Any]]) -> Optional[str]:
     """Several notes for one month (and merged copies that gained lines since): everything goes into the oldest
-    live one. Returns its id, or None if that couldn't be done (and nothing more was changed). Each write is
-    logged like every other Joplin write."""
+    live one. Returns its id, or None if that couldn't be done. Each write is version-checked like every other
+    Joplin write: both notes are read again just before writing, and if either changed meanwhile (a line ticked
+    back, or one synced in from another device) the merge starts again from fresh copies, so nothing is written
+    over. Each write is logged."""
     from thirties_core.joplin_writeback import WriteLog
-    full = []
-    for n in notes:
-        got = api.get_note(n["id"], fields="id,title,body,created_time")
-        if got:
-            full.append({**n, **got})
-    live = sorted((n for n in full if n.get("title") == title), key=lambda n: (n.get("created_time") or 0, n["id"]))
-    if not live:
-        return None
-    keep = live[0]
-    extra = live[1:] + [n for n in full if n.get("title") == title + MERGED_SUFFIX and _blocks(n.get("body") or "")[1]]
+    fields = "id,title,body,created_time,updated_time"
+
+    def same(note: Dict[str, Any]) -> bool:
+        fresh = api.get_note(note["id"], fields="id,body,updated_time")
+        return bool(fresh) and fresh.get("body") == note.get("body") and \
+            fresh.get("updated_time") == note.get("updated_time")
     log = WriteLog(db)
-    body = keep.get("body") or ""
-    for other in extra:
+    keep_id = None
+    for _ in range(3 + len(notes)):  # one copy merged per pass, plus room to start over if one changes
+        full = []
+        for n in notes:
+            got = api.get_note(n["id"], fields=fields)
+            if got:
+                full.append({**n, **got})
+        live = sorted((n for n in full if n.get("title") == title),
+                      key=lambda n: (n.get("created_time") or 0, n["id"]))
+        if not live:
+            return None
+        keep = live[0]
+        keep_id = keep["id"]
+        extra = live[1:] + [n for n in full if n.get("title") == title + MERGED_SUFFIX
+                            and _blocks(n.get("body") or "")[1]]
+        if not extra:
+            return keep_id
+        other = extra[0]
+        body = keep.get("body") or ""
         merged = merge_done_bodies(body, other.get("body") or "")
         op = {"op": "merge_done_notes", "into": keep["id"], "from": other["id"], "title": title}
+        if not (same(keep) and same(other)):
+            continue  # one of them changed while the merge was worked out: start again from fresh copies
         if merged != body:
             ok = api.update_note(keep["id"], {"body": merged})
             log.record(op, title, ok, "the other copy's lines, in date order", body, merged, note_id=keep["id"])
             if not ok:
                 return None
-            body = merged
+        if not same(other):
+            continue  # it gained a line meanwhile: merged again, from fresh copies, before it's emptied
         pointer = (f"Merged into the older \"{title}\" note (two devices each made one before syncing). Nothing is "
                    f"left here; this note can be deleted.\n")
         ok = api.update_note(other["id"], {"title": title + MERGED_SUFFIX, "body": pointer})
         log.record(op, other.get("title") or title, ok, "emptied, pointing at the older note",
                    other.get("body") or "", pointer, note_id=other["id"])
         logger.info("Merged the duplicate Done note %s into %s", other["id"], keep["id"])
-    return keep["id"]
+        notes = [n for n in notes if n["id"] != other["id"]] + [{**other, "title": title + MERGED_SUFFIX}]
+    else:
+        return None  # the notes kept changing: nothing more is written; tried again next time
+    return keep_id
 
 
 def dropped_line(day: date, title: str, list_title: str, why: str = "") -> str:

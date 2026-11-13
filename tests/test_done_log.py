@@ -189,6 +189,34 @@ class TestDuplicateDoneNotes(unittest.TestCase):
         self.assertIn("2026-10-25: Late one", self.api.notes["theirs"]["body"])
         self.assertNotIn("Late one", self.api.notes["mine"]["body"])
 
+    def edit_once_after_read(self, note_id, line):
+        """A line lands in ``note_id`` (synced from another device) right after the merge first reads it."""
+        real_get, seen = self.api.get_note, []
+
+        def get_note(nid, fields=""):
+            note = real_get(nid, fields)
+            note = dict(note) if note else note  # what was read stays as it was read
+            if nid == note_id and not seen and "created_time" in fields:  # the merge's own read
+                seen.append(1)
+                self.api.notes[note_id]["body"] += line
+            return note
+        self.api.get_note = get_note
+
+    def test_a_line_synced_into_the_newer_copy_during_the_merge_isnt_lost(self):
+        from thirties_core.done_log import done_note_id
+        self.edit_once_after_read("mine", "- [x] 2026-10-26: Synced in late (Errands)\n")
+        self.assertEqual(done_note_id(self.api, self.db, "2026-10"), "theirs")
+        self.assertIn("2026-10-26: Synced in late", self.api.notes["theirs"]["body"])
+        self.assertNotIn("- [", self.api.notes["mine"]["body"])  # emptied only once its lines were merged
+
+    def test_an_edit_in_the_kept_note_during_the_merge_isnt_written_over(self):
+        from thirties_core.done_log import done_note_id
+        self.edit_once_after_read("theirs", "- [x] 2026-10-27: Added by hand (Errands)\n")
+        done_note_id(self.api, self.db, "2026-10")
+        body = self.api.notes["theirs"]["body"]
+        self.assertIn("2026-10-27: Added by hand", body)
+        self.assertIn("2026-10-12: Call the bank", body)
+
     def test_one_note_is_found_by_title_not_made_again(self):
         from thirties_core.done_log import done_note_id
         del self.api.notes["mine"]
