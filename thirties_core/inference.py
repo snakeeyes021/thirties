@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
+from thirties_core import privacy
 from thirties_core.config import InferenceConfig, ThirtiesConfig
 
 logger = logging.getLogger(__name__)
@@ -312,7 +313,7 @@ class AntigravityInferenceEngine:
         cmd = [agy_bin, "--sandbox", "--input-format", "stream-json", "--output-format", "stream-json",
                "--model", self.model, "--disable-slash-commands", "--agent", AGY_AGENT]
         workspace = agy_workspace_dir()
-        prompt = f"{AGY_NO_TOOLS}\n\n{prompt}"
+        prompt = f"{AGY_NO_TOOLS}\n\n{privacy.SHIELD.redact_prompt(prompt)}"  # the exit to the cloud: filtered
         try:
             res = self._run(cmd, prompt, workspace)
             result = _stream_result(res.stdout)
@@ -324,7 +325,7 @@ class AntigravityInferenceEngine:
             record_agy_call(self.model, "timeout")
             return "The Antigravity assistant timed out waiting for a response."
         if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
-            return str(result.get("response", ""))
+            return privacy.SHIELD.restore(str(result.get("response", "")))
         return f"Error contacting model via Antigravity CLI: {res.stderr or res.stdout[-1000:]}"
 
     def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
@@ -344,7 +345,7 @@ class AntigravityInferenceEngine:
         if not agy_bin:
             raise RuntimeError("Antigravity CLI (agy) binary not found.")
 
-        prompt_text = self._format_prompt(messages)
+        prompt_text = self._format_prompt(privacy.SHIELD.redact_messages(messages))  # the exit to the cloud
         is_flatpak = Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
 
         # The prompt goes in on stdin (one stream-json message): as a command-line argument it
@@ -405,12 +406,12 @@ class AntigravityInferenceEngine:
                 "tool_calls": [],
             }
 
-        clean_text, tool_calls = parse_model_directives(raw_reply)
-        return {
+        clean_text, tool_calls = parse_model_directives(raw_reply, _split_glued_on(self.config))
+        return privacy.SHIELD.restore_reply({
             "role": "assistant",
             "content": clean_text,
             "tool_calls": tool_calls,
-        }
+        })
 
 
 class GeminiInferenceEngine:
@@ -443,7 +444,7 @@ class GeminiInferenceEngine:
         system_instruction = None
         contents: List[Dict[str, Any]] = []
 
-        for msg in messages:
+        for msg in privacy.SHIELD.redact_messages(messages):  # the exit to the cloud: filtered
             role = msg.get("role", "")
             if role == "system":
                 system_instruction = {"parts": [{"text": msg.get("content", "")}]}
@@ -491,12 +492,12 @@ class GeminiInferenceEngine:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 raw_text = "".join(p.get("text", "") for p in parts)
 
-            clean_text, tool_calls = parse_model_directives(raw_text)
-            return {
+            clean_text, tool_calls = parse_model_directives(raw_text, _split_glued_on(self.config))
+            return privacy.SHIELD.restore_reply({
                 "role": "assistant",
                 "content": clean_text,
                 "tool_calls": tool_calls,
-            }
+            })
         except Exception as e:
             logger.error("Gemini API request failed: %s", e)
             return {
@@ -701,13 +702,17 @@ class LiteRTInferenceEngine:
                         raw_reply = raw_stdout.strip()
                 else:
                     logger.error("Host runner exited with code %s: %s", res.returncode, res.stderr)
+                    from thirties_core.brains.slm import fit  # out of memory, killed, or a bug: recorded (fit.py)
+                    kind = fit.classify_exit(res.returncode, (res.stderr or "") + (res.stdout or "")[-2000:])
+                    if kind != "ok":
+                        fit.note_event(kind, f"host runner exit {res.returncode}")
             except Exception as runner_err:
                 logger.error("Host runner execution failed: %s", runner_err)
 
         if not raw_reply:
             raw_reply = "I'm ready to help you plan your day. Let me know what you'd like to work on!"
 
-        clean_text, tool_calls = parse_model_directives(raw_reply)
+        clean_text, tool_calls = parse_model_directives(raw_reply, _split_glued_on(self.config))
         return {
             "role": "assistant",
             "content": clean_text,
@@ -719,7 +724,26 @@ _CALL_LINE_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*(\{.*
 _CALL_START_RE = re.compile(r"^\s*CALL\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
-def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
+def _split_glued(line: str, start: "re.Match") -> Optional[tuple]:
+    """A call whose JSON arguments are followed straight away by text: (name, args, the text), or None."""
+    brace = line.find("{", start.end())
+    if brace < 0 or line[start.end():brace].strip(" (") != "":
+        return None
+    try:
+        args, end = json.JSONDecoder().raw_decode(line, brace)
+    except ValueError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    rest = line[end:].lstrip(" );")
+    return start.group(1), args, rest.strip()
+
+
+def _split_glued_on(config) -> bool:
+    return bool(getattr(getattr(config, "assistant", None), "turn_bookkeeping", False))
+
+
+def parse_model_directives(raw_reply: str, split_glued: bool = False) -> tuple[str, list[dict[str, Any]]]:
     """Extract tool calls from a text reply and return (visible_text, tool_calls).
 
     Text transports express a tool call as one line: ``CALL tool_name {json arguments}``.
@@ -745,6 +769,14 @@ def parse_model_directives(raw_reply: str) -> tuple[str, list[dict[str, Any]]]:
                 stripped += " " + lines[i].strip().strip("`")
                 i += 1
         m = _CALL_LINE_RE.match(stripped)
+        if not m and start and split_glued:  # text glued after the arguments ("CALL x {}Sorry, ..."): call, then text
+            glued = _split_glued(stripped, start)
+            if glued is not None:
+                name, args, rest = glued
+                calls.append({"id": f"call_{len(calls) + 1}", "name": name, "arguments": args})
+                if rest:
+                    visible.append(rest)
+                continue
         if not m:
             if start:  # still a call, but not one we can read ("CALL redraw()" went to Telegram, 10-27): never shown
                 calls.append({"id": f"call_{len(calls) + 1}", "name": start.group(1), "arguments": {
@@ -839,9 +871,15 @@ class GeminiSourcesEngine:
 
 
 def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEngine:
-    """Factory creating the appropriate inference engine backend based on configuration."""
+    """Factory creating the appropriate inference engine backend based on configuration. The on-device model
+    (LiteRT) only while it's offered (the developer switch, brains.gemma_offered): never picked or fallen back on
+    without it."""
+    from thirties_core.brains import gemma_offered
     cfg = config or ThirtiesConfig()
     backend = (cfg.inference.backend or "gemini").lower()
+    if backend == "litert" and not gemma_offered(cfg):
+        logger.warning("The on-device model isn't offered (developer switch off): using Gemini instead of LiteRT.")
+        backend = "gemini"
 
     if backend == "gemini":
         sources = GeminiSourcesEngine(cfg)
@@ -866,9 +904,10 @@ def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEn
             "Checking LiteRT fallback.",
             backend,
         )
-        litert = LiteRTInferenceEngine(cfg)
-        if litert.is_available():
-            return litert
+        if gemma_offered(cfg):
+            litert = LiteRTInferenceEngine(cfg)
+            if litert.is_available():
+                return litert
         return MockInferenceEngine()
 
     elif backend in ("gemini_api", "gemini-api"):

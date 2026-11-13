@@ -71,7 +71,7 @@ class TestDropsInJoplin(TodayTestCase):
             out = self.t.execute("leftover_action", {"item": "Call the bank", "action": "archive"})
         finally:
             self.t.user_message = None
-        self.assertIn("still on its list", out)
+        self.assertIn('Say "archive it"', out)
         self.assertEqual(self.body("n_errands"), ERRANDS)
         self.assertIsNone(self.dropped_note())
 

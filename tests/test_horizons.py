@@ -290,6 +290,47 @@ class TestBubblingDown(PlannerCase):
         TodayLinks(self.sched.state_db).link("File the taxes", self.tasks[6])
         self.assertEqual(self.ids(candidates_for_day(self.t)), [])
 
+    def test_someday_items_fill_room_in_a_month_a_year_or_a_span_of_years(self):
+        """Not only once a year: whenever a longer plan has room, last of all, turning over by period."""
+        from thirties_core.horizons import SOMEDAY_PER_PERIOD
+        self.tasks += [item(f"maybe{i}", f"Someday thing {i}", someday=True) for i in range(6)]
+        self.build()
+        for text in ("this month", "this year"):
+            p = parse_period(text, DAY)
+            offered = [c for c in self.hp.candidates(p, limit=None) if c.source == "someday"]
+            self.assertEqual(len(offered), SOMEDAY_PER_PERIOD, text)
+            self.assertTrue(all(c.why == "someday: there's room for it now" for c in offered))
+            self.assertNotIn("lamp", self.ids(offered))  # reference lists stay out
+            rest = [c for c in self.hp.candidates(p, limit=None) if c.source != "someday"]
+            self.assertLess(max(c.score for c in offered), min(c.score for c in rest))  # last, after everything else
+        seen = set()
+        for m in range(1, 13):  # month by month, each gets its turn
+            seen |= {c.task_id for c in self.hp.candidates(period_of("month", date(2027, m, 1)), limit=None)
+                     if c.source == "someday"}
+        self.assertGreater(len(seen), 4, seen)
+        week = parse_period("this week", DAY)
+        self.assertFalse([c for c in self.hp.candidates(week, limit=None) if c.source == "someday"])  # a week: full
+
+    def test_a_pin_expires_a_period_after_its_own(self):
+        last = parse_period("this week", DAY - timedelta(days=7))
+        older = parse_period("this week", DAY - timedelta(days=14))
+        self.hp.pin(self.tasks[0], last)
+        self.hp.pin(self.tasks[2], older)
+        week = parse_period("this week", DAY)
+        cands = self.by_id(self.hp.candidates(week, limit=None))
+        self.assertEqual(cands["door"].source, "carried")  # last week's: still offered as left over
+        live = {r["item_id"] for r in HorizonPlans(self.sched.state_db).rows()}
+        self.assertNotIn("gutter", live)  # two weeks back: expired, taken out
+
+    def test_a_pin_whose_item_is_gone_is_let_go_and_said_once(self):
+        week = parse_period("this week", DAY)
+        self.hp.pin(item("vanished", "Return the borrowed ladder"), week)  # pinned, then gone from every list
+        self.hp.candidates(week, limit=None)
+        self.assertNotIn("vanished", {r["item_id"] for r in HorizonPlans(self.sched.state_db).rows()})
+        said = self.hp.lost_pins_text()
+        self.assertIn("No longer on any list, so taken off its plan: Return the borrowed ladder (this week).", said)
+        self.assertEqual(self.hp.lost_pins_text(), "")  # once
+
     def test_done_long_ago_and_open_again_is_a_new_round(self):
         self.hp.pin(self.tasks[0], parse_period("this week", DAY))
         self.sched.state_db.record_task_completed("door", DAY - timedelta(days=60))
@@ -335,6 +376,68 @@ class TestBubblingDown(PlannerCase):
         self.assertIn("Sat Oct 17: no work, ~", text)
         self.assertIn("1 pinned from the week", text)
         self.assertNotIn("Mon Oct 12", text)  # past days aren't room
+
+
+class TestPullingForward(PlannerCase):
+    """The longer plans keep adjusting: when there's room, work is pulled forward, and a review runs whenever
+    something that matters changes, and lightly each week or month."""
+
+    def month_titles(self):
+        return sorted(r["title"] for r in self.hp.plan_items(parse_period("this month", DAY)))
+
+    def test_the_years_work_comes_into_this_month_when_there_is_room(self):
+        self.hp.pin(self.tasks[5], parse_period("this year", DAY))  # Paint the hall, some time this year
+        pulled = self.hp.adjust("month")
+        self.assertIn("Paint the hall", pulled)
+        self.assertIn("Paint the hall", self.month_titles())
+        said = self.hp.pulled_text()
+        self.assertTrue(said.startswith("Pulled forward into this month (October), where there was room: "), said)
+        self.assertIn("Paint the hall", said)
+
+    def test_a_full_plan_takes_nothing_more(self):
+        from thirties_core.horizons import ROOM
+        extra = [item(f"x{i}", f"Errand number {i}") for i in range(ROOM["month"])]
+        self.tasks += extra
+        self.build()
+        for t in extra:
+            self.hp.pin(t, parse_period("this month", DAY))
+        self.assertEqual(self.hp.adjust("month"), [])
+
+    def test_this_quarter_takes_the_years_work_meant_for_later(self):
+        q4 = parse_period("Q4", DAY)
+        self.hp.pin(self.tasks[2], parse_period("this year", DAY))  # Clean the gutters: the year, no quarter yet
+        self.assertIn("Clean the gutters", self.hp.adjust("quarter"))
+        self.assertIn("gutter", [r["item_id"] for r in self.hp.plan_items(q4)])
+
+    def test_an_item_with_a_budget_is_left_to_the_trickle_down(self):
+        self.hp.pin(self.tasks[5], parse_period("this year", DAY), sessions=6, minutes=60)
+        self.assertNotIn("Paint the hall", self.hp.adjust("month"))
+
+    def test_not_before_the_periods_own_planning_session(self):
+        set_debug_time(at("10:00", 18))  # Monday, Nov 2: the month's session hasn't been offered yet
+        self.build(DAY + timedelta(days=18))
+        self.hp.pin(self.tasks[5], parse_period("this year", DAY + timedelta(days=18)))
+        self.assertEqual(self.hp.adjust("month"), [])
+
+    def test_a_review_runs_when_something_changes_and_otherwise_lightly(self):
+        from unittest.mock import patch
+        calls = []
+        with patch.object(HorizonPlanner, "adjust", lambda hp, level: calls.append(level) or []):
+            self.hp.review()
+            self.assertEqual(calls, ["month", "quarter", "year", "years"])  # never reviewed yet
+            calls.clear()
+            self.hp.review()
+            self.assertEqual(calls, [])  # nothing changed, reviewed today
+            self.sched.state_db.record_task_completed("door", DAY)  # something finished: room may have opened
+            self.hp.review()
+            self.assertEqual(calls, ["month", "quarter", "year", "years"])
+            calls.clear()
+            set_debug_time(at("10:00", 7))  # a week later, nothing new: the month and quarter's light review
+            self.build(DAY + timedelta(days=7))
+            with patch.object(HorizonPlanner, "fingerprint", lambda hp: self.sched.state_db.get_sync_meta(
+                    "horizon_fingerprint")):
+                self.hp.review()
+        self.assertEqual(calls, ["month", "quarter"])
 
 
 class TestOnTrack(PlannerCase):

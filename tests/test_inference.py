@@ -1,6 +1,8 @@
 """Unit tests for thirties_core.inference."""
 
+from tests.fixtures import temp_dir
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -145,7 +147,7 @@ class TestTransports(unittest.TestCase):
         sleep.assert_not_called()
 
     def setUp(self) -> None:
-        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(tempfile.mkdtemp()) / "agy_calls.log")
+        ledger = patch("thirties_core.inference.AGY_LEDGER", Path(temp_dir("thirties_tmp_")) / "agy_calls.log")
         self.ledger = ledger.start()
         self.addCleanup(ledger.stop)
 
@@ -272,12 +274,35 @@ class TestTransports(unittest.TestCase):
 
         cfg_litert = ThirtiesConfig()
         cfg_litert.inference.backend = "litert"
+        cfg_litert.assistant.offer_gemma = True  # the on-device model, behind its developer switch
         with patch.object(LiteRTInferenceEngine, "is_available", return_value=True):
             self.assertIsInstance(get_inference_engine(cfg_litert), LiteRTInferenceEngine)
+
+    def test_the_on_device_model_never_runs_with_its_switch_off(self) -> None:
+        with patch.object(LiteRTInferenceEngine, "is_available", return_value=True), \
+                patch("thirties_core.inference.find_agy_binary", return_value=None), \
+                patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": ""}):
+            cfg = ThirtiesConfig()
+            cfg.inference.backend = "litert"  # asked for, but not offered: Gemini (here, nothing set up: mock)
+            self.assertNotIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
+            cfg = ThirtiesConfig()
+            cfg.inference.backend = "antigravity"  # no agy and no key: never a fallback to the on-device model
+            self.assertNotIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
+            cfg.assistant.offer_gemma = True
+            self.assertIsInstance(get_inference_engine(cfg), LiteRTInferenceEngine)
 
         cfg_mock = ThirtiesConfig()
         cfg_mock.inference.backend = "mock"
         self.assertIsInstance(get_inference_engine(cfg_mock), MockInferenceEngine)
+
+
+class TestNoRealModelInUnitTests(unittest.TestCase):
+    @unittest.skipIf(os.environ.get("THIRTIES_LIVE_MODELS") == "1", "live models allowed for this run")
+    def test_the_agy_cli_is_never_found_and_there_is_no_api_key(self) -> None:
+        from thirties_core.inference import find_agy_binary, get_inference_engine
+        self.assertIsNone(find_agy_binary())
+        self.assertNotIn("GEMINI_API_KEY", os.environ)
+        self.assertEqual(type(get_inference_engine(ThirtiesConfig())).__name__, "MockInferenceEngine")
 
 
 if __name__ == "__main__":

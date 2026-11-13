@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from thirties_core.brains import BRAINS
 from thirties_core.astronomy import get_diurnal_date
@@ -68,6 +68,10 @@ def telegram_html(text: str) -> str:
 
 THUMBS_UP = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"}
 YES_TARGETS_KEY = "telegram_yes_targets"  # [[chat_id, message_id], ...]: messages a 👍 answers with "yes"
+OFFSET_KEY = "telegram_offset"  # this device's: the next update to read, per bot ("telegram_offset:<bot id>")
+UNSENT_KEY = "telegram_unsent"  # this device's: replies that never got through, kept across a restart
+# copy-madlibs T3-047
+EDIT_NOTICE = "That edit came after my reply, so I left it alone: send the change as a new message."
 
 
 def plain_lists(text: str) -> str:
@@ -81,6 +85,31 @@ def plain_lists(text: str) -> str:
         out.append(line if code else _re.sub(r"^(\s*)[-•*]\s+(?=\S)", r"\1", line))
     return "\n".join(out)
 
+def _one_slip(x: str, y: str) -> bool:
+    """At most one slip of the keyboard between two words: a letter added or dropped, two swapped, or a letter
+    changed in a longer word (in a short one that's often another word: "done" and "gone")."""
+    if x == y:
+        return True
+    if abs(len(x) - len(y)) > 1:
+        return False
+    if len(x) == len(y):
+        diff = [i for i in range(len(x)) if x[i] != y[i]]
+        return (len(diff) == 1 and len(x) >= 5) or (len(diff) == 2 and diff[1] == diff[0] + 1
+                                  and x[diff[0]] == y[diff[1]] and x[diff[1]] == y[diff[0]])
+    short, long_ = (x, y) if len(x) < len(y) else (y, x)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def _typo_fix(before: str, after: str) -> bool:
+    """An edit that only fixes typing slips: the same words in the same order, each at most one slip from what it
+    was, and the same numbers ("tomatos" to "tomatoes"; never "at 5" to "at 6", "Tuesday" to "Thursday" or an
+    added "don't")."""
+    a, b = before.lower().split(), after.lower().split()
+    if len(a) != len(b) or re.findall(r"\d+", before) != re.findall(r"\d+", after):
+        return False
+    return all(_one_slip(x, y) for x, y in zip(a, b))
+
+
 class TelegramClient:
     """Minimal, dependency-free Telegram Bot API client using urllib.request."""
 
@@ -89,6 +118,14 @@ class TelegramClient:
         self.api_url = f"{base_url.rstrip('/')}/bot{self.bot_token}"
         self.undelivered: List[tuple] = []  # (chat_id, text, when, expires, parse_mode) that never got through
         self.sent_ids: List[tuple] = []  # (chat_id, message_id) of what was sent, newest last (reactions)
+        self.on_undelivered: Optional[Callable[[List[tuple]], None]] = None  # told whenever `undelivered` changes
+
+    def _undelivered_changed(self) -> None:
+        if self.on_undelivered is not None:
+            try:
+                self.on_undelivered(list(self.undelivered))
+            except Exception as e:
+                logger.warning("Couldn't keep the unsent Telegram messages: %s", e)
 
     def _request(self, method: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 30.0) -> Dict[str, Any]:
         url = f"{self.api_url}/{method}"
@@ -161,6 +198,7 @@ class TelegramClient:
                 logger.error("Telegram never got a message (kept to send later): %r", chunk[:120])
                 self.undelivered.append((chat_id, chunk, time.time(),
                                          expires.timestamp() if expires is not None else None, parse_mode))
+                self._undelivered_changed()
             success = success and bool(sent)
         return success
 
@@ -202,14 +240,18 @@ class TelegramClient:
         past its moment is dropped, never sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower", 33 minutes
         late), and anything older than a few hours is dropped too (the app's chat has it)."""
         now = time.time()
+        before = len(self.undelivered)
         self.undelivered = [u for u in self.undelivered if now - u[2] < self.UNDELIVERED_HOURS * 3600
                             and (len(u) < 4 or u[3] is None or now < u[3])]
+        if len(self.undelivered) != before:
+            self._undelivered_changed()
         while self.undelivered:
             chat_id, chunk = self.undelivered[0][:2]
             mode = self.undelivered[0][4] if len(self.undelivered[0]) > 4 else None
             if self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode) is False:
                 return
             self.undelivered.pop(0)
+            self._undelivered_changed()
 
     @staticmethod
     def _chunk_text(text: str, max_len: int = 4000) -> List[str]:
@@ -293,6 +335,10 @@ class ThirtiesTelegramBridge:
 
         self.allowed_chat_ids: Set[int] = set(self.config.telegram.allowed_chat_ids)
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
+        self._bot_id = self.bot_token.split(":", 1)[0]
+        self._answered: Dict[Tuple[int, int], str] = {}  # (chat, message id) -> its text, for the last few messages
+        self._restore_unsent()
+        self.client.on_undelivered = self._save_unsent
         self.current_date: date = self._get_active_diurnal_date()
         self._own_manager: Optional[ConversationManager] = None
         self.running = False
@@ -449,7 +495,7 @@ class ThirtiesTelegramBridge:
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
             "• `/status` – System, model, and sync status\n"
-            "• `/brain` – Which brain answers; `/brain gemma` or `/brain gemini` to switch\n"
+            "• `/brain` – Which brain answers, and how to switch\n"
             "• `/help` – Show this guide\n\n"
             "💬 *Conversation*:\n"
             "Simply send natural messages to schedule and plan:\n"
@@ -500,6 +546,9 @@ class ThirtiesTelegramBridge:
         live = plan.day_start <= now < plan.day_end
         text = render_schedule(plan, now if live else None, whole_day=True,
                                missed=missed_for(self.conv_manager.tools, now) if live else [], label="today")
+        if live and getattr(self.conv_manager.tools, "assistant", None) is not None:
+            from thirties_core.if_time import text_for
+            text += text_for(self.conv_manager.tools.assistant)  # after the day's timed items
         title = f"📅 *Schedule for {plan.target_date.strftime('%A, %b %d')}*\n\n"
         self.client.send_message(chat_id, title + text, parse_mode="Markdown")
 
@@ -554,6 +603,53 @@ class ThirtiesTelegramBridge:
         for chat_id in list(self.allowed_chat_ids):
             self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires)
 
+    # --- kept on this device across a restart: where reading stopped, and replies not yet delivered ---
+
+    def _db(self):
+        return getattr(self.scheduler, "state_db", None)
+
+    def _saved_offset(self) -> Optional[int]:
+        db = self._db()
+        raw = db.get_setting(f"{OFFSET_KEY}:{self._bot_id}") if db is not None else None
+        return int(raw) if raw and raw.lstrip("-").isdigit() else None
+
+    def _save_offset(self, offset: Optional[int]) -> None:
+        """Saved before the updates are answered: after a crash, a message is never acted on twice."""
+        db = self._db()
+        if db is not None and offset is not None:
+            db.set_setting(f"{OFFSET_KEY}:{self._bot_id}", str(offset))
+
+    def _save_unsent(self, items: List[tuple]) -> None:
+        db = self._db()
+        if db is not None:
+            db.set_setting(UNSENT_KEY, json.dumps([list(i) for i in items]))
+
+    def _restore_unsent(self) -> None:
+        db = self._db()
+        try:
+            items = json.loads(db.get_setting(UNSENT_KEY) or "[]") if db is not None else []
+            self.client.undelivered = [tuple(i) for i in items if isinstance(i, list) and len(i) >= 3]
+        except Exception as e:
+            logger.warning("Couldn't read the unsent Telegram messages: %s", e)
+
+    def _edited(self, chat_id: int, message_id: Any, text: str) -> None:
+        """An edit to a message already answered: never acted on again (that would repeat what it did). A small
+        fix (a typo) passes quietly; any other change gets a note to send it as a new message."""
+        if chat_id not in self.allowed_chat_ids:
+            return
+        before = self._answered.get((chat_id, message_id))
+        if before is not None and _typo_fix(before, text):
+            return
+        logger.info("An edit to an answered message was not acted on")
+        self.client.send_message(chat_id, EDIT_NOTICE, parse_mode=None)
+
+    def _remember(self, chat_id: int, message_id: Any, text: str) -> None:
+        if message_id is None:
+            return
+        self._answered[(chat_id, message_id)] = text
+        for key in list(self._answered)[:-50]:
+            del self._answered[key]
+
     def _rest_of_burst(self, offset: Optional[int]) -> tuple:
         """After a message arrives, wait for a few seconds of quiet: quick messages sent one after another are
         one burst, answered once (A8, 10-26 10:17–10:18). Returns (more updates, the new offset)."""
@@ -571,8 +667,10 @@ class ThirtiesTelegramBridge:
         return more, offset
 
     def handle_updates(self, updates: List[Dict[str, Any]]) -> None:
-        """Answer a batch of updates: commands one by one, and each chat's plain messages as one burst."""
+        """Answer a batch of updates: commands one by one, and each chat's plain messages as one burst. An edit to a
+        message in the same batch replaces it; an edit to one already answered is never acted on again."""
         bursts: Dict[int, List[str]] = {}
+        waiting: Dict[Tuple[int, Any], int] = {}  # (chat, message id) -> its place in the chat's burst
         for u in updates:
             reaction = u.get("message_reaction")
             if reaction:  # a 👍 on a message that asks for a yes (the morning proposal) is that yes
@@ -581,17 +679,30 @@ class ThirtiesTelegramBridge:
                 if chat_id is not None and emojis & THUMBS_UP and self._asks_yes(chat_id, reaction.get("message_id")):
                     bursts.setdefault(chat_id, []).append("👍")
                 continue
-            msg = u.get("message") or u.get("edited_message")
+            edited = u.get("edited_message")
+            msg = u.get("message") or edited
             if not msg:
                 continue
             chat_id = msg.get("chat", {}).get("id")
             text = msg.get("text", "")
+            message_id = msg.get("message_id")
             if chat_id is None or not text:
                 continue
+            if edited is not None and not u.get("message"):
+                if message_id is not None and (chat_id, message_id) in waiting:  # not answered yet: the edit is it
+                    bursts[chat_id][waiting[(chat_id, message_id)]] = text
+                else:
+                    self._edited(chat_id, message_id, text)
+                continue
             if text.strip().startswith("/"):
+                self._remember(chat_id, message_id, text)
                 self.handle_message(chat_id, text)
             else:
                 bursts.setdefault(chat_id, []).append(text)
+                if message_id is not None:
+                    waiting[(chat_id, message_id)] = len(bursts[chat_id]) - 1
+        for (chat_id, message_id), at in waiting.items():
+            self._remember(chat_id, message_id, bursts[chat_id][at])
         for chat_id, texts in bursts.items():
             self.handle_message(chat_id, texts[-1], earlier=texts[:-1])
 
@@ -599,7 +710,7 @@ class ThirtiesTelegramBridge:
         """Answer messages until stopped. Another computer polling the same bot makes Telegram refuse
         one of the two (HTTP 409); then this one backs off, since only one computer should run the bridge."""
         self.running = True
-        offset: Optional[int] = None
+        offset: Optional[int] = self._saved_offset()
         while self.running:
             try:
                 updates = self.client.get_updates(offset=offset, timeout=25)
@@ -612,6 +723,8 @@ class ThirtiesTelegramBridge:
                 if any(not str(((u.get("message") or {}).get("text") or "/")).startswith("/") for u in updates):
                     more, offset = self._rest_of_burst(offset)
                     updates += more
+                if updates:
+                    self._save_offset(offset)
                 self.handle_updates(updates)
             except urllib.error.HTTPError as e:
                 if e.code == 409:

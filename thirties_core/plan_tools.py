@@ -46,6 +46,8 @@ from thirties_core.scheduler import DeterministicScheduler
 logger = logging.getLogger(__name__)
 
 NOT_DONE = "NOT_DONE"
+# The user saying the time is now ("starting it now", "right now"): that minute is theirs, never rounded.
+_NOW_SAID_RE = re.compile(r"\b(?:right )?now\b|\bjust (?:started|starting|began|got going)\b", re.IGNORECASE)
 
 
 # Tool contract shared by every brain. Times are clock strings like "4:30 PM";
@@ -87,6 +89,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "replace_overlaps": "true only when the user says it replaces what's there: trims or removes the planned "
                                 "activities it covers (never fixed ones).",
             "push_later": "true only when the user asks to slide what follows later to make room.",
+            "alongside": "true if it happens during something fixed (reading on the train, a long session across a "
+                         "short fixed one).",
             "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
             "day": "The day the item is on (default: the day being planned).",
         },
@@ -107,14 +111,17 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "set_item_facts",
-        "description": "Record facts about an item that Python then keeps: what it has to come after, a time it "
-                       "can't start before, that it needs daylight, or that it stays put. With every_day=true they "
+        "description": "Record facts about an item that Python then keeps wherever it's placed: what it has to come "
+                       "after or be done before, a window (not before / done by), that it needs daylight, or that it "
+                       "stays put. Works for an item not planned yet too (by its title, for that day). With every_day=true they "
                        "hold for the item by name, every day (\"dinner takes an hour\", \"fish food is at 5\", "
                        "\"Journal and brush teeth go with the shower\", \"nothing outside until after the shower\": "
                        "event 'outside'), even if it isn't planned today.",
         "parameters": {"event": "The item's id or title (with every_day, its name).",
                        "after": "Item(s) it must come after, by id or title (e.g. 'Shower').",
                        "not_before": "Clock time it can't start before (e.g. '3:00 PM').",
+                       "before": "Item(s) it must be done before, by id or title (e.g. 'Client call').",
+                       "done_by": "Clock time it must be done by (e.g. '2:30 PM'); with not_before, a window.",
                        "daylight": "true if it needs daylight (outdoors).",
                        "stays_put": "true if it keeps its time when the day is redrawn (a meal at a set time).",
                        "every_day": "true if the user says it holds every day, not just today.",
@@ -123,6 +130,19 @@ TOOL_SPECS: List[Dict[str, Any]] = [
                        "goes_with": "Item(s) it's done together with, right after them (every day).",
                        "kind": "When the user says what kind of thing it is: 'once' (done means finished), "
                                "'ongoing' (worked on over time; stays open until finished) or 'daily'.",
+                       "repeats": "When the user says its deadline comes round again: 'monthly', 'quarterly' or "
+                                  "'yearly' (a missed one then moves to the next, and its work is planned back "
+                                  "from there). Never guess it.",
+                       "effort": "How much work it needs for each deadline, as hours or sessions ('12 hours', "
+                                 "'6 sessions'): what the user said, or your own estimate when Python asks for one "
+                                 "(then set effort_is_estimate). Python plans it back from the deadline.",
+                       "effort_is_estimate": "true when effort is your estimate rather than the user's words; it's "
+                                             "shown as an estimate, and the user can correct it.",
+                       "lead": "How long before its deadline the work starts, when the user says ('a month', "
+                               "'2 weeks'); otherwise Python starts it as soon as there's room.",
+                       "season": "When the user says it only makes sense in some months: a season ('summer', "
+                                 "'a winter thing') or months ('May to September'); 'all year' clears it. It's then "
+                                 "planned only in those months. Never guess it.",
                        "day": "The day it's on (default: the day being planned)."},
         "required": ["event"],
     },
@@ -223,6 +243,20 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         },
         "required": ["event", "attend"],
     },
+    {
+        "name": "hide_for_today",
+        "description": "Hide one of someone else's events (Not yours today) for today only (\"hide that one\"). "
+                       "Nothing else changes; it's back tomorrow. For every time it comes up, use "
+                       "resolve_calendar_event with attend=false.",
+        "parameters": {"event": "The event's id or title."},
+        "required": ["event"],
+    },
+    {
+        "name": "not_yours_today",
+        "description": "The ids of today's Not yours today events, as listed. Read-only.",
+        "parameters": {},
+        "required": [],
+    },
 ]
 
 from thirties_core.day_proposal import PROPOSAL_READ_ONLY, PROPOSAL_TOOL_SPECS  # noqa: E402
@@ -232,7 +266,8 @@ from thirties_core.routines import ROUTINE_TOOL_SPECS  # noqa: E402
 SCHEDULE_TOOL_SPECS = TOOL_SPECS
 TOOL_SPECS = (SCHEDULE_TOOL_SPECS + ASSISTANT_TOOL_SPECS + ROUTINE_TOOL_SPECS + PROPOSAL_TOOL_SPECS + MESSAGE_TOOL_SPECS
               + LIST_TOOL_SPECS)
-READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options"} | ASSISTANT_READ_ONLY | PROPOSAL_READ_ONLY
+READ_ONLY_TOOLS = ({"list_schedule", "find_open_time", "slot_options", "not_yours_today"} | ASSISTANT_READ_ONLY
+                   | PROPOSAL_READ_ONLY
                    | MESSAGE_READ_ONLY | LIST_READ_ONLY)
 
 
@@ -432,7 +467,11 @@ class PlanTools:
         if not self.user_message or dt.minute in (0, 30):
             return False
         from thirties_core.clock import real_times
-        return ((dt.hour % 12) or 12, dt.minute) in real_times(self.user_message)
+        if ((dt.hour % 12) or 12, dt.minute) in real_times(self.user_message):
+            return True
+        # "starting it now": the current minute is a time the user gave, not one Thirties picked
+        now = self._now().replace(second=0, microsecond=0)
+        return dt.replace(second=0, microsecond=0) == now and bool(_NOW_SAID_RE.search(self.user_message))
 
     def _keep_to_blocks(self, start: datetime, end: datetime) -> Tuple[datetime, datetime]:
         """A flexible item Thirties places keeps to blocks (10-28 and 10-29: items placed at odd
@@ -455,6 +494,23 @@ class PlanTools:
             return self._facts().get(span.id).anchored
         except ToolError:
             return False
+
+    def _is_routine(self, span: EventSpan) -> bool:
+        """A fixed routine: something at its own time every day (a daily anchor, or an item that's always at one
+        time). It keeps its time, but it never stops anything being set across it, by the user or the assistant:
+        the two share the time, and whether to plan around it is the assistant's judgement."""
+        if span.source == "calendar" or span.is_firm or span.is_envelope or self._state_db is None:
+            return False
+        if span.source == "routine":  # a routine's own part, as Thirties placed it
+            return True
+        if any(self._lasting().for_item(name).fixed_at for name in [span.title] + self._lasting_aliases(span.task_id)):
+            return True
+        from thirties_core.routines import RoutineBook
+        return span.title.strip().lower() in {a.key for a in RoutineBook(self._state_db).anchors()}
+
+    def _blocks(self, span: EventSpan) -> bool:
+        """Fixed, and not a routine: something new may not overlap it without alongside."""
+        return self._is_fixed(span) and not self._is_routine(span)
 
     def _set_fixed(self, span: EventSpan, fixed: bool) -> None:
         if self._state_db is None:
@@ -541,12 +597,13 @@ class PlanTools:
                   and s.status != SpanStatus.SKIPPED]  # a skipped item didn't happen: its time is free
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
-        return [s for s in others if not s.is_envelope and self._is_fixed(s)]
+        # a fixed thing that's already happened (or gone by unreported) has no time left to protect: it shares
+        return [s for s in others if not s.is_envelope and s.status == SpanStatus.PLANNED and self._blocks(s)]
 
     def _sharing(self, span: EventSpan) -> List[EventSpan]:
-        """The other planned items this span shares time with (not work or sleep, not fixed ones)."""
+        """The other planned items this span shares time with (not work or sleep; of the fixed ones, only routines)."""
         return [s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt) if s.id != span.id
-                and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._is_fixed(s)]
+                and s.status != SpanStatus.SKIPPED and not s.is_envelope and not self._blocks(s)]
 
     def _sharing_rules(self):
         if self._state_db is None:
@@ -628,14 +685,15 @@ class PlanTools:
                 f"{span.title} at {format_clock(span.start_dt)} – {format_clock(span.end_dt)} would overlap "
                 + "; ".join(self.describe(s) for s in hard)
                 + (", which is a fixed calendar commitment." if calendar else ", which is fixed (it keeps its time).")
-                + " Pick another time, or add it with alongside=true if it really happens during it.")
+                + " Pick another time, or pass alongside=true (to this same call) if it really happens during it.")
         sharing = self._sharing(span)
         if not replace_overlaps:
             from thirties_core.sharing import needs_a_word, said_together
             ask = not alongside and not said_together(self.user_message)
             rules = self._sharing_rules()
             return [f"alongside {self.describe(s)} [id {s.id}], both kept"
-                    + (f"; if they can't happen together, push_later=true moves {s.title} and what follows (ask the "
+                    + (" (a routine: it keeps its time)" if self._is_fixed(s) else
+                       f"; if they can't happen together, push_later=true moves {s.title} and what follows (ask the "
                        f"user if it isn't clear)" if ask and needs_a_word(span, s, rules) else "")
                     for s in sharing]
         if self.user_message is not None and not REPLACE_WORDS_RE.search(self.user_message):
@@ -645,6 +703,8 @@ class PlanTools:
         for s in sharing:
             if s.status != SpanStatus.PLANNED:
                 notes.append(f"{s.title} already happened, kept")
+            elif self._is_fixed(s):  # a routine keeps its time: never trimmed or removed by what's put across it
+                notes.append(f"{self.describe(s)} keeps its time, so it stays alongside")
             elif s.start_dt < span.start_dt and span.end_dt < s.end_dt:
                 notes.append(f"{self.describe(s)} runs around it and stays (an item is never split)")
             elif self._cut_short(s, span):  # its usual length holds unless the user said otherwise
@@ -686,7 +746,7 @@ class PlanTools:
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
-                    if c.id != span.id and not c.is_envelope and self._is_fixed(c)]
+                    if c.id != span.id and not c.is_envelope and c.status == SpanStatus.PLANNED and self._blocks(c)]
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
@@ -731,6 +791,8 @@ class PlanTools:
     ) -> str:
         if not str(title or "").strip():
             raise ToolError("The item needs a title.")
+        if self.assistant is not None:
+            self.assistant.refuse_routine_as_item(str(title))
         from thirties_core.titles import is_raw_id, resolve_raw
         if is_raw_id(title):  # 11-06: an item went on the plan as 31a1d3808b2c9b79: never a raw id as a title
             known = resolve_raw(self.scheduler.state_db if self.scheduler else None, str(title),
@@ -773,18 +835,24 @@ class PlanTools:
         if end_dt is None:
             raise ToolError("Give an end time or a duration.")
 
-        from thirties_core.facts import looks_fixed
-        is_fixed = looks_fixed(str(title)) if fixed in (None, "") else _as_bool(fixed)
+        from thirties_core.facts import gave_time, looks_fixed
+        # fixed needs a real signal: the model or user saying so, a time kept every day, or an appointment-like
+        # item whose time the user gave; the wording alone only suggests it ("pick up groceries" isn't fixed)
+        is_fixed = (looks_fixed(str(title)) and gave_time(self.user_message, start_dt)) if fixed in (None, "") \
+            else _as_bool(fixed)
         is_fixed = is_fixed or bool(self._state_db is not None and self._lasting().for_item(str(title)).fixed_at)
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
             start_dt, end_dt = self._keep_to_blocks(start_dt, end_dt)  # flexible: keeps to blocks; fixed: real time
         if not _as_bool(alongside) and not is_fixed:
             start_dt, end_dt = self._stack_short(start_dt, end_dt)
+        kept = ""
+        if not is_fixed and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            start_dt, end_dt, kept = self._constraints_kept(str(title).strip(), None, start_dt, end_dt)
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if self._push_wanted(span, push_later, alongside) and not span.is_envelope and not _as_bool(alongside):
             self._push_asked()
             firm = [c for c in self.day_plan.spans_overlapping(start_dt, end_dt)
-                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._is_fixed(c)]
+                    if not c.is_envelope and c.status == SpanStatus.PLANNED and self._blocks(c)]
             if firm:
                 raise ToolError(f"{span.title} would overlap {self.describe(firm[0])}, which is fixed.")
             notes = self._push_following(span)
@@ -797,6 +865,7 @@ class PlanTools:
             self._set_fixed(span, True)
         self._save_plan_after_change()
         extra = f" ({'; '.join(lasting + notes)})" if lasting or notes else ""
+        extra += kept
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
@@ -820,6 +889,7 @@ class PlanTools:
         push_later: Any = False,
         to_day: Any = None,
         fixed: Any = None,
+        alongside: Any = False,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
@@ -833,7 +903,7 @@ class PlanTools:
         if to_day not in (None, ""):
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
-            return self._move_to_day(span, to_day, start, end, duration, title)
+            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
 
@@ -854,14 +924,21 @@ class PlanTools:
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
+        kept = ""
+        if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
+            new_start, new_end, kept = self._constraints_kept(span.title, span.id, new_start, new_end)
+        self._kept_note = kept
 
-        if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt:
+        # a shift of a real time (one off the half hours: Thirties only picks block times) keeps it real: 7:15 an
+        # hour later is 8:15, not 8:30
+        shifted_real = shift not in (None, "") and start in (None, "") and span.start_dt.minute not in (0, 30)
+        if not span.is_envelope and not self._is_fixed(span) and new_start != span.start_dt and not shifted_real:
             new_start, new_end = self._keep_to_blocks(new_start, new_end)  # a new length alone keeps the start
         if start not in (None, "") and shift in (None, "") and not self._is_fixed(span):
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
-        if not span.is_envelope and self._push_wanted(moved, push_later, False):
+        if not span.is_envelope and self._push_wanted(moved, push_later, alongside):
             self._push_asked()
             notes = []
             span_backup = (span.start_dt, span.end_dt)
@@ -872,7 +949,7 @@ class PlanTools:
                 span.start_dt, span.end_dt = span_backup
                 raise
         else:
-            notes = self._place(moved, _as_bool(replace_overlaps))
+            notes = self._place(moved, _as_bool(replace_overlaps), alongside=_as_bool(alongside))
         span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
         if span.source == "routine":
             span.source = "user"
@@ -880,9 +957,10 @@ class PlanTools:
         self._persist(span)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
-        return f"Changed {before} → {self.describe(span)}.{extra}"
+        return f"Changed {before} → {self.describe(span)}.{extra}{getattr(self, '_kept_note', '')}"
 
-    def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any) -> str:
+    def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any,
+                     alongside: bool = False) -> str:
         source_plan = self.day_plan
         target_plan = self.plan_for(to_day)
         length = span.end_dt - span.start_dt
@@ -901,7 +979,7 @@ class PlanTools:
                           source="user", task_id=span.task_id, notes=span.notes)
         self.day_plan = target_plan
         try:
-            self._place(moved, False)
+            self._place(moved, False, alongside=alongside)
         finally:
             self.day_plan = source_plan
         before = self.describe(span)
@@ -970,6 +1048,16 @@ class PlanTools:
                   for span in (first, second) if any(o.id not in (a.id, b.id) for o in self._sharing(span))]
         return f"Swapped: {self.describe(first)}; {self.describe(second)}." + (f" ({'; '.join(shared)})" if shared else "")
 
+    def _constraints_kept(self, title: str, span_id: Optional[str], start: datetime,
+                          end: datetime) -> Tuple[datetime, datetime, str]:
+        """A placement kept to the windows and order the user stated (constraints.py): moved to the nearest time
+        that keeps them, with a note; a time the user named that breaks one is refused, to ask them once."""
+        from thirties_core import constraints
+        try:
+            return constraints.keep(self, title, span_id, start, end)
+        except ValueError as e:
+            raise ToolError(str(e))
+
     def _lasting_ok(self, span: EventSpan, new_start: datetime, new_end: datetime) -> None:
         """What the user said holds every day for an item isn't undone behind their back (10-26 and 10-28: dinner cut
         to 30 minutes; 10-30: the fish food moved to 6): a fixed item moves, and an item is cut below its usual
@@ -981,6 +1069,13 @@ class PlanTools:
                              self.user_message, [s.title for s in self.day_plan.spans], self.day_plan.day_start)
         if why:
             raise ToolError(why)
+        from thirties_core.meals import window as meal_window
+        from thirties_core.item_facts import mentions
+        w = meal_window(span.title, self.day_plan.day_start)
+        if w is not None and new_end > w[1] and new_end > span.end_dt and self.user_message is not None \
+                and not mentions(self.user_message, span.title, [s.title for s in self.day_plan.spans]):
+            raise ToolError(f"{span.title}'s window ends at {format_clock(w[1])} (meals stay in their window), so it "
+                            "doesn't go later unless the user says so. Fit the rest around it, or ask the user.")
 
     def _envelope_ok(self, span: EventSpan) -> None:
         """Work and sleep change only when the user talks about them (10-27: placing the morning routine moved Work
@@ -1122,14 +1217,43 @@ class PlanTools:
 
     def set_item_facts(self, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                        stays_put: Any = None, every_day: Any = None, length: Any = None, at: Any = None,
-                       goes_with: Any = None, kind: Any = None, **_: Any) -> str:
-        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind)):
+                       goes_with: Any = None, kind: Any = None, before: Any = None, done_by: Any = None,
+                       repeats: Any = None, season: Any = None, effort: Any = None, effort_is_estimate: Any = None,
+                       lead: Any = None, **_: Any) -> str:
+        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind, repeats, season,
+                                                                         effort, lead)):
             from thirties_core.item_facts import record_lasting  # by name, every day (R6)
             return record_lasting(self, event, after=after, not_before=not_before, daylight=daylight,
-                                  stays_put=stays_put, length=length, at=at, goes_with=goes_with, kind=kind)
-        span = self._find_span(event)
+                                  stays_put=stays_put, length=length, at=at, goes_with=goes_with, kind=kind,
+                                  repeats=repeats, season=season, effort=effort,
+                                  effort_is_estimate=effort_is_estimate, lead=lead)
+        def names(value: Any) -> List[str]:
+            return value if isinstance(value, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(value)) if a]
+        try:
+            span = self._find_span(event)
+        except ToolError:  # not on the plan yet: kept by its name for the day, applied when it's placed
+            if self._state_db is None or not any(v not in (None, "", []) for v in (after, before, not_before, done_by)):
+                raise
+            from thirties_core import constraints
+            rec = constraints.record(self._state_db, self.day_plan.target_date, str(event).strip(),
+                                     before=names(before) if before not in (None, "", []) else [],
+                                     after=names(after) if after not in (None, "", []) else [],
+                                     not_before=self._start(not_before).strftime("%H:%M") if not_before else "",
+                                     done_by=self._start(done_by).strftime("%H:%M") if done_by else "")
+            said = ([f"after {', '.join(rec['after'])}"] if rec.get("after") else []) + \
+                ([f"before {', '.join(rec['before'])}"] if rec.get("before") else []) + \
+                ([f"not before {rec['not_before']}"] if rec.get("not_before") else []) + \
+                ([f"done by {rec['done_by']}"] if rec.get("done_by") else [])
+            return f"Noted for {rec['title']} today (it isn't planned yet; kept when it is): " + ", ".join(said) + "."
         store = self._facts()
         facts = store.get(span.id)
+        if before not in (None, "", []):
+            ids = [self._find_span(r).id for r in names(before)]
+            if span.id in ids:
+                raise ToolError("An item can't come before itself.")
+            facts.before = sorted(set(facts.before) | set(ids))
+        if done_by not in (None, ""):
+            facts.done_by = self._start(done_by)
         if after not in (None, "", []):
             refs = after if isinstance(after, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(after)) if a]
             ids = [self._find_span(r).id for r in refs]
@@ -1164,6 +1288,12 @@ class PlanTools:
                           and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not facts[s.id].anchored
                           and (s.start_dt >= start_from or s.end_dt <= now)), key=lambda s: s.start_dt)
         movable = self._in_fact_order(movable, facts)
+        # meals first, each at the earliest room inside its window (meals.py); the rest flows around them
+        from thirties_core.meals import late_line, window as meal_window
+        windows = {s.id: w for s in movable if not facts[s.id].after
+                   for w in [meal_window(s.title, plan.day_start)] if w is not None and w[1] > start_from}
+        movable = [s for s in movable if s.id in windows] + [s for s in movable if s.id not in windows]
+        late: List[str] = []
         ids = {s.id for s in movable}
         original = {s.id: (s.start_dt, s.end_dt) for s in movable}
         blockers = [s for s in plan.active_spans() if s.id not in ids and not s.tentative and s.end_dt > start_from
@@ -1183,9 +1313,13 @@ class PlanTools:
                 placed[span.id] = (t, t + length)
                 ends[span.id] = t + length
                 continue
-            earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
-                           + ([f.not_before] if f.not_before else [])
-                           + [ends[a] for a in f.after if a in ends])
+            meal = windows.get(span.id)
+            if meal is not None:  # from the window's opening (or now), never from where the rest has got to
+                earliest = max([start_from, meal[0]] + ([f.not_before] if f.not_before else []))
+            else:
+                earliest = max([cursor] + ([span.start_dt] if span.start_dt >= start_from else [])
+                               + ([f.not_before] if f.not_before else [])
+                               + [ends[a] for a in f.after if a in ends])
             if f.daylight:
                 earliest = max(earliest, plan.sunrise)
             t = earliest
@@ -1205,6 +1339,10 @@ class PlanTools:
                 continue
             placed[span.id] = (t, end)
             ends[span.id] = end
+            if meal is not None:
+                if end > meal[1]:  # the window was full: it gives way, and the reply says so
+                    late.append(late_line(span.title, meal[1], "no free stretch for it"))
+                continue  # a meal doesn't move the rest along: they flow around it
             cursor = end
         if self._state_db is not None:
             self._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}", json.dumps(
@@ -1215,6 +1353,7 @@ class PlanTools:
             if span.id in placed:
                 span.start_dt, span.end_dt = placed[span.id]
                 self._persist(span)
+        waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
         for span in no_room:  # it can't stay where it was: something else may be there now
             self._drop(span)
         plan.spans.sort(key=lambda s: s.start_dt)
@@ -1224,12 +1363,28 @@ class PlanTools:
         out = ["Redrew the rest of today:" if lines else "Nothing to redraw: nothing flexible is left today."] + lines
         if no_room:
             out.append("Doesn't fit before bedtime, so it's off today's plan: " + ", ".join(s.title for s in no_room)
-                       + (". Plan it tomorrow, or let it go?" if len(no_room) == 1 else
-                          ". Plan them tomorrow, or let them go?"))
+                       + (". It waits for tomorrow (Before today), where it can be moved or dropped."
+                          if waiting and len(no_room) == 1 else
+                          ". They wait for tomorrow (Before today), where each can be moved or dropped."
+                          if waiting else ". Plan it tomorrow, or let it go?"))
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
+        out += late
         return "\n".join(out)
+
+    def _wait_for_tomorrow(self, spans: List[EventSpan]) -> bool:
+        """Items a redraw couldn't fit, put in the open pool for tomorrow (carry.py), so nothing it takes off the
+        plan is lost. False without the app's storage."""
+        if self._state_db is None or not spans:
+            return False
+        from thirties_core.carry import TODAY, OpenPool
+        day = self.day_plan.target_date
+        tomorrow = (day + timedelta(days=1)).isoformat()
+        OpenPool(self._state_db).add([{"title": s.title, "task_id": s.task_id or "", "horizon": TODAY,
+                                       "when": "tomorrow", "start": tomorrow, "end": tomorrow,
+                                       "why": "didn't fit when the day was redrawn"} for s in spans], day)
+        return True
 
     @staticmethod
     def _in_fact_order(spans: List[EventSpan], facts) -> List[EventSpan]:
@@ -1250,12 +1405,17 @@ class PlanTools:
                 span.start_dt, span.end_dt = (datetime.fromisoformat(x) for x in before["moved"][span.id])
                 self._persist(span)
                 restored.append(span.title)
+        back_on = []
         for data in before["removed"]:
             if not any(s.id == data["id"] for s in self.day_plan.spans):
                 span = EventSpan.from_dict(data)
                 self.day_plan.spans.append(span)
                 self._persist(span)
                 restored.append(span.title)
+                back_on.append(span.title)
+        if back_on and self._state_db is not None:  # back on today's plan: no longer waiting for tomorrow
+            from thirties_core.carry import OpenPool
+            OpenPool(self._state_db).drop(back_on)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._state_db.set_sync_meta(f"redraw_undo:{self.day_plan.target_date.isoformat()}", "")
         return "Put back as it was before the redraw: " + (", ".join(restored) or "nothing to restore") + "."
@@ -1327,12 +1487,19 @@ class PlanTools:
         now = self._now()
         from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
         from thirties_core.day_lists import pencilled_text
+        from thirties_core.if_time import text_for as if_time_text
+        from thirties_core.not_yours import text_for as not_yours_text
         behind = missed_for(self, now) if plan.day_start <= now < plan.day_end else []
-        return ("Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
+        from thirties_core.calendar_engine import unread_text
+        unread = unread_text(plan.calendar_unread)
+        return ((unread + " Free time below may not be free.\n" if unread else "")
+                + "Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
                 + f"\n{scope}: {free}"
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
+                + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
-                   + "\n".join(missed_lines(behind)) if behind else ""))
+                   + "\n".join(missed_lines(behind)) if behind else "")
+                + not_yours_text(plan, self._state_db))  # someone else's: always last, never the user's own
 
     def _title(self, span) -> str:
         """The short title the chat says (11-06): the headline of a long line, never a raw id."""
@@ -1341,6 +1508,15 @@ class PlanTools:
             return title_of(resolve_raw(self.scheduler.state_db if self.scheduler else None, span.title,
                                         self.services.tasks if self.services is not None else []) or "an item")
         return title_of(span.title)
+
+    def hide_for_today(self, event: Any = None, **_: Any) -> str:
+        """Someone else's event, hidden for today only (not_yours.py)."""
+        from thirties_core.not_yours import hide
+        return hide(self, event)
+
+    def not_yours_today(self, **_: Any) -> str:
+        from thirties_core.not_yours import ids_text
+        return ids_text(self.day_plan, self._state_db)
 
     def resolve_calendar_event(self, event: Any, attend: Any = True, series: Any = None, **_: Any) -> str:
         span = self._find_span(event)
@@ -1386,6 +1562,8 @@ class PlanTools:
             "find_open_time": self.find_open_time,
             "list_schedule": self.list_schedule,
             "resolve_calendar_event": self.resolve_calendar_event,
+            "hide_for_today": self.hide_for_today,
+            "not_yours_today": self.not_yours_today,
             "set_item_facts": self.set_item_facts,
             "redraw": self.redraw,
             "undo_redraw": self.undo_redraw,
@@ -1402,13 +1580,19 @@ class PlanTools:
         args = dict(arguments or {})
         if "_parse_error" in args:
             return f"{NOT_DONE}: {name} {args['_parse_error']}. Write the arguments as a JSON object."
+        from thirties_core.intents import guard  # destructive only on the user's explicit words (intents.py)
+        guarded, args, guard_note = guard(name, args, self.user_message)
+        if not guarded:
+            return guard_note
         saved = self.day_plan
         outermost = self._home_plan is None
         if outermost:
             self._home_plan = saved
         from thirties_core.plan_log import tool_call
+        before: Optional[List[Dict[str, Any]]] = None
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
+            before = [s.to_dict() for s in self.day_plan.spans]  # to put the plan back if the tool breaks halfway
             with tool_call(name, self.user_message):  # every change it makes is logged with its cause (plan_log)
                 result = handler(**args)
                 if name == "update_event" and self.assistant and not args.get("to_day"):
@@ -1419,15 +1603,41 @@ class PlanTools:
                 self.outcomes_logged += 1  # "I've logged it as done" needs one of these (frontier.py)
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
+            if guard_note and not str(result).startswith(NOT_DONE):
+                result = f"{result}{guard_note}"
             return self.shorten(result) if outermost else result  # items by their short titles (11-07)
         except (ToolError, ClockError) as e:
+            # a refusal changes nothing: anything the tool changed before it refused is put back
+            if before is not None and [s.to_dict() for s in self.day_plan.spans] != before:
+                self._roll_back(before)
             return self.shorten(f"{NOT_DONE}: {e}") if outermost else f"{NOT_DONE}: {e}"
         except TypeError as e:
+            if before is not None:
+                self._roll_back(before)
             return f"{NOT_DONE}: bad arguments for {name}: {e}"
+        except Exception as e:  # anything unexpected: the plan as it was, and a plain refusal, never half a change
+            logger.exception("Tool %s failed unexpectedly", name)
+            if before is not None:
+                self._roll_back(before)
+            return f"{NOT_DONE}: {name} hit a problem ({type(e).__name__}), so nothing was changed. Try another way."
         finally:
             self.day_plan = saved
             if outermost:
                 self._home_plan = None
+
+    def _roll_back(self, before: List[Dict[str, Any]]) -> None:
+        """The day's items exactly as they were before a tool that failed: those it added go, the rest are restored
+        (in memory and in the database)."""
+        try:
+            was = {d["id"]: EventSpan.from_dict(d) for d in before}
+            for s in list(self.day_plan.spans):
+                if s.id not in was:
+                    self._drop(s)
+            for span in was.values():
+                self._persist(span)
+            self.day_plan.spans = sorted(was.values(), key=lambda s: s.start_dt)
+        except Exception:
+            logger.exception("Couldn't put the plan back after a failed tool")
 
     def shorten(self, text: str) -> str:
         """Long item lines in ``text`` said by their short titles (titles.py): what the model reads and passes on

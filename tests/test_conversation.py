@@ -1,5 +1,6 @@
 """Unit tests for ConversationManager and the FrontierBrain turn loop."""
 
+from tests.fixtures import temp_dir
 import unittest
 
 from tests.fixtures import DAY, TZ, at, event, make_scheduler, occupant
@@ -173,6 +174,18 @@ class TestTurnLoop(ConversationTestCase):
         self.assertTrue(any("no log_outcome went through" in n for n in notes), notes)
         self.assertEqual(self.manager.tools.outcomes_logged, 1)
 
+    def test_saying_something_is_not_marked_done_is_no_claim(self) -> None:
+        self.manager.execute_tool("add_event", {"title": "Sanding", "start": "9:00 AM", "duration": "1 hour"})
+        text = "Sanding isn't actually marked done: it's still waiting to hear how it went. Did it happen?"
+        self.engine.set_next_response(reply(text))
+        self.assertEqual(self.manager.send_user_message("why does sanding look finished?"), text)
+        self.assertEqual(len(self.engine.call_history), 1)  # no second round to "correct" it
+        for said in ("Nothing is recorded as done so far.", "It hasn't been logged as finished."):
+            self.assertFalse(self.manager.brain._claims_outcome(said), said)
+        for said in ("No problem — I've marked it done.", "No problem, I've marked Sanding done.",
+                     "Not bad! Marked Sanding as finished."):
+            self.assertTrue(self.manager.brain._claims_outcome(said), said)  # a "no" elsewhere isn't a denial
+
     def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
         self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
         self.engine.set_next_response(reply("You're free all afternoon."))
@@ -236,10 +249,10 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.responses = [reply('CALL add_event {"title": "Uber to the airport", "start": "12:15 PM", '
                                        '"duration": "30 min"}'),
                                  reply("Your Uber is at 12:15, in the 12:00 block. Packing at 11:45 fits.")]
-        self.assertEqual(self.manager.send_user_message("I'm leaving for the airport then"),
+        self.assertEqual(self.manager.send_user_message("my Uber to the airport is at 12:15"),
                          "Your Uber is at 12:15, in the 12:00 block. Packing in the 11:30 block fits.")  # 10-23
         uber = next(s for s in self.manager.day_plan.spans if s.title == "Uber to the airport")
-        self.assertEqual(uber.start_dt, at("12:15"))  # a ride is fixed: it keeps its real time
+        self.assertEqual(uber.start_dt, at("12:15"))  # a ride at the time the user gave is fixed: it keeps it
 
     def test_rounds_are_capped(self) -> None:
         for _ in range(5):
@@ -306,6 +319,29 @@ class TestChoosingTheBrain(ConversationTestCase):
         warm = patch.object(ConversationManager, "warm_in_background")  # don't load Gemma in unit tests
         warm.start()
         self.addCleanup(warm.stop)
+        offered = patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": "1"})  # the developer switch: Gemma can be picked
+        offered.start()
+        self.addCleanup(offered.stop)
+
+    def test_gemma_is_hidden_without_the_developer_switch(self) -> None:
+        from unittest.mock import patch
+        from thirties_core.brains import brain_choice, offered_brains
+        from thirties_core.settings import Settings
+        sched = self.manager.scheduler
+        with patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
+            self.assertNotIn("slm", offered_brains(sched.config))
+            self.assertNotIn("pipeline", offered_brains(sched.config))  # parked: behind the switch too
+            self.assertIn("Unknown brain", self.manager.send_user_message("/brain pipeline"))
+            out = self.manager.send_user_message("/brain gemma")
+            self.assertIn("Unknown brain", out)
+            self.assertEqual(self.manager.brain_name, "frontier")
+            self.assertNotIn("gemma", self.manager.send_user_message("/brain").lower())
+            Settings(sched.state_db).set("assistant.brain", "slm")  # chosen before it was hidden
+            self.assertEqual(brain_choice(sched.config, sched.state_db), "frontier")
+            sched.config.assistant.brain = "slm"
+            self.assertEqual(brain_choice(sched.config), "frontier")
+            sched.config.assistant.offer_gemma = True  # the switch in config
+            self.assertEqual(brain_choice(sched.config), "slm")
 
     def test_switching_keeps_the_conversation_and_sticks_on_this_device(self) -> None:
         self.engine.set_next_response(reply("Morning!"))
@@ -360,7 +396,7 @@ class TestFreshLists(unittest.TestCase):
         from unittest.mock import MagicMock
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
-        db = Path(tempfile.mkdtemp()) / "database.sqlite"
+        db = Path(temp_dir("thirties_tmp_")) / "database.sqlite"
         db.write_text("")
         joplin = MagicMock()
         joplin.config.resolve_joplin_db_path.return_value = db

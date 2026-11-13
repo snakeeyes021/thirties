@@ -184,21 +184,23 @@ class TestChangingThePlanByHand(DayCase):
 
     def test_a_drag_moves_it_to_the_thirty_it_lands_on_keeping_its_length(self):
         movie = self.cards["Movie"]  # rows 26-28, 8 PM
-        self.assertEqual(move_call(self.d, movie, 0, 28.3), ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        self.assertEqual(move_call(self.d, movie, 0, 28.3),
+                         ("update_event", {"event": "movie", "start": "9:00 PM", "alongside": True}))
         # grabbed by its second thirty: the card keeps its place under the pointer
-        self.assertEqual(move_call(self.d, movie, 1, 28.3), ("update_event", {"event": "movie", "start": "8:30 PM"}))
+        self.assertEqual(move_call(self.d, movie, 1, 28.3)[1]["start"], "8:30 PM")
         self.assertIsNone(move_call(self.d, movie, 0, 26.7))  # same thirty: nothing to do
         self.assertEqual(move_call(self.d, movie, 0, 22.5, push=True),  # onto dinner, Shift held: push what follows
                          ("update_event", {"event": "movie", "start": "6:00 PM", "push_later": True}))
-        self.assertEqual(move_call(self.d, movie, 0, 22.5)[1], {"event": "movie", "start": "6:00 PM"})  # shares it
+        self.assertEqual(move_call(self.d, movie, 0, 22.5)[1],  # shares it, a fixed item too: placed by hand
+                         {"event": "movie", "start": "6:00 PM", "alongside": True})
 
     def test_a_resize_changes_one_edge_on_thirties(self):
         movie = self.cards["Movie"]
         self.assertEqual(resize_extent(self.d, movie, "bottom", 30.2), (26, 4))
-        self.assertEqual(resize_call(self.d, movie, "bottom", 30.2), ("update_event", {"event": "movie",
-                                                                                         "end": "10:00 PM"}))
+        self.assertEqual(resize_call(self.d, movie, "bottom", 30.2),
+                         ("update_event", {"event": "movie", "end": "10:00 PM", "alongside": True}))
         self.assertEqual(resize_call(self.d, movie, "top", 25.1),
-                         ("update_event", {"event": "movie", "start": "7:30 PM", "end": "9:30 PM"}))
+                         ("update_event", {"event": "movie", "start": "7:30 PM", "end": "9:30 PM", "alongside": True}))
         self.assertEqual(resize_extent(self.d, movie, "top", 31), (28, 1))  # never less than one thirty
         self.assertEqual(resize_extent(self.d, movie, "bottom", 2), (26, 1))
         self.assertIsNone(resize_call(self.d, movie, "bottom", 29.1))  # unchanged

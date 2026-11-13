@@ -629,7 +629,9 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
     ``config`` may be a ThirtiesConfig (its ``media`` section is used) or a
     MediaConfig. A source is refetched only when its cache is older than
     ``cache_hours``. If a refetch fails, the stale cached list is used instead
-    so a network outage never empties the backlog. Never raises.
+    so a network outage never empties the backlog; a refetch that loads but
+    finds nothing keeps a cached list that had items too (a page that changed
+    or half loaded looks just like that), with a warning. Never raises.
     """
     media = getattr(config, "media", config)
     now = now or datetime.now(timezone.utc)
@@ -652,7 +654,11 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
         except Exception as exc:  # sources should not raise; be safe anyway
             logger.warning("%s: fetch failed: %s", src.cache_key, exc)
             items, src.ok = [], False
-        if src.ok:
+        if src.ok and not items and cached is not None and cached[1]:
+            logger.warning("%s: refresh came back empty; keeping the %d cached items from %s",
+                           src.cache_key, len(cached[1]), cached[0])
+            merged.extend(cached[1])
+        elif src.ok:
             cache.save(src.cache_key, items, now)
             merged.extend(items)
         elif cached is not None:

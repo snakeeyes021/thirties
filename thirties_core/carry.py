@@ -20,6 +20,12 @@ The rules, applied once a day when the day is built (after the user's first repl
    - this week: everything else; when unsure, this week, never today.
    The morning model revises it (propose_leftovers): drops what has gone moot (a one-time event whose day is
    gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
+   Then each kept one-off gets a concrete day (replan.py), applied at once and said in the morning ("Keep: <item>,
+   <day>") so the user can correct it: what can't wait (urgency "now", or "as soon as possible" in its wording)
+   goes on today if it fits, else the first day with room; everything else the first day from tomorrow with room,
+   within this week unless it has a deadline, never past its deadline. With no room it waits at its horizon.
+   Missed time on an ongoing effort with a deadline is spread over its next sessions before that deadline;
+   without one it simply ends (rule 2).
 4. Kept items wait at their horizon straight away; drops wait for a yes (a reply, or a 👍). The user can say
    what to change (place_leftover) or what's already done. No answer: kept items stay where proposed, and
    nothing is dropped. Recurring things never enter the pool: a missed one skips to its next turn.
@@ -34,14 +40,20 @@ The rules, applied once a day when the day is built (after the user's first repl
 from __future__ import annotations
 
 import json
+import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 POOL_KEY = "open_pool"          # {title lower: {"title", "task_id", "since", "horizon", "due"}}
 TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED = "today", "week", "deadline", "someday", "dropped"
 POOL_HORIZONS = (TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED)
 SAID = {TODAY: "today", WEEK: "this week", DEADLINE: "by its deadline", SOMEDAY: "someday", DROPPED: "dropped"}
 QUICK_MINUTES = 15
+# can't wait, by its own wording: as soon as possible means today if it fits
+ASAP_RE = re.compile(r"\b(asap|a\.s\.a\.p\.?|as soon as (?:possible|i can)|urgent(?:ly)?|right away)(?!\w)", re.I)
 DEADLINE_PULL_DAYS = 7
 ASKED_KEY = "status_asked"      # {title lower: day asked}: never asked twice
 POOL_DAYS = 14
@@ -196,6 +208,15 @@ def settle(assistant, day: date) -> Dict[str, Any]:
                 pass
         done = {t.lower() for t in _done_titles(assistant, day)}
         pool.drop([k for k in pool.all() if k in done])  # done since: out of the pool
+        try:
+            replan_leftovers(assistant, day, out)  # each missed item gets the day it goes to next
+        except Exception as e:
+            logger.warning("Replanning what was missed failed: %s", e)
+        try:
+            from thirties_core.deadlines import roll_missed
+            out["deadlines_moved"] = roll_missed(assistant, day)  # a repeating deadline missed: on to the next
+        except Exception as e:
+            logger.warning("Moving missed repeating deadlines failed: %s", e)
         OpenPool(db).add(out["pool_items"], day - timedelta(days=1))
         db.set_sync_meta(key, json.dumps(out))
     return out
@@ -237,7 +258,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     note = assistant._today_note()
     today_lines: List[str] = []
     if note is not None:
-        open_lines = [t for t, ticked in with_done(note, done_ids) if not ticked]
+        open_lines = [t for t, ticked in with_done(note, done_ids, assistant._db) if not ticked]
         children = {c.lower() for t in open_lines for c in (group_items(note, t) or [])}
         today_lines = [t for t in open_lines if t.lower() not in children]  # a group by its name (11-05)
     on_today = {t.lower() for t in today_lines}
@@ -256,11 +277,18 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     def home_of(title: str) -> Optional[Dict[str, str]]:
         return links.home_of(title) if links is not None else None
 
+    from thirties_core import if_time
+    untimed_left = {t.lower() for t in if_time.items(note)} if note is not None else set()
+
     def rollable_item(title: str, low: str) -> Dict[str, str]:
         home = home_of(title)
         task = tasks.get((home or {}).get("home_id", "")) or listed.get(low)
+        horizon = WEEK if low in untimed_left else choose_horizon(assistant, task, title, day)  # If there's time: this week
         return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else ""),
-                "horizon": choose_horizon(assistant, task, title, day), "due": (task.due or "")[:10] if task else ""}
+                "horizon": horizon, "due": (task.due or "")[:10] if task else ""}
+
+    from thirties_core.kinds import ONGOING
+    ongoing_missed: List[Dict[str, Any]] = []  # time on something ongoing that didn't happen: spread forward
 
     # yesterday's plan: what ended with no outcome
     for s in unmarked:
@@ -273,6 +301,17 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if (s.category == SpanCategory.CALENDAR or s.is_firm or pt._is_fixed(s) or s.status == SpanStatus.UNKNOWN
                 or never_rolls(s.title, s)):
             ended.append(s.title)
+            # project time comes round again anyway; only an ongoing effort with a deadline gets its missed time
+            # spread over the next sessions: a hard one (its due date) or a soft one (the end of the period its
+            # time was budgeted for, budgets.py)
+            project = tasks.get(s.task_id or "") or listed.get(low)
+            if s.category != SpanCategory.CALENDAR and not s.is_firm and not pt._is_fixed(s) \
+                    and low not in daily and low not in routine_steps and low not in routine_names \
+                    and project is not None and assistant.kind_of(s, ctx) == ONGOING:
+                until, level = _deadline_of(assistant, project, day - timedelta(days=1))
+                if until is not None:
+                    ongoing_missed.append({"title": s.title, "due": until.isoformat(), "level": level,
+                                           "minutes": int((s.end_dt - s.start_dt).total_seconds() // 60)})
             continue
         if low not in asked_before:
             ask.append(s.title)
@@ -318,7 +357,76 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             ask.append(title)
         pool_items.append(rollable_item(title, low))
     return {"ask": ask, "off_today": off_today, "ended": ended,
-            "pooled": [i["title"] for i in pool_items], "pool_items": pool_items}
+            "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed}
+
+
+def _deadline_of(assistant, task, missed_on: date) -> tuple:
+    """(the date missed time on an ongoing effort must fit before, the budget's level or "" for a due date): its
+    due date, or the end of the budgeted period (budgets.py) that held the missed day, whichever comes first."""
+    due = None
+    if task.due:
+        try:
+            due = date.fromisoformat(task.due[:10])
+        except ValueError:
+            due = None
+    budget = None
+    try:
+        from thirties_core.budgets import budget_of
+        from thirties_core.horizons import HorizonPlanner
+        budget = budget_of(HorizonPlanner(assistant.pt), task, missed_on)
+    except Exception as e:
+        logger.warning("Couldn't read %s's budget: %s", task.title, e)
+    if budget is not None and (due is None or budget.period.end < due):
+        return budget.period.end, budget.period.level
+    return due, ""
+
+
+def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
+    """Where each missed item goes next (replan.py), recorded on it: a one-off waits for the first day from today
+    with room (never past its deadline), and that day's morning puts it on; missed time on something ongoing is
+    spread over its next sessions. Someday items stay someday."""
+    from thirties_core.day_proposal import usual_minutes
+    from thirties_core.replan import place_once, spread_ongoing
+    tasks = {t.id: t for t in assistant.s.tasks}
+    pt = assistant.pt
+    week_start = getattr(pt.scheduler.config.general, "week_start", "mon") if pt.scheduler else "mon"
+    week_end = max(_week_bounds(day, week_start)[1], day + timedelta(days=1))  # by default within this week
+    for item in out.get("pool_items", []):
+        if item.get("horizon") == SOMEDAY:
+            continue
+        task = tasks.get(item.get("task_id") or "")
+        try:
+            due = date.fromisoformat(item["due"][:10]) if item.get("due") else None
+            # what can't wait (the today horizon) may go on today; everything else waits from tomorrow (rule 3:
+            # when unsure, never today)
+            first = day if item.get("horizon") == TODAY else day + timedelta(days=1)
+            placed = place_once(pt, item["title"], usual_minutes(assistant, task, item["title"]),
+                                first - timedelta(days=1), due, last=week_end)
+        except Exception as e:
+            logger.warning("Couldn't find a day for %s: %s", item.get("title"), e)
+            continue
+        if placed.day is not None:
+            item["start"] = item["end"] = placed.day.isoformat()
+            gap = (placed.day - day).days
+            item["when"] = "today" if gap == 0 else "tomorrow" if gap == 1 else placed.day.strftime("%A").lower()
+        item["why"] = placed.why
+    respread = []
+    for miss in out.get("ongoing_missed", []):
+        try:
+            until = date.fromisoformat(miss["due"][:10]) if miss.get("due") else None
+            placed = spread_ongoing(pt, miss["title"], miss["minutes"], day, until=until)  # from tomorrow: never today
+        except Exception as e:
+            logger.warning("Couldn't spread %s: %s", miss["title"], e)
+            continue
+        why = placed.why
+        if not placed.extended and placed.day is None and miss.get("level"):
+            from thirties_core.horizons import PARENT
+            up = PARENT.get(miss["level"])
+            plan = "the multi-year plan" if up == "years" else f"this {up}'s plan" if up else ""
+            why = f"no room left this {miss['level']}" + (f", so it counts toward {plan}" if plan else "")
+        respread.append({"title": miss["title"], "why": why,
+                         "day": placed.day.isoformat() if placed.day else ""})
+    out["respread"] = respread
 
 
 def where_text(items: List[Dict[str, str]], short=lambda t: t) -> str:
@@ -363,6 +471,7 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
     if task is not None and (task.someday or task.list_role in ("menu", "backlog")) or horizon == "someday":
         return SOMEDAY
     if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
+            or ASAP_RE.search(title or "") \
             or (minutes is not None and 0 < minutes <= QUICK_MINUTES):
         return TODAY
     if due is not None:
@@ -487,7 +596,8 @@ def proposal_lines(keep: List[Dict[str, str]], drop: List[Dict[str, str]], short
     return "\n".join(out)
 
 
-def notice_text(kept: int, on_today: int, drops: int, overflow: List[str]) -> str:
+def notice_text(kept: int, on_today: int, drops: int, overflow: List[str],
+                placed: Optional[List[tuple]] = None) -> str:
     """The morning's word on the leftovers when no model writes it (copy-madlibs T3-023 to T3-025): what was
     done, not a question; the one question is only for what doesn't fit today."""
     if not kept and not drops and not overflow:
@@ -497,6 +607,8 @@ def notice_text(kept: int, on_today: int, drops: int, overflow: List[str]) -> st
         out = f"Kept {kept} from before ({on_today} on today's plan)"
         out += f", and I'd drop {drops}" if drops else ""
         out += ": see Before today."
+    for title, when in placed or []:  # each placement said, so the user can correct it
+        out += f"\nKeep: {title}, {when}."
     if overflow:
         out += (("\n" if out else "") + "Doesn't fit today: " + ", ".join(overflow)
                 + ". Drop, move to another day, or squeeze in?")

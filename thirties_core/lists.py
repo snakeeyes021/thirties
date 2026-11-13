@@ -17,6 +17,7 @@ devices like the profile.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -185,11 +186,33 @@ class ListCatalog:
         return True
 
 
+_MARKUP = re.compile(r"\*\*|`|\]\(|https?://")
+
+
+def agent_written(note: Dict[str, Any]) -> bool:
+    """A note whose items read like an agent's work log (most lines marked up, linked or long: "**Status: drafted**
+    ... next step ..."), a project's backlog rather than things to do one by one."""
+    from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX
+    lines = [m.group(2) for m in (CHECKBOX_REGEX.match(x) or DONE_CHECKBOX_REGEX.match(x)
+                                  for x in (note.get("body") or "").splitlines()) if m]
+    if len(lines) < 3:
+        return False
+    marked = sum(1 for x in lines if _MARKUP.search(x) or len(x) > 140)
+    return marked >= 0.6 * len(lines)
+
+
 def sort_lists(catalog: ListCatalog, notes: List[Dict[str, Any]], tasks: List[TaskItem], sorter, today: date,
                max_notes: Optional[int] = None, with_items: bool = True) -> Dict[str, int]:
     """Guess what's missing: the role of each new note, then (with ``with_items``) the urgency of each new item
     in sorted lists, a whole note at a time. A note the model couldn't answer for is tried again next time."""
     counts = {"roles": 0, "items": 0}
+    known = catalog.roles()
+    for note in notes:  # an agent's work log is a project's backlog: guessed so, never asked (a guess, not a choice)
+        had = known.get(note["id"])
+        if agent_written(note) and (had is None or (had.get("source") != "user"
+                                    and had.get("role") in ("list", "project"))):
+            catalog.set_role(note["id"], "backlog", note.get("title", ""), source="guess")
+            counts["roles"] += 1
     for note in catalog.notes_without_role(notes)[:max_notes]:
         role = sorter.role(note)
         if role is not None:

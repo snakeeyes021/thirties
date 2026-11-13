@@ -280,6 +280,47 @@ class RoutineBook:
         return True
 
 
+STEP_MINUTES = 5   # a routine step's length when nothing says otherwise (a quick step: feed the fish, make the bed)
+
+
+def natural_parts(note: Dict[str, Any], minutes_of=None) -> List[List[str]]:
+    """A routine's steps in the parts it naturally falls into, each about a thirty, in the note's order: the note's
+    own groups (steps separated by a blank line or a heading) if it has them, else the steps by their usual lengths
+    (``minutes_of``, else STEP_MINUTES each) split evenly over as many thirties as they need. A routine that fits
+    one thirty is one part; one opaque item with no steps never happens (it has its steps, always)."""
+    import math
+    from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX
+    groups: List[List[str]] = [[]]
+    for line in (note.get("body") or "").splitlines():
+        m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
+        if m:
+            groups[-1].append(m.group(2).strip())
+        elif (not line.strip() or line.lstrip().startswith("#")) and groups[-1]:
+            groups.append([])  # a blank line or a heading ends a group
+    groups = [g for g in groups if g]
+
+    def length(step: str) -> int:
+        n = minutes_of(step) if minutes_of else 0
+        return n or STEP_MINUTES
+
+    def split(steps: List[str]) -> List[List[str]]:
+        total = sum(length(s) for s in steps)
+        n = max(1, math.ceil(total / 30))
+        if n == 1:
+            return [steps]
+        out, part, done = [], [], 0
+        for s in steps:  # cut where the running length passes each even share
+            part.append(s)
+            done += length(s)
+            if done >= total * (len(out) + 1) / n and len(out) < n - 1:
+                out.append(part)
+                part = []
+        return out + ([part] if part else [])
+    if len(groups) > 1:
+        return [p for g in groups for p in split(g)]
+    return split(groups[0]) if groups else []
+
+
 def _hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
@@ -422,11 +463,11 @@ class RoutineTools:
 
     def last_done(self, note: Dict[str, Any], r: Optional[Routine] = None) -> Optional[date]:
         """The last day it was really done: what the user said, or the latest tick of any of its steps."""
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_id
         r = r or self.book().get(note["id"], note["title"])
         days = [_day_of(r.last_done)]
         for step in self.steps(note):
-            rec = self.db.get_task_history(_checkbox_id(note["id"], step))
+            rec = self.db.get_task_history(line_id(self.db, note["id"], step))
             days.append(_day_of(rec.completed_date) if rec and rec.completed_date else None)
         return max((d for d in days if d), default=None)
 
@@ -445,11 +486,11 @@ class RoutineTools:
         """For a routine with no placement yet: each step at the thirty it was most often planned in over the last
         two weeks (ties: the latest), grouped into parts in the note's order. On 0.2's first morning this is the
         pattern the user built by hand since 10-18."""
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_ids
         if self.pt.scheduler is None:
             return []
         steps = self.steps(note)
-        by_id = {_checkbox_id(note["id"], s): s for s in steps}
+        by_id = {i: s for s in steps for i in line_ids(self.pt.scheduler.state_db, note["id"], s)}
         by_title = {s.lower(): s for s in steps}
         tz = self.pt.day_plan.day_start.tzinfo
         end = datetime.combine(before, datetime.min.time(), tzinfo=tz)
@@ -493,11 +534,12 @@ class RoutineTools:
         from thirties_core.plan_log import outer_tool
         if span is None or span.is_envelope or self.placing or self.db is None or outer_tool() != "update_event":
             return
-        from thirties_core.assistant_tools import _checkbox_id
+        from thirties_core.item_ids import line_ids
         want = span.title.strip().lower()
         for note in self.a._routines():
             steps = self.steps(note)
-            name = next((s for s in steps if span.task_id == _checkbox_id(note["id"], s) or s.lower() == want), None)
+            name = next((s for s in steps if s.lower() == want or span.task_id in line_ids(self.a._db, note["id"], s)),
+                        None)
             if name is None and want in self.known_extras(note):
                 name = span.title.strip()
             if name is not None:
@@ -1005,7 +1047,8 @@ class RoutineTools:
         if steps and self.pt.is_current(self.pt.day_plan):
             today, writer = self.a._today_note(), self.a._writer()
             if today is not None and writer is not None:
-                writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
+                writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip(),
+                               "valid_until": self.a.valid_until()})  # today's group, today only
                 self.a._today_groups.pop((self.a._today().isoformat(), note["title"].strip().lower()), None)
         return f"{len(steps)} planned step{'s' if len(steps) != 1 else ''} off today's plan" if steps else ""
 

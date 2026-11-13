@@ -1,5 +1,7 @@
 # The SLM Brain: Design, Measurements and Evaluation
 
+> **Parked 11-12:** rounds 1–4 of the study comparing the scaffolded pipeline with the one-prompt brain failed their bar (round 4 held the model fixed: Gemini on both); see the study reports in `docs/eval_reports/studies/pipeline_vs_one_prompt/`. Its code remains in the repository, inert: the on-device brain and Gemini on the pipeline are offered only behind the developer switch (`[assistant] offer_gemma`, or `THIRTIES_OFFER_GEMMA=1`), are never the default, and aren't maintained. The on-device brain is still the goal: what's reconsidered after 0.3.0 is how its brain layer is built (salvage this pipeline or rewrite it), not whether Thirties has one. Until then Thirties runs in debug mode on the Frontier Brain. The shared-core fixes found on the way stay.
+
 > The on-device brain: Gemma 4 E4B through LiteRT-LM, on the user's own computer. `AGENTS.md` §4 explains how it sits next to the Frontier Brain on the shared core. Code: `thirties_core/brains/slm/`. Sequencing: `docs/ROADMAP.md`.
 
 ---

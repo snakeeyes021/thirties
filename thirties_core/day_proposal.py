@@ -4,8 +4,8 @@ The user shouldn't have to manage the daily items by hand, or work out what has 
 on track (10-30). Each morning, once the routines and anchors are on (routines.py), the assistant offers
 one short, concrete plan for the open time: what's pressing, not the whole backlog. Python gathers the candidates
 (due dates, urgency now / soon, what's on the Today note, a little project time) and the free time; the model picks
-and says why (propose_day); the proposal is remembered and goes on the plan, exactly as offered, on "yes"
-(apply_day_proposal), like the rollover.
+and says why (propose_day); the proposal is the schedule: it goes on the plan at once, exactly as proposed, and
+is said as a notice, which the user can still change, as with the rollover.
 
 Items put off again and again are offered kindly: as a 30-minute start, with a note saying so. When no model can
 pick (the on-device brain, or a failed call), Python makes the obvious proposal itself (default_items).
@@ -45,7 +45,7 @@ MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
     "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
-    "on, as a list, and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
+    "on, one plain line each (time first, never '- ' bullets), and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
     "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
     "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
@@ -82,7 +82,8 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "apply_day_proposal",
-        "description": "Put the day's proposal on the plan, as proposed (after the user agrees). Items from the "
+        "description": "Put a stored day proposal on the plan, as proposed (propose_day already does this by itself; "
+                       "use this only for one still waiting). Items from the "
                        "lists stay linked.",
         "parameters": {"skip": "Titles or words of items to leave out (optional)."},
         "required": [],
@@ -313,7 +314,7 @@ class DayProposal:
     @staticmethod
     def _lines(items: List[Dict[str, Any]]) -> List[str]:
         from thirties_core.assistant_tools import _short  # a list line said in brief (11-05: whole paragraphs)
-        return [f"- {format_clock(datetime.fromisoformat(i['start']))} – {_short(i['title'])}" for i in items]
+        return [f"{format_clock(datetime.fromisoformat(i['start']))} {_short(i['title'])}" for i in items]
 
     def _store(self, items: List[Dict[str, Any]], why: str = "") -> str:
         day = self.pt.day_plan.target_date
@@ -375,6 +376,14 @@ class DayProposal:
             except (ClockError, ValueError) as e:
                 raise ToolError(f"{title}: {e}")
             start, end = self.pt._snap(start, start + timedelta(minutes=minutes))
+            from thirties_core import constraints  # what the user said about its window or order: kept
+            if constraints.problem(self.pt, title, None, start, end) is not None:
+                slot = constraints.nearest(self.pt, title, None, minutes, start)
+                if slot is None:
+                    problems.append(f"{title}: {constraints.problem(self.pt, title, None, start, end)}, and no free "
+                                    "time keeps it")
+                    continue
+                start, end = slot, slot + timedelta(minutes=minutes)
             fits = any(a <= start and end <= b for a, b in free)
             clash = next((t for t in taken if t[0] < end and start < t[1]), None)
             if not fits or clash:
@@ -456,6 +465,8 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         if c.title.strip().lower() in on_plan or c.task_id in on_plan:
             continue  # already on the day
         why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
+        if c.sessions and c.minutes:
+            minutes = c.minutes  # a session of a budgeted effort: the budget says how long (budgets.py)
         if c.deferred >= DEFERRED_OFTEN:
             why += f"; put off {c.deferred} times: offer a 30-minute start or breaking it down, kindly"
             minutes = 30
@@ -464,6 +475,13 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
                     "minutes": minutes})
         seen.add(c.title.lower())
     out += [c for c in own if c["title"].lower() not in seen]
+    try:  # out of season, an item waits for its months: never offered day after day (seasons.py)
+        from thirties_core.horizons import HorizonPlanner
+        from thirties_core.seasons import in_season
+        planner = HorizonPlanner(dp.a.pt)
+        out = [c for c in out if c.get("task") is None or in_season(planner.months_of(c["task"]), plan.target_date)]
+    except Exception as e:
+        logger.warning("Couldn't check the seasons of the day's candidates: %s", e)
     return out[:MAX_CANDIDATES]
 
 
@@ -474,7 +492,8 @@ MORNING_FACTS = (
     "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
     "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
     "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
-    "morning!\". Don't list the routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
+    "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
+    "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:

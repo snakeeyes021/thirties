@@ -1,5 +1,6 @@
 """Unit tests for thirties_core.scheduler: the span store and the day builder."""
 
+from tests.fixtures import temp_dir
 import json
 import tempfile
 import unittest
@@ -14,7 +15,7 @@ from thirties_core.scheduler import ROUTINE_TIMESTAMP, DayMeta, StateDatabase
 class TestStateDatabase(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.db = StateDatabase(Path(tempfile.mkdtemp()) / "state.sqlite")
+        self.db = StateDatabase(Path(temp_dir("thirties_tmp_")) / "state.sqlite")
 
     def test_task_history_and_decomposition(self) -> None:
         self.db.record_task_allocation("t1", DAY, count=2)

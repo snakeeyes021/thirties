@@ -68,6 +68,9 @@ def _lists_page(core):
             if not notes:
                 message = "No notes found yet. Connect Joplin on the previous page, or skip this for now."
             else:
+                from thirties_core.backlog import remember_private
+                from thirties_core.privacy import SHIELD
+                remember_private(core.scheduler, notes, SHIELD)  # private notes are known before any model sees them
                 sorter = list_sorter_for(core.config, core.scheduler.state_db, core.inference_engine)
                 if sorter is None:
                     message = ("Thirties will sort your lists once the assistant is ready. "
@@ -143,7 +146,8 @@ class SetupWindow(Adw.ApplicationWindow):
             self.nav.pop_to_page(self._pages[0])
             return
         if not settings.is_set("assistant.brain"):
-            settings.set("assistant.brain", "slm")
+            from thirties_core.brains import gemma_offered
+            settings.set("assistant.brain", "slm" if gemma_offered(self.core.config) else "frontier")
         if settings.get("background.enabled", True):
             self.app.request_background_permission()
         settings.set("setup.done", True)

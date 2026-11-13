@@ -149,5 +149,29 @@ class TestBrainsUseThem(unittest.TestCase):
         self.assertEqual(brain._score_task(brain.tasks[0], set(), set(), set()), -1.0)  # no single tickets
 
 
+
+class TestAgentWrittenNotes(unittest.TestCase):
+    def test_an_agent_work_log_is_guessed_a_backlog_never_overriding_the_user(self):
+        from tests.fixtures import make_scheduler
+        from thirties_core.lists import ListCatalog, agent_written, sort_lists
+        log = {"id": "n_log", "title": "Garden app inbox", "body": "".join(
+            f"- [ ] **Step {i}: drafted** (see https://example.org/{i}) next: review it\n" for i in range(4))}
+        plain = {"id": "n_home", "title": "Home", "body": "- [ ] Fix the gate\n- [ ] Oil the hinges\n- [ ] Sweep\n"}
+        self.assertTrue(agent_written(log))
+        self.assertFalse(agent_written(plain))
+
+        class Sorter:  # the model is asked only about notes Python can't place
+            def role(self, note):
+                return "list"
+
+            def urgencies(self, *a, **k):
+                return {}
+        catalog = ListCatalog(make_scheduler().state_db)
+        sort_lists(catalog, [log, plain], [], Sorter(), None, with_items=False)
+        self.assertEqual((catalog.role("n_log"), catalog.role("n_home")), ("backlog", "list"))
+        catalog.set_role("n_log", "list", "Garden app inbox")  # the user's choice
+        sort_lists(catalog, [log, plain], [], Sorter(), None, with_items=False)
+        self.assertEqual(catalog.role("n_log"), "list")  # never overridden by a guess
+
 if __name__ == "__main__":
     unittest.main()

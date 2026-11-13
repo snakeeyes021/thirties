@@ -8,7 +8,7 @@ import random
 import threading
 from datetime import datetime, time as dtime
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from thirties_core.clock import format_clock
 from thirties_core.config import load_config
@@ -299,11 +299,19 @@ def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
 # --- the assistant ---
 
+NOT_READY = ("Thirties' own assistant runs privately on this computer, but it isn't ready yet. Until it is, "
+             "Thirties runs in debug mode on Gemini, in Google's cloud (Developer options, below).")
+
+
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
-    from thirties_core.brains import brain_unavailable_reason
+    from thirties_core.brains import brain_unavailable_reason, gemma_offered
     from thirties_core.brains.slm.runtime import find_model
     group = Adw.PreferencesGroup(title="Assistant",
                                  description="Gemma runs privately on this computer. Nothing you say leaves it.")
+    if not gemma_offered(ctx.config()):  # the on-device model isn't offered yet: say so plainly, no choice to make
+        group.set_description(NOT_READY)
+        group.refresh = lambda: None
+        return group
     chosen = ctx.get("assistant.brain") or "slm"  # Gemma unless the user chose otherwise
     gemma = Adw.ActionRow(title="Gemma (on this computer)")
     gemma_check = Gtk.CheckButton(active=chosen == "slm", valign=Gtk.Align.CENTER)
@@ -317,7 +325,7 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     gemma.add_suffix(download)
     group.add(gemma)
 
-    gemini = Adw.ActionRow(title="Gemini (cloud, for developers)")
+    gemini = Adw.ActionRow(title="Gemini (cloud, debug mode)")
     gemini_check = Gtk.CheckButton(group=gemma_check, active=chosen == "frontier", valign=Gtk.Align.CENTER)
     gemini.add_prefix(gemini_check)
     gemini.set_activatable_widget(gemini_check)
@@ -361,9 +369,59 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
     download.connect("clicked", on_download)
     group.connect("destroy", lambda *_: cancel.set())
-    group.refresh = refresh
-    refresh()
+
+    # The smaller model (fit.py): offered on a device under 8 GB, or once the bigger one has failed to fit
+    from thirties_core.brains.slm import fit
+    small = Adw.ActionRow(title=SMALL_MODEL_TITLE, subtitle=SMALL_MODEL_HINT)
+    small_btn = Gtk.Button(valign=Gtk.Align.CENTER)
+    small.add_suffix(small_btn)
+    group.add(small)
+
+    def refresh_small():
+        using = (ctx.get("assistant.slm_model") or "") == fit.SMALL_MODEL
+        offered = fit.FitRecord(ctx.core.scheduler.state_db).should_offer() if hasattr(ctx.core, "scheduler") else False
+        small.set_visible(using or fit.small_device() or offered)
+        small_btn.set_label(SMALL_MODEL_BACK if using else SMALL_MODEL_USE)
+
+    def on_small(_btn):
+        from thirties_core.brains.slm import model_download as md
+        to_small = (ctx.get("assistant.slm_model") or "") != fit.SMALL_MODEL
+        gpu = (md.models_dir() / md.GEMMA_E4B.filename).exists() or (md.models_dir() / md.GEMMA_E2B.filename).exists()
+        small_btn.set_sensitive(False)
+
+        def finished(said, error):
+            small_btn.set_sensitive(True)
+            ctx.toast(str(error) if error else said)
+            refresh_small()
+        ctx.run_async(lambda: fit.swap(to_small, ctx.set, gpu=gpu, cancel=cancel), finished)
+
+    small_btn.connect("clicked", on_small)
+
+    def refresh_all():
+        refresh()
+        refresh_small()
+    group.refresh = refresh_all
+    refresh_all()
     return group
+
+
+def drop_brain_section(menu) -> bool:
+    """Take the Assistant section (the brain choice) out of the main menu: while the on-device model isn't
+    offered, there's only one brain to use."""
+    if not isinstance(menu, Gio.Menu):
+        return False
+    for i in range(menu.get_n_items()):
+        if menu.get_item_attribute_value(i, "label", GLib.VariantType.new("s")) is not None and \
+                menu.get_item_attribute_value(i, "label", GLib.VariantType.new("s")).get_string() == "Assistant":
+            menu.remove(i)
+            return True
+    return False
+
+
+SMALL_MODEL_TITLE = "Smaller model (Gemma 4 E2B)"
+SMALL_MODEL_HINT = "2.6 GB and faster, but noticeably less accurate. For devices with less memory."
+SMALL_MODEL_USE = "Use it"
+SMALL_MODEL_BACK = "Switch back"
 
 
 def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:

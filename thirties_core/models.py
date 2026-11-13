@@ -242,6 +242,7 @@ class DayPlan:
     spans: List[EventSpan] = field(default_factory=list)
     is_finalized: bool = False
     notes: str = ""
+    calendar_unread: List[str] = field(default_factory=list)  # calendars that couldn't be read ("": all of them)
 
     # --- canvas ---
 

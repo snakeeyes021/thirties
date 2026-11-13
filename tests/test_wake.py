@@ -58,6 +58,29 @@ class TestHello(unittest.TestCase):
         self.assertEqual(write_hello(engine, "wake", at("07:00"), []), FALLBACK["wake"].format(clock="7:00 AM"))
         self.assertEqual(write_hello(None, "sunrise", at("06:52"), []), FALLBACK["sunrise"].format(clock="6:52 AM"))
 
+    def test_sent_late_it_never_claims_the_time_is_now(self):
+        """The computer was asleep at 7:00 and the greeting goes out at 8:30: never "it's 7:00"."""
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.wake import FALLBACK_LATE, check_line, write_hello
+        engine = MockInferenceEngine()
+        engine.responses = [{"role": "assistant", "content": "Good morning, it's 7:00! Ready when you are.",
+                             "tool_calls": []}]
+        line = write_hello(engine, "wake", at("07:00"), [], now=at("08:30"))
+        self.assertEqual(line, FALLBACK_LATE["wake"].format(clock="7:00 AM"))  # the model's "it's 7:00" refused
+        self.assertNotRegex(line, r"(?i)\bit'?s 7|\bit is 7")
+        self.assertIn("has passed", engine.call_history[0][0]["content"])  # the prompt says it's past
+        self.assertTrue(check_line("Morning! Your 7:00 wake-up time has passed; ready when you are.", "wake",
+                                   at("07:00"), late=True))
+        self.assertIsNone(check_line("It is 7:00, your wake-up time!", "wake", at("07:00"), late=True))
+        self.assertTrue(check_line("It is 7:00, your wake-up time!", "wake", at("07:00"), late=False))  # on time
+
+    def test_a_few_minutes_late_is_still_on_time(self):
+        from thirties_core.wake import FALLBACK, write_hello
+        self.assertEqual(write_hello(None, "wake", at("07:00"), [], now=at("07:08")), FALLBACK["wake"].format(clock="7:00 AM"))
+        from thirties_core.wake import FALLBACK_LATE
+        self.assertEqual(write_hello(None, "sunrise", at("06:52"), [], now=at("07:30")),
+                         FALLBACK_LATE["sunrise"].format(clock="6:52 AM"))
+
     def test_seven_oclock_can_be_said_as_7am(self):
         from thirties_core.wake import check_line
         self.assertTrue(check_line("7am means the alarm is ringing! Want me to plan the day?", "wake", at("07:00")))

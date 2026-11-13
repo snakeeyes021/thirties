@@ -1,5 +1,6 @@
 """Lasting facts about items, by name (R6): what the user said holds every day, applied by Python."""
 
+from tests.fixtures import temp_dir
 import tempfile
 import unittest
 from pathlib import Path
@@ -177,8 +178,8 @@ class TestThePrompt(unittest.TestCase):
 class TestSync(unittest.TestCase):
 
     def test_facts_and_their_clearing_sync_last_write_wins(self):
-        a = LastingFacts(StateDatabase(Path(tempfile.mkdtemp()) / "a.sqlite"))
-        b = LastingFacts(StateDatabase(Path(tempfile.mkdtemp()) / "b.sqlite"))
+        a = LastingFacts(StateDatabase(Path(temp_dir("thirties_tmp_")) / "a.sqlite"))
+        b = LastingFacts(StateDatabase(Path(temp_dir("thirties_tmp_")) / "b.sqlite"))
         a.set(Lasting(name="Dinner", title="Dinner", minutes=60))
         for record in a.all_records():
             self.assertTrue(b.merge_record(record))

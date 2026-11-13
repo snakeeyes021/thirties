@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-10-30. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30). In progress: 0.2 on `feature/0.2`.
+> Last revised: 2026-11-12. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30), 0.2.0 (2026-11-08), 0.2.1 (2026-11-11). Ready: 0.3.0 on `feature/0.3` (its release notes are in the metainfo).
 
 ---
 
@@ -87,6 +87,8 @@ The first real day of use (before 2026-10-14) was about 75% usable, on the old c
   - other people's calendars need a decision
 
 ### SLM brain (see `docs/SLM_BRAIN.md`)
+**Parked 11-12:** rounds 1–4 of the study comparing the scaffolded pipeline with the one-prompt brain failed their bar (round 4 held the model fixed: Gemini on both); see the study reports in `docs/eval_reports/studies/pipeline_vs_one_prompt/`. Its code remains in the repository, inert: the on-device brain and Gemini on the pipeline are offered only behind the developer switch (`[assistant] offer_gemma`, or `THIRTIES_OFFER_GEMMA=1`), are never the default, and aren't maintained. The on-device brain is still the goal: what's reconsidered after 0.3.0 is how its brain layer is built (salvage this pipeline or rewrite it), not whether Thirties has one. Until then Thirties runs in debug mode on the Frontier Brain. The shared-core fixes found on the way stay.
+
 - **Gemma parses; Python does the rest.** One parse per message, in a long-lived session that reuses the KV cache: about 12 s for the first message and about 3.5 s after that in the benchmark. The context window is 8k tokens, with a safe budget and a fresh session if a call fails.
 - **Python handles:**
   - references ("it", "the first X", "the 9 PM one")
@@ -396,7 +398,26 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 
 **0.2 soak** (AGENTS.md §6.3): started Fri Oct 30 (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
 
-## 0.3 (not started; the next version after 0.2)
+## 0.3 (0.3.0 cut 2026-11-12, on `feature/0.3`; what's below is still open)
+**Small things from a second look at 0.3.0** (none harms data; each is rare; for 0.3.x):
+- Making a new note while moving several items checks the source note before the new note is made, not again just before the source note is written.
+- Clearing ticked lines from Today matches them by wording, so a same-worded line ticked later the same day can be cleared with it; store how many of each were ticked.
+- A write whose reply is lost, read back as changed by the user in the meantime, can apply an added or ticked line twice; remember what was sent in that case too.
+- Ticking a duplicated item by its open-copy number shifts when the user ticks an earlier copy; tie it to the item id instead.
+- A private item is shortened to its title one way only, so a rename or split from the cloud brain may drop its hidden detail; give it a restorable placeholder, or refuse those on private items.
+- A labelled secret's value stops at the first space or comma ("password: correct horse battery staple"); take the rest of the line.
+- The private-note list is empty until the lists are first read in a process; a cloud call before that has only the pattern filters.
+- Pushing items back past bedtime leaves the one that can't move where it was, possibly overlapping one moved into its place; say so, or find it a gap.
+- Meal windows are built on the day's start date, not the plan's date (matters only if a day can start before midnight).
+- "Put on Today today" and the undo of a drop compare calendar dates, not the diurnal day, after midnight.
+- Leftover-pool lookups fall back to a substring match; require a unique match or ask.
+- A tick 15 or more minutes past a half hour can store a finish time later than now; never end after now.
+- Asked for the on-device brain while it's switched off, the chat answers "Unknown brain"; name the switch instead.
+
+**Switched off in 0.3.0** (each stays off until its study passes):
+- `[assistant] turn_bookkeeping`: off. The one-prompt turn's bookkeeping (failures tracked per item, retries checked like any other round, history keeping only the final reply, a reply glued onto a call read as both). Off is the turn loop as it was before, pinned by `tests/turn_baseline.json`. The shared rollback (a refused or broken change leaves the plan as it was) is not behind the switch.
+- `[assistant] offer_gemma` (or `THIRTIES_OFFER_GEMMA=1`): off. The on-device brain and the scaffolded pipeline (parked, see the SLM brain section above).
+
 - **Rethink the Profile:** it overlaps with other stores. Its "preferences" section can hold near-copies of memory notes, and it also overlaps with lasting item facts, routines and anchors, Your week, calendar choices and list roles, which now hold the same kinds of things in structured, enforced form. Decide what the Profile is still for (probably the free-text "who you are": goals, life context, what matters), what moves into the structured stores, whether memory notes and the Profile merge, and how the assistant uses whatever remains. Audit the overlap first: list every place a fact about the user can live.
 - **Sleep and wake from a tracker:** read when the user fell asleep and woke from Google Health / Fitbit (or Health Connect on the phone) instead of asking every day, which quickly becomes tedious. The Sleep span and the routine's "on waking" placement then follow the real times.
 - **Scratchpad notes:** a project note used for brainstorming is not a to-do list. When an idea moves to the project's real backlog (often a file in its repo), it's deleted from the note or moved to an archived copy, so the note never holds a stale second backlog and the original idea can still be found. Thirties should support that: offer to move ripe ideas to the right backlog rather than scheduling them straight off the note, clear what's moved, and not treat a scratchpad note as a to-do list. An inbox note is a fast-capture list to sort. Test this with an invented unsorted inbox and its hand-sorted version as the answer key.

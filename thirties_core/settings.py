@@ -64,6 +64,7 @@ _ALL = [
     Setting("assistant.sunset_notice", "shared"),
     # about this machine
     Setting("assistant.brain", "device"),
+    Setting("assistant.slm_model", "device"),  # the smaller model on a device where the bigger one doesn't fit (fit.py)
     Setting("general.latitude", "device"),
     Setting("general.longitude", "device"),
     Setting("general.timezone", "device"),

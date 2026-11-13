@@ -90,6 +90,8 @@ class BackgroundService:
         self.desktop_notify = desktop_notify
         self.scheduler = scheduler or DeterministicScheduler(config)
         self.joplin_engine = joplin_engine or JoplinEngine(config)
+        if hasattr(self.joplin_engine, "use_ids"):
+            self.joplin_engine.use_ids(self.scheduler.state_db)  # item ids that follow edits and moves
         self.inference_engine = inference_engine or get_inference_engine(config)
         self.sync_engine = sync_engine or SyncEngine(config=config, state_db=self.scheduler.state_db,
                                                      joplin_engine=self.joplin_engine)
@@ -156,6 +158,16 @@ class BackgroundService:
         (a block starting, a check-in) ``expires``: if Telegram can't take it before then, it's dropped rather than
         sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower, Journal", 33 minutes late)."""
         from thirties_core.clock import real_times, to_thirties, trim_meridiems
+        if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
+            try:
+                from thirties_core.if_time import gap_line
+                assistant = self.manager().tools.assistant
+                line = gap_line(assistant, now or self.now()) if assistant is not None else ""
+                if line:
+                    text += "\n" + line
+                    telegram_text = (telegram_text + "\n" + line) if telegram_text else None
+            except Exception as e:
+                logger.warning("Couldn't add the If there's time line: %s", e)
         try:
             now = now or self.now()
             keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)
@@ -287,6 +299,23 @@ class BackgroundService:
             self.send(text, "heads_up", now=now, expires=event.start_dt)
         if soon:
             self._remember("heads_up", told, now)
+
+    def model_fit(self, now: datetime) -> None:
+        """Once per start: record a death while the on-device model was working (its marker left behind), and, if
+        the bigger model doesn't fit this device, offer the smaller one (at most once a week; never switched by
+        itself). Only for someone using the on-device model."""
+        if getattr(self, "_fit_checked", False):
+            return
+        self._fit_checked = True
+        from thirties_core.brains.slm import fit
+        record = fit.FitRecord(self.scheduler.state_db)
+        record.check_startup()
+        from thirties_core.brains import gemma_offered
+        if (self.config.assistant.brain or "") != "slm" or not gemma_offered(self.config):
+            return
+        if record.should_offer(current_model=self.config.assistant.slm_model or ""):
+            record.offered()
+            self.send(fit.OFFER_TEXT + " " + fit.OFFER_WHERE, "notice", now=now)
 
     def stretches(self, now: datetime) -> None:
         """Medium: at the start of each stretch of the day, what's planned in it; once it's over (plus the grace
@@ -562,8 +591,9 @@ class BackgroundService:
             recent = json.loads(db.get_sync_meta(RECENT_KEY) or "[]")
         except ValueError:
             recent = []
-        engine = self.inference_engine if getattr(self.config.assistant, "brain", "frontier") == "frontier" else None
-        line = write_hello(engine, mode, at, recent)  # the model writes it fresh each morning (11-05)
+        from thirties_core.brains import brain_choice  # the brain actually in use (Gemma only behind its switch)
+        engine = self.inference_engine if brain_choice(self.config, db) == "frontier" else None
+        line = write_hello(engine, mode, at, recent, now)  # the model writes it fresh each morning (11-05)
         db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
         self.send(hello_text(line, titles), "morning", now=now)
 
@@ -668,6 +698,19 @@ class BackgroundService:
         if text:
             self.send("📅 " + text, "horizon", now=now)
 
+    def horizon_review(self, now: datetime) -> None:
+        """Keep the longer plans current, quietly: when something that matters changes, and lightly each week or
+        month, pull work forward where a plan has room (horizons.HorizonPlanner.review). The next morning says
+        what moved."""
+        manager = self.manager()
+        if manager.tools.assistant is None or manager.scheduler is None:
+            return
+        from thirties_core.horizons import HorizonPlanner
+        with manager.turn_lock:
+            pulled = HorizonPlanner(manager.tools).review()
+        if pulled:
+            logger.info("Pulled forward into the longer plans: %d item(s)", len(pulled))
+
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
         if time.time() - self._last_today < self.TODAY_EVERY:
@@ -747,6 +790,10 @@ class BackgroundService:
                 notes, tasks = self.joplin_engine.fetch_active_notes(), self.joplin_engine.fetch_tasks()
                 if not notes:
                     return
+                from thirties_core.backlog import remember_private
+                from thirties_core.privacy import SHIELD
+                # privacy first: hidden lines are learnt before the sorter reads a single note
+                remember_private(self.scheduler, notes, SHIELD)
                 sorter = list_sorter_for(self.config, self.scheduler.state_db, self.inference_engine)
                 if sorter is None:
                     return
@@ -780,9 +827,10 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
-        waits = {self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+        waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
-        for duty in (self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+        for duty in (self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
+                     self.horizon_review, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
             if not up and duty in waits:

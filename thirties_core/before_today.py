@@ -26,8 +26,7 @@ from thirties_core.carry import DROPPED, SOMEDAY, OpenPool, resolve_when
 ACTIONS = ("accept", "done", "drop", "keep", "undrop", "archive")
 # An archive takes the item off its list in Joplin: allowed in chat only when the user's words ask for it (11-11:
 # "drop" means stop rolling it over; a real removal only on an explicit ask). Anything else is a plain drop.
-EXPLICIT_REMOVAL = re.compile(r"\b(archive|delete|remove it|get rid of|drop (it|that|this) (completely|for good|"
-                              r"entirely)|for good|never (going to|gonna|doing|do)|not ever)\b", re.I)
+from thirties_core.intents import EXPLICIT_REMOVAL  # noqa: E402  (one source: intents.py)
 
 
 class BeforeToday:

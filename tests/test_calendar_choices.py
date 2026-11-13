@@ -84,7 +84,9 @@ class CalendarModesTest(unittest.TestCase):
         self.assertFalse(shown.is_firm or shown.tentative)
         self.assertIsNone(occupant(plan, "19:00"))  # the time is still free
         tools = PlanTools(plan, pending, sched)
-        self.assertNotIn("School play", tools.schedule_text())  # the assistant never brings it up
+        text = tools.schedule_text()
+        self.assertNotIn("School play", text.split("Not yours today:")[0])  # never in the user's own schedule
+        self.assertTrue(text.endswith("Not yours today:\nSchool play, 7:00 PM – 9:00 PM"), text)  # its own section, last
         tools.execute("add_event", {"title": "Dinner", "start": "7:00 PM", "duration": "1 hour"})
         self.assertEqual(occupant(tools.day_plan, "19:00"), "Dinner")
 

@@ -1,5 +1,6 @@
 """Settings: device vs shared scope, secrets, applying onto the config, syncing shared ones."""
 
+from tests.fixtures import temp_dir
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,7 +25,7 @@ class FakeKeyring:
 
 
 def db():
-    return StateDatabase(Path(tempfile.mkdtemp()) / "state.sqlite")
+    return StateDatabase(Path(temp_dir("thirties_tmp_")) / "state.sqlite")
 
 
 class TestSettings(unittest.TestCase):

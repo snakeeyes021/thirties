@@ -1,0 +1,60 @@
+{
+ "failure_then_other_success": {
+  "reply": "All set: moved and added.",
+  "calls": 2,
+  "last_sent": [
+   "[System check, not from the user] This is the user's first message of the day, and the day is being built now. Answer it",
+   "move the chore to 6 and add ferns at 7",
+   "",
+   "NOT_DONE: There is no item 'Nonexistent chore' on this day's schedule.",
+   "Added Water the ferns, 7:00 PM – 7:30 PM (30m) [id]."
+  ]
+ },
+ "empty_then_refusal": {
+  "reply": "Sorry, I lost my train of thought there. Could you say that again?",
+  "calls": 2,
+  "last_sent": [
+   "[System check, not from the user] This is the user's first message of the day, and the day is being built now. Answer it",
+   "move the chore to 6",
+   "",
+   "[System check, not from the user] You didn't write a reply. Reply to the user now, in your own words."
+  ]
+ },
+ "claim_then_next_turn": {
+  "reply": "Sure.",
+  "calls": 3,
+  "last_sent": [
+   "[System check, not from the user] This is the user's first message of the day, and the day is being built now. Answer it",
+   "hello",
+   "Your plan has been updated.",
+   "[System check, not from the user] Your reply says the schedule changed, but you made no CALLs, so nothing changed. Make ",
+   "Nothing changed yet; what should I add?",
+   "thanks"
+  ]
+ },
+ "glued_call": {
+  "reply": "Here is the day, again.",
+  "calls": 2,
+  "last_sent": [
+   "[System check, not from the user] This is the user's first message of the day, and the day is being built now. Answer it",
+   "what's on?",
+   "",
+   "NOT_DONE: list_schedule could not read 'CALL list_schedule {}Here is the day.'. Write the arguments as a JSON object."
+  ]
+ },
+ "rounds_capped": {
+  "reply": "Sorry, I lost my train of thought there. Could you say that again?",
+  "calls": 4,
+  "last_sent": [
+   "[System check, not from the user] This is the user's first message of the day, and the day is being built now. Answer it",
+   "show me",
+   "",
+   "Scheduled:\n- 8:30 AM – 4:00 PM: Work [work] id=routine-2026-10-15-work\n- 11:00 PM – 7:00 AM: Sleep [sleep] id=routine-20",
+   "",
+   "Scheduled:\n- 8:30 AM – 4:00 PM: Work [work] id=routine-2026-10-15-work\n- 11:00 PM – 7:00 AM: Sleep [sleep] id=routine-20",
+   "",
+   "Scheduled:\n- 8:30 AM – 4:00 PM: Work [work] id=routine-2026-10-15-work\n- 11:00 PM – 7:00 AM: Sleep [sleep] id=routine-20",
+   "[System check, not from the user] You didn't write a reply. Reply to the user now, in your own words."
+  ]
+ }
+}

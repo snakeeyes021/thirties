@@ -1,8 +1,9 @@
 """Render the Timeline page (Day and Week) and the Agenda to PNGs (light and dark) for review, with a made-up day on a temp database.
 
-    /usr/bin/python3 -m tests.timeline_screenshot [out_dir]   (default docs/eval_reports/ui/, gitignored)
+    python3 tests/headless.py -m tests.timeline_screenshot [out_dir]   (default docs/eval_reports/ui/, gitignored)
 
-Needs GTK 4, libadwaita and a display; never touches the user's data.
+Needs GTK 4 and libadwaita, and runs only in a private headless session (tests/headless.py), never on the user's
+desktop; never touches the user's data.
 """
 
 from __future__ import annotations
@@ -63,6 +64,10 @@ def _day():
 
 
 def main() -> int:
+    from tests.test_gui import isolated
+    if not isolated():
+        print("Run this through tests/headless.py: it needs a private headless session.", file=sys.stderr)
+        return 2
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "docs" / "eval_reports" / "ui"
     out.mkdir(parents=True, exist_ok=True)
     pkg = tempfile.mkdtemp(prefix="thirties_shot_pkg_")

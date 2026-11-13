@@ -145,10 +145,19 @@ class LiteRtRuntime(ConversationRuntime):
         cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "thirties" / "litert"
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_arg = str(cache_dir) if cache else None  # cache=False: no compile cache (the model spike's --litert-cache off)
+        from thirties_core.brains.slm import fit
+        too_big = fit.preflight(model_path, max_tokens)
+        if too_big:  # plainly won't fit: offer the smaller model before trying, not after a failure
+            fit.note_event("memory", too_big)
+            raise SlmUnavailable(f"Gemma doesn't fit in this device's memory now ({too_big}).")
         start = time.time()
+        self._using = lambda phase: fit.Using(model_path.name, phase)
         try:
-            self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.GPU(),
-                                           max_num_tokens=max_tokens, cache_dir=cache_arg)
+            if os.environ.get("THIRTIES_SLM_CPU"):  # the GPU is someone else's right now: CPU only
+                raise RuntimeError("THIRTIES_SLM_CPU is set: not using the GPU")
+            with self._using("load"):
+                self.engine = litert_lm.Engine(str(model_path), backend=litert_lm.Backend.GPU(),
+                                               max_num_tokens=max_tokens, cache_dir=cache_arg)
             self.device = "gpu"
         except Exception as gpu_error:
             # A "-gpu" LiteRT build doesn't run on the CPU backend at all (the engine can't be created, 11-04); the
@@ -161,8 +170,9 @@ class LiteRtRuntime(ConversationRuntime):
                     "run here.") from gpu_error
             logger.warning("Gemma on GPU failed (%s); using CPU with %s.", gpu_error, cpu_path.name)
             try:
-                self.engine = litert_lm.Engine(str(cpu_path), backend=litert_lm.Backend.CPU(),
-                                               max_num_tokens=max_tokens, cache_dir=cache_arg)
+                with self._using("load"):
+                    self.engine = litert_lm.Engine(str(cpu_path), backend=litert_lm.Backend.CPU(),
+                                                   max_num_tokens=max_tokens, cache_dir=cache_arg)
             except Exception as cpu_error:
                 raise SlmUnavailable(f"Gemma couldn't start on this computer's GPU ({gpu_error}) or its CPU "
                                      f"({cpu_error}).") from cpu_error
@@ -199,7 +209,8 @@ class LiteRtRuntime(ConversationRuntime):
                 max_output_tokens=max_output_tokens,
             )
             try:
-                raw = self._text(conv.send_message(user, response_format=lm.ResponseFormat.json(schema)))
+                with self._using("generate"):
+                    raw = self._text(conv.send_message(user, response_format=lm.ResponseFormat.json(schema)))
             finally:
                 conv.close()
         self._log("json", start, len(system) + len(user))
@@ -210,7 +221,8 @@ class LiteRtRuntime(ConversationRuntime):
             system_message=system, sampler_config=self._lm.SamplerConfig(temperature=0.0, top_k=1))
 
     def send(self, conversation: Any, user: str) -> str:
-        return self._text(conversation.send_message(user)).strip()
+        with self._using("generate"):
+            return self._text(conversation.send_message(user)).strip()
 
     def close_conversation(self, conversation: Any) -> None:
         conversation.close()
@@ -225,7 +237,8 @@ class LiteRtRuntime(ConversationRuntime):
                 max_output_tokens=max_output_tokens,
             )
             try:
-                out = self._text(conv.send_message(user)).strip()
+                with self._using("generate"):
+                    out = self._text(conv.send_message(user)).strip()
             finally:
                 conv.close()
         self._log("text", start, len(system) + len(user))

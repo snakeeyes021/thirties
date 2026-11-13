@@ -76,6 +76,9 @@ class MessageTools:
         live = tools.is_current(plan) and plan.day_start <= now < plan.day_end
         missed = missed_for(tools, now) if live else []
         text = render_schedule(plan, now if live else None, whole_day=_as_bool(whole_day), missed=missed)
+        if live and getattr(tools, "assistant", None) is not None:  # after the day's timed items (if_time.py)
+            from thirties_core.if_time import text_for
+            text += text_for(tools.assistant)
         if missed:
             MissedTracker(tools._state_db).mark(now, missed)  # shown: notices and replies needn't list them again
         tools.shown_schedule = text  # the conversation layer makes sure the reply carries this, as it is
@@ -125,7 +128,10 @@ class MessageTools:
         if tools.services is not None:
             for conv in tools.services.conversations.for_day(tools.day_plan.target_date):
                 for m in conv.messages:
-                    if m.get("role") == "user" and title in str(m.get("content", "")).lower():
+                    # a hidden message is Thirties' own (a system check), never the user's words
+                    if (m.get("role") == "user" and not m.get("hidden")
+                            and not str(m.get("content", "")).startswith("[System check")
+                            and title in str(m.get("content", "")).lower()):
                         at = m.get("at", "")
                         when = format_clock(datetime.fromisoformat(at).astimezone(tz)) if at else "earlier"
                         lines.append(f"{when}: the user said \"{str(m['content'])[:200]}\"")

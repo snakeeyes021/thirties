@@ -315,7 +315,7 @@ class TestSchedulingActions(SlmTestCase):
 
     def test_start_now(self):
         out = self.say("start upgrades now for an hour", {"type": "add", "title": "Upgrades", "start": "now", "duration": "an hour"})
-        self.assertIn("4:30 PM – 5:30 PM", out)  # 4:40 rounds to the half hour
+        self.assertIn("4:40 PM – 5:40 PM", out)  # the user's now is this minute: never rounded into the past
 
     def test_invented_add_is_dropped_and_missing_move_becomes_add(self):
         out = self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"},
@@ -612,9 +612,11 @@ class TestFromTheMilestoneRun(SlmTestCase):
     def test_starting_something_isnt_finishing_it(self):
         self.say("laundry at 5", {"type": "add", "title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
         out = self.say("starting laundry now", {"type": "outcome", "target": "laundry", "status": "done"})
-        self.assertEqual(out, "Got it, Laundry is underway.")
+        self.assertTrue(out.startswith("Got it, Laundry is underway: moved to 4:40 PM – 5:40 PM."), out)  # the plan follows
         laundry = next(s for s in self.m.day_plan.spans if s.title == "Laundry")
         self.assertEqual(laundry.status.value, "planned")
+        out = self.say("still on laundry", {"type": "outcome", "target": "laundry", "status": "started"})
+        self.assertEqual(out, "Got it, Laundry is underway.")  # already running: nothing moves
 
     def test_done_words_win_over_starting_words(self):
         from thirties_core.brains.slm.brain import FINISHED_RE, STARTING_RE
@@ -725,7 +727,7 @@ class TestParityWithGemini(ParityTestCase):
     def test_put_things_on_todays_list(self):
         out = self.say("I want to get the hardware store help desk thing done, stick it on my list for today",
                        {"type": "today", "title": "hardware store help desk"})
-        self.assertEqual(out, "Added to today's list: Hardware store help desk.")
+        self.assertTrue(out.startswith("On today's plan: Hardware store help desk at "), out)  # a time at once
         self.assertEqual(self.api.notes["n_today"]["body"], "- [ ] Hardware store help desk\n")
         self.say("laundry at 7", {"type": "add", "title": "Laundry", "start": "7", "duration": "1 hour"})
         out = self.say("and put that on the list for today too", {"type": "today", "title": "that"})
@@ -966,3 +968,69 @@ class TestHelpersForGemma(ParityTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPipelineGaps(SlmTestCase):
+    """The frictions the first pipeline study found (invented examples)."""
+
+    def test_tool_text_meant_for_the_model_never_reaches_the_person(self):
+        error = ("Procreate sketching, 9:00 – 10:30 is already planned. To move it, use update_event with that id; "
+                 "to plan a second session as well, add it with again=true.")
+        self.assertEqual(SlmBrain._humane(error), "Procreate sketching, 9:00 – 10:30 is already planned.")
+
+    def test_both_or_all_of_those_means_the_items_just_asked_about(self):
+        self.say("walk at 7", {"type": "add", "title": "Walk", "start": "7", "duration": "30 min"})
+        self.say("dishes at 8", {"type": "add", "title": "Dishes", "start": "8", "duration": "30 min"})
+        self.m.brain.messages.append({"role": "assistant", "content": "Before bed: did Walk and Dishes happen?"})
+        out = self.say("both happened", {"type": "outcome", "target": "both", "status": "done"})
+        done = {s.title for s in self.m.tools.day_plan.spans if s.status.value == "done"}
+        self.assertTrue({"Walk", "Dishes"} <= done, out)
+        self.assertNotIn("both is done", out.lower())
+
+    def test_a_tie_asks_one_question(self):
+        self.say("kestrel icons at 7", {"type": "add", "title": "Kestrel icon concepts", "start": "7",
+                                        "duration": "30 min"})
+        self.say("kestrel deck at 8", {"type": "add", "title": "Kestrel presentation deck", "start": "8",
+                                       "duration": "30 min"})
+        out = self.say("kestrel is done", {"type": "outcome", "target": "kestrel", "status": "done"})
+        self.assertTrue(out.startswith("Which one: "), out)
+
+    def test_talk_isnt_sent_back_as_a_request(self):
+        self.brain._unclear = ["going to sleep soon", "my head is pounding"]
+        self.assertEqual(self.brain._unclear_note(), "")
+        self.brain._unclear = ["the blue one", "can you sort the blue one"]  # only the request is asked about
+        self.assertIn("say that part again", self.brain._unclear_note())
+
+    def test_a_stated_window_is_kept(self):
+        out = self.say("add laundry between 7 and 9 pm", {"type": "add", "title": "Laundry"})
+        laundry = next(s for s in self.m.tools.day_plan.spans if s.title == "Laundry")
+        self.assertTrue(at("19:00") <= laundry.start_dt and laundry.end_dt <= at("21:00"), (out, laundry.start_dt))
+
+
+class TestPipelineGapsRound2(SlmTestCase):
+    """The second study round's frictions (invented examples)."""
+
+    def test_narration_is_taken_in_not_sent_back(self):
+        self.brain._unclear = ["Heading out now, will check in when I'm at the cafe!", "Tool chest is organized."]
+        self.assertEqual(self.brain._unclear_note(), "")
+
+    def test_done_in_one_clause_and_starting_in_another(self):
+        self.assertFalse(SlmBrain._just_starting("Bills are paid, starting on the garage now", "Bills"))
+        self.assertTrue(SlmBrain._just_starting("Starting on the bills now", "Bills"))
+
+    def test_an_item_already_on_the_plan_isnt_an_error(self):
+        self.say("rest at 7", {"type": "add", "title": "Rest break", "start": "7", "duration": "30 min"})
+        out = self.say("add a rest break at 7", {"type": "add", "title": "Rest break", "start": "7",
+                                                 "duration": "30 min"})
+        self.assertNotIn("couldn't", out.lower())
+
+    def test_a_tool_message_keeps_its_fact_and_speaks_to_you(self):
+        self.assertEqual(SlmBrain._humane("Plumber window is on the user's calendar; change it there."),
+                         "Plumber window is on your calendar; change it there.")
+
+    def test_the_first_message_is_the_morning_so_no_second_one_comes_later(self):
+        from thirties_core import morning
+        db = self.sched.state_db
+        db.set_sync_meta(morning.done_key(self.m.day_plan.target_date), "")
+        self.say("morning! walk at 7", {"type": "add", "title": "Walk", "start": "7", "duration": "30 min"})
+        self.assertTrue(morning.is_done(db, self.m.day_plan.target_date))

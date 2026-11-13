@@ -29,6 +29,32 @@ class TestBackground(unittest.TestCase):
         self.svc.bridge = MagicMock()
         self.sched.state_db.upsert_span(EventSpan("tx", "Taxes", at("17:00"), at("18:00"), SpanCategory.TASK))
 
+    def test_a_new_private_line_is_hidden_before_the_lists_are_sorted(self):
+        from unittest.mock import patch
+        from thirties_core.privacy import SHIELD
+        line = "Ask about the tremor in the left hand at the follow-up visit"
+        self.svc.joplin_engine.fetch_active_notes.return_value = [
+            {"id": "n_med", "title": "Medical", "source_notebook": "Lists", "body": f"- {line}\n"}]
+        seen = []
+
+        class Sorter:  # what the model would be sent, through the shield, as the app sends it
+            def role(self, note):
+                seen.append(SHIELD.redact(note.get("body") or ""))
+                return "ignore"
+
+        class Now:  # the sort runs in its own thread: here, right away
+            def __init__(self, target=None, **_):
+                self.target = target
+
+            def start(self):
+                self.target()
+        self.svc.sort_lists_enabled = True
+        with patch("thirties_core.brains.list_sorter.list_sorter_for", return_value=Sorter()), \
+                patch("thirties_core.background.threading.Thread", Now):
+            self.svc.sort_lists()
+        self.assertTrue(seen)
+        self.assertNotIn(line, " ".join(seen))  # the private line never reached the model, even on its first sort
+
     def test_check_in_once_after_an_item_ends_on_desktop_and_phone(self):
         self.svc.check_ins(at("18:15"))
         self.svc.check_ins(at("18:20"))
@@ -48,7 +74,7 @@ class TestBackground(unittest.TestCase):
         from tests.fixtures import mark_up
         mark_up(self.sched.state_db, at("08:30"))  # the user's first message of the day
         self.svc.rollover(at("09:00"))
-        self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n- 5:00 PM – Taxes")])
+        self.assertEqual(self.desktop, [("rollover", "☀️ Good morning! Already planned for today:\n5:00 PM Taxes")])
 
     def test_the_drop_box_is_offered_in_the_afternoon_twice_an_hour_at_most(self):
         from unittest.mock import patch
@@ -434,9 +460,10 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         kinds = [k for k, _ in self.sent]
         self.assertEqual(kinds, ["morning", "reminder"], self.sent)  # no heads-up, check-in or block notice
         first = self.sent[0][1]
-        from thirties_core.wake import FALLBACK
+        from thirties_core.wake import FALLBACK_LATE
         line, items = first.split("\n\n", 1)
-        self.assertEqual(line, FALLBACK["wake"].format(clock="7:00"))  # the mock model: the plain fallback (AM trimmed)
+        # sent at 7:30 for a 7:00 wake-up (the computer was asleep): the time said as past, never as now
+        self.assertEqual(line, FALLBACK_LATE["wake"].format(clock="7:00"))  # the mock model: the plain fallback
         self.assertEqual(items, "On the plate today:\nJournal\nDentist\nCall")  # one per line, no bullets, no times
         self.assertNotIn("Taxes", first)  # yesterday's leftover isn't today's by default (carry.py)
         self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built
@@ -471,6 +498,19 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         mark_up(self.sched.state_db, early + _td(minutes=10))  # the reply, still before sunrise, counts for today
         self.assertTrue(user_is_up(self.sched.state_db, self.sched.build_day_plan(DAY)[0], plan.sunrise + _td(minutes=5)))
         self.assertNotEqual(wake, early)
+
+    def test_the_morning_line_comes_from_the_brain_in_use_not_an_old_setting(self):
+        from unittest.mock import patch
+        self.sched.config.assistant.morning_message_at = "sunrise"
+        self.sched.config.assistant.brain = "slm"  # chosen once; the on-device model isn't offered now
+        self.sched.config.assistant.offer_gemma = False
+        plan = self.svc.manager().day_plan
+        engines = []
+        set_debug_time(plan.sunrise)
+        with patch("thirties_core.wake.write_hello", lambda engine, *a, **k: engines.append(engine) or "Morning."), \
+                patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
+            self.svc.morning_hello(plan.sunrise)
+        self.assertEqual(engines, [self.svc.inference_engine])  # Gemini writes it, as for the cloud brain
 
     def test_the_first_message_at_sunrise_and_without_the_items(self):
         self.sched.config.assistant.morning_message_at = "sunrise"
@@ -512,9 +552,10 @@ class TestRollover(unittest.TestCase):
     def test_a_notice_and_nothing_moved_into_today(self):
         text = self.m.execute_tool("rollover_proposal", {})
         # 11-06: in effect by itself, said as a notice; Email Mom and Dishes are tasks too (no item is "on no list")
-        self.assertEqual(text, "Kept 3 from before (0 on today's plan): see Before today.")
+        self.assertEqual(text.split("\n")[0], "Kept 3 from before (0 on today's plan): see Before today.")
+        self.assertIn("Keep: Taxes, tomorrow.", text)  # each placement said, so it can be corrected
         keep = {r["title"]: r["when"] for r in self.m.tools.assistant.before.rows()["keep"]}
-        self.assertEqual(keep, {"Taxes": "this week", "Email Mom": "this week", "Dishes": "this week"})
+        self.assertEqual(keep, {"Taxes": "tomorrow", "Email Mom": "tomorrow", "Dishes": "tomorrow"})
         out = self.m.execute_tool("apply_rollover", {})
         self.assertIn("The rest wait where proposed.", out)
         self.assertNotIn("Taxes", [s.title for s in self.sched.build_day_plan(DAY)[0].spans])

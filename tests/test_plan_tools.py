@@ -105,9 +105,15 @@ class TestAddEvent(unittest.TestCase):
 
     def test_fixed_things_keep_their_minutes_and_flexible_ones_keep_to_blocks(self) -> None:
         t = tools_for()
+        t.user_message = "the Uber to the airport is at 12:15"  # someone else's clock, and the user gave the time
         out = t.execute("add_event", {"title": "Uber to the airport", "start": "12:15 PM", "duration": "30 min"})
         self.assertTrue(out.startswith("Added Uber to the airport, 12:15 PM – 12:45 PM (30m) (blocks 12:00 PM – "
                                        "1:00 PM, fixed)"), out)
+        t.user_message = "add picking up the dry cleaning"  # worded like an errand at a set time, but no time given
+        out = t.execute("add_event", {"title": "Pick up the dry cleaning", "start": "1:15 PM", "duration": "30 min"})
+        self.assertNotIn("fixed", out)  # the wording alone only suggests it: flexible, on blocks
+        self.assertIn("1:30 PM", out)
+        t.user_message = None
         out = t.execute("add_event", {"title": "Packing", "start": "3:45 PM", "duration": "1 hour"})
         self.assertTrue(out.startswith("Added Packing, 4:00 PM – 5:00 PM (1h)"), out)  # flexible: the next block
         out = t.execute("add_event", {"title": "Hold music", "start": "5:15 PM", "duration": "1 hour", "fixed": True})
@@ -124,6 +130,65 @@ class TestAddEvent(unittest.TestCase):
 
 
 class TestUpdateEvent(unittest.TestCase):
+
+    def test_stretched_over_a_fixed_item_it_goes_alongside_and_stays_the_same_item(self) -> None:
+        t = tools_for()
+        t.execute("add_event", {"title": "Vet call", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        quilting = span_id(t, "Quilting")
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Vet call" in out, out)
+        self.assertIn("alongside=true (to this same call)", out)  # update_event takes it too: no remove and re-add
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM", "alongside": True})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual((t.day_plan.get_span(quilting).start_dt, t.day_plan.get_span(quilting).end_dt),
+                         (at("13:00"), at("21:00")))  # the same item (its id and record), now longer
+        self.assertEqual(t.day_plan.get_span(span_id(t, "Vet call")).start_dt, at("17:00"))  # it keeps its time
+
+    def test_a_fixed_routine_never_blocks_but_keeps_its_time(self) -> None:
+        from thirties_core.routines import Anchor, RoutineBook
+        t = tools_for()
+        RoutineBook(t._state_db).save_anchor(Anchor("Water the ferns", "17:00", 15, fixed=True))  # every day at 5
+        t.execute("add_event", {"title": "Water the ferns", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        quilting, ferns = span_id(t, "Quilting"), span_id(t, "Water the ferns")
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM"})  # no alongside, no permission asked
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("alongside Water the ferns", out)
+        self.assertIn("a routine: it keeps its time", out)
+        self.assertEqual(t.day_plan.get_span(quilting).end_dt, at("21:00"))
+        self.assertEqual((t.day_plan.get_span(ferns).start_dt, t.day_plan.get_span(ferns).end_dt),
+                         (at("17:00"), at("17:15")))  # it stays at its own time, sharing it
+        t.user_message = "put sorting the seeds there instead"
+        out = t.execute("add_event", {"title": "Sorting seeds", "start": "4:30 PM", "duration": "1 hour",
+                                      "replace_overlaps": True})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(t.day_plan.get_span(ferns).start_dt, at("17:00"))  # never trimmed or removed
+        t.user_message = None
+        t.execute("add_event", {"title": "Vet call", "start": "7:00 PM", "duration": "15 min", "fixed": True})
+        out = t.execute("add_event", {"title": "Glazing", "start": "6:30 PM", "duration": "1 hour"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Vet call" in out, out)  # a one-off fixed time still holds
+
+    def test_a_routines_own_fixed_part_never_blocks_either(self) -> None:
+        from thirties_core.models import EventSpan
+        t = tools_for()
+        part = EventSpan("r-stretch", "Morning stretches", at("17:00"), at("17:15"), SpanCategory.ACTIVITY,
+                         source="routine")  # placed by Thirties as part of a routine, and kept at its time
+        t.day_plan.spans.append(part)
+        t._set_fixed(part, True)
+        out = t.execute("add_event", {"title": "Quilting", "start": "4:00 PM", "duration": "2 hours"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("a routine: it keeps its time", out)
+
+    def test_a_fixed_item_already_done_no_longer_blocks_the_time(self) -> None:
+        from thirties_core.models import SpanStatus
+        t = tools_for()
+        t.execute("add_event", {"title": "Vet call", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        t.day_plan.get_span(span_id(t, "Vet call")).status = SpanStatus.DONE  # it happened: nothing left to protect
+        out = t.execute("update_event", {"event": span_id(t, "Quilting"), "end": "9:00 PM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(t.day_plan.get_span(span_id(t, "Quilting")).end_dt, at("21:00"))
 
     def test_work_ran_long_moves_only_the_end(self) -> None:
         t = tools_for()
@@ -167,6 +232,20 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertEqual(today.status.value, "skipped")
         tomorrow = t.plan_for("tomorrow")
         self.assertEqual([s.status.value for s in tomorrow.spans if s.title == "File taxes"], ["planned"])
+
+    def test_moved_to_another_day_it_can_go_alongside_something_fixed_there(self) -> None:
+        t = tools_for()
+        out = t.execute("add_event", {"title": "Ferry crossing", "start": "9:00 AM", "duration": "1 hour",
+                                      "fixed": True, "day": "tomorrow"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        t.execute("add_event", {"title": "Reading", "start": "6:00 PM", "duration": "1 hour"})
+        out = t.execute("update_event", {"event": "reading", "to_day": "tomorrow", "start": "9:00 AM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Ferry crossing" in out, out)
+        out = t.execute("update_event", {"event": "reading", "to_day": "tomorrow", "start": "9:00 AM",
+                                         "alongside": True})  # reading on the ferry
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual([s.title for s in t.plan_for("tomorrow").spans if s.title in ("Reading", "Ferry crossing")],
+                         ["Ferry crossing", "Reading"])
 
     def test_short_items_stack_in_their_thirty(self) -> None:
         t = tools_for()
@@ -294,7 +373,8 @@ class TestInsertAndSwap(unittest.TestCase):
 
     def test_swap_refuses_to_land_on_a_fixed_thing(self) -> None:
         t = self.day()
-        t.execute("add_event", {"title": "Vet", "start": "5:30 PM", "duration": "30 min"})  # fixed by its name
+        t.user_message = "vet at 5:30"
+        t.execute("add_event", {"title": "Vet", "start": "5:30 PM", "duration": "30 min"})  # its time, as the user gave it
         out = t.execute("swap_events", {"first": "Upgrades", "second": "Reading"})
         self.assertTrue(out.startswith(NOT_DONE) and "Vet" in out, out)
 
@@ -373,6 +453,27 @@ class TestReadOnlyAndCalendar(unittest.TestCase):
         delta = t.compute_delta(before, t.capture_snapshot())
         self.assertEqual((len(delta.added), len(delta.changed), len(delta.removed)), (1, 1, 0))
         self.assertEqual(delta.total_changes, 2)
+
+
+class TestNowIsTheUsersTime(unittest.TestCase):
+    """Shared core: "starting it now" put the item on the next half hour (Thirties rounds only times it picks)."""
+
+    def test_now_said_by_the_user_is_kept(self):
+        from tests.fixtures import at, build_day
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.plan_tools import PlanTools
+        set_debug_time(at("16:40"))
+        self.addCleanup(set_debug_time, None)
+        sched, plan, events = build_day()
+        t = PlanTools(plan, events, sched)
+        t.execute("add_event", {"title": "Laundry", "start": "5:00 PM", "duration": "1 hour"})
+        t.user_message = "starting the laundry now"
+        t.execute("update_event", {"event": "Laundry", "start": "4:40 PM"})
+        s = next(s for s in t.day_plan.spans if s.title == "Laundry")
+        self.assertEqual((s.start_dt, s.end_dt), (at("16:40"), at("17:40")))
+        t.user_message = "laundry later"
+        t.execute("update_event", {"event": "Laundry", "start": "4:50 PM"})
+        self.assertEqual(next(s for s in t.day_plan.spans if s.title == "Laundry").start_dt.minute % 30, 0)  # a time it picks keeps to blocks
 
 
 if __name__ == "__main__":

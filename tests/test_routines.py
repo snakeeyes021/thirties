@@ -49,7 +49,7 @@ class RoutineCase(unittest.TestCase):
         joplin.api_client = self.api
         joplin.config.resolve_joplin_db_path.return_value = None  # the lists aren't re-read from a real Joplin
         joplin.fetch_active_notes.side_effect = lambda: [
-            {"id": nid, "title": TITLES[nid], "source_notebook": "1. Tasks", "body": n["body"]}
+            {"id": nid, "title": TITLES.get(nid) or n.get("title", ""), "source_notebook": "1. Tasks", "body": n["body"]}
             for nid, n in self.api.notes.items()]
         self.catalog = ListCatalog(self.sched.state_db)
         for nid, role in (("n_today", "today"), ("n_errands", "list"), ("n_routine", "routine"),
@@ -226,6 +226,45 @@ class TestTheMorningSetUp(RoutineCase):
                                      "task_id": "t_bank"})  # the first write to Today: the day sets itself up
         self.assertTrue(self.spans(self.t, "Lunch"))
         self.assertIn("- [ ] Lunch", self.body("n_today"))
+
+
+class TestNoOpaqueRoutine(RoutineCase):
+    def test_a_routine_never_goes_on_as_one_item(self):
+        for tool, args in (("add_event", {"title": "Morning Routine", "start": "9:00 AM", "duration": "1 hour"}),
+                           ("add_event", {"title": "Deep Clean", "start": "6:00 PM", "duration": "1 hour"}),
+                           ("add_task", {"title": "Morning Routine", "list": "Errands/Admin"})):
+            out = self.t.execute(tool, args)
+            self.assertTrue(out.startswith(NOT_DONE), out)
+            self.assertIn("put_routine", out)
+        self.assertFalse(self.spans(self.t, "Morning Routine"))
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)  # the way it goes on: as its parts
+
+
+class TestNaturalParts(RoutineCase):
+    """A routine is placed as its parts: about a thirty each, in order, never all crammed into one."""
+
+    def test_the_notes_own_groups_are_its_parts(self):
+        from thirties_core.routines import natural_parts
+        body = "".join(f"- [ ] {s}\n" for s in FIRST) + "\n" + "".join(f"- [ ] {s}\n" for s in STEPS[5:])
+        self.assertEqual(natural_parts({"body": body}), [FIRST, STEPS[5:]])
+        headed = "## Kitchen\n" + "".join(f"- [ ] {s}\n" for s in FIRST) + "## Bathroom\n- [ ] Shower\n"
+        self.assertEqual(natural_parts({"body": headed}), [FIRST, ["Shower"]])
+
+    def test_without_groups_the_steps_split_evenly_by_length(self):
+        from thirties_core.routines import natural_parts
+        self.assertEqual(natural_parts({"body": self.routine_body}), [STEPS[:4], STEPS[4:]])  # 40 min: two thirties
+        self.assertEqual(natural_parts({"body": "- [ ] Vacuum\n- [ ] Mop\n"}), [["Vacuum", "Mop"]])  # fits one
+        long = {"Shower": 20, "Make bed": 10}
+        parts = natural_parts({"body": "- [ ] Make bed\n- [ ] Shower\n- [ ] Journal\n"}, long.get)
+        self.assertEqual(parts, [["Make bed", "Shower"], ["Journal"]])  # 35 minutes: two
+
+    def test_a_start_alone_places_each_part_in_its_own_thirty(self):
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        self.assertIn("9:00 AM: " + ", ".join(STEPS[:4]), out)
+        self.assertIn("9:30 AM: " + ", ".join(STEPS[4:]), out)
+        from thirties_core.clock import thirty_of
+        self.assertEqual(thirty_of(self.spans(self.t, "Shower")[0].start_dt), at("09:30"))  # in the second thirty
 
 
 class TestDailyAnchors(RoutineCase):
@@ -584,7 +623,7 @@ class TestTheMorningMessage(RoutineCase):
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
         self.assertTrue(text.startswith("☀️ Good morning! "), text)
-        self.assertRegex(text, r"On the plan for the free time:\n- 4:00( PM)? – Call the bank$")  # a notice
+        self.assertRegex(text, r"On the plan for the free time:\n4:00( PM)? Call the bank$")  # a notice
         self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))
 
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
@@ -593,7 +632,10 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("4:00 PM – Call the bank", self.sent[0][1])
+        self.assertIn("\n4:00 Call the bank", self.sent[0][1])
+        self.assertIn("\n3:00 Make bed, Shower, Journal", self.sent[0][1])  # routines are listed, by part
+        self.assertIn("\n12:00 PM Lunch", self.sent[0][1])  # and the meals
+        self.assertNotIn("\n- ", self.sent[0][1])  # plain lines
         visible = [h["content"] for h in self.m.history()]
         self.assertFalse(any("the bank at 4" in v for v in visible))
 

@@ -1,6 +1,7 @@
 """Headless checks of the GTK desktop client's widgets.
 
-Skipped when GTK 4 / libadwaita or a display is unavailable. The client package
+Run them with ``python3 tests/headless.py``, which gives them a private headless session; anywhere else (or
+when GTK 4 / libadwaita is unavailable) they're skipped, never shown on the user's desktop. The client package
 is imported as ``thirties`` (as installed by meson) through a temporary symlink
 to ``src/``.
 """
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from datetime import timedelta
 from pathlib import Path
 
@@ -27,7 +29,17 @@ from thirties_core.models import EventSpan, SpanCategory
 SRC = Path(__file__).resolve().parent.parent / "src"
 
 
+def isolated() -> bool:
+    """Only in a private headless session (tests/headless.py): GTK on the user's own desktop can start and then
+    unmount their document portal, breaking every Flatpak app."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    return os.environ.get("THIRTIES_HEADLESS") == "1" and bool(runtime) and \
+        not runtime.rstrip("/").startswith("/run/user/")
+
+
 def _load_gtk():
+    if not isolated():
+        return None
     try:
         import gi
         gi.require_version("Gtk", "4.0")
@@ -111,6 +123,25 @@ def _rows(widget):
     return out
 
 
+class TestOwnSession(unittest.TestCase):
+    def test_gtk_never_starts_outside_a_private_session(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {"THIRTIES_HEADLESS": "1", "XDG_RUNTIME_DIR": "/run/user/1000"}):
+            self.assertIsNone(_load_gtk())
+        with unittest.mock.patch.dict(os.environ, {"THIRTIES_HEADLESS": ""}):
+            self.assertIsNone(_load_gtk())
+
+    @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+    def test_the_display_is_the_sessions_own(self) -> None:
+        runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+        self.assertFalse(str(runtime).startswith("/run/user/"))
+        self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
+        wayland = os.environ.get("WAYLAND_DISPLAY")
+        if wayland:  # cage: its socket is in the private runtime dir
+            self.assertTrue((runtime / wayland).exists())
+        else:  # Xvfb: a display number of its own
+            self.assertNotIn(os.environ.get("DISPLAY"), (None, "", ":0", ":1"))
+
+
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
 class DayViewTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -141,11 +172,61 @@ class DayViewTests(unittest.TestCase):
         rows = lambda key: [r.get_title() for r in _rows(page.groups[key])] if key in page.groups else []
         self.assertEqual(rows("now"), ["Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("next")[0], "Dishes")
-        self.assertEqual(rows("behind"), [])
+        self.assertEqual(rows("behind"), ["Lunch with Kim"])  # the calendar lunch at noon, nothing said about it
         self.assertEqual(_blocks(page.groups["now"]), [("7 PM", ["Make bed", "Shower", "Journal", "Brush teeth"])])
         page.refresh(plan, at("19:31"))
-        self.assertEqual(rows("behind"), ["Make bed", "Shower", "Journal", "Brush teeth"])
+        self.assertEqual(rows("behind"), ["Lunch with Kim", "Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("now"), ["Dishes"])
+
+    def test_a_calendar_that_couldnt_be_read_is_said_first(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.calendar_unread = ["Evening classes"]
+        page = AgendaPage()
+        page.refresh(plan, at("19:20"))
+        first = next(iter(page.groups))
+        self.assertEqual(first, "calendar_unread")
+        self.assertEqual([r.get_title() for r in _rows(page.groups[first])],
+                         ["Couldn't read the calendar Evening classes, so its events may be missing."])
+        plan.calendar_unread = []
+        page.refresh(plan, at("19:20"))
+        self.assertNotIn("calendar_unread", page.groups)
+
+    def test_if_theres_time_comes_after_the_timed_items_with_its_actions(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.read_tool = lambda name, args: "If there's time:\n- Water the ferns\n- Oil the hinges" \
+            if name == "if_there_is_time_items" else ""
+        page.refresh(plan, at("19:20"))
+        keys = list(page.groups)
+        self.assertLess(keys.index("next"), keys.index("if_time"))  # after the day's timed items
+        self.assertEqual([r.get_title() for r in _rows(page.groups["if_time"])], ["Water the ferns", "Oil the hinges"])
+        done, schedule, later, menu = page.if_time_rows["Water the ferns"]
+        schedule.emit("clicked")
+        menu.get_last_child().emit("clicked")  # Not today → Drop
+        self.assertEqual(calls, [("if_there_is_time", {"item": "Water the ferns", "action": "schedule"}),
+                                 ("if_there_is_time", {"item": "Water the ferns", "action": "drop"})])
+
+    def test_not_yours_today_has_only_its_own_two_actions(self) -> None:
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.spans.append(EventSpan("cal-c", "Band practice", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        plan.spans.append(EventSpan("cal-h", "Hidden thing", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.read_tool = lambda name, args: "- cal-c" if name == "not_yours_today" else ""  # cal-h: hidden today
+        page.refresh(plan, at("19:20"))
+        self.assertEqual([r.get_title() for r in _rows(page.groups["not_yours"])], ["Band practice"])
+        self.assertNotIn("Band practice", [r.get_title() for r in _rows(page.groups["next"])])
+        hide, mine = page.not_yours_rows["cal-c"]
+        hide.emit("clicked")
+        mine.emit("clicked")
+        self.assertEqual(calls, [("hide_for_today", {"event": "cal-c"}),
+                                 ("resolve_calendar_event", {"event": "cal-c", "attend": False, "series": True})])
 
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
@@ -174,7 +255,8 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(titles(groups["now"]), [("Free until 8 PM", "")])
         # the block's start only: no "planned", no range, no ":00" (10-31: the row looked too busy)
         # a card per block, its start once in the gutter (10-31: option B)
-        self.assertEqual(_blocks(groups["behind"]), [("6 PM", ["Dinner", "Audiobook"])])
+        # the calendar lunch, past with nothing said, waits here too (it used to vanish from the day)
+        self.assertEqual(_blocks(groups["behind"]), [("12 PM", ["Lunch with Kim"]), ("6 PM", ["Dinner", "Audiobook"])])
         self.assertIn(("8 PM", ["Movie"]), _blocks(groups["next"]))
         self.assertEqual(_blocks(groups["done"]), [("1 PM", ["Research"])])  # when it really happened
         early = []
@@ -194,7 +276,7 @@ class DayViewTests(unittest.TestCase):
         view.agenda.replan_btn.emit("clicked")
         self.assertEqual(calls[-1], ("redraw", {}))
         self.assertTrue(view.move_to("movie", at("21:00")))
-        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM"}))  # nothing else moves
+        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM", "alongside": True}))
 
     def test_items_past_their_time_are_not_assumed_done(self) -> None:
         set_debug_time(at("21:40"))
@@ -214,6 +296,31 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual([b.get_tooltip_text() for b in buttons], ["Mark Movie done", "Mark Movie skipped"])
         buttons[0].emit("clicked")
         self.assertEqual(calls, [("log_outcome", {"event": "movie", "status": "done"})])
+
+    def test_an_item_gone_by_unreported_is_never_under_done(self) -> None:
+        # an item whose time passed with nothing said is marked "not reported": it's still to sort out, not done
+        from thirties_core.models import SpanStatus
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        research = next(s for s in plan.spans if s.id == "research")
+        research.status = SpanStatus.UNKNOWN
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.refresh(plan, at("19:20"))
+        rows = lambda key: [r.get_title() for r in _rows(page.groups[key])] if key in page.groups else []
+        self.assertNotIn("Research", rows("done"))
+        self.assertIn("Research", rows("behind"))
+        marks = [b for b in _rows_of_type(page.groups["behind"], Gtk.Button)
+                 if (b.get_tooltip_text() or "").startswith("Mark Research")]
+        self.assertEqual([b.get_tooltip_text() for b in marks], ["Mark Research done", "Mark Research skipped"])
+        marks[0].emit("clicked")
+        self.assertEqual(calls[-1], ("log_outcome", {"event": "research", "status": "done"}))
+        page.refresh(plan, None)  # looked at as another day: still apart from what was done, and still to sort out
+        self.assertNotIn("Research", rows("done"))
+        self.assertIn("Research", rows("behind"))
+        marks = [b for b in _rows_of_type(page.groups["behind"], Gtk.Button)
+                 if (b.get_tooltip_text() or "").startswith("Mark Research")]
+        self.assertEqual([b.get_tooltip_text() for b in marks], ["Mark Research done", "Mark Research skipped"])
 
     @staticmethod
     def action_rows(group):
@@ -242,14 +349,15 @@ class DayViewTests(unittest.TestCase):
         done = dict(self.action_rows(view.agenda.groups["done"]))
         self.assertEqual(done["Garden app dev"], "worked on")
         self.assertIn(("1 PM", ["Garden app dev"]), _blocks(view.agenda.groups["done"]))
-        self.assertEqual(done["Dinner"], "not reported")
+        self.assertNotIn("Dinner", done)  # not done: it waits under "Not marked yet"
+        self.assertIn("Dinner", dict(self.action_rows(view.agenda.groups["behind"])))
         now = self.action_rows(view.agenda.groups["now"])
-        self.assertEqual(now[0], ("Free until 8 PM", ""))  # someone else's event doesn't make the user busy
-        self.assertEqual(now[1], ("Book group", "not yours (shown only)"))
+        self.assertEqual(now, [("Free until 8 PM", "")])  # someone else's event doesn't make the user busy
         blocks = _blocks(view.agenda.groups["now"])  # 11-05: "Free" has a time too (when it began), so rows line up
-        self.assertEqual([b for b in blocks if b[1] == ["Book group"]], [("7 PM", ["Book group"])])
         self.assertEqual(blocks[0][1], ["Free until 8 PM"])
         self.assertTrue(blocks[0][0])
+        self.assertEqual(list(view.agenda.groups)[-1], "not_yours")  # its own section, always last
+        self.assertEqual(self.action_rows(view.agenda.groups["not_yours"]), [("Book group", "7 PM – 9 PM")])
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Garden app dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Garden app dev"].title_label.get_label())  # a session isn't struck through
@@ -492,17 +600,17 @@ class TimelineTests(unittest.TestCase):
         x, y, w, h = canvas.lane_rect(canvas.get_width(), movie.card)
         body = canvas.begin_gesture(x + w / 2, y + timeline.PITCH + 10)  # grabbed by its second thirty
         self.assertEqual((body["mode"], body["grab"]), ("move", 1))
-        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),
-                         ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),  # by hand: alongside whatever is there
+                         ("update_event", {"event": "movie", "start": "9:00 PM", "alongside": True}))
         self.assertEqual(canvas.gesture_call(body, -4 * timeline.PITCH, push=True)[1],
                          {"event": "movie", "start": "6:00 PM", "push_later": True})  # Shift: push what follows
         bottom = canvas.begin_gesture(x + w / 2, y + h - 2)
         self.assertEqual(bottom["mode"], "bottom")
-        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH), ("update_event", {"event": "movie",
-                                                                                         "end": "10:00 PM"}))
+        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH),
+                         ("update_event", {"event": "movie", "end": "10:00 PM", "alongside": True}))
         top = canvas.begin_gesture(x + w / 2, y + 2)
         self.assertEqual(canvas.gesture_call(top, timeline.PITCH)[1],
-                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM"})
+                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM", "alongside": True})
         from gi.repository import Graphene
         _ok, point = movie.tick.compute_point(canvas, Graphene.Point().init(5, 5))
         self.assertIsNone(canvas.begin_gesture(point.x, point.y))  # pressing the tick doesn't drag
@@ -629,6 +737,7 @@ class ProfileDialogTests(unittest.TestCase):
         dialog = ProfileMemoryDialog(services.profile, services.memory)
         flagged = [r for r in dialog._note_rows if r.has_css_class("warning")]
         self.assertEqual([r.get_text() for r in flagged], ["Items don't cross block boundaries"])
+        self.assertTrue(flagged[0].get_title().startswith("Now built in, remove?"))
         def walk(widget):
             for child in _children(widget):
                 yield child
@@ -747,8 +856,9 @@ class SetupAndPreferencesTests(unittest.TestCase):
         from unittest import mock
         from thirties_core.app_core import AppCore
         from thirties_core.config import ThirtiesConfig
-        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tempfile.mkdtemp(prefix="thirties_gui_data_"),
-                                           "THIRTIES_JOPLIN_PEER_HOME": tempfile.mkdtemp(prefix="thirties_gui_peer_")})
+        from tests.fixtures import temp_dir
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": temp_dir("thirties_gui_data_"),
+                                           "THIRTIES_JOPLIN_PEER_HOME": temp_dir("thirties_gui_peer_")})
         env.start()
         self.addCleanup(env.stop)
         self.core = AppCore(use_keyring=False, config=ThirtiesConfig())
@@ -766,19 +876,47 @@ class SetupAndPreferencesTests(unittest.TestCase):
         win._finish(None)
         self.assertEqual(done, [True])
         self.assertTrue(self.core.setup_done)
-        self.assertEqual(self.core.settings.get("assistant.brain"), "slm")  # Gemma unless chosen otherwise
+        self.assertEqual(self.core.settings.get("assistant.brain"), "frontier")  # Gemma isn't offered yet
         self.assertEqual(self.core.config.general.work_days, ["sat", "sun"])  # applied live
         self.app.request_background_permission.assert_called_once()
 
+    def test_the_main_menu_loses_its_brain_choice(self):
+        import re
+        from pathlib import Path
+        from gi.repository import Gtk
+        ui = Path(__file__).resolve().parent.parent / "src" / "window.ui"
+        menu_xml = re.search(r'<menu id="primary_menu">.*?</menu>', ui.read_text(), re.S).group(0)
+        menu = Gtk.Builder.new_from_string(f"<interface>{menu_xml}</interface>", -1).get_object("primary_menu")
+        n = menu.get_n_items()
+        self.assertTrue(settings_rows.drop_brain_section(menu))
+        self.assertEqual(menu.get_n_items(), n - 1)
+        self.assertFalse(settings_rows.drop_brain_section(menu))  # gone: nothing else is taken
+
+    def test_gemma_is_offered_only_with_the_developer_switch(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": ""}):
+            group = settings_rows.brain_group(settings_rows.SettingsContext(self.core))
+            self.assertEqual(group.get_description(), settings_rows.NOT_READY)  # said plainly: debug mode, on Gemini
+            self.assertIn("isn't ready", group.get_description())
+        with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": "1"}):
+            group = settings_rows.brain_group(settings_rows.SettingsContext(self.core))
+            self.assertTrue(group.get_visible())
+            self.assertNotEqual(group.get_description(), settings_rows.NOT_READY)
+
     def test_setup_sorts_the_lists_and_shows_its_guesses(self):
         from unittest import mock
+        private = "Bring the blood test results to the next appointment"
         notes = [{"id": "n1", "title": "Errands", "source_notebook": "1. Tasks", "body": "- [ ] Call the bank"},
-                 {"id": "n2", "title": "Cheat sheet", "source_notebook": "5. Misc", "body": "# Python"}]
+                 {"id": "n2", "title": "Cheat sheet", "source_notebook": "5. Misc", "body": "# Python"},
+                 {"id": "n3", "title": "Health", "source_notebook": "1. Tasks", "body": f"- {private}"}]
         self.core.joplin_engine = mock.MagicMock()
         self.core.joplin_engine.fetch_active_notes.return_value = notes
         self.core.joplin_engine.fetch_tasks.return_value = []
         sorter = mock.MagicMock()
-        sorter.role.side_effect = lambda note: {"n1": "list", "n2": "ignore"}[note["id"]]
+        from thirties_core.privacy import SHIELD
+        sent = []
+        sorter.role.side_effect = lambda note: sent.append(SHIELD.redact(note["body"])) or \
+            {"n1": "list", "n2": "ignore", "n3": "ignore"}[note["id"]]
         with mock.patch("thirties_core.brains.list_sorter.list_sorter_for", return_value=sorter):
             win = SetupWindow(application=None, core=self.core, on_done=lambda: None)
             page = next(p for p in win._pages if p.get_title() == "Your Lists")
@@ -788,6 +926,7 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertTrue(page.lists.notebook_switches["1. Tasks"].get_active())
         self.assertFalse(page.lists.notebook_switches["5. Misc"].get_active())  # nothing to do in it, it seems
         sorter.urgencies.assert_not_called()  # left for the background
+        self.assertNotIn(private, " ".join(sent))  # a private note is hidden even on the very first run
 
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)
