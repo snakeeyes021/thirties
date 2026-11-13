@@ -131,6 +131,30 @@ class TestAddEvent(unittest.TestCase):
 
 class TestUpdateEvent(unittest.TestCase):
 
+    def test_stretched_over_a_fixed_item_it_goes_alongside_and_stays_the_same_item(self) -> None:
+        t = tools_for()
+        t.execute("add_event", {"title": "Vet call", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        quilting = span_id(t, "Quilting")
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Vet call" in out, out)
+        self.assertIn("alongside=true (to this same call)", out)  # update_event takes it too: no remove and re-add
+        out = t.execute("update_event", {"event": quilting, "end": "9:00 PM", "alongside": True})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual((t.day_plan.get_span(quilting).start_dt, t.day_plan.get_span(quilting).end_dt),
+                         (at("13:00"), at("21:00")))  # the same item (its id and record), now longer
+        self.assertEqual(t.day_plan.get_span(span_id(t, "Vet call")).start_dt, at("17:00"))  # it keeps its time
+
+    def test_a_fixed_item_already_done_no_longer_blocks_the_time(self) -> None:
+        from thirties_core.models import SpanStatus
+        t = tools_for()
+        t.execute("add_event", {"title": "Vet call", "start": "5:00 PM", "duration": "15 min", "fixed": True})
+        t.execute("add_event", {"title": "Quilting", "start": "1:00 PM", "duration": "30 min"})
+        t.day_plan.get_span(span_id(t, "Vet call")).status = SpanStatus.DONE  # it happened: nothing left to protect
+        out = t.execute("update_event", {"event": span_id(t, "Quilting"), "end": "9:00 PM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(t.day_plan.get_span(span_id(t, "Quilting")).end_dt, at("21:00"))
+
     def test_work_ran_long_moves_only_the_end(self) -> None:
         t = tools_for()
         sleep_before = t.day_plan.get_span(span_id(t, "Sleep"))

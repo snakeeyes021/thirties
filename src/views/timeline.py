@@ -1089,10 +1089,11 @@ class TimelinePage(Gtk.Box):
         self.run_tool("log_outcome", args)
 
     def move_to(self, span_id: str, start: datetime) -> bool:
-        """Drag to move: to a thirty, sharing it with what's there (item 17: moving one item never moves another)."""
+        """Drag to move: to a thirty, sharing it with what's there, a fixed item too (placed by hand; item 17:
+        moving one item never moves another)."""
         if self.run_tool is None:
             return False
-        self.run_tool("update_event", {"event": span_id, "start": format_clock(start)})
+        self.run_tool("update_event", {"event": span_id, "start": format_clock(start), "alongside": True})
         return True
 
     def _change(self, name: str, args: dict) -> str:

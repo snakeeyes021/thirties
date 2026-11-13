@@ -275,7 +275,7 @@ class DayViewTests(unittest.TestCase):
         view.agenda.replan_btn.emit("clicked")
         self.assertEqual(calls[-1], ("redraw", {}))
         self.assertTrue(view.move_to("movie", at("21:00")))
-        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM"}))  # nothing else moves
+        self.assertEqual(calls[-1], ("update_event", {"event": "movie", "start": "9:00 PM", "alongside": True}))
 
     def test_items_past_their_time_are_not_assumed_done(self) -> None:
         set_debug_time(at("21:40"))
@@ -573,17 +573,17 @@ class TimelineTests(unittest.TestCase):
         x, y, w, h = canvas.lane_rect(canvas.get_width(), movie.card)
         body = canvas.begin_gesture(x + w / 2, y + timeline.PITCH + 10)  # grabbed by its second thirty
         self.assertEqual((body["mode"], body["grab"]), ("move", 1))
-        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),
-                         ("update_event", {"event": "movie", "start": "9:00 PM"}))
+        self.assertEqual(canvas.gesture_call(body, 2 * timeline.PITCH),  # by hand: alongside whatever is there
+                         ("update_event", {"event": "movie", "start": "9:00 PM", "alongside": True}))
         self.assertEqual(canvas.gesture_call(body, -4 * timeline.PITCH, push=True)[1],
                          {"event": "movie", "start": "6:00 PM", "push_later": True})  # Shift: push what follows
         bottom = canvas.begin_gesture(x + w / 2, y + h - 2)
         self.assertEqual(bottom["mode"], "bottom")
-        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH), ("update_event", {"event": "movie",
-                                                                                         "end": "10:00 PM"}))
+        self.assertEqual(canvas.gesture_call(bottom, timeline.PITCH),
+                         ("update_event", {"event": "movie", "end": "10:00 PM", "alongside": True}))
         top = canvas.begin_gesture(x + w / 2, y + 2)
         self.assertEqual(canvas.gesture_call(top, timeline.PITCH)[1],
-                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM"})
+                         {"event": "movie", "start": "8:30 PM", "end": "9:30 PM", "alongside": True})
         from gi.repository import Graphene
         _ok, point = movie.tick.compute_point(canvas, Graphene.Point().init(5, 5))
         self.assertIsNone(canvas.begin_gesture(point.x, point.y))  # pressing the tick doesn't drag

@@ -89,6 +89,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "replace_overlaps": "true only when the user says it replaces what's there: trims or removes the planned "
                                 "activities it covers (never fixed ones).",
             "push_later": "true only when the user asks to slide what follows later to make room.",
+            "alongside": "true if it happens during something fixed (reading on the train, a long session across a "
+                         "short fixed one).",
             "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
             "day": "The day the item is on (default: the day being planned).",
         },
@@ -578,7 +580,8 @@ class PlanTools:
                   and s.status != SpanStatus.SKIPPED]  # a skipped item didn't happen: its time is free
         if span.is_envelope:
             return [s for s in others if s.category == span.category]
-        return [s for s in others if not s.is_envelope and self._is_fixed(s)]
+        # a fixed thing that's already happened (or gone by unreported) has no time left to protect: it shares
+        return [s for s in others if not s.is_envelope and s.status == SpanStatus.PLANNED and self._is_fixed(s)]
 
     def _sharing(self, span: EventSpan) -> List[EventSpan]:
         """The other planned items this span shares time with (not work or sleep, not fixed ones)."""
@@ -665,7 +668,7 @@ class PlanTools:
                 f"{span.title} at {format_clock(span.start_dt)} – {format_clock(span.end_dt)} would overlap "
                 + "; ".join(self.describe(s) for s in hard)
                 + (", which is a fixed calendar commitment." if calendar else ", which is fixed (it keeps its time).")
-                + " Pick another time, or add it with alongside=true if it really happens during it.")
+                + " Pick another time, or pass alongside=true (to this same call) if it really happens during it.")
         sharing = self._sharing(span)
         if not replace_overlaps:
             from thirties_core.sharing import needs_a_word, said_together
@@ -866,6 +869,7 @@ class PlanTools:
         push_later: Any = False,
         to_day: Any = None,
         fixed: Any = None,
+        alongside: Any = False,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
@@ -914,7 +918,7 @@ class PlanTools:
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
-        if not span.is_envelope and self._push_wanted(moved, push_later, False):
+        if not span.is_envelope and self._push_wanted(moved, push_later, alongside):
             self._push_asked()
             notes = []
             span_backup = (span.start_dt, span.end_dt)
@@ -925,7 +929,7 @@ class PlanTools:
                 span.start_dt, span.end_dt = span_backup
                 raise
         else:
-            notes = self._place(moved, _as_bool(replace_overlaps))
+            notes = self._place(moved, _as_bool(replace_overlaps), alongside=_as_bool(alongside))
         span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
         if span.source == "routine":
             span.source = "user"
