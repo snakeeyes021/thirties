@@ -617,9 +617,19 @@ class Candidate:
 
 _SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0,
                  "someday": 5.0}
-# A year plan also offers a few someday items, so they're looked at once a year rather than never. Which ones turns
-# over each year (a stable shuffle by year), so over the years each gets its turn.
-SOMEDAY_PER_YEAR = 2
+# A month, year or span of years also offers a few someday items, last of all, so they fill room a plan has rather
+# than waiting for a once-a-year look. Which ones turns over each period (a stable shuffle by period), so each gets
+# its turn.
+SOMEDAY_PER_PERIOD = 2
+# How many open items a plan holds before it's full: below this, work is pulled forward into it (adjust). A quarter
+# is the year plan's slot for it.
+ROOM = {"month": 6, "quarter": 4, "year": 8, YEARS: 8}
+# Light reviews between the big ones at each period's start: the month and quarter weekly, the year and a span of
+# years monthly; and at once whenever something that matters changes (review).
+REVIEW_DAYS = {"month": 7, "quarter": 7, "year": 30, YEARS: 30}
+# What a plan is never filled with by itself: work from the level above stays there until it's pulled down a level,
+# and a span of years takes only what's due, left over or someday (everything "belongs" at so long a horizon).
+_NOT_PULLED = {"month": {"upper"}, "quarter": {"upper"}, "year": {"upper"}, YEARS: {"upper", "belongs", "from_plan"}}
 
 
 class HorizonPlanner:
@@ -1069,14 +1079,15 @@ class HorizonPlanner:
             elif above and h == above:
                 add(t, "upper", HORIZON_WHY[h])
 
-        # 6. a year: a few someday items, so they're looked at once a year (which ones turns over by year)
-        if p.level == "year":
+        # 6. a month, year or span of years: a few someday items, last of all, for room the plan has (which ones
+        # turns over by period)
+        if p.level in ("month", "year", YEARS):
             import hashlib
             someday = [t for t in tasks.values() if t.id not in placed_elsewhere and not t.id.startswith("media:")
                        and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"]
-            someday.sort(key=lambda t: hashlib.sha1(f"{p.start.year}|{t.id}".encode()).hexdigest())
-            for t in someday[:SOMEDAY_PER_YEAR]:
-                add(t, "someday", "someday: worth a look this year?")
+            someday.sort(key=lambda t: hashlib.sha1(f"{p.key}|{t.id}".encode()).hexdigest())
+            for t in someday[:SOMEDAY_PER_PERIOD]:
+                add(t, "someday", "someday: there's room for it now")
 
         for c in out.values():
             c.carried = carried.get(c.task_id, 0)
@@ -1218,6 +1229,94 @@ class HorizonPlanner:
         if raw:
             self.db.set_sync_meta(self._proposal_key(p), json.dumps({**json.loads(raw), "state": "declined"}))
         self.db.set_sync_meta("horizon_pending", "")
+
+    # --- keeping the longer plans current: pulling work forward when there's room ---
+
+    def current(self, level: str) -> Optional[Period]:
+        """This month, quarter or year; for a span of years, the one a plan holds today (None if there's none)."""
+        today = self.today()
+        if level != YEARS:
+            return period_of(level, today, self.week_start)
+        spans = [row_period(r, self.week_start) for r in self.plans.rows(level=YEARS)]
+        return next((sp for sp in spans if sp.contains(today)), None)
+
+    def adjust(self, level: str) -> List[str]:
+        """Fill the current period's plan up to its room with the best of what could go in: candidates chosen
+        afresh, so work is pulled forward (from the year into this month, from later into now) whenever there's
+        room. Returns the titles pulled in. Never before the period's own planning session has been offered."""
+        p = self.current(level)
+        if p is None:
+            return []
+        if level in SESSION_GRACE_DAYS and not self.db.get_sync_meta(f"horizon_session:{p.key}") \
+                and (self.today() - p.start).days <= SESSION_GRACE_DAYS[level]:
+            return []  # its start-of-period session comes first
+        held = [r for r in self.plan_items(p) if r["status"] in ("open", "scheduled")]
+        room = ROOM[level] - len(held)
+        if room <= 0:
+            return []
+        source_p = period_of("year", p.start, self.week_start) if level == "quarter" else p
+        # an item with a budget already reaches each period through the trickle-down (budgets.py): never moved
+        have = {r["item_id"] for r in held} | {r["item_id"] for r in self.plans.rows() if int(r.get("sessions") or 0)}
+        picks = [c for c in self.candidates(source_p, limit=None)
+                 if c.source != "pinned" and c.source not in _NOT_PULLED[level] and c.task_id not in have
+                 and c.task is not None]
+        if level == "quarter":  # what the year plan holds for later in the year comes into this quarter first
+            in_year = {r["item_id"] for r in self.plans.in_period(source_p)}
+            picks = [c for c in self.candidates(source_p, limit=None) if c.source == "pinned" and c.task is not None
+                     and c.task_id in in_year and c.task_id not in have and c.slot != p.start.isoformat()] + picks
+        pulled = []
+        for c in picks[:room]:
+            self.pin(c.task, p)
+            pulled.append(c.title)
+        if pulled:
+            log = json.loads(self.db.get_sync_meta("horizon_pulled") or "[]")
+            log += [{"title": t, "into": self.label(p), "at": self.pt._now().isoformat()} for t in pulled]
+            self.db.set_sync_meta("horizon_pulled", json.dumps(log[-50:]))
+        return pulled
+
+    def fingerprint(self) -> str:
+        """What a change that matters to the longer plans changes: the open items (their deadlines, horizons and
+        someday marks), the plans' rows, and what's been done this year."""
+        import hashlib
+        maps = self._horizon_maps()
+        items = sorted((t.id, t.due or "", self.horizon_of(t, maps), int(t.someday)) for t in self.tasks)
+        rows = sorted((r["id"], r.get("sessions") or "", r["slot"]) for r in self.plans.rows())
+        done = sorted(self._done_since(period_of("year", self.today(), self.week_start).start))
+        return hashlib.sha1(json.dumps([items, rows, done]).encode()).hexdigest()
+
+    def review(self) -> List[str]:
+        """Keep the longer plans current: whenever something that matters changed (an item done or dropped, a
+        deadline new or moved, a budget's session done, a new item), and otherwise lightly each week (month,
+        quarter) or month (year, years), pull work forward where there's room. Returns what was pulled in."""
+        now, today = self.pt._now(), self.today()
+        changed = self.db.get_sync_meta("horizon_fingerprint") != self.fingerprint()
+        pulled = []
+        for level in ("month", "quarter", "year", YEARS):
+            key = f"horizon_reviewed:{level}"
+            last = self.db.get_sync_meta(key)
+            stale = not last or (today - date.fromisoformat(last[:10])).days >= REVIEW_DAYS[level]
+            if not (changed or stale):
+                continue
+            try:
+                pulled += self.adjust(level)
+            except Exception as e:  # one level's trouble never stops the rest
+                logger.warning("Couldn't review the %s plan: %s", level, e)
+            self.db.set_sync_meta(key, today.isoformat())
+        self.db.set_sync_meta("horizon_fingerprint", self.fingerprint())  # after: its own pins are no change
+        return pulled
+
+    def pulled_text(self, since: Optional[datetime] = None) -> str:
+        """For the morning: what was pulled forward since ``since`` (all that's logged, without one)."""
+        log = json.loads(self.db.get_sync_meta("horizon_pulled") or "[]")
+        recent = [e for e in log if since is None or datetime.fromisoformat(e["at"]) >= since]
+        if not recent:
+            return ""
+        from thirties_core.assistant_tools import _short
+        by_period: Dict[str, List[str]] = {}
+        for e in recent:
+            by_period.setdefault(e["into"], []).append(_short(e["title"]))
+        return "\n".join(f"Pulled forward into {into}, where there was room: {', '.join(titles)}."
+                         for into, titles in by_period.items())
 
     # --- sessions at the natural moment ---
 

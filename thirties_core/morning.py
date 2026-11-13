@@ -11,8 +11,11 @@ morning instruction all include it, so they can't drift apart.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Tuple
+
+logger = logging.getLogger(__name__)
 
 POLICY = ("What you put on the plan goes on at once: the schedule just IS the schedule, with no approval step. "
           "Tell the user what you put on, as a short notice, not a question.")
@@ -59,7 +62,15 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
         ahead = planned_ahead_text(assistant, skip=offered)
     from thirties_core.calendar_engine import unread_text
     unread = unread_text(manager.day_plan.calendar_unread)  # an empty-looking day may not be free
-    facts = "\n\n".join(t for t in (holiday, unread, ahead if level != "off" or text else "", text) if t)
+    pulled = ""
+    if assistant is not None and db is not None:  # what the longer plans pulled forward since the last morning
+        from thirties_core.horizons import HorizonPlanner
+        try:
+            last = db.get_sync_meta("morning_sent_at")
+            pulled = HorizonPlanner(manager.tools).pulled_text(datetime.fromisoformat(last) if last else None)
+        except Exception as e:
+            logger.warning("Couldn't say what the plans pulled forward: %s", e)
+    facts = "\n\n".join(t for t in (holiday, unread, ahead if level != "off" or text else "", text, pulled) if t)
     brief = assistant.leftover_brief() if assistant is not None else ""
     return facts, brief
 

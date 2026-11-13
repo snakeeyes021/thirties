@@ -697,6 +697,19 @@ class BackgroundService:
         if text:
             self.send("📅 " + text, "horizon", now=now)
 
+    def horizon_review(self, now: datetime) -> None:
+        """Keep the longer plans current, quietly: when something that matters changes, and lightly each week or
+        month, pull work forward where a plan has room (horizons.HorizonPlanner.review). The next morning says
+        what moved."""
+        manager = self.manager()
+        if manager.tools.assistant is None or manager.scheduler is None:
+            return
+        from thirties_core.horizons import HorizonPlanner
+        with manager.turn_lock:
+            pulled = HorizonPlanner(manager.tools).review()
+        if pulled:
+            logger.info("Pulled forward into the longer plans: %d item(s)", len(pulled))
+
     def today_sync(self, now: datetime) -> None:
         """Every two minutes: catch up with hand edits to the Today note (AssistantTools.sync_today)."""
         if time.time() - self._last_today < self.TODAY_EVERY:
@@ -811,7 +824,8 @@ class BackgroundService:
             up = True
         waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
-        for duty in (self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session, self.reminders, self.heads_up, self.stretches,
+        for duty in (self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
+                     self.horizon_review, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
             if not up and duty in waits:
