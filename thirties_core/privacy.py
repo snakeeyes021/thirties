@@ -159,6 +159,26 @@ PRIVATE_TAG = "private"
 PRIVATE_LIST_RE = re.compile(r"\b(?:medical|health|healthcare|finances?|financial)\b", re.I)
 _CHECKBOX = re.compile(r"^\s*[-*+]\s+\[[ xX]\]\s+(.*\S)\s*$")
 PRIVATE_BODY = "[private note: contents not shown]"
+# All the placeholder kinds the filter makes: one left in text that's about to be written into the user's lists means
+# the real wording would be lost there (leftover_placeholder)
+PLACEHOLDER_KINDS = ("private key", "password", "PIN", "security code", "API key", "token", "secret", "backup codes",
+                     "SSN", "IBAN", "card", "routing number", "account number", "account", "ID number", "condition",
+                     "medication", "private note")
+_LEFTOVER = re.compile(r"\[\s*(?:" + "|".join(re.escape(k).replace(r"\ ", r"\s*")
+                                             for k in sorted(PLACEHOLDER_KINDS, key=len, reverse=True))
+                       + r")(?:\s*(?:\d+|\.\.\s*\d{2,4}|:[^\]\n]{0,40}))?\s*(?:\]|(?![\w.]))", re.IGNORECASE)
+
+
+def leftover_placeholder(value: Any) -> Optional[str]:
+    """The first placeholder still in ``value`` (a string, or the strings inside a list or dict), or None."""
+    if isinstance(value, str):
+        m = _LEFTOVER.search(value)
+        return m.group(0) if m else None
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple)):
+        return next((found for v in value for found in [leftover_placeholder(v)] if found), None)
+    return None
 MIN_PRIVATE_LINE = 12  # a shorter private line is too likely to match ordinary words elsewhere
 
 
@@ -298,7 +318,8 @@ class Shield:
 
     def restore(self, text: str) -> str:
         """Placeholders in a model's reply turned back into the real values (longest first, so "[card 2]" isn't
-        read as "[card]")."""
+        read as "[card]"). A placeholder the model wrote a little differently is still recognised: any case,
+        spaces added or dropped inside it, a missing closing bracket ("[Password]", "[card..1234]", "[pin 2")."""
         if not text or "[" not in text:
             return text
         with self._lock:
@@ -306,6 +327,12 @@ class Shield:
         for ph, value in pairs:
             if ph in text:
                 text = text.replace(ph, value)
+        if "[" not in text:
+            return text
+        for ph, value in pairs:
+            parts = [re.escape(p) for p in re.split(r"\s+|(?=\.\.)", ph[1:-1].strip()) if p]
+            loose = re.compile(r"\[\s*" + r"\s*".join(parts) + r"\s*(?:\]|(?![\w.]))", re.IGNORECASE)
+            text = loose.sub(lambda m: value, text)
         return text
 
     # -- messages --

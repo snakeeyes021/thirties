@@ -57,6 +57,36 @@ class SecretsTest(unittest.TestCase):
         self.assertIn("page=2", out)
 
 
+class GarbledPlaceholdersTest(unittest.TestCase):
+    """A placeholder the model wrote a little differently was never put back, and could be written into the
+    user's lists in place of the real value."""
+
+    def test_a_placeholder_written_a_little_differently_is_still_put_back(self):
+        s = Shield()
+        s.redact("Shed lock password: Gr33nG@te and card 4111 1111 1111 1111")
+        self.assertEqual(s.restore("[Password] (new lock)"), "Gr33nG@te (new lock)")
+        self.assertEqual(s.restore("pay with [card..1111]"), "pay with 4111 1111 1111 1111")
+        self.assertEqual(s.restore("pay with [CARD ..1111"), "pay with 4111 1111 1111 1111")
+        self.assertEqual(s.restore("all [passwords] reset"), "all [passwords] reset")  # another word
+
+    def test_a_change_still_holding_a_placeholder_is_never_written_to_the_lists(self):
+        from tests.test_joplin_safety import ERRANDS, VersionedJoplin, writer_for
+        from thirties_core.joplin_writeback import current_turn
+        from thirties_core.privacy import leftover_placeholder
+        self.assertEqual(leftover_placeholder({"title": "Reset the [Password ] on the router"}), "[Password ]")
+        self.assertIsNone(leftover_placeholder({"title": "Plan the [Kestrel] review", "lines": ["[ID: 1]"]}))
+        api = VersionedJoplin({"n1": {"id": "n1", "title": "Errands", "body": ERRANDS}})
+        writer, _ = writer_for(api)
+        token = current_turn.set("rename the router task")
+        try:
+            state, msg = writer.submit({"op": "add_task", "note_id": "n1", "title": "Reset the [password] on it"})
+        finally:
+            current_turn.reset(token)
+        self.assertEqual(state, "failed")
+        self.assertIn("ask the user", msg)
+        self.assertEqual(api.notes["n1"]["body"], ERRANDS)  # nothing written
+
+
 class NumbersTest(unittest.TestCase):
     def setUp(self):
         self.s = Shield()

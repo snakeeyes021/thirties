@@ -421,6 +421,13 @@ class JoplinWriter:
             # a watchlist item isn't in Joplin: it's done in Thirties' own record, never queued (one such write was
             # retried for two weeks)
             return "failed", "not a Joplin item: it's recorded in Thirties."
+        if current_turn.get():  # written because of a model's turn: no placeholder may reach the user's lists
+            from thirties_core.privacy import leftover_placeholder
+            found = leftover_placeholder({k: v for k, v in op.items() if not k.startswith("_")
+                                          and not k.endswith("id") and k not in ("key", "month", "day")})
+            if found:
+                return "failed", (f"not written: the text still holds a hidden detail ({found}) where the real "
+                                  "wording goes; ask the user how it should read.")
         if current_turn.get() and "_turn" not in op:
             op = {**op, "_turn": current_turn.get()[:500]}
         if self.api.ping() and not self._held(op):
