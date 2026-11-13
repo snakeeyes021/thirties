@@ -1675,7 +1675,7 @@ class AssistantTools(KindTools):
              "end": day.isoformat()} for t in listed])
         ask = still_unknown(self, day, left["ask"])
         spread = "".join(f"\n{_short(r['title'])}: {r['why']}." for r in left.get("respread", []))  # ongoing time moved
-        if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, and a prep week before it
+        if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, its work planned back
             from thirties_core.deadlines import moved_text
             spread += "\n" + moved_text(left["deadlines_moved"], day, short=_short)
         try:  # pins let go because their item is on no list any more: said once
@@ -1732,8 +1732,13 @@ class AssistantTools(KindTools):
         raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
         data = json.loads(raw) if raw else {}
         lo = data.get("leftovers") or {}
+        from thirties_core.deadlines import estimates_wanted
+        wanted = estimates_wanted(self)
+        ask = ("WORK TO ESTIMATE (a deadline that repeats; how much work it needs isn't known, so one session holds "
+               "its place): " + ", ".join(_short(t) for t in wanted) + ". Estimate each and save it with "
+               "set_item_facts (effort, effort_is_estimate=true), unless the user says.") if wanted else ""
         if not lo.get("keep") and not lo.get("drop"):
-            return ""
+            return ask
         tasks = {t.id: t for t in self.s.tasks}
         lines = []
         for k in lo.get("keep", []):
@@ -1745,7 +1750,7 @@ class AssistantTools(KindTools):
             lines.append(f"- {k['title']} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; today's "
-                "are on the plan):\n" + "\n".join(lines))
+                "are on the plan):\n" + "\n".join(lines) + ("\n" + ask if ask else ""))
 
     def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python

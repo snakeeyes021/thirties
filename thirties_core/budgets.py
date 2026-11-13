@@ -157,7 +157,7 @@ def share_this(planner: "HorizonPlanner", task: "TaskItem", child: "Period") -> 
     done_here, planned_here = count_sessions(planner.pt, task.title, child.start, child.end, planner.today())
     left = up.left + done_here + planned_here
     rest = periods_left(up.period, child.level, max(planner.today(), child.start), planner.week_start)
-    due = _due(task)
+    due = _due(task, planner)
     if due is not None:  # a deadline inside the period pulls the pieces earlier: only the periods before it count
         if child.start > due:
             return 0
@@ -209,7 +209,7 @@ def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") ->
     if b is None:
         return []
     pt, today = planner.pt, planner.today()
-    due = _due(task)
+    due = _due(task, planner)
     have, room, off = [], [], set()
     daylight = outdoors(task.title, pt)
     for d in week.days():
@@ -235,7 +235,14 @@ def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") ->
     return sorted(set(have) | set(picks))
 
 
-def _due(task) -> Optional[date]:
+def _due(task, planner: Optional["HorizonPlanner"] = None) -> Optional[date]:
+    """The last day work on ``task`` goes on: its deadline, or for a deadline that repeats, a few days before it
+    (deadlines.work_by: its buffer)."""
+    if planner is not None:
+        from thirties_core.deadlines import work_by
+        by = work_by(getattr(planner.pt.scheduler, "state_db", None) if planner.pt.scheduler else None, task)
+        if by is not None:
+            return by
     try:
         return date.fromisoformat(task.due[:10]) if getattr(task, "due", "") else None
     except ValueError:

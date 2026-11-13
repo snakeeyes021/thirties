@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS item_facts (
 );
 """
 _COLUMNS = ["name", "title", "kind", "minutes", "fixed_at", "not_before", "after", "goes_with", "daylight",
-            "updated_at", "repeats", "months"]
+            "updated_at", "repeats", "months", "effort", "effort_source", "lead_days"]
+_ADDED = {"repeats": "TEXT NOT NULL DEFAULT ''", "months": "TEXT NOT NULL DEFAULT ''",
+          "effort": "INTEGER NOT NULL DEFAULT 0", "effort_source": "TEXT NOT NULL DEFAULT ''",
+          "lead_days": "INTEGER NOT NULL DEFAULT 0"}
 # How often an item's deadline comes round again, when the user says so ("the filing window is every quarter"):
 # a missed one then moves to the next (deadlines.py), never guessed from the wording
 REPEATS = ("monthly", "quarterly", "yearly")
@@ -126,10 +129,13 @@ class Lasting:
     updated_at: str = ""
     repeats: str = ""                                   # its deadline comes round again: monthly, quarterly, yearly
     months: str = ""                                    # the months it's in season ("6,7,8"); empty: all year
+    effort: int = 0                                     # minutes of work it needs for each deadline; 0 = not known
+    effort_source: str = ""                             # 'user' (said) or 'estimate' (the model's judgement)
+    lead_days: int = 0                                  # how long before the deadline the work starts; 0 = not said
 
     def is_empty(self) -> bool:
         return not (self.kind or self.minutes or self.fixed_at or self.not_before or self.after or self.goes_with
-                    or self.daylight or self.repeats or self.months)
+                    or self.daylight or self.repeats or self.months or self.effort or self.lead_days)
 
     def fixed_time(self, day_start: datetime) -> Optional[datetime]:
         """The fixed time on the day that starts at ``day_start`` (an early-morning time is the next morning's)."""
@@ -161,6 +167,11 @@ class Lasting:
         if self.months:
             from thirties_core.seasons import describe, from_text
             out.append(f"in season {describe(from_text(self.months))}")
+        if self.effort:
+            out.append(f"about {format_duration(self.effort)} of work for each deadline"
+                       + (" (an estimate)" if self.effort_source == "estimate" else ""))
+        if self.lead_days:
+            out.append(f"the work starts {self.lead_days} days before its deadline")
         return [x for x in out if x]
 
 
@@ -180,9 +191,9 @@ class LastingFacts:
         with db._get_connection() as conn:
             conn.executescript(_SCHEMA)
             have = {r[1] for r in conn.execute("PRAGMA table_info(item_facts)").fetchall()}
-            for col in ("repeats", "months"):
+            for col, kind in _ADDED.items():
                 if col not in have:
-                    conn.execute(f"ALTER TABLE item_facts ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+                    conn.execute(f"ALTER TABLE item_facts ADD COLUMN {col} {kind}")
 
     @staticmethod
     def _row(row) -> Lasting:
@@ -191,6 +202,9 @@ class LastingFacts:
                        goes_with=json.loads(row["goes_with"] or "[]"), daylight=bool(row["daylight"]),
                        repeats=(row["repeats"] if "repeats" in row.keys() else "") or "",
                        months=(row["months"] if "months" in row.keys() else "") or "",
+                       effort=int((row["effort"] if "effort" in row.keys() else 0) or 0),
+                       effort_source=(row["effort_source"] if "effort_source" in row.keys() else "") or "",
+                       lead_days=int((row["lead_days"] if "lead_days" in row.keys() else 0) or 0),
                        updated_at=row["updated_at"])
 
     def all(self) -> List[Lasting]:
@@ -232,7 +246,8 @@ class LastingFacts:
     @staticmethod
     def _values(f: Lasting) -> list:
         return [f.name, f.title, f.kind, int(f.minutes), f.fixed_at, f.not_before, json.dumps(sorted(set(f.after))),
-                json.dumps(sorted(set(f.goes_with))), int(f.daylight), f.updated_at, f.repeats or "", f.months or ""]
+                json.dumps(sorted(set(f.goes_with))), int(f.daylight), f.updated_at, f.repeats or "", f.months or "",
+                int(f.effort or 0), f.effort_source or "", int(f.lead_days or 0)]
 
     def kind_override(self, title: Any, *aliases: Any) -> str:
         own = next((f for f in (self.get(t) for t in (title,) + aliases if t) if f is not None), None)
@@ -249,7 +264,8 @@ class LastingFacts:
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             defaults = {"title": "", "kind": "", "minutes": 0, "fixed_at": "", "not_before": "", "after": "[]",
-                        "goes_with": "[]", "daylight": 0, "repeats": "", "months": ""}
+                        "goes_with": "[]", "daylight": 0, "repeats": "", "months": "", "effort": 0,
+                        "effort_source": "", "lead_days": 0}
             conn.execute(f"INSERT OR REPLACE INTO item_facts ({', '.join(_COLUMNS)}) "
                          f"VALUES ({', '.join('?' * len(_COLUMNS))})",
                          [record.get(c, defaults.get(c)) for c in _COLUMNS])
@@ -379,7 +395,8 @@ def _names(value: Any) -> List[str]:
 
 def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                    stays_put: Any = None, length: Any = None, at: Any = None, goes_with: Any = None,
-                   kind: Any = None, repeats: Any = None, season: Any = None) -> str:
+                   kind: Any = None, repeats: Any = None, season: Any = None, effort: Any = None,
+                   effort_is_estimate: Any = None, lead: Any = None) -> str:
     """set_item_facts with every_day: what the user says holds for an item every day, kept by its name. The item
     needn't be planned; if it is, its title is the name. Returns the tool result."""
     from thirties_core.clock import format_clock, format_duration, parse_duration_minutes
@@ -428,6 +445,19 @@ def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = Non
         facts.months = to_text(months)
     if length not in (None, ""):
         facts.minutes = parse_duration_minutes(length)
+    replan = False
+    if effort not in (None, ""):
+        facts.effort = effort_minutes(effort, facts.minutes)
+        facts.effort_source = "estimate" if truthy(effort_is_estimate) else "user"
+        replan = True
+    if lead not in (None, ""):
+        from thirties_core.deadlines import parse_lead_days
+        try:
+            facts.lead_days = parse_lead_days(lead)
+        except ValueError as e:
+            from thirties_core.assistant_tools import ToolError
+            raise ToolError(str(e))
+        replan = True
     if at not in (None, ""):
         facts.fixed_at = pt._start(at).strftime("%H:%M")
     elif stays_put not in (None, ""):
@@ -448,6 +478,10 @@ def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = Non
                                                       if n and n != mine})
     store.set(facts)
     out = f"Noted for {facts.title}, every day: " + (", ".join(facts.describe()) or "nothing special") + "."
+    if replan and getattr(pt, "assistant", None) is not None:  # a repeating deadline's work is planned afresh
+        from thirties_core.deadlines import replan_item
+        note = replan_item(pt.assistant, facts.title)
+        out += (" " + note) if note else ""
     if span is not None and facts.minutes and span.duration_minutes < facts.minutes:
         out += (f" It's planned for {format_duration(span.duration_minutes)} today; lengthen it with update_event if "
                 "the user wants today's to match.")
@@ -457,5 +491,15 @@ def record_lasting(pt: Any, event: Any, after: Any = None, not_before: Any = Non
     return out
 
 
-__all__ = ["Lasting", "LastingFacts", "item_name", "mentions", "is_outside", "OUTSIDE", "for_new_item",
+def effort_minutes(value: Any, session_minutes: int = 0) -> int:
+    """The work an item takes, in minutes, from what was said: a length ("12 hours") or a number of sessions
+    ("6 sessions", each its usual length, or an hour)."""
+    from thirties_core.clock import parse_duration_minutes
+    m = re.fullmatch(r"\s*(?:about\s+)?(\d+)\s+sessions?\s*", str(value), re.IGNORECASE)
+    if m:
+        return int(m.group(1)) * (session_minutes or 60)
+    return parse_duration_minutes(value)
+
+
+__all__ = ["Lasting", "LastingFacts", "item_name", "effort_minutes", "mentions", "is_outside", "OUTSIDE", "for_new_item",
            "change_refused", "redraw_facts", "fact_order", "lasting_lines", "record_lasting"]

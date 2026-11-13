@@ -129,8 +129,15 @@ TOOL_SPECS: List[Dict[str, Any]] = [
                        "kind": "When the user says what kind of thing it is: 'once' (done means finished), "
                                "'ongoing' (worked on over time; stays open until finished) or 'daily'.",
                        "repeats": "When the user says its deadline comes round again: 'monthly', 'quarterly' or "
-                                  "'yearly' (a missed one then moves to the next, with time to prepare planned "
-                                  "before it). Never guess it.",
+                                  "'yearly' (a missed one then moves to the next, and its work is planned back "
+                                  "from there). Never guess it.",
+                       "effort": "How much work it needs for each deadline, as hours or sessions ('12 hours', "
+                                 "'6 sessions'): what the user said, or your own estimate when Python asks for one "
+                                 "(then set effort_is_estimate). Python plans it back from the deadline.",
+                       "effort_is_estimate": "true when effort is your estimate rather than the user's words; it's "
+                                             "shown as an estimate, and the user can correct it.",
+                       "lead": "How long before its deadline the work starts, when the user says ('a month', "
+                               "'2 weeks'); otherwise Python starts it as soon as there's room.",
                        "season": "When the user says it only makes sense in some months: a season ('summer', "
                                  "'a winter thing') or months ('May to September'); 'all year' clears it. It's then "
                                  "planned only in those months. Never guess it.",
@@ -1186,12 +1193,15 @@ class PlanTools:
     def set_item_facts(self, event: Any, after: Any = None, not_before: Any = None, daylight: Any = None,
                        stays_put: Any = None, every_day: Any = None, length: Any = None, at: Any = None,
                        goes_with: Any = None, kind: Any = None, before: Any = None, done_by: Any = None,
-                       repeats: Any = None, season: Any = None, **_: Any) -> str:
-        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind, repeats, season)):
+                       repeats: Any = None, season: Any = None, effort: Any = None, effort_is_estimate: Any = None,
+                       lead: Any = None, **_: Any) -> str:
+        if _as_bool(every_day) or any(v not in (None, "", []) for v in (length, at, goes_with, kind, repeats, season,
+                                                                         effort, lead)):
             from thirties_core.item_facts import record_lasting  # by name, every day (R6)
             return record_lasting(self, event, after=after, not_before=not_before, daylight=daylight,
                                   stays_put=stays_put, length=length, at=at, goes_with=goes_with, kind=kind,
-                                  repeats=repeats, season=season)
+                                  repeats=repeats, season=season, effort=effort,
+                                  effort_is_estimate=effort_is_estimate, lead=lead)
         def names(value: Any) -> List[str]:
             return value if isinstance(value, list) else [a for a in re.split(r"\s*(?:,|;| and )\s*", str(value)) if a]
         try:

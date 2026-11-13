@@ -1,12 +1,12 @@
-"""Deadlines that come round again (deadlines.py): a missed one moves to the next, with a prep week before it.
-Invented items throughout."""
+"""Deadlines that come round again (deadlines.py): a missed one moves to the next, and its work is planned back
+from there, sized to how much it takes. Invented items throughout."""
 
 import unittest
 from datetime import date, timedelta
 
 from tests.fixtures import DAY
 from tests.test_today import TodayTestCase
-from thirties_core.deadlines import PREP_SESSIONS, add_months, next_deadline, prep_start, prep_week
+from thirties_core.deadlines import add_months, buffer_days, next_deadline, parse_lead_days
 from thirties_core.horizons import HorizonPlanner, period_of
 from thirties_core.models import TaskItem
 
@@ -24,14 +24,12 @@ class ArithmeticTest(unittest.TestCase):
         self.assertEqual(next_deadline(date(2025, 10, 10), "yearly", DAY), date(2026, 10, 10) + timedelta(days=365))
         self.assertIsNone(next_deadline(date(2026, 9, 30), "", DAY))
 
-    def test_preparing_starts_a_month_before_or_a_third_of_the_period(self):
-        self.assertEqual(prep_start(date(2026, 12, 31), "quarterly"), date(2026, 12, 1))  # a month
-        self.assertEqual(prep_start(date(2027, 10, 15), "yearly"), date(2027, 9, 15))    # a month
-        self.assertEqual(prep_start(date(2026, 11, 30), "monthly"), date(2026, 11, 20))  # a third of 31 days: 10
-        week = prep_week(date(2026, 12, 31), DAY)
-        self.assertTrue(week.contains(date(2026, 12, 1)))  # the week preparing starts in
-        self.assertGreater((week.start - DAY).days, 40)  # about two months after a quarter's missed deadline
-        self.assertEqual(prep_week(date(2026, 11, 1), DAY), period_of("week", DAY))  # already begun: this week
+    def test_a_lead_in_days(self):
+        self.assertEqual(parse_lead_days("a month"), 30)
+        self.assertEqual(parse_lead_days("2 weeks"), 14)
+        self.assertEqual(parse_lead_days("10 days before"), 10)
+        with self.assertRaises(ValueError):
+            parse_lead_days("soonish")
 
 
 class RollTest(TodayTestCase):
@@ -41,24 +39,82 @@ class RollTest(TodayTestCase):
                                             is_checkbox_item=True, parent_note_title="Errands/Admin",
                                             parent_note_id="n_errands", due=date(2026, 9, 30).isoformat()))
 
-    def test_a_missed_repeating_deadline_moves_on_with_a_prep_week(self):
+    def facts(self, **kw):
+        return self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "quarterly", **kw})
+
+    def pinned(self):
+        from thirties_core.budgets import budget_period
+        hp = HorizonPlanner(self.t)
+        return [(budget_period(r, hp.week_start).level, int(r["sessions"]), int(r["minutes"]))
+                for r in hp.plans.rows(item_id="t_permit")]
+
+    def test_a_missed_repeating_deadline_moves_on_and_one_session_holds_its_place(self):
+        """No word yet on how much work it needs: one session, and the model (only) is asked for an estimate."""
         from thirties_core.carry import settle
         from thirties_core.lists import ListCatalog
-        out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "quarterly"})
-        self.assertIn("its deadline comes round quarterly", out)
-        left = settle(self.t.assistant, DAY)
-        moved = left["deadlines_moved"]
+        self.assertIn("its deadline comes round quarterly", self.facts())
+        moved = settle(self.t.assistant, DAY)["deadlines_moved"]
         self.assertEqual([(m["title"], m["due"]) for m in moved], [("Renew the parking permit", "2026-12-31")])
         self.assertEqual(ListCatalog(self.sched.state_db).urgencies()["t_permit"]["due"], "2026-12-31")  # stored
-        hp = HorizonPlanner(self.t)
-        week = prep_week(date(2026, 12, 31), DAY)
-        rows = [r for r in hp.plans.in_period(week) if r["item_id"] == "t_permit"]
-        self.assertEqual(int(rows[0]["sessions"]), PREP_SESSIONS)  # an intense week, before the deadline
+        self.assertEqual(self.pinned(), [("quarter", 1, 60)])  # the period that holds the time before it
+        self.assertEqual(moved[0]["plan"]["by"], "2026-12-26")  # a few days' buffer, more for the miss
+        brief = self.t.assistant.leftover_brief()
+        self.assertIn("WORK TO ESTIMATE", brief)
+        self.assertIn("Renew the parking permit", brief)
+
+    def test_the_work_is_planned_back_sized_to_what_it_takes(self):
+        from thirties_core.carry import settle
+        self.facts(effort="12 hours")
+        settle(self.t.assistant, DAY)
+        self.assertEqual(self.pinned(), [("quarter", 12, 60)])
+        self.assertNotIn("WORK TO ESTIMATE", self.t.assistant.leftover_brief())  # the user said
+
+    def test_a_big_effort_close_to_its_deadline_gets_denser_sessions(self):
+        from thirties_core.carry import settle
+        self.facts(effort="20 hours", lead="1 week")  # a week before the buffer: Dec 19 to Dec 26
+        plan = settle(self.t.assistant, DAY)["deadlines_moved"][0]["plan"]
+        self.assertEqual((plan["from"], plan["by"]), ("2026-12-19", "2026-12-26"))
+        self.assertEqual(self.pinned(), [("month", 8, 150)])  # 20 hours over 8 days: sessions of 2.5 hours
+
+    def test_a_small_effort_is_one_or_two_sessions(self):
+        from thirties_core.carry import settle
+        self.facts(effort="2 sessions")
+        settle(self.t.assistant, DAY)
+        self.assertEqual(self.pinned(), [("quarter", 2, 60)])
+
+    def test_the_models_estimate_is_shown_as_one_and_plans_the_work_again(self):
+        from thirties_core.carry import settle
+        self.facts()
+        settle(self.t.assistant, DAY)
+        out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "effort": "6 hours",
+                                                "effort_is_estimate": True})
+        self.assertIn("about 6h of work for each deadline (an estimate)", out)
+        self.assertIn("6 sessions of 1h before Dec 26 (from an estimate).", out)
+        self.assertEqual(self.pinned(), [("quarter", 6, 60)])
+        out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "effort": "4 hours"})
+        self.assertNotIn("an estimate", out)  # the user's word replaces it
+
+    def test_the_buffer_grows_with_each_miss(self):
+        from thirties_core.carry import settle
+        self.assertEqual(buffer_days(self.sched.state_db, "t_permit"), 3)
+        self.facts()
+        settle(self.t.assistant, DAY)
+        self.assertEqual(buffer_days(self.sched.state_db, "t_permit"), 5)
+
+    def test_the_budget_stops_at_the_buffer(self):
+        from thirties_core.budgets import _due
+        from thirties_core.carry import settle
+        self.facts()
+        settle(self.t.assistant, DAY)
+        task = next(t for t in self.services.tasks if t.id == "t_permit")
+        self.assertEqual(_due(task, HorizonPlanner(self.t)), date(2026, 12, 26))
+        self.assertEqual(_due(task), date(2026, 12, 31))  # without the planner: the deadline itself
 
     def test_the_morning_says_where_it_went(self):
-        self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "quarterly"})
+        self.facts(effort="3 hours")
         said = self.t.execute("rollover_proposal", {})
-        self.assertIn("Renew the parking permit: next deadline Dec 31; a prep week from ", said)
+        self.assertIn("Renew the parking permit: next deadline Dec 31; 3 sessions of 1h before Dec 26.", said)
+        self.assertNotIn("[", said)  # nothing meant for the model reaches this text
 
     def test_without_a_repeat_a_missed_deadline_is_left_alone(self):
         from thirties_core.carry import settle
