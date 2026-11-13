@@ -2,7 +2,7 @@
 
 Test, demo and example data is always invented (AGENTS.md, anti-pattern 6). Before asking for a review, run:
 
-    python3 -I tests/realdata_check.py BASE        # e.g. origin/feature/0.2
+    python3 -I tests/realdata_check.py BASE        # e.g. origin/feature/0.3
 
 It reads, read-only, what this machine's Thirties and Joplin hold (found the way the app finds them: the
 config's paths, never a path written here): the user's own messages, their items and notes. It takes every two
@@ -175,7 +175,7 @@ def user_data() -> str:
 
 
 def main(argv: List[str]) -> int:
-    base = argv[1] if len(argv) > 1 else "origin/feature/0.2"
+    base = argv[1] if len(argv) > 1 else "origin/feature/0.3"
     added = added_lines(base)
     known = baseline(base)
     data = user_data()

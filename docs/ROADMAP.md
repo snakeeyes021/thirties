@@ -2,7 +2,7 @@
 
 > The single, ordered backlog for the whole project. `AGENTS.md` defines the mission and the invariants; this file defines the order of work. If the two ever disagree, `AGENTS.md` wins and this file gets fixed.
 >
-> Last revised: 2026-11-12. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30), 0.2.0 (2026-11-08), 0.2.1 (2026-11-11). Ready: 0.3.0 on `feature/0.2` (its release notes are in the metainfo).
+> Last revised: 2026-11-12. Releases: 0.0.1 (2026-10-18), 0.1.0 (2026-10-30), 0.2.0 (2026-11-08), 0.2.1 (2026-11-11). Ready: 0.3.0 on `feature/0.3` (its release notes are in the metainfo).
 
 ---
 
@@ -398,7 +398,7 @@ The scope is everything from the 0.1 soak and the Oct 14–30 transcripts, plus 
 
 **0.2 soak** (AGENTS.md §6.3): started Fri Oct 30 (build `c52394e`); with no new blocker, the review is Mon Nov 2 evening, then the Profile audit (0.3).
 
-## 0.3 (0.3.0 cut 2026-11-12 on `feature/0.2`; what's below is still open)
+## 0.3 (0.3.0 cut 2026-11-12, on `feature/0.3`; what's below is still open)
 **Small things from a second look at 0.3.0** (none harms data; each is rare; for 0.3.x):
 - Making a new note while moving several items checks the source note before the new note is made, not again just before the source note is written.
 - Clearing ticked lines from Today matches them by wording, so a same-worded line ticked later the same day can be cleared with it; store how many of each were ticked.
