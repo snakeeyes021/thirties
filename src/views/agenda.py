@@ -62,6 +62,9 @@ def _day_text(d: Optional[date], today: Optional[date] = None) -> str:
     return d.strftime("%a %b %-d")
 
 
+BEHIND_TITLE = "Not marked yet"
+BEHIND_TEXT = "Past their time with nothing said: not assumed done."
+
 GUTTER = 60  # px: the block times' column, to the left of the cards
 
 
@@ -124,10 +127,14 @@ class AgendaPage(Gtk.ScrolledWindow):
             self._group("calendar_unread", "").add(row)
         theirs = [s for s in plan.spans_in_view() if s.shown_only]
         spans = [s for s in plan.spans_in_view() if not s.shown_only]  # someone else's: their own section, last
+        # gone by with nothing said (marked "not reported"): not done, so never under Done; still to sort out
+        unreported = [s for s in spans if _markable(s) and s.status == SpanStatus.UNKNOWN]
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
+            if unreported:
+                self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), unreported, now)
             self._fill_done(spans)
             self._fill_not_yours(theirs, today=False)
             return
@@ -135,9 +142,9 @@ class AgendaPage(Gtk.ScrolledWindow):
         # "past" at 9:06): an item is now through its whole last thirty, and past only once that's over.
         block = thirty_of(now)
         behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and _block_end(s) <= block]
+        behind += unreported
         if behind:  # first: being behind is common, and these are what to sort out
-            self._fill(self._group("behind", "Not marked yet", "Past their time with nothing said: not assumed done."),
-                       behind, now, behind=True)
+            self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), behind, now, behind=True)
         current = [s for s in spans if thirty_of(s.start_dt) <= block < _block_end(s) and s.status == SpanStatus.PLANNED
                    and not (s.is_envelope and not s.start_dt <= now < s.end_dt)]
         group = self._group("now", "Now")
@@ -329,7 +336,7 @@ class AgendaPage(Gtk.ScrolledWindow):
             group.add(box)
 
     def _fill_done(self, spans: List[EventSpan]) -> None:
-        done = [s for s in spans if s.status != SpanStatus.PLANNED and _markable(s)]
+        done = [s for s in spans if s.status not in (SpanStatus.PLANNED, SpanStatus.UNKNOWN) and _markable(s)]
         if not done:
             return
         group = self._group("done", "Done today", "What actually happened, and when.")
@@ -338,8 +345,6 @@ class AgendaPage(Gtk.ScrolledWindow):
             note = ""
             if s.status == SpanStatus.SKIPPED:
                 note = "skipped"
-            elif s.status == SpanStatus.UNKNOWN:  # gone moot with nothing said: not known to have happened
-                note = "not reported"
             elif s.status == SpanStatus.PARTIAL:
                 note = "partly"
             elif self._ongoing(s):  # a session: the thing itself carries on (B2)

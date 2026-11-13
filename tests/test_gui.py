@@ -296,6 +296,28 @@ class DayViewTests(unittest.TestCase):
         buttons[0].emit("clicked")
         self.assertEqual(calls, [("log_outcome", {"event": "movie", "status": "done"})])
 
+    def test_an_item_gone_by_unreported_is_never_under_done(self) -> None:
+        # an item whose time passed with nothing said is marked "not reported": it's still to sort out, not done
+        from thirties_core.models import SpanStatus
+        from thirties.views.agenda import AgendaPage
+        plan, _ = self.sched.build_day_plan(DAY)
+        research = next(s for s in plan.spans if s.id == "research")
+        research.status = SpanStatus.UNKNOWN
+        calls = []
+        page = AgendaPage(run_tool=lambda name, args: calls.append((name, args)) or "ok")
+        page.refresh(plan, at("19:20"))
+        rows = lambda key: [r.get_title() for r in _rows(page.groups[key])] if key in page.groups else []
+        self.assertNotIn("Research", rows("done"))
+        self.assertIn("Research", rows("behind"))
+        marks = [b for b in _rows_of_type(page.groups["behind"], Gtk.Button)
+                 if (b.get_tooltip_text() or "").startswith("Mark Research")]
+        self.assertEqual([b.get_tooltip_text() for b in marks], ["Mark Research done", "Mark Research skipped"])
+        marks[0].emit("clicked")
+        self.assertEqual(calls[-1], ("log_outcome", {"event": "research", "status": "done"}))
+        page.refresh(plan, None)  # looked at as another day: still apart from what was done
+        self.assertNotIn("Research", rows("done"))
+        self.assertIn("Research", rows("behind"))
+
     @staticmethod
     def action_rows(group):
         rows = []
@@ -323,7 +345,8 @@ class DayViewTests(unittest.TestCase):
         done = dict(self.action_rows(view.agenda.groups["done"]))
         self.assertEqual(done["Garden app dev"], "worked on")
         self.assertIn(("1 PM", ["Garden app dev"]), _blocks(view.agenda.groups["done"]))
-        self.assertEqual(done["Dinner"], "not reported")
+        self.assertNotIn("Dinner", done)  # not done: it waits under "Not marked yet"
+        self.assertIn("Dinner", dict(self.action_rows(view.agenda.groups["behind"])))
         now = self.action_rows(view.agenda.groups["now"])
         self.assertEqual(now, [("Free until 8 PM", "")])  # someone else's event doesn't make the user busy
         blocks = _blocks(view.agenda.groups["now"])  # 11-05: "Free" has a time too (when it began), so rows line up
