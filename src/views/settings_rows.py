@@ -299,13 +299,17 @@ def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 
 # --- the assistant ---
 
+NOT_READY = ("Thirties' own assistant runs privately on this computer, but it isn't ready yet. Until it is, "
+             "Thirties runs in debug mode on Gemini, in Google's cloud (Developer options, below).")
+
+
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     from thirties_core.brains import brain_unavailable_reason, gemma_offered
     from thirties_core.brains.slm.runtime import find_model
     group = Adw.PreferencesGroup(title="Assistant",
                                  description="Gemma runs privately on this computer. Nothing you say leaves it.")
-    if not gemma_offered(ctx.config()):  # the on-device model isn't offered yet: no choice to make here
-        group.set_visible(False)
+    if not gemma_offered(ctx.config()):  # the on-device model isn't offered yet: say so plainly, no choice to make
+        group.set_description(NOT_READY)
         group.refresh = lambda: None
         return group
     chosen = ctx.get("assistant.brain") or "slm"  # Gemma unless the user chose otherwise
@@ -321,7 +325,7 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     gemma.add_suffix(download)
     group.add(gemma)
 
-    gemini = Adw.ActionRow(title="Gemini (cloud, for developers)")
+    gemini = Adw.ActionRow(title="Gemini (cloud, debug mode)")
     gemini_check = Gtk.CheckButton(group=gemma_check, active=chosen == "frontier", valign=Gtk.Align.CENTER)
     gemini.add_prefix(gemini_check)
     gemini.set_activatable_widget(gemini_check)

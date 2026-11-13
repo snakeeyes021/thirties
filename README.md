@@ -3,7 +3,7 @@
 A personal assistant for your time. Thirties gathers your tasks and calendar into one place, lays the day out as 48 half-hour "thirties" anchored to sunrise and sunset, and lets you plan, re-plan and review the day in plain conversation. The aim is to take the work of *organizing the organizing* off you, the way a good executive assistant would.
 
 - A language model handles the conversation. Deterministic Python handles all time math, schedule state, invariants and integrations.
-- Today it runs on Gemini (the **Frontier Brain**). An on-device small model (the **SLM Brain**) is the long-term research goal.
+- Thirties' own assistant is a small model that runs privately on your computer (the **SLM Brain**, Gemma). It isn't ready yet, so it's behind a developer switch; for now Thirties runs in debug mode on Gemini (the **Frontier Brain**), a stand-in, not the product.
 - Connected so far: Joplin (tasks and notes) and GNOME Evolution Data Server (calendar). More connectors are planned.
 
 Read [`AGENTS.md`](./AGENTS.md) for the mission and architecture, and [`docs/ROADMAP.md`](./docs/ROADMAP.md) for what's next.

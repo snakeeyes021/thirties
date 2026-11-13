@@ -867,9 +867,13 @@ class SetupAndPreferencesTests(unittest.TestCase):
     def test_gemma_is_offered_only_with_the_developer_switch(self):
         from unittest import mock
         with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": ""}):
-            self.assertFalse(settings_rows.brain_group(settings_rows.SettingsContext(self.core)).get_visible())
+            group = settings_rows.brain_group(settings_rows.SettingsContext(self.core))
+            self.assertEqual(group.get_description(), settings_rows.NOT_READY)  # said plainly: debug mode, on Gemini
+            self.assertIn("isn't ready", group.get_description())
         with mock.patch.dict(os.environ, {"THIRTIES_OFFER_GEMMA": "1"}):
-            self.assertTrue(settings_rows.brain_group(settings_rows.SettingsContext(self.core)).get_visible())
+            group = settings_rows.brain_group(settings_rows.SettingsContext(self.core))
+            self.assertTrue(group.get_visible())
+            self.assertNotEqual(group.get_description(), settings_rows.NOT_READY)
 
     def test_setup_sorts_the_lists_and_shows_its_guesses(self):
         from unittest import mock

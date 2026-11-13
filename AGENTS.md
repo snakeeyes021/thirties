@@ -107,7 +107,7 @@ The language model handles **dialogue, intent extraction, and fuzzy negotiation*
 
 ## 4. One Shared Core, Two Brains
 
-To balance long-term interest in a robust (and privacy-focused) solution with the short term user need to have a working prototype TODAY (in the sense of "yes, I understand the car is in the shop until Tuesday, but I still need something to drive until then"), the project runs two tracks. They are **two brains on one shared core**, living side by side on `main`, not two long-lived branches.
+Thirties is a private assistant that runs on the user's own computer: **the on-device brain is the product.** It isn't ready yet, so it stays behind a developer switch, and meanwhile Thirties runs on a frontier model (Gemini) as a **debug stand-in**, so the app can be used and tested today (the car is in the shop until Tuesday, and something still has to get you to work). Say so plainly when only debug mode is usable; never present the stand-in as the product, or the on-device brain as a side project. They are **two brains on one shared core**, living side by side on `main`, not two long-lived branches.
 
 The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the frontier prompt will not work for it. Its brain has to be a structurally different, heavily scaffolded harness. That difference lives entirely in the brain layer; everything below it is shared.
 
@@ -129,16 +129,16 @@ The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the front
         connectors (Joplin, EDS calendar), sync
 ```
 
-| Dimension | Frontier Brain (the daily driver) | SLM Brain (the research track) |
+| Dimension | Frontier Brain (the debug stand-in) | On-device SLM Brain (the product) |
 | :--- | :--- | :--- |
-| **Primary Mission** | Production-ready daily driver for user's actual planning today. | Research testbed for privacy-first 4B SLMs running locally on edge hardware. |
+| **Primary Mission** | Stands in so the app can be used and tested today, and shows in real use which tools the product needs. Never the goal. | The product: a private assistant running locally on the user's own hardware (a 4B SLM). Not ready yet, so it's behind a developer switch. |
 | **Model Backend** | **Gemini 3.8 Flash** (via Antigravity `agy` CLI bridge or direct API). | **Gemma 4B / 2B** (via LiteRT-LM Vulkan/GPU). |
 | **Context Window** | **1M+ tokens**: Ingests complete task hierarchies and notes without artificial truncation. | **2K–4K tokens**: Highly constrained budget requiring strict token conservation. |
 | **Backlog Strategy** | Full ingestion with taxonomy and checklist extraction. | Need to research and test various strategies, given token/context constraints of SLM. Python pre-scores; the model sees a handful of candidates. |
 | **Model's Job** | Reads the whole situation, converses, calls tools. | Makes one tiny, schema-constrained decision per call; Python handles selection, time resolution, conflicts and as much of the reply as possible. |
-| **Validation Engine**| Real daily usage, multi-turn stress dialogues, cross-device sync. | Autonomous combinatorial matrix (`run_eval_harness.py`) and stepping judge (`interactive_eval.py`), with the Frontier Brain's result on the same scenario as a reference answer. This is the real driving force of getting the SLM running correctly; in both tracks, we are leveraging MASSIVE generative intelligence; for the daily driver, we do it "because we need *something* that works *now*," and for the SLM we do it to step in where a human normally would and provide mountains of qualitative data to hone the exact workings of our SLM and the division of labor across the model and hyper efficient/effective, well curated, and smartly selected deterministic helper tools. |
+| **Validation Engine**| Real daily usage, multi-turn stress dialogues, cross-device sync. | Autonomous combinatorial matrix (`run_eval_harness.py`) and stepping judge (`interactive_eval.py`), with the Frontier Brain's result on the same scenario as a reference answer. This is the real driving force of getting the SLM running correctly; for both brains, we are leveraging MASSIVE generative intelligence; for the stand-in, we do it "because we need *something* that works *now*," and for the SLM we do it to step in where a human normally would and provide mountains of qualitative data to hone the exact workings of our SLM and the division of labor across the model and hyper efficient/effective, well curated, and smartly selected deterministic helper tools. |
 
-**Status (2026-11-12):** the scaffolded pipeline (the SLM brain, and Gemini on it) is parked after failing its studies; it stays in the code behind a developer switch (`docs/SLM_BRAIN.md`), and the Frontier Brain is the one in use.
+**Status (2026-11-12):** only debug mode (the Frontier Brain on Gemini) is usable; the app's own assistant isn't ready. The first design for the on-device brain, a scaffolded pipeline, is parked after failing its studies; it stays in the code behind the developer switch (`docs/SLM_BRAIN.md`). The on-device goal stays: the next study asks how its brain layer should be built.
 
 Both brains use the **same tool API** (`PlanTools`). The Frontier Brain shows in real use which tools are actually needed; the SLM Brain inherits exactly those. See `docs/ROADMAP.md` for sequencing and `docs/SLM_BRAIN.md` for the research design.
 
