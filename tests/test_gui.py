@@ -710,6 +710,7 @@ class ProfileDialogTests(unittest.TestCase):
         dialog = ProfileMemoryDialog(services.profile, services.memory)
         flagged = [r for r in dialog._note_rows if r.has_css_class("warning")]
         self.assertEqual([r.get_text() for r in flagged], ["Items don't cross block boundaries"])
+        self.assertTrue(flagged[0].get_title().startswith("Now built in, remove?"))
         def walk(widget):
             for child in _children(widget):
                 yield child

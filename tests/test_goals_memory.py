@@ -109,6 +109,52 @@ class TestMemoryAudit(unittest.TestCase):
         self.assertEqual([n.text for n, _ in to_review(sched.state_db)], [self.NOTES[2]])
         self.assertEqual(len(services.memory.notes()), 4)
 
+    def test_after_an_update_the_model_names_notes_the_patterns_miss(self):
+        import json
+        from thirties_core.memory_audit import BUILT_IN, VERSION_KEY, review_after_update
+        sched = make_scheduler()
+        memory = Services.for_db(sched.state_db).memory
+        meals = memory.add("Add the meals to every day by themselves, unasked.")
+        fact = memory.add("Prefers the window seat on trains.")
+        k = next(i for i, (why, _) in enumerate(BUILT_IN, 1) if "anchors such as meals" in why)
+        calls = []
+
+        class Judge:
+            def chat(self, messages):
+                calls.append(messages[0]["content"])
+                return {"content": json.dumps({"notes": [{"id": meals.id, "behaviour": k},
+                                                         {"id": "no-such-note", "behaviour": 1},
+                                                         {"id": fact.id, "behaviour": 999}]})}
+        self.assertEqual(review_after_update(sched.state_db, "0.3.0", Judge()), 1)
+        self.assertEqual([(n.id, why) for n, why in to_review(sched.state_db)], [(meals.id, BUILT_IN[k - 1][0])])
+        self.assertIn(fact.text, calls[0])  # the notes the patterns missed, with the behaviours
+        self.assertEqual(sched.state_db.get_sync_meta(VERSION_KEY), "0.3.0")
+        review_after_update(sched.state_db, "0.3.0", Judge())
+        self.assertEqual(len(calls), 1)  # once per version
+        self.assertEqual(len(memory.notes()), 2)  # offered, never removed
+        review_after_update(sched.state_db, "0.3.1", Judge())
+        self.assertEqual(len(calls), 2)  # looked over again after the next update
+
+    def test_without_a_model_or_a_version_only_the_patterns_count(self):
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.memory_audit import review_after_update
+        sched = make_scheduler()
+        Services.for_db(sched.state_db).memory.add("Add the meals to every day by themselves, unasked.")
+        self.assertEqual(review_after_update(sched.state_db, "0.3.0", MockInferenceEngine()), 0)
+        self.assertEqual(review_after_update(sched.state_db, "", None), 0)
+
+    def test_a_kept_note_comes_back_only_for_something_built_in_later(self):
+        sched = make_scheduler()
+        memory = Services.for_db(sched.state_db).memory
+        old = memory.add(self.NOTES[2])  # a 0.2 behaviour
+        new = memory.add("Line the cleaning up with the half-hour blocks.")  # a 0.3 one
+        review = MemoryReview(sched.state_db)
+        review.keep(old.id, "0.2.4")
+        review.keep(new.id, "0.2.4")
+        self.assertEqual([n.id for n, _ in to_review(sched.state_db)], [new.id])  # built in since it was kept
+        review.keep(new.id, "0.3.0")
+        self.assertEqual(to_review(sched.state_db), [])
+
     def test_kept_answers_sync(self):
         from thirties_core.sync_engine import SyncEngine
         sched = make_scheduler()
