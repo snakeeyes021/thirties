@@ -2387,6 +2387,8 @@ class AssistantTools(KindTools):
             raise ToolError("urgency must be 'now', 'soon', 'whenever' or 'someday'.")
         ListCatalog(self._db).set_urgency(found.id, urgency, due_day, note_id=found.parent_note_id or found.id,
                                           title=found.title, source="user")
+        from thirties_core.deadlines import restart_series
+        restart_series(self._db, found.id, due_day)  # a repeating deadline goes on from the user's new date
         found.urgency, found.due, found.someday = urgency, due_day.isoformat() if due_day else "", urgency == "someday"
         return f"Noted: '{found.title}' is {urgency_label(found)}."
 

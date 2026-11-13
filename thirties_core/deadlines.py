@@ -95,6 +95,12 @@ def day_of_series(db, task_id: str, due: date) -> int:
     return day
 
 
+def restart_series(db, task_id: str, due: Optional[date]) -> None:
+    """The user set a new deadline: its series keeps the new date's day from now on, not the old one's."""
+    if db is not None and due is not None:
+        db.set_sync_meta(SERIES_DAY_KEY.format(task_id), str(series_day(due)))
+
+
 def repeats_of(db, title: str) -> str:
     """How an item's deadline comes round: what the user said, else its own text's mark; "" if it doesn't."""
     from thirties_core.item_facts import LastingFacts

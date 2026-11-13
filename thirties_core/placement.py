@@ -208,8 +208,9 @@ def push_back(tools: "PlanTools", by: int, since: Optional[datetime] = None) -> 
                       and (s.start_dt >= lo or (since is None and live and s.start_dt <= now < s.end_dt))),
                      key=lambda s: s.start_dt)
     ids = {s.id for s in movable}
-    fixed = [s for s in plan.active_spans() if s.id not in ids and not s.is_envelope and s.status != SpanStatus.SKIPPED
-             and tools._is_fixed(s)]
+    # a fixed item blocks only while it's still ahead
+    fixed = [s for s in plan.active_spans() if s.id not in ids and not s.is_envelope
+             and s.status == SpanStatus.PLANNED and tools._is_fixed(s)]
     sleep = [s for s in plan.active_spans() if s.category == SpanCategory.SLEEP]
     placed: Dict[str, Tuple[datetime, datetime]] = {}
     no_room: List[EventSpan] = []

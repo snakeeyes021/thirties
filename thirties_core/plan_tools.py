@@ -501,7 +501,9 @@ class PlanTools:
         the two share the time, and whether to plan around it is the assistant's judgement."""
         if span.source == "calendar" or span.is_firm or span.is_envelope or self._state_db is None:
             return False
-        if self._lasting().for_item(span.title).fixed_at:
+        if span.source == "routine":  # a routine's own part, as Thirties placed it
+            return True
+        if any(self._lasting().for_item(name).fixed_at for name in [span.title] + self._lasting_aliases(span.task_id)):
             return True
         from thirties_core.routines import RoutineBook
         return span.title.strip().lower() in {a.key for a in RoutineBook(self._state_db).anchors()}
@@ -744,7 +746,7 @@ class PlanTools:
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
-                    if c.id != span.id and not c.is_envelope and self._blocks(c)]
+                    if c.id != span.id and not c.is_envelope and c.status == SpanStatus.PLANNED and self._blocks(c)]
             if firm:
                 raise ToolError(f"Sliding {span.title} later would run into {firm[0].title} "
                                 f"({format_clock(firm[0].start_dt)}), a fixed commitment.")
@@ -901,7 +903,7 @@ class PlanTools:
         if to_day not in (None, ""):
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
-            return self._move_to_day(span, to_day, start, end, duration, title)
+            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
 
@@ -957,7 +959,8 @@ class PlanTools:
         extra = f" ({'; '.join(notes)})" if notes else ""
         return f"Changed {before} → {self.describe(span)}.{extra}{getattr(self, '_kept_note', '')}"
 
-    def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any) -> str:
+    def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any,
+                     alongside: bool = False) -> str:
         source_plan = self.day_plan
         target_plan = self.plan_for(to_day)
         length = span.end_dt - span.start_dt
@@ -976,7 +979,7 @@ class PlanTools:
                           source="user", task_id=span.task_id, notes=span.notes)
         self.day_plan = target_plan
         try:
-            self._place(moved, False)
+            self._place(moved, False, alongside=alongside)
         finally:
             self.day_plan = source_plan
         before = self.describe(span)

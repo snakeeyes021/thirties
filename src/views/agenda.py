@@ -133,15 +133,16 @@ class AgendaPage(Gtk.ScrolledWindow):
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
-            if unreported:
-                self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), unreported, now)
+            if unreported:  # still to sort out, there too
+                self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), unreported, now, behind=True)
             self._fill_done(spans)
             self._fill_not_yours(theirs, today=False)
             return
         # In blocks, as the cards say (10-31: one 11:00 block was split across Now and Next, and a 9:00 item was
         # "past" at 9:06): an item is now through its whole last thirty, and past only once that's over.
         block = thirty_of(now)
-        behind = [s for s in spans if _flexible(s) and s.status == SpanStatus.PLANNED and _block_end(s) <= block]
+        # a calendar event too: past its time with nothing said, it waits here rather than vanish from the day
+        behind = [s for s in spans if _markable(s) and s.status == SpanStatus.PLANNED and _block_end(s) <= block]
         behind += unreported
         if behind:  # first: being behind is common, and these are what to sort out
             self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), behind, now, behind=True)

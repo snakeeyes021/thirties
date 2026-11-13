@@ -128,6 +128,17 @@ class RollTest(TodayTestCase):
             rolled += [m["due"] for m in moved]
         self.assertEqual(rolled, ["2026-11-30", "2027-02-28", "2027-05-30"])
 
+    def test_a_new_deadline_from_the_user_restarts_the_series_on_its_day(self):
+        from thirties_core.carry import settle
+        task = next(t for t in self.services.tasks if t.id == "t_permit")
+        task.due = date(2026, 8, 30).isoformat()
+        self.facts()
+        settle(self.t.assistant, DAY)  # rolled once: the series keeps the 30th
+        out = self.t.execute("set_urgency", {"task": task.title, "due": "2027-01-15"})
+        self.assertNotIn("NOT_DONE", out)
+        moved = settle(self.t.assistant, date(2027, 1, 16))["deadlines_moved"]
+        self.assertEqual([m["due"] for m in moved], ["2027-04-15"])  # the user's new day, not the old 30th
+
     def test_a_month_end_series_stays_on_month_ends(self):
         from thirties_core.deadlines import next_deadline, series_day
         self.assertEqual(next_deadline(date(2026, 9, 30), "quarterly", DAY, series_day(date(2026, 9, 30))),

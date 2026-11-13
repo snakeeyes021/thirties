@@ -172,10 +172,10 @@ class DayViewTests(unittest.TestCase):
         rows = lambda key: [r.get_title() for r in _rows(page.groups[key])] if key in page.groups else []
         self.assertEqual(rows("now"), ["Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("next")[0], "Dishes")
-        self.assertEqual(rows("behind"), [])
+        self.assertEqual(rows("behind"), ["Lunch with Kim"])  # the calendar lunch at noon, nothing said about it
         self.assertEqual(_blocks(page.groups["now"]), [("7 PM", ["Make bed", "Shower", "Journal", "Brush teeth"])])
         page.refresh(plan, at("19:31"))
-        self.assertEqual(rows("behind"), ["Make bed", "Shower", "Journal", "Brush teeth"])
+        self.assertEqual(rows("behind"), ["Lunch with Kim", "Make bed", "Shower", "Journal", "Brush teeth"])
         self.assertEqual(rows("now"), ["Dishes"])
 
     def test_a_calendar_that_couldnt_be_read_is_said_first(self) -> None:
@@ -255,7 +255,8 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(titles(groups["now"]), [("Free until 8 PM", "")])
         # the block's start only: no "planned", no range, no ":00" (10-31: the row looked too busy)
         # a card per block, its start once in the gutter (10-31: option B)
-        self.assertEqual(_blocks(groups["behind"]), [("6 PM", ["Dinner", "Audiobook"])])
+        # the calendar lunch, past with nothing said, waits here too (it used to vanish from the day)
+        self.assertEqual(_blocks(groups["behind"]), [("12 PM", ["Lunch with Kim"]), ("6 PM", ["Dinner", "Audiobook"])])
         self.assertIn(("8 PM", ["Movie"]), _blocks(groups["next"]))
         self.assertEqual(_blocks(groups["done"]), [("1 PM", ["Research"])])  # when it really happened
         early = []
@@ -314,9 +315,12 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual([b.get_tooltip_text() for b in marks], ["Mark Research done", "Mark Research skipped"])
         marks[0].emit("clicked")
         self.assertEqual(calls[-1], ("log_outcome", {"event": "research", "status": "done"}))
-        page.refresh(plan, None)  # looked at as another day: still apart from what was done
+        page.refresh(plan, None)  # looked at as another day: still apart from what was done, and still to sort out
         self.assertNotIn("Research", rows("done"))
         self.assertIn("Research", rows("behind"))
+        marks = [b for b in _rows_of_type(page.groups["behind"], Gtk.Button)
+                 if (b.get_tooltip_text() or "").startswith("Mark Research")]
+        self.assertEqual([b.get_tooltip_text() for b in marks], ["Mark Research done", "Mark Research skipped"])
 
     @staticmethod
     def action_rows(group):

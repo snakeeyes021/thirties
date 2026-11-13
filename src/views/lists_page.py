@@ -239,6 +239,8 @@ class ListsPage(Gtk.Stack):
         days = (due - date.today()).days
         self.catalog.set_urgency(task.id, "now" if days <= 1 else "soon", due, note_id=task.parent_note_id or "",
                                  title=task.title, source="user")
+        from thirties_core.deadlines import restart_series
+        restart_series(self.catalog.db, task.id, due)  # a repeating deadline goes on from the new date
         for b in self.item_buttons[task.id].values():
             b.set_active(False)
         pick.set_label(due.strftime("%b %-d"))

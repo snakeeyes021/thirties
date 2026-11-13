@@ -169,6 +169,17 @@ class TestUpdateEvent(unittest.TestCase):
         out = t.execute("add_event", {"title": "Glazing", "start": "6:30 PM", "duration": "1 hour"})
         self.assertTrue(out.startswith(NOT_DONE) and "Vet call" in out, out)  # a one-off fixed time still holds
 
+    def test_a_routines_own_fixed_part_never_blocks_either(self) -> None:
+        from thirties_core.models import EventSpan
+        t = tools_for()
+        part = EventSpan("r-stretch", "Morning stretches", at("17:00"), at("17:15"), SpanCategory.ACTIVITY,
+                         source="routine")  # placed by Thirties as part of a routine, and kept at its time
+        t.day_plan.spans.append(part)
+        t._set_fixed(part, True)
+        out = t.execute("add_event", {"title": "Quilting", "start": "4:00 PM", "duration": "2 hours"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("a routine: it keeps its time", out)
+
     def test_a_fixed_item_already_done_no_longer_blocks_the_time(self) -> None:
         from thirties_core.models import SpanStatus
         t = tools_for()
@@ -221,6 +232,20 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertEqual(today.status.value, "skipped")
         tomorrow = t.plan_for("tomorrow")
         self.assertEqual([s.status.value for s in tomorrow.spans if s.title == "File taxes"], ["planned"])
+
+    def test_moved_to_another_day_it_can_go_alongside_something_fixed_there(self) -> None:
+        t = tools_for()
+        out = t.execute("add_event", {"title": "Ferry crossing", "start": "9:00 AM", "duration": "1 hour",
+                                      "fixed": True, "day": "tomorrow"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        t.execute("add_event", {"title": "Reading", "start": "6:00 PM", "duration": "1 hour"})
+        out = t.execute("update_event", {"event": "reading", "to_day": "tomorrow", "start": "9:00 AM"})
+        self.assertTrue(out.startswith(NOT_DONE) and "Ferry crossing" in out, out)
+        out = t.execute("update_event", {"event": "reading", "to_day": "tomorrow", "start": "9:00 AM",
+                                         "alongside": True})  # reading on the ferry
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual([s.title for s in t.plan_for("tomorrow").spans if s.title in ("Reading", "Ferry crossing")],
+                         ["Ferry crossing", "Reading"])
 
     def test_short_items_stack_in_their_thirty(self) -> None:
         t = tools_for()
