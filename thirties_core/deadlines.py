@@ -49,27 +49,50 @@ def marked_repeat(title: str) -> str:
     return _MARKS.get(m.group(1).lower(), "") if m else ""
 
 
-def add_months(d: date, months: int) -> date:
-    """The same day ``months`` later, kept within the month (Jan 31 + 1 month is Feb 28). A deadline on a month's
-    last day stays on the last day (a quarter's end, Sep 30, is followed by Dec 31)."""
+END = 31  # a series' day: "the month's last day"
+
+
+def series_day(d: date) -> int:
+    """The day a series of deadlines keeps, from its own first date: that day of the month, or END when that date
+    is the month's last day (a quarter's end, Sep 30, is followed by Dec 31)."""
+    return END if d.day == calendar.monthrange(d.year, d.month)[1] else d.day
+
+
+def add_months(d: date, months: int, day: Optional[int] = None) -> date:
+    """The series' day (``day``; else ``d``'s own, series_day) ``months`` later, kept within the month: Jan 30
+    + 1 month is Feb 28, and with day 30 the month after is Mar 30, never drifting to the month's end."""
     m = d.month - 1 + months
     y, m = d.year + m // 12, m % 12 + 1
     last = calendar.monthrange(y, m)[1]
-    if d.day == calendar.monthrange(d.year, d.month)[1]:
-        return date(y, m, last)
-    return date(y, m, min(d.day, last))
+    want = series_day(d) if day is None else day
+    return date(y, m, last if want == END else min(want, last))
 
 
-def next_deadline(due: date, repeats: str, after: date) -> Optional[date]:
-    """The first deadline of the series after ``after``."""
+def next_deadline(due: date, repeats: str, after: date, day: Optional[int] = None) -> Optional[date]:
+    """The first deadline of the series after ``after``; ``day``: the series' own day (series_day of its first
+    date), so a deadline clamped into a short month doesn't move the ones after it."""
     step = STEP_MONTHS.get(repeats)
     if not step:
         return None
-    n, nxt = 1, add_months(due, step)
+    n, nxt = 1, add_months(due, step, day)
     while nxt <= after:
         n += 1
-        nxt = add_months(due, step * n)
+        nxt = add_months(due, step * n, day)
     return nxt
+
+
+SERIES_DAY_KEY = "deadline_day:{}"  # sync meta, by item id: the day its series keeps (from its first deadline)
+
+
+def day_of_series(db, task_id: str, due: date) -> int:
+    """The series' day: kept from the first deadline that rolled (the user's own date), never from a clamped one."""
+    raw = db.get_sync_meta(SERIES_DAY_KEY.format(task_id)) if db is not None else None
+    if raw and raw.isdigit():
+        return int(raw)
+    day = series_day(due)
+    if db is not None:
+        db.set_sync_meta(SERIES_DAY_KEY.format(task_id), str(day))
+    return day
 
 
 def repeats_of(db, title: str) -> str:
@@ -212,7 +235,7 @@ def roll_missed(assistant, day: date) -> List[Dict[str, Any]]:
         if due >= day:
             continue
         repeats = repeats_of(db, t.title)
-        nxt = next_deadline(due, repeats, day - timedelta(days=1)) if repeats else None
+        nxt = next_deadline(due, repeats, day - timedelta(days=1), day_of_series(db, t.id, due)) if repeats else None
         if nxt is None:
             continue
         try:

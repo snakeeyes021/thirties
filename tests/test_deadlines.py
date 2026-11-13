@@ -116,6 +116,24 @@ class RollTest(TodayTestCase):
         self.assertIn("Renew the parking permit: next deadline Dec 31; 3 sessions of 1h before Dec 26.", said)
         self.assertNotIn("[", said)  # nothing meant for the model reaches this text
 
+    def test_a_series_keeps_its_own_day_through_a_short_month(self):
+        """Aug 30 quarterly: Nov 30 (November's last day), then Feb 28, then May 30 (not May 31)."""
+        from thirties_core.carry import settle
+        task = next(t for t in self.services.tasks if t.id == "t_permit")
+        task.due = date(2026, 8, 30).isoformat()
+        self.facts()
+        rolled = []
+        for day in (DAY, date(2026, 12, 1), date(2027, 3, 1)):
+            moved = settle(self.t.assistant, day)["deadlines_moved"]
+            rolled += [m["due"] for m in moved]
+        self.assertEqual(rolled, ["2026-11-30", "2027-02-28", "2027-05-30"])
+
+    def test_a_month_end_series_stays_on_month_ends(self):
+        from thirties_core.deadlines import next_deadline, series_day
+        self.assertEqual(next_deadline(date(2026, 9, 30), "quarterly", DAY, series_day(date(2026, 9, 30))),
+                         date(2026, 12, 31))
+        self.assertEqual(next_deadline(date(2027, 2, 28), "monthly", date(2027, 3, 1), 30), date(2027, 3, 30))
+
     def test_without_a_repeat_a_missed_deadline_is_left_alone(self):
         from thirties_core.carry import settle
         left = settle(self.t.assistant, DAY)
