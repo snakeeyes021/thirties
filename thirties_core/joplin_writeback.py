@@ -354,6 +354,11 @@ STRUCTURE_OPS = {"rename", "split", "move", "untick", "file_done", "unfile_done"
                  "file_dropped", "unfile_dropped"}
 
 
+# Changes whose title only finds an item already in a note (its new wording, if any, is in another field): a
+# placeholder there can't reach the list, so it's never a reason to refuse the change
+LOOKUP_ONLY_OPS = ("complete", "untick", "remove", "move", "move_many", "rename", "split", "break_down")
+
+
 class JoplinWriter:
     """Delivers write-back operations now if Joplin is up, else queues them in the outbox."""
 
@@ -423,8 +428,9 @@ class JoplinWriter:
             return "failed", "not a Joplin item: it's recorded in Thirties."
         if current_turn.get():  # written because of a model's turn: no placeholder may reach the user's lists
             from thirties_core.privacy import leftover_placeholder
+            lookup = ("title", "parent_title") if op.get("op") in LOOKUP_ONLY_OPS else ()  # what it finds, not writes
             found = leftover_placeholder({k: v for k, v in op.items() if not k.startswith("_")
-                                          and not k.endswith("id") and k not in ("key", "month", "day")})
+                                          and not k.endswith("id") and k not in ("key", "month", "day") + lookup})
             if found:
                 return "failed", (f"not written: the text still holds a hidden detail ({found}) where the real "
                                   "wording goes; ask the user how it should read.")
@@ -476,7 +482,11 @@ class JoplinWriter:
                     self._set_aside(row, op, "set aside: the other copy of Joplin never caught up")
                     continue
                 break  # the other copy of Joplin hasn't synced this note yet: wait, keeping the order
-            ok, msg = self._apply(op)
+            try:
+                ok, msg = self._apply(op)
+            except Exception as e:  # one broken change never stops the rest of the outbox (it's retried, then parked)
+                logger.warning("A Joplin change failed: %s", e)
+                ok, msg = False, f"Couldn't apply the change: {e}"
             if ok:
                 self.db.outbox_done(row["id"])
                 delivered += 1
@@ -588,7 +598,9 @@ class JoplinWriter:
             # sent before Joplin went away, and exactly as sent: those notes are done, and their edits aren't worked
             # out again (the item they move is already gone from where it was)
             landed = {nid for nid, n in notes.items() if self._landed_before(n)}
-            if landed == set(notes):
+            # written in reverse, so the first edit's note is written after the others: when it landed, so had
+            # they (even one edited since), so the whole change is done and nothing is worked out again
+            if landed == set(notes) or (landed and edits[0][0] in landed):
                 return True, "already in Joplin"
             for note_id, edit in edits:
                 if note_id in landed:

@@ -249,8 +249,9 @@ class ListTools:
         note_id, note_title = found.parent_note_id, found.parent_note_title or ""
         occ = found.occurrence
         is_open = any(t is found for t in self.a.s.tasks)  # an open list item: never an old tick with its wording
+        from thirties_core.privacy import SHIELD  # a private item keeps the detail the model never saw
         if str(rename_to).strip():
-            new = str(rename_to).strip()
+            new = SHIELD.keep_hidden(found.title, str(rename_to).strip())
             queued = self._submit({"op": "rename", "note_id": note_id, "title": found.title, "new_title": new,
                                    "occurrence": occ, "open_only": is_open})
             old_title = found.title
@@ -260,6 +261,7 @@ class ListTools:
         if split:
             if len(split) < 2:
                 raise ToolError("Split it into at least two lines.")
+            split = [SHIELD.keep_hidden(found.title, split[0])] + split[1:]  # the first part is the item itself
             queued = self._submit({"op": "split", "note_id": note_id, "title": found.title, "parts": split,
                                    "occurrence": occ, "open_only": is_open})
             old_title = found.title

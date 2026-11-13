@@ -86,6 +86,30 @@ class GarbledPlaceholdersTest(unittest.TestCase):
         self.assertIn("ask the user", msg)
         self.assertEqual(api.notes["n1"]["body"], ERRANDS)  # nothing written
 
+    def test_the_users_own_bracketed_words_are_never_taken_for_a_placeholder(self):
+        from tests.test_joplin_safety import VersionedJoplin, writer_for
+        from thirties_core.joplin_writeback import current_turn
+        from thirties_core.privacy import leftover_placeholder
+        for text in ("Buy a [card for grandpa]", "[Secret Santa gift] for the office", "File the [condition report]",
+                     "[Account options](https://example.org/prefs)"):
+            self.assertIsNone(leftover_placeholder({"title": text}), text)
+        self.assertEqual(leftover_placeholder({"title": "Use [pin 2"}), "[pin 2")  # still a placeholder, cut short
+        s = Shield()
+        s.redact("Diagnosis: asthma, follow up in May")  # "[condition]" is a placeholder from here on
+        self.assertEqual(s.restore("Check the [condition of the roof], and the [Condition"),
+                         "Check the [condition of the roof], and the asthma")  # the user's words stay theirs
+        body = "## Errands\n- [ ] Reset the [password] on the router\n"
+        api = VersionedJoplin({"n1": {"id": "n1", "title": "Errands", "body": body}})
+        writer, _ = writer_for(api)
+        token = current_turn.set("ticked the router one")
+        try:  # an item already in the list is found by its wording: ticking it is fine
+            state, _ = writer.submit({"op": "complete", "note_id": "n1", "title": "Reset the [password] on the router",
+                                      "is_checkbox_item": True})
+        finally:
+            current_turn.reset(token)
+        self.assertEqual(state, "done")
+        self.assertIn("- [x] Reset the [password] on the router", api.notes["n1"]["body"])
+
 
 class NumbersTest(unittest.TestCase):
     def setUp(self):
@@ -203,6 +227,19 @@ class PrivateNotesTest(unittest.TestCase):
         out = self.s.redact(f"Earlier you said: {line}")
         self.assertNotIn("insurance card", out)
         self.assertIn("Book the dentist", out)
+
+    def test_rewording_a_private_item_keeps_the_detail_the_model_never_saw(self):
+        line = "**Book the dentist** (cleaning overdue since the spring, use the new insurance card)"
+        self.s.set_private_notes(self.NOTES)
+        new = self.s.keep_hidden(line, "Book the dentist for Friday")
+        self.assertEqual(new, "**Book the dentist for Friday** (cleaning overdue since the spring, use the new "
+                              "insurance card)")
+        self.assertNotIn("insurance card", self.s.redact(f"Reworded it to '{new}'"))  # still never sent
+        self.assertEqual(self.s.keep_hidden("Paint the shed before the first frost arrives", "Paint the shed"),
+                         "Paint the shed")  # not private: as the model wrote it
+        self.assertEqual(self.s.keep_hidden(line, "Book the dentist (cleaning overdue since the spring, use the new "
+                                                  "insurance card)"),
+                         "Book the dentist (cleaning overdue since the spring, use the new insurance card)")
 
     def test_it_stays_private_across_a_restart(self):
         from tests.fixtures import make_scheduler

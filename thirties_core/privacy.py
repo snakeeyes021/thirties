@@ -166,7 +166,8 @@ PLACEHOLDER_KINDS = ("private key", "password", "PIN", "security code", "API key
                      "medication", "private note")
 _LEFTOVER = re.compile(r"\[\s*(?:" + "|".join(re.escape(k).replace(r"\ ", r"\s*")
                                              for k in sorted(PLACEHOLDER_KINDS, key=len, reverse=True))
-                       + r")(?:\s*(?:\d+|\.\.\s*\d{2,4}|:[^\]\n]{0,40}))?\s*(?:\]|(?![\w.]))", re.IGNORECASE)
+                       + r")(?:\s*(?:\d+|\.\.\s*\d{2,4}|:[^\]\n]{0,40}))?\s*(?:\]|(?![\w.]|\s+\w))", re.IGNORECASE)
+# (a closing bracket left off is still a placeholder, "[pin 2"; but "[card for mum]" is the user's own wording)
 
 
 def leftover_placeholder(value: Any) -> Optional[str]:
@@ -237,6 +238,28 @@ class Shield:
             self._private_lines = sorted(lines, key=len, reverse=True)
             self._private_items = sorted(items.items(), key=lambda kv: len(kv[0]), reverse=True)
         return count
+
+    def keep_hidden(self, old: str, new: str) -> str:
+        """``new``, the model's wording for a private item it only ever saw shortened (``old`` in full), with the
+        detail it never saw put back, so rewording or splitting it never drops that detail from the user's list.
+        The new full line is private from now on, like the old one. ``new`` unchanged for any other item."""
+        from thirties_core.titles import split_title
+        with self._lock:
+            short = dict(self._private_items).get(old)
+        new = new.strip()
+        detail = split_title(old)[1]
+        if not short or not detail or detail in new:
+            return new
+        at = old.find(short)
+        if at >= 0:  # the title's own place in the line, its markup and what follows it kept
+            full = old[:at] + new + old[at + len(short):]
+        else:  # a title shortened with "…": the detail after the new wording
+            full = f"{new} ({detail})"
+        with self._lock:
+            items = dict(self._private_items)
+            items[full] = new
+            self._private_items = sorted(items.items(), key=lambda kv: len(kv[0]), reverse=True)
+        return full
 
     def private_state(self) -> Dict[str, Any]:
         """What's remembered as private, to keep across restarts (on this device only)."""
@@ -331,7 +354,7 @@ class Shield:
             return text
         for ph, value in pairs:
             parts = [re.escape(p) for p in re.split(r"\s+|(?=\.\.)", ph[1:-1].strip()) if p]
-            loose = re.compile(r"\[\s*" + r"\s*".join(parts) + r"\s*(?:\]|(?![\w.]))", re.IGNORECASE)
+            loose = re.compile(r"\[\s*" + r"\s*".join(parts) + r"\s*(?:\]|(?![\w.]|\s+\w))", re.IGNORECASE)
             text = loose.sub(lambda m: value, text)
         return text
 

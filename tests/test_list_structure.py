@@ -44,6 +44,20 @@ class TestStructure(ListsTestCase):
         self.assertIn("Added under 'Call the bank'", out)
         self.assertIn("- [ ] Call the bank\n    - [ ] Look up the routing number\n", self.body("n_errands"))
 
+    def test_rewording_a_private_item_never_drops_its_hidden_detail_from_the_list(self):
+        from thirties_core.privacy import SHIELD
+        line = "**Renew the prescription** (the blue inhaler, ask for the larger size)"
+        self.api.notes["n_errands"]["body"] += f"- [ ] {line}\n"
+        self.services.tasks = self.read_tasks()
+        SHIELD.set_private_notes([{"id": "n_errands", "title": "Health", "source_notebook": "Lists",
+                                   "body": f"- [ ] {line}\n"}])
+        out = self.t.execute("edit_list_item", {"item": "Renew the prescription",
+                                                "rename_to": "Renew the prescription this week"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("- [ ] **Renew the prescription this week** (the blue inhaler, ask for the larger size)\n",
+                      self.body("n_errands"))
+        self.assertNotIn("inhaler", SHIELD.redact(out))  # the reply to the model still hides it
+
     def test_move_between_sections(self):
         out = self.t.execute("edit_list_item", {"item": "Learn to juggle", "to_section": "Active"})
         self.assertEqual(out, "Moved 'Learn to juggle' under 'Active' in Errands/Admin.")

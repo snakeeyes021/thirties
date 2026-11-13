@@ -293,6 +293,62 @@ class TwoNoteChangesTest(unittest.TestCase):
         self.assertEqual(api.notes["n2"]["body"].count("Buy stamps"), 1)
         self.assertNotIn("Buy stamps", api.notes["n1"]["body"])
 
+    def crash_on_second_write(self, api):
+        real_update, calls = api.update_note, []
+
+        def update(note_id, data):
+            calls.append(note_id)
+            if len(calls) == 2:  # the item's own note is saved, then Joplin goes away before answering
+                api.crash_after_put = True
+            return real_update(note_id, data)
+        api.update_note = update
+
+    def test_a_landed_move_whose_receiving_note_was_edited_since_is_done_on_the_retry(self):
+        api = self.api()
+        writer, db = writer_for(api)
+        self.crash_on_second_write(api)
+        state, _ = writer.submit({"op": "move", "note_id": "n1", "to_note_id": "n2", "title": "Buy stamps",
+                                  "section": "Home"})
+        self.assertEqual(state, "queued")
+        api.up = True
+        api.user_edit("n2", api.notes["n2"]["body"] + "- [ ] Sweep the porch\n")  # edited before the retry
+        writer.flush(launch=False)  # never stuck on the item it already took out
+        self.assertEqual(db.outbox_pending(), [])
+        self.assertEqual(api.notes["n2"]["body"].count("Buy stamps"), 1)  # never a second copy
+        self.assertIn("Sweep the porch", api.notes["n2"]["body"])
+
+    def test_filing_a_done_item_that_landed_keeps_what_was_under_it_on_the_retry(self):
+        from thirties_core.done_log import DoneLog
+        api = VersionedJoplin({"n1": {"id": "n1", "title": "Errands",
+                                      "body": "## Errands\n- [x] Buy stamps\n    - [x] Find the envelopes\n"
+                                              "- [ ] Return the library books\n"},
+                               "d1": {"id": "d1", "title": "Done 2026-10", "body": ""}})
+        writer, db = writer_for(api)
+        db.set_sync_meta("done_note:2026-10", "d1")
+        self.crash_on_second_write(api)
+        state, _ = writer.submit({"op": "file_done", "note_id": "n1", "title": "Buy stamps", "key": "k-stamps",
+                                  "month": "2026-10", "day": "2026-10-15", "list_title": "Errands"})
+        self.assertEqual(state, "queued")
+        api.up = True
+        writer.flush(launch=False)
+        self.assertEqual(db.outbox_pending(), [])
+        record = DoneLog(db).get("k-stamps")
+        self.assertEqual(record["section"], "Errands")  # what to put back if it's undone
+        self.assertIn("    - [x] Find the envelopes", record["block"])
+        self.assertEqual(api.notes["d1"]["body"].count("Buy stamps"), 1)
+
+    def test_a_change_that_breaks_never_stops_the_rest_of_the_outbox(self):
+        api = self.api()
+        writer, db = writer_for(api)
+        api.up = False
+        writer.submit({"op": "move", "note_id": "n1", "to_note_id": "n2", "title": "Buy stamps", "section": "Home"})
+        writer.submit({"op": "add_task", "note_id": "n2", "title": "Paint the shed"})
+        api.up = True
+        real_apply = writer._apply
+        writer._apply = lambda op: (_ for _ in ()).throw(KeyError("block")) if op["op"] == "move" else real_apply(op)
+        writer.flush(launch=False)
+        self.assertIn("Paint the shed", api.notes["n2"]["body"])  # the next change still went through
+
 
 if __name__ == "__main__":
     unittest.main()

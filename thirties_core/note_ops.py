@@ -58,7 +58,7 @@ def _move(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
     open_only = bool(op.get("open_only"))  # an open list item: never an old ticked line with the same wording
     if target == op["note_id"]:
         return writer._edit_body(target, lambda b: ne.move_within(b, op["title"], section, occ, open_only=open_only))
-    held: Dict[str, Any] = {}
+    held: Dict[str, Any] = op.setdefault("_taken", {})  # kept on the op: a retry may find the change already made
 
     def take(body: str) -> Optional[str]:
         taken = ne.take_item(body, op["title"], occ, ticked_too=bool(op.get("ticked_too")), open_only=open_only)
@@ -147,7 +147,7 @@ def _done(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
     if op["op"] == "worked_on":
         return writer._edit_body(done_id, lambda b: ne.insert_lines(b, [f"- [x] {op['line']}"], None))
     line = done_line(date.fromisoformat(op["day"]), op["title"], op.get("list_title") or "")
-    held: Dict[str, Any] = {}
+    held: Dict[str, Any] = op.setdefault("_taken", {})  # kept on the op: a retry may find the change already made
 
     def take(body: str) -> Optional[str]:
         taken = ne.take_item(body, op["title"], occ, ticked_only=True)
@@ -234,7 +234,7 @@ def _dropped(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
     if note_id is None:
         return False, "Couldn't make the Dropped note in Joplin."
     line = dropped_line(date.fromisoformat(op["day"]), op["title"], op.get("list_title") or "", op.get("why") or "")
-    held: Dict[str, Any] = {}
+    held: Dict[str, Any] = op.setdefault("_taken", {})  # kept on the op: a retry may find the change already made
 
     def take(body: str) -> Optional[str]:
         held["anchor"] = _anchor(body, op["title"], occ)
