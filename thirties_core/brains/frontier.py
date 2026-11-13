@@ -398,8 +398,16 @@ RULES
                                    r"\b(done|finished|complete|skipped)\b|\b(logged|marked) (?:it|that|them|both)\b",
                                    re.IGNORECASE)
 
+    # "it isn't actually marked done", "hasn't been logged as finished": saying it's NOT recorded is no claim
+    _NEGATED_RE = re.compile(r"(?:n't|\bnot|\bnever|\bnothing|\bno)\b(?:\s+\w+){0,3}\s*$", re.IGNORECASE)
+
     def _claims_outcome(self, text: str) -> bool:
-        return bool(self._OUTCOME_CLAIM_RE.search(text or "")) and not self._ADMITS_RE.search(text or "")
+        text = text or ""
+        if self._ADMITS_RE.search(text):
+            return False
+        return any(not self._NEGATED_RE.search(text[max(0, m.start() - 40):m.start()])
+                   and not re.search(r"\bnot\b|n't", m.group(0), re.IGNORECASE)
+                   for m in self._OUTCOME_CLAIM_RE.finditer(text))
 
     def _claims_change(self, text: str) -> bool:
         return bool(ACTION_CLAIM_PATTERN.search(text or ""))

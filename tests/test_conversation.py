@@ -174,6 +174,18 @@ class TestTurnLoop(ConversationTestCase):
         self.assertTrue(any("no log_outcome went through" in n for n in notes), notes)
         self.assertEqual(self.manager.tools.outcomes_logged, 1)
 
+    def test_saying_something_is_not_marked_done_is_no_claim(self) -> None:
+        self.manager.execute_tool("add_event", {"title": "Sanding", "start": "9:00 AM", "duration": "1 hour"})
+        text = "Sanding isn't actually marked done: it's still waiting to hear how it went. Did it happen?"
+        self.engine.set_next_response(reply(text))
+        self.assertEqual(self.manager.send_user_message("why does sanding look finished?"), text)
+        self.assertEqual(len(self.engine.call_history), 1)  # no second round to "correct" it
+        for said in ("Nothing is recorded as done so far.", "It hasn't been logged as finished."):
+            self.assertFalse(self.manager.brain._claims_outcome(said), said)
+        for said in ("No problem — I've marked it done.", "No problem, I've marked Sanding done.",
+                     "Not bad! Marked Sanding as finished."):
+            self.assertTrue(self.manager.brain._claims_outcome(said), said)  # a "no" elsewhere isn't a denial
+
     def test_reply_narrating_the_conversation_is_asked_again(self) -> None:
         self.engine.set_next_response(reply("Notice that the previous turn ran the tools. Let's check rule 9."))
         self.engine.set_next_response(reply("You're free all afternoon."))
