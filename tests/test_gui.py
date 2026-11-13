@@ -1,6 +1,7 @@
 """Headless checks of the GTK desktop client's widgets.
 
-Skipped when GTK 4 / libadwaita or a display is unavailable. The client package
+Run them with ``python3 tests/headless.py``, which gives them a private headless session; anywhere else (or
+when GTK 4 / libadwaita is unavailable) they're skipped, never shown on the user's desktop. The client package
 is imported as ``thirties`` (as installed by meson) through a temporary symlink
 to ``src/``.
 """
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from datetime import timedelta
 from pathlib import Path
 
@@ -27,7 +29,17 @@ from thirties_core.models import EventSpan, SpanCategory
 SRC = Path(__file__).resolve().parent.parent / "src"
 
 
+def isolated() -> bool:
+    """Only in a private headless session (tests/headless.py): GTK on the user's own desktop can start and then
+    unmount their document portal, breaking every Flatpak app."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    return os.environ.get("THIRTIES_HEADLESS") == "1" and bool(runtime) and \
+        not runtime.rstrip("/").startswith("/run/user/")
+
+
 def _load_gtk():
+    if not isolated():
+        return None
     try:
         import gi
         gi.require_version("Gtk", "4.0")
@@ -109,6 +121,25 @@ def _rows(widget):
         out += _rows(c)
         c = c.get_next_sibling()
     return out
+
+
+class TestOwnSession(unittest.TestCase):
+    def test_gtk_never_starts_outside_a_private_session(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {"THIRTIES_HEADLESS": "1", "XDG_RUNTIME_DIR": "/run/user/1000"}):
+            self.assertIsNone(_load_gtk())
+        with unittest.mock.patch.dict(os.environ, {"THIRTIES_HEADLESS": ""}):
+            self.assertIsNone(_load_gtk())
+
+    @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+    def test_the_display_is_the_sessions_own(self) -> None:
+        runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+        self.assertFalse(str(runtime).startswith("/run/user/"))
+        self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
+        wayland = os.environ.get("WAYLAND_DISPLAY")
+        if wayland:  # cage: its socket is in the private runtime dir
+            self.assertTrue((runtime / wayland).exists())
+        else:  # Xvfb: a display number of its own
+            self.assertNotIn(os.environ.get("DISPLAY"), (None, "", ":0", ":1"))
 
 
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")

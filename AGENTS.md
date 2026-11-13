@@ -175,7 +175,7 @@ Future agents frequently fall into predictable traps. **Never make these six err
 ### 🚫 Anti-Pattern 5: "Vibe Testing"
 *The Symptom*: Making an edit to `conversation.py`, trying a single prompt in the chat panel, saying "looks good to me", and committing.
 *The Consequence*: Silent regressions in timezone handling, edge-case block calculations, or sync payloads.
-*The Correct Fix*: Always run the automated unit test suite (`python3 -m unittest discover tests`) and relevant evaluation harnesses (`tests/interactive_eval.py`) before declaring victory.
+*The Correct Fix*: Always run the automated unit test suite (`python3 tests/headless.py`) and relevant evaluation harnesses (`tests/interactive_eval.py`) before declaring victory.
 
 ### 🚫 Anti-Pattern 6: Real Data in Tests, Fixtures and Docs
 *The Rule*: Test, demo, fixture and example data is always invented. Never copy items, notes, names or schedules from a real user's database, Joplin notes, chats or screenshots, and never quote a user's messages in code, comments, docs or commit messages; describe the behaviour or bug instead.
@@ -240,8 +240,10 @@ Thirties/
 ### 6.2. Common Execution Commands
 Use `.venv/bin/python` instead of `python3` if you have a project virtualenv.
 ```bash
-# 1. Run full unit test suite (Fast, sandboxed, mock-backed)
-python3 -m unittest discover tests
+# 1. Run full unit test suite (mock-backed), GTK tests included, in a private headless session: never on the
+#    user's own desktop (a GTK program sharing /run/user/<uid> can unmount their document portal). A plain
+#    `python3 -m unittest discover tests` skips the GTK tests.
+python3 tests/headless.py
 
 # 2. Run Headless Mobile Bridge (Temporary Telegram daemon)
 python3 -m thirties_core.telegram_bridge

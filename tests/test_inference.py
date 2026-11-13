@@ -2,6 +2,7 @@
 
 from tests.fixtures import temp_dir
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -279,6 +280,15 @@ class TestTransports(unittest.TestCase):
         cfg_mock = ThirtiesConfig()
         cfg_mock.inference.backend = "mock"
         self.assertIsInstance(get_inference_engine(cfg_mock), MockInferenceEngine)
+
+
+class TestNoRealModelInUnitTests(unittest.TestCase):
+    @unittest.skipIf(os.environ.get("THIRTIES_LIVE_MODELS") == "1", "live models allowed for this run")
+    def test_the_agy_cli_is_never_found_and_there_is_no_api_key(self) -> None:
+        from thirties_core.inference import find_agy_binary, get_inference_engine
+        self.assertIsNone(find_agy_binary())
+        self.assertNotIn("GEMINI_API_KEY", os.environ)
+        self.assertEqual(type(get_inference_engine(ThirtiesConfig())).__name__, "MockInferenceEngine")
 
 
 if __name__ == "__main__":

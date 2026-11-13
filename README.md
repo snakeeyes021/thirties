@@ -34,7 +34,7 @@ with `flatpak install --user tech.redfoxlabs.Thirties.flatpak`; it's an early al
 For development:
 
 ```bash
-python3 -m unittest discover tests                         # unit tests
+python3 tests/headless.py                                  # unit tests, in a private headless session
 ~/.local/share/thirties/venv/bin/python -m tests.sim_eval  # simulated users (see docs/SLM_BRAIN.md §4)
 python3 -m thirties_core.telegram_bridge                   # the background service headless, without the app
 ```
