@@ -303,8 +303,12 @@ class ConversationManager:
         self.brain.messages = value
 
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Run a schedule tool directly, bypassing the model."""
-        return self.tools.execute(name, arguments)
+        """Run a schedule tool directly, bypassing the model: the app's own controls, so the user did it."""
+        self.tools.by_hand = True
+        try:
+            return self.tools.execute(name, arguments)
+        finally:
+            self.tools.by_hand = False
 
     def _now_iso(self) -> str:
         return get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")

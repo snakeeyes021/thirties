@@ -7,8 +7,9 @@ one short, concrete plan for the open time: what's pressing, not the whole backl
 and says why (propose_day); the proposal is the schedule: it goes on the plan at once, exactly as proposed, and
 is said as a notice, which the user can still change, as with the rollover.
 
-Items put off again and again are offered kindly: as a 30-minute start, with a note saying so. When no model can
-pick (the on-device brain, or a failed call), Python makes the obvious proposal itself (default_items).
+An item missed day after day isn't offered again the next morning: it rests a little longer after each miss, and
+after the third gets one question instead (backoff.py). When no model can pick (the on-device brain, or a failed
+call), Python makes the obvious proposal itself (default_items).
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ def _short(title: str, limit: int = 80) -> str:
 
 MAX_CANDIDATES = 8   # what the model chooses from: enough to choose, never the backlog
 MAX_DEFAULT = 3      # Python's own proposal (no model): a few things, not a full day
-DEFERRED_OFTEN = 3   # put off this many times: offered as a 30-minute start
 PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a later "yes"
 MIN_FREE_MINUTES = 60  # less free time than this ahead: nothing to propose
 
@@ -243,12 +243,10 @@ class DayProposal:
                 rank, why = (5, 0), "a free-time pick"
             else:
                 continue
-            if t.deferred_count >= DEFERRED_OFTEN:
-                why += f"; put off {t.deferred_count} times: offer a 30-minute start or breaking it down, kindly"
             if low not in out or rank < out[low]["rank"]:
                 out[low] = {"rank": rank, "task": t, "title": title, "why": why,
                             "where": t.parent_note_title or t.source_notebook or "",
-                            "minutes": 30 if t.deferred_count >= DEFERRED_OFTEN else usual_minutes(self.a, t, title)}
+                            "minutes": usual_minutes(self.a, t, title)}
         found = sorted(out.values(), key=lambda c: (c["rank"], c["title"].lower()))
         menus = [c for c in found if c["rank"][0] == 5][:2]
         found = [c for c in found if c["rank"][0] < 5][:MAX_CANDIDATES - len(menus)] + menus
@@ -369,6 +367,19 @@ class DayProposal:
                 task = self.a._exact_task(words)
                 ref = words
             title = task.title if task is not None else ref
+            from thirties_core.backoff import MissStreaks, signature
+            from thirties_core.item_facts import mentions
+            said = self.pt.user_message
+            from thirties_core.carry import ASAP_RE
+            rest = MissStreaks(self.db).held_until(self.pt.day_plan.target_date, title, task.id if task else "",
+                                                   signature(task), task.due if task else "",
+                                                   urgent=(task is not None and task.urgency == "now")
+                                                   or bool(ASAP_RE.search(title)))
+            if rest is not None and not (said is not None and mentions(said, title)):
+                problems.append(f"{title} was missed lately (skipped or left unmarked), so it rests"
+                                + (f" until {rest.strftime('%A')}" if rest != date.max else "")
+                                + " unless the user brings it up")
+                continue
             try:
                 start = self.pt._start(raw.get("start"))
                 minutes = parse_duration_minutes(raw["duration"]) if raw.get("duration") not in (None, "") else \
@@ -450,7 +461,7 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
     """The candidates for a day, best first: what the horizon plans bubble down into it (pinned to the day, due,
     the week's unplaced items, ...: horizons.candidates_for_day), then this module's own (urgency, Today, menus,
     time on a project) for what they don't cover. Each is {"rank", "task", "title", "why", "where", "minutes"}."""
-    own = dp.own_candidates(plan)
+    own = _resting_out(dp, plan.target_date, dp.own_candidates(plan))
     try:
         from thirties_core.horizons import candidates_for_day
         bubbled = candidates_for_day(dp.a.pt, plan.target_date, limit=MAX_CANDIDATES)
@@ -467,13 +478,11 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
         if c.sessions and c.minutes:
             minutes = c.minutes  # a session of a budgeted effort: the budget says how long (budgets.py)
-        if c.deferred >= DEFERRED_OFTEN:
-            why += f"; put off {c.deferred} times: offer a 30-minute start or breaking it down, kindly"
-            minutes = 30
         out.append({"rank": (0, i), "task": c.task, "title": c.title, "why": why,
                     "where": c.list or (c.task.parent_note_title if c.task is not None else "") or "",
-                    "minutes": minutes})
+                    "minutes": minutes, "session": bool(c.sessions and c.due)})
         seen.add(c.title.lower())
+    out = _resting_out(dp, plan.target_date, out)
     out += [c for c in own if c["title"].lower() not in seen]
     try:  # out of season, an item waits for its months: never offered day after day (seasons.py)
         from thirties_core.horizons import HorizonPlanner
@@ -483,6 +492,25 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
     except Exception as e:
         logger.warning("Couldn't check the seasons of the day's candidates: %s", e)
     return out[:MAX_CANDIDATES]
+
+
+def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Leave out what's resting after missed days (backoff.py); a due date near, a session of the work planned back
+    from it today, or what can't wait, still comes."""
+    from thirties_core.backoff import MissStreaks, signature
+    from thirties_core.carry import ASAP_RE
+    if dp.db is None:
+        return cands
+    streaks = MissStreaks(dp.db)
+    out = []
+    for c in cands:
+        t = c.get("task")
+        urgent = bool(c.get("session")) or (t is not None and t.urgency == "now") or bool(ASAP_RE.search(c["title"]))
+        if streaks.held(day, c["title"], t.id if t is not None else "", signature(t), t.due if t is not None else "",
+                        urgent=urgent):
+            continue
+        out.append(c)
+    return out
 
 
 MORNING_FACTS = (

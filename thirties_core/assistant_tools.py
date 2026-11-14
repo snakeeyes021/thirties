@@ -247,6 +247,14 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["item", "action"],
     },
     {
+        "name": "still_want",
+        "description": "Answer Before today's question about an item missed several days running (\"Still want "
+                       "this?\"), as the user says: keep (an option this week again), park (later: a month-level "
+                       "horizon) or drop (stop rolling it over; its list in Joplin keeps it, untouched).",
+        "parameters": {"item": "The item's title.", "choice": "keep, park or drop."},
+        "required": ["item", "choice"],
+    },
+    {
         "name": "restore_old_drops",
         "description": "Answer the one-time offer about items dropped before drops stopped touching Joplin (they "
                        "were filed in Dropped notes): put_back true puts them back on their lists where they were, "
@@ -1652,6 +1660,23 @@ class AssistantTools(KindTools):
         return BeforeToday(self)
 
     def rollover_proposal(self, **_: Any) -> str:
+        """The leftovers' notice (_rollover_notice), then the one question about items missed several days running
+        (backoff.py): one line each, asked once, answered in Before today or the chat (still_want)."""
+        text = self._rollover_notice()
+        if self._db is None:
+            return text
+        from thirties_core.backoff import MissStreaks, question_lines
+        streaks = MissStreaks(self._db)
+        still = streaks.to_ask()
+        if not still:
+            return text
+        streaks.mark_asked([r["title"] for r in still], self._today())
+        question = question_lines(still, _short)
+        if text.startswith("Nothing from yesterday"):
+            return question
+        return text.rstrip() + "\n" + question
+
+    def _rollover_notice(self) -> str:
         """The morning's proposal for what's left from before (carry.py, before_today.py; 11-06: it takes effect
         by itself). Each one-off with no outcome gets Python's first guess, a natural horizon; a Keep for today
         goes on today's schedule now, the others wait at their horizon. The morning model may revise it
@@ -2416,6 +2441,7 @@ class AssistantTools(KindTools):
             "propose_leftovers": self.propose_leftovers,
             "set_item_note": self.set_item_note,
             "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
+            "still_want": lambda item="", choice="", **_: self.before.still_want(item, choice),
             "restore_old_drops": lambda put_back=True, **_: self.before.restore_old_drops(put_back),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,

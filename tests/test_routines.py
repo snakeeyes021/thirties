@@ -534,7 +534,7 @@ class TestProposingTheDay(RoutineCase):
     def test_candidates_are_whats_pressing_not_the_backlog(self):
         cands = self.t.assistant.proposals.candidates()
         self.assertEqual([c["title"] for c in cands], ["Buy stamps", "Call the bank", "Clean the garage"])
-        self.assertIn("put off 4 times: offer a 30-minute start", cands[2]["why"])
+        self.assertNotIn("30-minute start", cands[2]["why"])  # put off often: no smaller re-offer (backoff.py)
         text = self.t.execute("day_options", {})
         self.assertIn("- Buy stamps (due Saturday; Errands/Admin; about 30m) task_id=t_stamps", text)  # horizons
         self.assertIn("Free time:\n- 4:00 PM – ", text)  # after work, before bed

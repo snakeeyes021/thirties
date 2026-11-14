@@ -26,6 +26,9 @@ RESTORE_HINT = ("Dropped earlier, when a drop still took items off their lists. 
 RESTORE_PUT_BACK, RESTORE_LEAVE = "Put back", "Leave them"
 ARCHIVE_TITLE, ARCHIVE_HINT = "Archive", "Let go. Nothing is deleted: undrop brings one back."
 EMPTY = "Nothing left from before."
+ASK_TITLE = "Still want these?"
+ASK_HINT = "Missed several days running, so Thirties stopped offering them. Asked once."
+ASK_LABELS = {"keep": "Keep for this week", "park": "Park for later", "drop": "Drop"}
 LABELS = {"accept": "Accept", "done": "Done", "drop": "Drop", "keep": "Keep", "undrop": "Undrop"}
 
 
@@ -57,6 +60,19 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
             data = {}
         keep, drop, archive = data.get("keep") or [], data.get("drop") or [], data.get("archive") or []
         restore = data.get("restore") or []
+        ask = data.get("ask") or []
+        if ask:  # the one question about what's been missed several days running (backoff.py)
+            group = self._group("ask", ASK_TITLE, ASK_HINT)
+            for r in ask:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(title_of(r["title"])),
+                                    subtitle=GLib.markup_escape_text(r.get("why") or ""))
+                for choice in ("keep", "park", "drop"):
+                    b = Gtk.Button(label=ASK_LABELS[choice], valign=Gtk.Align.CENTER)
+                    b.add_css_class("flat")
+                    b.connect("clicked", lambda _b, t=r["title"], c=choice: self._answer(t, c))
+                    self.buttons[("still", r["title"], choice)] = b
+                    row.add_suffix(b)
+                group.add(row)
         if restore:  # once: drops filed under the old meaning can go back on their lists (11-11)
             group = self._group("restore", RESTORE_TITLE, RESTORE_HINT)
             for title in restore:
@@ -70,7 +86,7 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
                 self.buttons[("restore", "put_back" if put_back else "leave")] = b
                 buttons.append(b)
             group.add(buttons)
-        if not keep and not drop and not archive and not restore:
+        if not keep and not drop and not archive and not restore and not ask:
             self._group("empty", "").add(Adw.ActionRow(title=EMPTY))
             return
         if keep:
@@ -108,6 +124,12 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
 
     def _restore(self, put_back: bool) -> None:
         out = self.run_tool("restore_old_drops", {"put_back": put_back}) if self.run_tool else ""
+        if out and self.on_notice:
+            self.on_notice(out)
+        self.refresh()
+
+    def _answer(self, title: str, choice: str) -> None:
+        out = self.run_tool("still_want", {"item": title, "choice": choice}) if self.run_tool else ""
         if out and self.on_notice:
             self.on_notice(out)
         self.refresh()

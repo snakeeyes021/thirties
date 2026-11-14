@@ -375,6 +375,19 @@ class DayViewTests(unittest.TestCase):
         view.before.buttons[("restore", "put_back")].emit("clicked")
         self.assertEqual(calls, [("restore_old_drops", {"put_back": True})])
 
+    def test_before_today_asks_once_about_what_keeps_being_missed(self) -> None:
+        calls = []
+        view = DayView()
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Re-pot the fern: parked for later.")
+        view.before.rows_provider = lambda: {"keep": [], "drop": [], "archive": [],
+                                             "ask": [{"title": "Re-pot the fern", "why": "missed 3 days running"}]}
+        view.refresh_plan(self.plan)
+        self.assertIn("ask", view.before.groups)
+        labels = [view.before.buttons[("still", "Re-pot the fern", c)].get_label() for c in ("keep", "park", "drop")]
+        self.assertEqual(labels, ["Keep for this week", "Park for later", "Drop"])
+        view.before.buttons[("still", "Re-pot the fern", "park")].emit("clicked")
+        self.assertEqual(calls, [("still_want", {"item": "Re-pot the fern", "choice": "park"})])
+
     def test_before_today_beside_today_with_the_same_actions_as_the_chat(self) -> None:
         # 11-06: Keep rows (accept/done/drop), Drop rows (accept/keep/done), an Archive by day (undrop)
         calls = []

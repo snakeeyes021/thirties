@@ -195,6 +195,8 @@ def settle(assistant, day: date) -> Dict[str, Any]:
             pass
     out = sort_leftovers(assistant, day)
     if db is not None:
+        from thirties_core.backoff import MissStreaks
+        MissStreaks(db).record_day(day - timedelta(days=1), out.get("missed", []), out.get("done", []))
         pool = OpenPool(db)
         try:
             assistant.before.reconcile()  # what the user changed in Joplin by hand comes first (11-06)
@@ -266,6 +268,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     ask: List[str] = []
     ended: List[str] = []
     pool_items: List[Dict[str, str]] = []
+    missed: List[Dict[str, str]] = []  # one-offs planned yesterday and skipped or left unmarked (backoff.py)
     off_today: List[str] = []
     seen = set()
 
@@ -316,6 +319,18 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low not in asked_before:
             ask.append(s.title)
         pool_items.append(rollable_item(s.title, low))
+        missed.append(_miss(s, pool_items[-1].get("task_id") or "", tasks))
+
+    for s in yesterday.spans:  # skipped is a miss too: the same one-offs, by the same rules
+        low = s.title.strip().lower()
+        if s.status != SpanStatus.SKIPPED or s.is_envelope or low in done_titles \
+                or s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.is_firm or pt._is_fixed(s) \
+                or never_rolls(s.title, s) or any(m["title"].strip().lower() == low for m in missed):
+            continue
+        task = tasks.get(s.task_id or "") or listed.get(low)
+        missed.append(_miss(s, s.task_id or (task.id if task is not None else ""), tasks))
+    done_items = [{"title": s.title, "task_id": s.task_id or ""} for s in yesterday.spans
+                  if s.status == SpanStatus.DONE]
 
     tz = pt.day_plan.day_start.tzinfo
 
@@ -357,7 +372,13 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             ask.append(title)
         pool_items.append(rollable_item(title, low))
     return {"ask": ask, "off_today": off_today, "ended": ended,
-            "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed}
+            "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed,
+            "missed": missed, "done": done_items}
+
+
+def _miss(span, task_id: str, tasks: Dict[str, Any]) -> Dict[str, str]:
+    from thirties_core.backoff import signature
+    return {"title": span.title, "task_id": task_id, "sig": signature(tasks.get(task_id))}
 
 
 def _deadline_of(assistant, task, missed_on: date) -> tuple:
@@ -385,9 +406,11 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     """Where each missed item goes next (replan.py), recorded on it: a one-off waits for the first day from today
     with room (never past its deadline), and that day's morning puts it on; missed time on something ongoing is
     spread over its next sessions. Someday items stay someday."""
+    from thirties_core.backoff import MissStreaks, signature
     from thirties_core.day_proposal import usual_minutes
     from thirties_core.replan import place_once, spread_ongoing
     tasks = {t.id: t for t in assistant.s.tasks}
+    streaks = MissStreaks(assistant._db)
     pt = assistant.pt
     week_start = getattr(pt.scheduler.config.general, "week_start", "mon") if pt.scheduler else "mon"
     week_end = max(_week_bounds(day, week_start)[1], day + timedelta(days=1))  # by default within this week
@@ -395,11 +418,17 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
         if item.get("horizon") == SOMEDAY:
             continue
         task = tasks.get(item.get("task_id") or "")
+        rest = streaks.held_until(day, item["title"], item.get("task_id") or "", signature(task), item.get("due", ""),
+                                  urgent=item.get("horizon") == TODAY)  # what can't wait isn't held
+        if rest == date.max:
+            continue  # parked or dropped when asked: not placed by Thirties (backoff.py)
         try:
             due = date.fromisoformat(item["due"][:10]) if item.get("due") else None
             # what can't wait (the today horizon) may go on today; everything else waits from tomorrow (rule 3:
-            # when unsure, never today)
+            # when unsure, never today); and never before a miss's rest is over (backoff.py)
             first = day if item.get("horizon") == TODAY else day + timedelta(days=1)
+            if rest is not None:
+                first = max(first, rest)
             placed = place_once(pt, item["title"], usual_minutes(assistant, task, item["title"]),
                                 first - timedelta(days=1), due, last=week_end)
         except Exception as e:

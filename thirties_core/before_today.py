@@ -62,9 +62,14 @@ class BeforeToday:
         pt, day = self.a.pt, self._today()
         placed, overflow = [], []
         pool = OpenPool(self.db)
+        from thirties_core.backoff import MissStreaks
+        streaks = MissStreaks(self.db)
         for item in items:
             if not item.get("end") or item["end"] > day.isoformat() or item.get("start", "") > day.isoformat():
                 continue  # not today's
+            if item.get("proposed_on") and streaks.held(day, item["title"], item.get("task_id") or "",
+                                                        due=item.get("due", ""), urgent=item.get("horizon") == "today"):
+                continue  # resting after missed days (backoff.py): Thirties doesn't put it on
             span = self._on_plan(item)
             if span is not None:
                 pool.set(item["title"], slot=span.start_dt.isoformat())
@@ -137,8 +142,44 @@ class BeforeToday:
             keep.append(row)
         keep.sort(key=lambda r: (r["at"] is None, r["at"].timestamp() if r["at"] else 0, r["title"].lower()))
         drop.sort(key=lambda r: r["title"].lower())
+        from thirties_core.backoff import MissStreaks
+        ask = [{"title": r["title"], "why": f"missed {r['misses']} days running"}
+               for r in MissStreaks(self.db).asked_open()] if self.db is not None else []
         return {"keep": keep, "drop": drop, "archive": sorted(archive.items(), reverse=True),
-                "restore": [r["title"] for r in self.old_filed_drops()]}
+                "restore": [r["title"] for r in self.old_filed_drops()], "ask": ask}
+
+    def still_want(self, item: str, choice: str) -> str:
+        """The answer to "Still want this?" (backoff.py): keep for this week, park for later, or drop."""
+        from thirties_core.assistant_tools import ToolError
+        from thirties_core.backoff import CHOICES, MissStreaks
+        choice = str(choice or "").strip().lower()
+        choice = {"keep for this week": "keep", "park for later": "park", "later": "park"}.get(choice, choice)
+        if choice not in CHOICES:
+            raise ToolError("choice must be keep, park or drop.")
+        rec = MissStreaks(self.db).answer(item, choice)
+        if rec is None:
+            raise ToolError(f"'{item}' isn't one Thirties asked about.")
+        title = rec["title"]
+        pool = OpenPool(self.db)
+        left = pool.all().get(title.strip().lower())
+        if choice == "keep":
+            if left is not None and left.get("horizon") not in (DROPPED, "gone"):
+                pool.place(title, "week", resolve_when("this week", self._today(), self._week_start()))
+            return f"{title}: kept for this week."
+        if choice == "drop":
+            if left is not None and left.get("horizon") not in (DROPPED, "gone"):
+                return self._drop(left, by="user")
+            pool.add([{"title": title, "task_id": rec.get("task_id") or ""}], self._today())
+            return self._drop(pool.all()[title.strip().lower()], by="user")
+        task = next((t for t in self.a.s.tasks if (rec.get("task_id") and t.id == rec["task_id"])
+                     or t.title.strip().lower() == title.strip().lower()), None)
+        if task is not None and self.a.pt.scheduler is not None:
+            from thirties_core.horizons import horizon_handlers
+            horizon_handlers(self.a)["set_horizon"](horizon="month", task=task.id)
+        if left is not None:
+            self.take_off_today(left)
+            pool.drop([title])  # it waits on its list at its month-level horizon, not in the daily pool
+        return f"{title}: parked for later (this month's plan, not the days)."
 
     # --- what the user does (from the tab or the chat) ---
 

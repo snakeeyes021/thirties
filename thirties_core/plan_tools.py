@@ -355,6 +355,7 @@ class PlanTools:
         self.successful_changes = 0  # every tool call that changed something, on any day or store
         self.outcomes_logged = 0  # successful log_outcome calls
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
+        self.by_hand = False  # a tool run from the app's own controls (a drag, a button): the user did it
         self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
     # ------------------------------------------------------------------
@@ -1551,6 +1552,29 @@ class PlanTools:
     # Dispatch & state tracking
     # ------------------------------------------------------------------
 
+    def _placed_by_user(self, name: str, args: Dict[str, Any]) -> None:
+        """The user placed or pinned an item themselves (their words name it, or the app's controls): a run of
+        missed days ends (backoff.py)."""
+        from thirties_core.backoff import PLACING_TOOLS, MissStreaks, placing_refs
+        from thirties_core.item_facts import mentions
+        if name not in PLACING_TOOLS or self._state_db is None or not (self.by_hand or self.user_message):
+            return
+        try:
+            streaks = MissStreaks(self._state_db)
+            tasks = {t.id: t for t in self.assistant.s.tasks} if self.assistant is not None else {}
+            for ref in placing_refs(name, args):
+                span = next((s for s in self.day_plan.spans if s.id == ref), None)
+                if span is not None:
+                    title, task_id = span.title, span.task_id or ""
+                elif ref in tasks:
+                    title, task_id = tasks[ref].title, ref
+                else:
+                    title, task_id = ref, ""
+                if self.by_hand or mentions(self.user_message, title):
+                    streaks.reset(title, task_id)
+        except Exception as e:  # never in the way of the change itself
+            logger.warning("Couldn't note that the user placed it: %s", e)
+
     def execute(self, name: str, arguments: Dict[str, Any]) -> str:
         """Run a tool by name. Failures come back as a NOT_DONE sentence; nothing is changed."""
         handlers = {
@@ -1605,6 +1629,8 @@ class PlanTools:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
             if guard_note and not str(result).startswith(NOT_DONE):
                 result = f"{result}{guard_note}"
+            if outermost and not str(result).startswith(NOT_DONE):
+                self._placed_by_user(name, args)
             return self.shorten(result) if outermost else result  # items by their short titles (11-07)
         except (ToolError, ClockError) as e:
             # a refusal changes nothing: anything the tool changed before it refused is put back
