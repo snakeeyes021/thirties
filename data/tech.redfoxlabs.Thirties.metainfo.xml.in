@@ -77,6 +77,7 @@
           <li>Private notes are hidden from the cloud model from the very first sorting of your lists at setup, and a line added to a private note later is hidden before the next sorting</li>
           <li>On the Day page, a calendar event past its time with nothing said waits under Not marked yet instead of vanishing, and items not marked on another day can be marked there</li>
           <li>A new deadline you set for a repeating item becomes the day its later deadlines follow</li>
+          <li>A conversation's title in the chat is your own first words (or the day, before you've said anything), never one of Thirties' own instructions; titles already stored that way are put right</li>
           <li>Time on a project ("Garden app dev") never rolls over, whatever list it's on; "Pick up meds" is a one-off, not a daily thing</li>
           <li>What a replan can't fit waits for tomorrow instead of being deleted, a change that fails never half-happens, and a time you gave keeps its minutes when it's moved</li>
           <li>Long or marked-up list lines go on Today by their short title; a done item doesn't leave an earlier copy asking about it; old plan pins expire; a routine never goes on as one opaque item; and done times are only ones you said (or Thirties' estimate)</li>
