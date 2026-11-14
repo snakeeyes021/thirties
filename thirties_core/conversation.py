@@ -444,6 +444,8 @@ class ConversationManager:
         merged = "\n".join(i.text for i in batch)
         self.tools.user_message = merged
         self.tools.shown_schedule = None
+        from thirties_core import whats_next
+        self._plan_before = whats_next.snapshot(self.day_plan)  # what the turn moves, for what's next
         self._stamp()
         self.reload_backlog()  # anything older is from before this turn
         if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
@@ -492,6 +494,7 @@ class ConversationManager:
                                if self.day_plan.target_date == self.tools.today() else None)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
+        final = self._with_whats_next(final, merged, before)
         if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":
@@ -532,6 +535,25 @@ class ConversationManager:
         listed = [s for s in missed if MISSED_HEADING in out and f"- {s.title}" in out]
         tracker.mark(now, listed, asked)
         return out
+
+    def _with_whats_next(self, reply: str, said: str, before: int) -> str:
+        """After a turn that changed something, what's next, from the plan as it now stands (whats_next.py), at the
+        end of the reply. Never with a schedule already in the reply, or when the user asked for it."""
+        from thirties_core import whats_next
+        from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
+        cfg = getattr(self.scheduler, "config", None) if self.scheduler is not None else None
+        mode = getattr(getattr(cfg, "assistant", None), "after_change", whats_next.DEFAULT_MODE)
+        if mode == "nothing" or self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or ""):
+            return reply
+        changed = any(m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
+                      and str(m.get("content") or "").strip() and not str(m.get("content")).startswith(NOT_DONE)
+                      for m in self.brain.messages[before:])
+        if not changed:
+            return reply
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
+        part = whats_next.render(self.day_plan, now, moved, mode, said)
+        return reply.rstrip() + "\n\n" + part if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
               attempts: int) -> str:

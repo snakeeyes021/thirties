@@ -981,6 +981,16 @@ class SetupAndPreferencesTests(unittest.TestCase):
         sorter.urgencies.assert_not_called()  # left for the background
         self.assertNotIn(private, " ".join(sent))  # a private note is hidden even on the very first run
 
+    def test_what_a_reply_shows_after_a_change(self):
+        from thirties_core.settings import SETTINGS
+        group = settings_rows.messages_group(settings_rows.SettingsContext(self.core))
+        row = _combo_rows(group)["After a change, show"]
+        self.assertEqual(row.get_selected(), 1)  # "What's next", by default
+        for i, mode in enumerate(("nothing", "next", "rest")):
+            row.set_selected(i)
+            self.assertEqual(self.core.settings.get("assistant.after_change"), mode)
+        self.assertEqual(SETTINGS["assistant.after_change"].scope, "shared")  # the same on every device
+
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)
         self.assertIsNotNone(dialog)

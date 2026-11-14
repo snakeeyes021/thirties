@@ -46,6 +46,7 @@ def temp_dir(prefix: str) -> str:
 def make_scheduler(events: Optional[List[CalendarEvent]] = None, db_path: Optional[Path] = None) -> DeterministicScheduler:
     cfg = ThirtiesConfig()
     cfg.general.timezone = "America/New_York"
+    cfg.assistant.after_change = "nothing"  # tests of replies see the model's text alone (test_whats_next turns it on)
     db = StateDatabase(db_path or Path(temp_dir("thirties_test_")) / "state.sqlite")
     return DeterministicScheduler(config=cfg, state_db=db, calendar_engine=MockCalendarEngine(list(events or [])))
 

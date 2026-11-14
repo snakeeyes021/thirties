@@ -103,6 +103,9 @@ class AssistantConfig:
     # scheduled wake-up ("wake": when the night's Sleep is planned to end); with or without the day's items.
     morning_message_at: str = "wake"
     morning_message_items: bool = True
+    # After a turn that changed something, the reply ends with: "nothing", "next" (the block you're in and the
+    # next few things: whats_next.py) or "rest" (the rest of today); rendered by Python, never by the model
+    after_change: str = "next"
     sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
     sunset_notice: bool = False
 

@@ -141,12 +141,34 @@ def _note(s: EventSpan) -> str:
     return s.status.value if s.status != SpanStatus.PLANNED else ""
 
 
-def schedule_rows(plan: DayPlan, start: Optional[datetime] = None) -> List[str]:
+def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only: bool = False) -> List[str]:
     """The plan from ``start`` on (the whole day without one), by blocks: each row a block and what's in it,
-    things at the same time joined with +, and an end time only before a gap (clock.agenda_lines)."""
-    items = [s for s in _row_items(plan) if start is None or s.start_dt >= start]
+    things at the same time joined with +, and an end time only before a gap (clock.agenda_lines). The one row
+    formatter: the schedule (render_schedule) and what's next after a change (whats_next) both lay rows out
+    here. ``planned_only``: what's still to come (nothing done, skipped or unanswered)."""
+    items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start)
+             and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]
     rows = [(s.start_dt, s.end_dt, s.title, _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
     return agenda_lines(rows)
+
+
+def plain_rows(rows: List[str]) -> List[str]:
+    """schedule_rows' rows as plain lines: no bullets, and a block with one thing after another on one line
+    ("7:00 PM – Shower, then Journal (until 7:30 PM)"); everything else exactly as the schedule shows it."""
+    grouped: List[list] = []
+    for row in rows:
+        if row.startswith("  ") and grouped:  # what follows within that half hour
+            grouped[-1][1].append(row.strip())
+        else:
+            grouped.append([row[2:] if row.startswith("- ") else row, []])
+    lines = []
+    for head, parts in grouped:
+        if parts:
+            m = re.match(r"^(.*?–)\s*(\(until [^)]*\))?$", head)
+            when, until = (m.group(1), m.group(2)) if m else (head, None)
+            head = f"{when} {', then '.join(parts)}" + (f" {until}" if until else "")
+        lines.append(head)
+    return lines
 
 
 def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = False,
