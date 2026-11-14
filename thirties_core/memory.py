@@ -18,6 +18,7 @@ and is shared by every brain and client:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from thirties_core.scheduler import StateDatabase, utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 PROFILE_SECTIONS = [
     "Habits & routines",
@@ -105,6 +108,32 @@ class Conversation:
         return sum(1 for m in self.messages if m.get("role") == "user")
 
 
+# Thirties' own messages in a conversation (system checks, the morning's instruction): never the user's words
+_INTERNAL_RE = re.compile(r"^\s*\[(?:System check|[^\]]*not from the user)", re.IGNORECASE)
+
+
+def is_internal(m: Dict[str, Any]) -> bool:
+    return bool(m.get("hidden")) or bool(_INTERNAL_RE.match(str(m.get("content") or "")))
+
+
+def day_title(plan_date: date) -> str:
+    """A conversation's title before the user has said anything: its day ("Friday, November 14")."""
+    return plan_date.strftime("%A, %B %-d")
+
+
+def conversation_title(conv: "Conversation") -> str:
+    """The user's own first words (shortened), never a hidden or system message; the day until they've spoken."""
+    first = next((str(m.get("content") or "").strip() for m in conv.messages
+                  if m.get("role") == "user" and not is_internal(m) and str(m.get("content") or "").strip()), "")
+    if not first:
+        return day_title(conv.plan_date)
+    return (first[:60] + "…") if len(first) > 60 else first
+
+
+def _needs_title(conv: "Conversation") -> bool:
+    return not conv.title or conv.title == day_title(conv.plan_date) or bool(_INTERNAL_RE.match(conv.title))
+
+
 def _row_to_conversation(row) -> Conversation:
     return Conversation(
         id=row["id"],
@@ -151,6 +180,25 @@ class ConversationStore:
     def __init__(self, db: StateDatabase) -> None:
         self.db = db
         ensure_schema(db)
+        self.repair_titles()
+
+    def repair_titles(self) -> int:
+        """Titles made from a hidden or system message (they reached the chat's header) made again by the same
+        rule as new ones. Titles are the app's own label, not the user's content. Returns how many."""
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM conversations WHERE substr(title, 1, 1) = '['").fetchall()
+        fixed = 0
+        for row in rows:
+            conv = _row_to_conversation(row)
+            if not _INTERNAL_RE.match(conv.title):
+                continue
+            title = conversation_title(conv)
+            with self.db._get_connection() as conn:  # the title alone: when it was last changed stays as it was
+                conn.execute("UPDATE conversations SET title = ? WHERE id = ?", (title, conv.id))
+            fixed += 1
+        if fixed:
+            logger.info("Repaired %d conversation title(s) that came from Thirties' own messages.", fixed)
+        return fixed
 
     def create(self, plan_date: date) -> Conversation:
         now = utc_now_iso()
@@ -160,9 +208,8 @@ class ConversationStore:
 
     def save(self, conv: Conversation) -> None:
         conv.updated_at = utc_now_iso()
-        if not conv.title:
-            first = next((m.get("content", "") for m in conv.messages if m.get("role") == "user"), "")
-            conv.title = (first[:60] + "…") if len(first) > 60 else first
+        if _needs_title(conv):  # the user's own first words, never Thirties' own messages; the day until then
+            conv.title = conversation_title(conv)
         with self.db._get_connection() as conn:
             conn.execute("""
             INSERT INTO conversations (id, plan_date, created_at, updated_at, title, summary, messages)
