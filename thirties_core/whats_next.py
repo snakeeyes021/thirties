@@ -2,7 +2,8 @@
 put at the end of the reply to a turn that changed something (an add, a done or skip, a move, a drop or undrop).
 
 Asking to see the plan right after changing it was common, so the reply carries it: the
-block they're in ("Now"), the next few things, and anything the change moved that falls outside those. The model
+block they're in ("Now"), the next few things, anything the change moved that falls outside those, and at the
+bottom what's past its time with nothing said ("Not marked yet": unknown, never assumed done or rolled). The model
 never writes it and is never asked to. A reply that already shows the schedule (show_schedule), or a turn where
 the user asked for it, gets none: never two schedules in one reply.
 
@@ -16,11 +17,13 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from thirties_core.clock import format_clock, slice_lines, thirty_of
+from thirties_core.messages import missed_items
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
 
 MODES = ("nothing", "next", "rest")
 DEFAULT_MODE = "next"
 NEXT_ROWS = 3  # the next few rows after the current block
+UNMARKED_ROWS = 5  # how many unmarked items are listed; any before them only as a count
 HALF = timedelta(minutes=30)
 
 # A turn that asks to see the plan: the reply shows it already (show_schedule), so no slice under it
@@ -70,11 +73,13 @@ def _moved_line(moved: List[EventSpan], plan: DayPlan, said: str) -> str:
 
 
 def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: str = DEFAULT_MODE,
-           said: str = "") -> str:
+           said: str = "", unmarked: Optional[List[EventSpan]] = None) -> str:
     """The slice: "Now:" and what's in the current block (no line when nothing is), then the next few rows (or
     the rest of today), laid out by the schedule's own row formatter, then any moved item not among them, and
-    someone else's events in that stretch on a "Not yours" line. "" outside the day, or with the mode "nothing".
-    ``said``: the user's message, so a time they gave keeps its minutes."""
+    someone else's events in that stretch on a "Not yours" line, and last "Not marked yet:" (no section when
+    nothing is). "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
+    keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
+    what the user asked not to be asked about); worked out from the plan when not given."""
     from thirties_core.messages import plain_rows, schedule_rows
     if mode not in MODES or mode == "nothing" or not (plan.day_start <= now < plan.day_end):
         return ""
@@ -104,7 +109,21 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     if theirs:
         lines.append("Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
                                                for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())))
+    lines += unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)
     return "\n".join(lines)
+
+
+def unmarked_lines(spans: List[EventSpan]) -> List[str]:
+    """"Not marked yet:" and one plain line per item, by the block it started in, oldest first: the most recent
+    few, and how many more came before them. Nothing at all when there's nothing."""
+    from thirties_core.messages import MISSED_HEADING
+    items = sorted(spans, key=lambda s: (s.start_dt.timestamp(), s.end_dt.timestamp()))
+    if not items:
+        return []
+    shown = items[-UNMARKED_ROWS:]
+    more = len(items) - len(shown)
+    return [MISSED_HEADING] + ([f"+{more} more earlier"] if more else []) \
+        + [f"{format_clock(thirty_of(s.start_dt))} – {s.title}" for s in shown]
 
 
 def _items_in_rows(upcoming: List[EventSpan], n_rows: int) -> List[EventSpan]:
@@ -115,4 +134,4 @@ def _items_in_rows(upcoming: List[EventSpan], n_rows: int) -> List[EventSpan]:
     return [s for s in upcoming if last is not None and thirty_of(s.start_dt) <= last]
 
 
-__all__ = ["MODES", "DEFAULT_MODE", "SCHEDULE_ASKED_RE", "snapshot", "moved_since", "render"]
+__all__ = ["MODES", "DEFAULT_MODE", "SCHEDULE_ASKED_RE", "snapshot", "moved_since", "render", "unmarked_lines"]

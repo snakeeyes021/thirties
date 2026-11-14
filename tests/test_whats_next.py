@@ -162,6 +162,61 @@ class TestTheSlice(unittest.TestCase):
         self.assertEqual(render(plan, at("12:00", 3)), "")  # another day
 
 
+class TestNotMarkedYet(WhatsNextCase):
+    """At the bottom: earlier items whose time is over with nothing said (neither done nor skipped), plain lines,
+    the most recent few; no section when there's nothing."""
+
+    def earlier(self, *items) -> None:
+        for sid, title, start, end in items:
+            self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(end), SpanCategory.ACTIVITY))
+        self.manager.day_plan.spans[:] = self.sched.build_day_plan(DAY)[0].spans
+
+    def test_after_a_done_at_the_bottom(self) -> None:
+        self.earlier(("seed", "Water the seedlings", "07:00", "07:15"), ("tune", "Tune the ukulele", "16:00", "16:30"),
+                     ("mail", "Post the parcel", "16:30", "17:00"))
+        out = self.turn('CALL log_outcome {"event": "mail", "status": "skipped"}',  # skipped is marked: not listed
+                        'CALL log_outcome {"event": "feed", "status": "done"}', "Nice, noted.",
+                        said="fed the cat, and the parcel can wait")
+        tail = self.tail(out)
+        self.assertEqual(tail[0], "Next:")
+        self.assertEqual(tail[-3:], ["Not marked yet:", "7:00 AM – Water the seedlings", "4:00 PM – Tune the ukulele"])
+        self.assertFalse(any("Post the parcel" in line or "Feed the cat" in line for line in tail))
+
+    def test_only_the_most_recent_five(self) -> None:
+        self.earlier(*[(f"c{n}", f"Chore {n}", f"{9 + n:02d}:00", f"{9 + n:02d}:30") for n in range(7)])
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        tail = self.tail(out)
+        section = tail[tail.index("Not marked yet:"):]
+        self.assertEqual(section, ["Not marked yet:", "+2 more earlier", "11:00 AM – Chore 2", "12:00 PM – Chore 3",
+                                   "1:00 PM – Chore 4", "2:00 PM – Chore 5", "3:00 PM – Chore 6"])
+
+    def test_none_when_nothing_is_unmarked(self) -> None:
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.assertNotIn("Not marked yet", out)
+
+    def test_not_in_the_block_still_under_way(self) -> None:
+        self.earlier(("tea", "Brew tea", "17:00", "17:05"))  # over, but in the 5:00 block the user is still in
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.assertNotIn("Not marked yet", out)
+
+    def test_the_setting_covers_it(self) -> None:
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
+        self.sched.config.assistant.after_change = "nothing"
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.assertEqual(out, "Noted.")
+
+    def test_never_twice_and_counted_as_shown(self) -> None:
+        from thirties_core.messages import MissedTracker
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}',
+                        "Noted.\n\nNot marked yet:\n- Tune the ukulele", said="fed the cat")
+        self.assertEqual(out.count("Not marked yet:"), 1)  # the reply has it already
+        self.manager.tools.user_message = None
+        self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}', "Added.",
+                  said="quilting at 5:30")
+        self.assertIn("tune the ukulele", MissedTracker(self.sched.state_db).titles_shown(at("17:10")))
+
+
 if __name__ == "__main__":
     unittest.main()
 
