@@ -406,7 +406,7 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     """Where each missed item goes next (replan.py), recorded on it: a one-off waits for the first day from today
     with room (never past its deadline), and that day's morning puts it on; missed time on something ongoing is
     spread over its next sessions. Someday items stay someday."""
-    from thirties_core.backoff import MissStreaks, signature
+    from thirties_core.backoff import MissStreaks, signature, stated_cant_wait
     from thirties_core.day_proposal import usual_minutes
     from thirties_core.replan import place_once, spread_ongoing
     tasks = {t.id: t for t in assistant.s.tasks}
@@ -419,7 +419,7 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
             continue
         task = tasks.get(item.get("task_id") or "")
         rest = streaks.held_until(day, item["title"], item.get("task_id") or "", signature(task), item.get("due", ""),
-                                  urgent=item.get("horizon") == TODAY)  # what can't wait isn't held
+                                  urgent=stated_cant_wait(assistant._db, task, item["title"]))
         if rest == date.max:
             continue  # parked or dropped when asked: not placed by Thirties (backoff.py)
         try:

@@ -9,8 +9,10 @@ morning, asks the same unanswered question day after day. Instead Thirties backs
 - After the k-th consecutive miss, Thirties doesn't offer or place it again until 2^(k-1) whole days have passed:
   1, 2, then 4 days, so nothing missed comes back the next morning. A due date overrides it: as the date nears
   (2 days or less), or when a session of the work planned back from its deadline falls today, it's offered as
-  usual. So does what can't wait (urgency "now", or "as soon as possible" in its own words): it goes on today if
-  it fits, as before.
+  usual. So does what the user said can't wait (an urgency of "now" they set, or "as soon as possible" in the
+  item's own words; never a guessed urgency), but only until the third miss: from then on it rests like the rest,
+  so it can't come back day after day.
+- Further misses in a row keep doubling the rest (8, then 16 days...), with no further question.
 - After the third consecutive miss it also gets one question, in the morning's Before today, with the other
   such items: "Still want this? Keep for this week / Park for later / Drop". Keep starts the count again, Park
   moves it to a month-level horizon, Drop stops it rolling over (its list in Joplin is untouched). Asked once per
@@ -38,6 +40,12 @@ def signature(task) -> str:
         return ""
     return "|".join(str(getattr(task, k, "") or "") for k in ("title", "description", "due", "parent_note_id",
                                                               "section"))
+
+
+def _changed(rec: Dict[str, Any], sig: str, task_id: str) -> bool:
+    """The same item (the same id), changed since its misses were counted. A copy under another id (the Today
+    note's line for it) is the same thing, not a change."""
+    return bool(sig and rec.get("sig") and sig != rec["sig"] and task_id and task_id == rec.get("task_id"))
 
 
 def rest_days(misses: int) -> int:
@@ -104,7 +112,7 @@ class MissStreaks:
             if rec.get("counted", "") >= stamp:
                 continue  # this day is counted already
             sig = item.get("sig") or ""
-            if sig and rec.get("sig") and sig != rec["sig"]:
+            if _changed(rec, sig, item.get("task_id") or ""):
                 rec.update(misses=0, asked="", answer="")  # a changed item starts again
             rec.update(title=title, task_id=item.get("task_id") or rec.get("task_id") or "",
                        misses=int(rec.get("misses") or 0) + 1, last_miss=stamp, counted=stamp, sig=sig or rec.get("sig", ""))
@@ -124,35 +132,38 @@ class MissStreaks:
     # --- whether Thirties may offer or place it ---
 
     def held_until(self, day: date, title: str = "", task_id: str = "", sig: str = "", due: str = "",
-                   urgent: bool = False) -> Optional[date]:
+                   session: bool = False, urgent: bool = False) -> Optional[date]:
         """None when Thirties may offer or place the item on ``day``; else the first day it may (date.max for a
-        drop, or a park with no due date near). A changed item is never held (its count starts again)."""
+        drop, or a park with no due date near). A changed item is never held (its count starts again).
+        ``session``: a session of the work planned back from its deadline falls on ``day``. ``urgent``: the user
+        said it can't wait (stated_cant_wait); it counts only before the third miss."""
         data = self._load()
         key = self._find(data, title, task_id)
         if not key:
             return None
         rec = data[key]
-        if sig and rec.get("sig") and sig != rec["sig"]:
+        if _changed(rec, sig, task_id):
             rec.update(misses=0, asked="", answer="", sig=sig)
             self._save(data)
             return None
         due_day = _as_date(due)
-        near = urgent or (due_day is not None and (due_day - day).days <= DUE_NEAR_DAYS)
+        misses, last = int(rec.get("misses") or 0), _as_date(rec.get("last_miss"))
+        near = session or (due_day is not None and (due_day - day).days <= DUE_NEAR_DAYS) \
+            or (urgent and misses < ASK_AFTER)
         if rec.get("answer") == "drop":
             return date.max  # the user said stop rolling it over
         if near:
             return None
         if rec.get("answer") == "park":
             return date.max  # waits at its month-level horizon
-        misses, last = int(rec.get("misses") or 0), _as_date(rec.get("last_miss"))
         if misses <= 0 or last is None:
             return None
         free = last + timedelta(days=rest_days(misses) + 1)  # whole days in between, then it may come
         return free if day < free else None
 
     def held(self, day: date, title: str = "", task_id: str = "", sig: str = "", due: str = "",
-             urgent: bool = False) -> bool:
-        return self.held_until(day, title, task_id, sig, due, urgent) is not None
+             session: bool = False, urgent: bool = False) -> bool:
+        return self.held_until(day, title, task_id, sig, due, session, urgent) is not None
 
     # --- the one question ---
 
@@ -192,6 +203,25 @@ class MissStreaks:
         return rec
 
 
+def stated_cant_wait(db, task, title: str) -> bool:
+    """The user said it can't wait: an urgency of "now" they set themselves (never a guess, nor a list's default),
+    or "as soon as possible" in the item's own words."""
+    from thirties_core.carry import ASAP_RE
+    if ASAP_RE.search(title or ""):
+        return True
+    if task is None or db is None:
+        return False
+    from thirties_core.lists import ListCatalog
+    from thirties_core.today import TodayLinks
+    ids = {task.id}
+    home = TodayLinks(db).home_of(task.title)  # a line on the Today note stands for its home item
+    if home and home.get("home_id"):
+        ids.add(home["home_id"])
+    urgencies = ListCatalog(db).urgencies()
+    return any((urgencies.get(i) or {}).get("urgency") == "now" and (urgencies.get(i) or {}).get("source") == "user"
+               for i in ids)
+
+
 def question_lines(items: List[Dict[str, Any]], short=lambda t: t) -> str:
     return "\n".join(QUESTION.format(title=short(r["title"])) for r in items)
 
@@ -217,4 +247,4 @@ PLACING_TOOLS = {"add_event", "update_event", "place_leftover", "pin_to_period",
 
 
 __all__ = ["MissStreaks", "ASK_AFTER", "CHOICES", "PLACING_TOOLS", "QUESTION", "placing_refs", "question_lines",
-           "rest_days", "signature"]
+           "rest_days", "signature", "stated_cant_wait"]

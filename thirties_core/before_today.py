@@ -62,14 +62,16 @@ class BeforeToday:
         pt, day = self.a.pt, self._today()
         placed, overflow = [], []
         pool = OpenPool(self.db)
-        from thirties_core.backoff import MissStreaks
+        from thirties_core.backoff import MissStreaks, stated_cant_wait
         streaks = MissStreaks(self.db)
         for item in items:
             if not item.get("end") or item["end"] > day.isoformat() or item.get("start", "") > day.isoformat():
                 continue  # not today's
-            if item.get("proposed_on") and streaks.held(day, item["title"], item.get("task_id") or "",
-                                                        due=item.get("due", ""), urgent=item.get("horizon") == "today"):
-                continue  # resting after missed days (backoff.py): Thirties doesn't put it on
+            task = next((t for t in self.a.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
+            if streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
+                            or (task.due if task is not None else ""),
+                            urgent=stated_cant_wait(self.db, task, item["title"])):
+                continue  # resting after missed days (backoff.py): Thirties doesn't put it on, from any list
             span = self._on_plan(item)
             if span is not None:
                 pool.set(item["title"], slot=span.start_dt.isoformat())

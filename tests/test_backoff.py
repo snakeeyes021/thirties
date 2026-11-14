@@ -36,6 +36,15 @@ class TestTheRests(unittest.TestCase):
         self.assertEqual(self.first_free("Re-pot the fern", D + timedelta(days=3)), D + timedelta(days=5))  # 2 days
         miss(self.s, "Re-pot the fern", D + timedelta(days=5))
         self.assertEqual(self.first_free("Re-pot the fern", D + timedelta(days=6)), D + timedelta(days=10))  # 4 days
+        miss(self.s, "Re-pot the fern", D + timedelta(days=10))
+        self.assertEqual(self.first_free("Re-pot the fern", D + timedelta(days=11)), D + timedelta(days=19))  # 8 days
+
+    def test_said_it_cant_wait_counts_only_before_the_third_miss(self):
+        miss(self.s, "Mail the tax form", D)
+        self.assertFalse(self.s.held(D + timedelta(days=1), "Mail the tax form", urgent=True))
+        for n in (1, 2):
+            miss(self.s, "Mail the tax form", D + timedelta(days=n))
+        self.assertTrue(self.s.held(D + timedelta(days=3), "Mail the tax form", urgent=True))  # rests like the rest
 
     def test_the_same_day_counts_once(self):
         for _ in range(3):
@@ -48,7 +57,7 @@ class TestTheRests(unittest.TestCase):
         later = D + timedelta(days=2)
         self.assertTrue(self.s.held(later, "Renew the fishing licence", due=(later + timedelta(days=5)).isoformat()))
         self.assertFalse(self.s.held(later, "Renew the fishing licence", due=(later + timedelta(days=2)).isoformat()))
-        self.assertFalse(self.s.held(later, "Renew the fishing licence", urgent=True))  # its prep session today, or it can't wait
+        self.assertFalse(self.s.held(later, "Renew the fishing licence", session=True))  # its prep session today
 
     def test_done_ends_the_run(self):
         miss(self.s, "Re-pot the fern", D)
@@ -57,9 +66,10 @@ class TestTheRests(unittest.TestCase):
         self.assertEqual(self.s.get("Re-pot the fern")["misses"], 0)
 
     def test_a_changed_item_starts_again(self):
-        miss(self.s, "Re-pot the fern", D, sig="a")
-        self.assertTrue(self.s.held(D + timedelta(days=1), "Re-pot the fern", sig="a"))
-        self.assertFalse(self.s.held(D + timedelta(days=1), "Re-pot the fern", sig="b"))  # edited: not held
+        miss(self.s, "Re-pot the fern", D, task_id="t_fern", sig="a")
+        self.assertTrue(self.s.held(D + timedelta(days=1), "Re-pot the fern", "t_fern", sig="a"))
+        self.assertTrue(self.s.held(D + timedelta(days=1), "Re-pot the fern", "t_copy", sig="b"))  # a copy of it
+        self.assertFalse(self.s.held(D + timedelta(days=1), "Re-pot the fern", "t_fern", sig="b"))  # edited
 
     def test_the_question_once_after_the_third(self):
         for n in range(2):
@@ -134,6 +144,29 @@ class BackoffDays(TodayTestCase):
         self.on(-1, "Call the bank", "t_bank", "skipped")
         self.morning(0)
         self.assertIn("Call the bank", self.offered(0))
+
+    def test_a_guessed_now_doesnt_override_the_rest(self):
+        ListCatalog(self.sched.state_db).set_urgency("t_bank", "now", source="guess")
+        self.services.tasks[:] = ListCatalog(self.sched.state_db).apply(self.services.tasks)
+        self.on(-1, "Call the bank", "t_bank", "skipped")
+        self.morning(0)
+        self.assertNotIn("Call the bank", self.offered(0))
+
+    def test_said_it_cant_wait_skipped_three_days_running_gets_the_question_and_rests(self):
+        ListCatalog(self.sched.state_db).set_urgency("t_bank", "now")  # the user's own word
+        self.services.tasks[:] = ListCatalog(self.sched.state_db).apply(self.services.tasks)
+        for offset in (-3, -2, -1):
+            self.morning(offset)
+            self.assertIn("Call the bank", self.offered(offset))  # it can't wait: back the next morning
+            self.on(offset, "Call the bank", "t_bank", "skipped")
+        self.morning(0)
+        said = self.t.execute("rollover_proposal", {})
+        self.assertIn("Still want Call the bank? Keep for this week / Park for later / Drop", said)
+        for offset in range(0, 4):  # no longer re-placed daily: four whole days of rest
+            self.morning(offset)
+            self.assertNotIn("Call the bank", self.offered(offset))
+        self.morning(4)
+        self.assertIn("Call the bank", self.offered(4))
 
     def three_misses(self):
         for offset in (-3, -2, -1):

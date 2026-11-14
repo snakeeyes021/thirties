@@ -370,11 +370,10 @@ class DayProposal:
             from thirties_core.backoff import MissStreaks, signature
             from thirties_core.item_facts import mentions
             said = self.pt.user_message
-            from thirties_core.carry import ASAP_RE
+            from thirties_core.backoff import stated_cant_wait
             rest = MissStreaks(self.db).held_until(self.pt.day_plan.target_date, title, task.id if task else "",
                                                    signature(task), task.due if task else "",
-                                                   urgent=(task is not None and task.urgency == "now")
-                                                   or bool(ASAP_RE.search(title)))
+                                                   urgent=stated_cant_wait(self.db, task, title))
             if rest is not None and not (said is not None and mentions(said, title)):
                 problems.append(f"{title} was missed lately (skipped or left unmarked), so it rests"
                                 + (f" until {rest.strftime('%A')}" if rest != date.max else "")
@@ -496,18 +495,16 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
 
 def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Leave out what's resting after missed days (backoff.py); a due date near, a session of the work planned back
-    from it today, or what can't wait, still comes."""
-    from thirties_core.backoff import MissStreaks, signature
-    from thirties_core.carry import ASAP_RE
+    from it today, or what the user said can't wait (before its third miss), still comes."""
+    from thirties_core.backoff import MissStreaks, signature, stated_cant_wait
     if dp.db is None:
         return cands
     streaks = MissStreaks(dp.db)
     out = []
     for c in cands:
         t = c.get("task")
-        urgent = bool(c.get("session")) or (t is not None and t.urgency == "now") or bool(ASAP_RE.search(c["title"]))
         if streaks.held(day, c["title"], t.id if t is not None else "", signature(t), t.due if t is not None else "",
-                        urgent=urgent):
+                        session=bool(c.get("session")), urgent=stated_cant_wait(dp.db, t, c["title"])):
             continue
         out.append(c)
     return out
