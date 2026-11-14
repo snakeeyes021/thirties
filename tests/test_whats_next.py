@@ -164,3 +164,38 @@ class TestTheSlice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOneLinePerItemEverywhere(WhatsNextCase):
+    """Each line of what's next stays its own line wherever the reply is shown: Telegram, and the stored
+    conversation read back after a restart. (The desktop chat: test_gui, ChatPanelTests.)"""
+
+    def reply_with_slice(self) -> tuple:
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Nice, the cat's fed.",
+                        said="fed the cat")
+        rows = self.tail(out)
+        self.assertGreaterEqual(len(rows), 3)
+        return out, rows
+
+    def test_telegram_sends_each_line_as_its_own_line(self) -> None:
+        from unittest.mock import patch
+        from thirties_core.telegram_bridge import TelegramClient
+        out, rows = self.reply_with_slice()
+        sent = []
+        client = TelegramClient("1:X")
+        with patch.object(TelegramClient, "_request", lambda self_, method, payload=None, timeout=30.0:
+                          sent.append(payload) or {"ok": True, "result": {"message_id": 1}}):
+            client.send_message(5, out)
+        lines = sent[0]["text"].split("\n")
+        for row in rows:
+            self.assertIn(row, lines)  # each row on its own line in what Telegram gets (HTML keeps newlines)
+
+    def test_the_stored_conversation_keeps_each_line_after_a_restart(self) -> None:
+        out, rows = self.reply_with_slice()
+        plan, pending = self.sched.build_day_plan(DAY)
+        again = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(),
+                                    active_notes=[])  # the app started again: the day's conversation, from the store
+        shown = [m["content"] for m in again.history() if m["role"] == "assistant"][-1]
+        self.assertEqual(shown, out)
+        for row in rows:
+            self.assertIn(row, shown.splitlines())
