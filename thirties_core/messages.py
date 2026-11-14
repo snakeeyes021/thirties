@@ -29,7 +29,8 @@ MISSED_HEADING = "Not marked yet:"
 # --- what's behind ---
 
 def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpan], bool]] = None) -> List[EventSpan]:
-    """Planned items whose time is over with nothing said, in order, once each.
+    """Today's planned items whose time is over with nothing said, in order, once each (an earlier day's are that
+    day's: Before today sorts them).
 
     An item counts only once the block it ends in is over: what's in the block the user is still in isn't missed
     (10-26 09:15: the user was asked about items of the block still under way). The same title
@@ -39,7 +40,7 @@ def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpa
     seen = set()
     for s in sorted(plan.active_spans(), key=lambda s: (s.start_dt, s.end_dt)):
         if s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.status != SpanStatus.PLANNED \
-                or s.tentative or thirty_ceil(s.end_dt) > block:
+                or s.tentative or thirty_ceil(s.end_dt) > block or s.start_dt < plan.day_start:  # today's only
             continue
         if skip is not None and skip(s):
             continue

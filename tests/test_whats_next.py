@@ -2,6 +2,7 @@
 Scripted model replies; invented items. DAY is Thu Oct 15 (Work 8:30 AM - 4 PM, Sleep from 11 PM)."""
 
 import unittest
+from datetime import timedelta
 
 from tests.fixtures import DAY, at, make_scheduler
 from tests.test_conversation import reply
@@ -230,6 +231,30 @@ class TestNotMarkedYet(WhatsNextCase):
                                 inference_engine=self.engine, sync_engine=MagicMock())
         svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
         self.assertEqual(svc._with_missed("🔔 6:00 PM: Dinner", at("17:20")), "🔔 6:00 PM: Dinner")  # no repeat
+
+    def test_missed_three_days_running_is_in_no_later_slice_or_notice(self) -> None:
+        from unittest.mock import MagicMock
+        from thirties_core.background import BackgroundService
+        from thirties_core.backoff import MissStreaks
+        streaks = MissStreaks(self.sched.state_db)
+        for offset in (-3, -2, -1):  # planned and left unmarked three days running
+            self.sched.state_db.upsert_span(EventSpan(f"fern{offset}", "Re-pot the fern", at("14:00", offset),
+                                                      at("14:30", offset), SpanCategory.TASK))
+            streaks.record_day((at("14:00", offset)).date(), [{"title": "Re-pot the fern"}])
+        self.assertEqual(streaks.get("Re-pot the fern")["misses"], 3)
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))  # today's own unmarked item still shows
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.assertNotIn("Re-pot the fern", out)
+        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+        from thirties_core.whats_next import render
+        plan = self.manager.day_plan
+        plan.spans.append(EventSpan("late", "Re-pot the fern", plan.day_start - timedelta(hours=2),
+                                    plan.day_start - timedelta(hours=1), SpanCategory.TASK))  # an earlier day's
+        self.assertNotIn("Re-pot the fern", render(plan, at("17:10")))
+        svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=MagicMock(),
+                                inference_engine=self.engine, sync_engine=MagicMock())
+        svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
+        self.assertNotIn("Re-pot the fern", svc._with_missed("🔔 6:00 PM: Dinner", at("17:20")))
 
     def test_a_notice_still_lists_what_no_slice_showed(self) -> None:
         from unittest.mock import MagicMock

@@ -109,7 +109,7 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     if theirs:
         lines.append("Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
                                                for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())))
-    lines += unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)
+    lines += unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)  # today's only
     return "\n".join(lines)
 
 
