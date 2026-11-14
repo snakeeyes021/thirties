@@ -553,11 +553,12 @@ class ConversationManager:
         from thirties_core.messages import MISSED_HEADING, MissedTracker, missed_for
         now = get_current_time(self.day_plan.day_start.tzinfo)
         moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
+        # A status view: worked out fresh from the plan for every slice, so what's still unmarked shows again in the
+        # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
         unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now)  # never the list twice
         part = whats_next.render(self.day_plan, now, moved, mode, said, unmarked)
         if part and unmarked and self.scheduler is not None:
-            listed = unmarked[-whats_next.UNMARKED_ROWS:]
-            MissedTracker(self.scheduler.state_db).mark(now, listed)  # shown: a notice doesn't list them again
+            MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
         return reply.rstrip() + "\n\n" + part if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,

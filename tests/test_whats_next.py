@@ -216,6 +216,30 @@ class TestNotMarkedYet(WhatsNextCase):
                   said="quilting at 5:30")
         self.assertIn("tune the ukulele", MissedTracker(self.sched.state_db).titles_shown(at("17:10")))
 
+    def test_a_status_view_every_slice_while_notices_stay_quiet(self) -> None:
+        from unittest.mock import MagicMock
+        from thirties_core.background import BackgroundService
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
+        first = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.manager.tools.user_message = None
+        second = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',
+                           "Added.", said="quilting at 5:30")
+        for out in (first, second):  # nothing ticked: listed again, fresh from the plan, not hidden as "shown"
+            self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+        svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=MagicMock(),
+                                inference_engine=self.engine, sync_engine=MagicMock())
+        svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
+        self.assertEqual(svc._with_missed("🔔 6:00 PM: Dinner", at("17:20")), "🔔 6:00 PM: Dinner")  # no repeat
+
+    def test_a_notice_still_lists_what_no_slice_showed(self) -> None:
+        from unittest.mock import MagicMock
+        from thirties_core.background import BackgroundService
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
+        svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=MagicMock(),
+                                inference_engine=self.engine, sync_engine=MagicMock())
+        svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
+        self.assertIn("Tune the ukulele", svc._with_missed("🔔 6:00 PM: Dinner", at("17:20")))
+
 
 if __name__ == "__main__":
     unittest.main()
