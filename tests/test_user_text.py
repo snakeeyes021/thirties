@@ -18,7 +18,8 @@ APP = ["src/*.py", "src/views/*.py"]
 CORE_USER_TEXT = ["thirties_core/messages.py", "thirties_core/background.py", "thirties_core/telegram_bridge.py",
                   "thirties_core/before_today.py", "thirties_core/if_time.py", "thirties_core/contextual.py",
                   "thirties_core/sun_notices.py", "thirties_core/morning.py", "thirties_core/not_yours.py",
-                  "thirties_core/day_lists.py", "thirties_core/conversation.py", "thirties_core/routine_profile.py"]
+                  "thirties_core/day_lists.py", "thirties_core/conversation.py", "thirties_core/routine_profile.py",
+                  "thirties_core/whats_next.py"]
 UI = ["src/*.ui"]
 
 HISTORY = (r"no longer|used to|anymore|any more|previously|built in|old meaning|"
