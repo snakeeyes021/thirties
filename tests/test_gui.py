@@ -402,12 +402,18 @@ class DayViewTests(unittest.TestCase):
     def test_before_today_offers_once_to_put_old_drops_back(self) -> None:
         calls = []
         view = DayView()
-        view.set_actions(lambda name, args: calls.append((name, args)) or "Put back on their lists: Old thing.")
-        view.before.rows_provider = lambda: {"keep": [], "drop": [], "archive": [], "restore": ["Old thing"]}
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Put Old thing back on its list.")
+        view.before.rows_provider = lambda: {"keep": [], "drop": [], "archive": [], "restore": ["Old thing", "Kite"]}
         view.refresh_plan(self.plan)
-        self.assertIn("restore", view.before.groups)
-        view.before.buttons[("restore", "put_back")].emit("clicked")
-        self.assertEqual(calls, [("restore_old_drops", {"put_back": True})])
+        group = view.before.groups["restore"]
+        self.assertEqual((group.get_title(), group.get_description()),
+                         ("Taken off your lists earlier", "Put any of these back on their lists?"))
+        view.before.buttons[("restore", "Old thing", "put_back")].emit("clicked")
+        view.before.buttons[("restore", "Kite", "leave")].emit("clicked")
+        view.before.buttons[("restore", "leave_all")].emit("clicked")
+        self.assertEqual(calls, [("restore_old_drops", {"put_back": True, "item": "Old thing"}),
+                                 ("restore_old_drops", {"put_back": False, "item": "Kite"}),
+                                 ("restore_old_drops", {"put_back": False})])
 
     def test_before_today_asks_once_about_what_keeps_being_missed(self) -> None:
         calls = []
@@ -784,7 +790,7 @@ class ProfileDialogTests(unittest.TestCase):
         dialog = ProfileMemoryDialog(services.profile, services.memory)
         flagged = [r for r in dialog._note_rows if r.has_css_class("warning")]
         self.assertEqual([r.get_text() for r in flagged], ["Items don't cross block boundaries"])
-        self.assertTrue(flagged[0].get_title().startswith("Now built in, remove?"))
+        self.assertTrue(flagged[0].get_title().startswith("Thirties already does this by itself. Remove this note?"))
         def walk(widget):
             for child in _children(widget):
                 yield child

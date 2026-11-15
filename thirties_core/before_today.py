@@ -294,29 +294,44 @@ class BeforeToday:
     OFFER_KEY = "old_drops_offer"
 
     def old_filed_drops(self) -> List[Dict[str, Any]]:
-        """Drops filed in a Dropped note under the old meaning, while the one-time offer is still open."""
+        """Items filed in a Dropped note (taken off their lists), while the one-time offer is open and each one
+        hasn't been answered yet."""
         if self.db is None or self.db.get_sync_meta(self.OFFER_KEY):
             return []
-        return [r for r in OpenPool(self.db).all().values() if r.get("horizon") == DROPPED and r.get("filed_key")]
+        return [r for r in OpenPool(self.db).all().values()
+                if r.get("horizon") == DROPPED and r.get("filed_key") and not r.get("offer_left")]
 
-    def restore_old_drops(self, put_back: Any = True) -> str:
-        """The one-time offer: put the items filed in Dropped notes back on their home lists, open, where they
-        were (they still don't roll over), or leave them filed. Either way it isn't offered again."""
+    def restore_old_drops(self, put_back: Any = True, item: str = "") -> str:
+        """The one-time offer: put items filed in Dropped notes back on their own lists, open, where they were
+        (they still don't come back by themselves), or leave them off. One ``item`` at a time, or all of them; once
+        none is left to answer, or all are left off, it isn't offered again."""
         put_back = str(put_back).strip().lower() not in ("false", "0", "no", "leave")
         items = self.old_filed_drops()
+        if item:
+            low = str(item).strip().lower()
+            items = [r for r in items if r["title"].strip().lower() == low] or \
+                [r for r in items if low and low in r["title"].strip().lower()][:1]
+            if not items:
+                from thirties_core.assistant_tools import ToolError
+                raise ToolError(f"'{item}' isn't one of the items taken off their lists earlier.")
         back = []
-        if put_back:
-            for rec in items:
+        for rec in items:
+            if put_back:
                 if not self.a._undrop_in_joplin(rec):
                     back.append(rec["title"])
-        self.db.set_sync_meta(self.OFFER_KEY, "put back" if put_back else "left")
+            else:
+                OpenPool(self.db).set(rec["title"], offer_left=True)
+        if not item or not self.old_filed_drops():
+            self.db.set_sync_meta(self.OFFER_KEY, "answered")
         if not put_back:
-            return "Left them in the Dropped notes."
-        return ("Put back on their lists: " + ", ".join(back) + ".") if back else "Nothing needed putting back."
+            return f"Left {items[0]['title']} off its list." if item else "Left them all off their lists."
+        if not back:
+            return "Nothing needed putting back."
+        return f"Put {back[0]} back on its list." if item else "Put back on their lists: " + ", ".join(back) + "."
 
     def _drop(self, rec: Dict[str, Any], by: str) -> str:
         self.take_off_today(rec)
         OpenPool(self.db).set(rec["title"], horizon=DROPPED, pending_drop=False, dropped_on=self._today().isoformat(),
                               dropped_by=by)
         self.a._drop_leftovers([{"title": rec["title"]}])  # off the Today note; its own list keeps it, untouched
-        return f"Dropped {rec['title']}: it won't roll over, and it stays on its own list."
+        return f"Dropped {rec['title']}: it won't come back by itself, and it stays on its own list."

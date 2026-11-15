@@ -553,7 +553,7 @@ class ThirtiesTelegramBridge:
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
             "• `/status` – System, model, and sync status\n"
-            "• `/brain` – Which brain answers, and how to switch\n"
+            "• `/brain` – Which assistant answers, and how to switch\n"
             "• `/help` – Show this guide\n\n"
             "💬 *Conversation*:\n"
             "Simply send natural messages to schedule and plan:\n"
@@ -638,7 +638,7 @@ class ThirtiesTelegramBridge:
         msg = (
             "⚙️ *Thirties System Status*\n\n"
             f"🧠 *Inference Backend*: `{inf_name}`\n"
-            f"🧠 *Brain*: {BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)}\n"
+            f"🧠 *Assistant*: {BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)}\n"
             f"🤖 *Model*: `{model_name}`\n"
             f"🔄 *Joplin Sync*: {sync_enabled}\n"
             f"🔔 *Block Buzzes*: {notify_enabled}\n"

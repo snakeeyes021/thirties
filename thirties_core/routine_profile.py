@@ -134,7 +134,7 @@ def resume(routines: RoutineTools, title: str) -> str:
     r = book.get(note["id"], note["title"])
     r.snoozed_until, r.skipped_on = "", ""
     book.save(r)
-    return f"{note['title']} isn't skipped any more."
+    return f"{note['title']} is back on."
 
 
 def save_anchor(routines: RoutineTools, title: str, time: str, minutes: int, fixed: bool, days: Any = None) -> str:

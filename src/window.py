@@ -502,7 +502,8 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         return False
 
     def _toast_built_in_memory(self, count: int) -> bool:
-        toast = Adw.Toast(title=f"{count} memory note{'s are' if count > 1 else ' is'} now built in",
+        toast = Adw.Toast(title=("Thirties already does what one of your memory notes says" if count == 1 else
+                                 f"Thirties already does what {count} of your memory notes say"),
                           button_label="Review", timeout=8)
         toast.connect("button-clicked", lambda *_: self._show_profile_dialog(page="memory"))
         self.toast_overlay.add_toast(toast)

@@ -256,10 +256,11 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "restore_old_drops",
-        "description": "Answer the one-time offer about items dropped before drops stopped touching Joplin (they "
-                       "were filed in Dropped notes): put_back true puts them back on their lists where they were, "
-                       "false leaves them filed. Asked once, in the Before today tab.",
-        "parameters": {"put_back": "true to put them back, false to leave them filed."},
+        "description": "Answer the one-time offer in the Before today tab about items taken off their lists "
+                       "earlier (filed in Dropped notes): put_back true puts an item (or all of them) back on its "
+                       "list where it was; false leaves it off. With no item, false leaves them all off for good.",
+        "parameters": {"put_back": "true to put back, false to leave off.",
+                       "item": "One item's title (optional: without it, all of them)."},
         "required": ["put_back"],
     },
     {
@@ -2472,7 +2473,7 @@ class AssistantTools(KindTools):
             "set_item_note": self.set_item_note,
             "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
             "still_want": lambda item="", choice="", **_: self.before.still_want(item, choice),
-            "restore_old_drops": lambda put_back=True, **_: self.before.restore_old_drops(put_back),
+            "restore_old_drops": lambda put_back=True, item="", **_: self.before.restore_old_drops(put_back, item),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,

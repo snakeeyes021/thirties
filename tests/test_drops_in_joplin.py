@@ -113,9 +113,24 @@ class TestDropsInJoplin(TodayTestCase):
 
     def test_leaving_the_old_drops_filed_ends_the_offer(self):
         self.archive()
-        self.assertIn("Left them", self.t.execute("restore_old_drops", {"put_back": False}))
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": False}), "Left them all off their lists.")
         self.assertNotIn("Call the bank", self.body("n_errands"))
         self.assertEqual(self.t.assistant.before.rows()["restore"], [])
+
+    def test_each_one_can_be_put_back_or_left_off(self):
+        self.pool.add([{"title": "Return the parcel", "task_id": "t_parcel", "horizon": "week",
+                        "pending_drop": True, "proposed_on": DAY.isoformat()}], DAY - timedelta(days=1))
+        self.archive()
+        self.archive("Return the parcel")
+        self.assertEqual(sorted(self.t.assistant.before.rows()["restore"]), ["Call the bank", "Return the parcel"])
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": False, "item": "Return the parcel"}),
+                         "Left Return the parcel off its list.")
+        self.assertEqual(self.t.assistant.before.rows()["restore"], ["Call the bank"])  # still offered
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": True, "item": "Call the bank"}),
+                         "Put Call the bank back on its list.")
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        self.assertNotIn("Return the parcel", self.body("n_errands"))
+        self.assertEqual(self.t.assistant.before.rows()["restore"], [])  # all answered: never offered again
 
     def test_done_goes_the_normal_done_way(self):
         self.pool.set("Call the bank", pending_drop=False)

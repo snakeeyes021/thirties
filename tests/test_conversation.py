@@ -331,9 +331,9 @@ class TestChoosingTheBrain(ConversationTestCase):
         with patch.dict("os.environ", {"THIRTIES_OFFER_GEMMA": ""}):
             self.assertNotIn("slm", offered_brains(sched.config))
             self.assertNotIn("pipeline", offered_brains(sched.config))  # parked: behind the switch too
-            self.assertIn("Unknown brain", self.manager.send_user_message("/brain pipeline"))
+            self.assertIn("Unknown assistant", self.manager.send_user_message("/brain pipeline"))
             out = self.manager.send_user_message("/brain gemma")
-            self.assertIn("Unknown brain", out)
+            self.assertIn("Unknown assistant", out)
             self.assertEqual(self.manager.brain_name, "frontier")
             self.assertNotIn("gemma", self.manager.send_user_message("/brain").lower())
             Settings(sched.state_db).set("assistant.brain", "slm")  # chosen before it was hidden
@@ -362,7 +362,7 @@ class TestChoosingTheBrain(ConversationTestCase):
         self.assertIn("hi", [m["content"] for m in other.history()])
 
     def test_unknown_brain_is_refused(self) -> None:
-        self.assertIn("Unknown brain", self.manager.send_user_message("/brain gpt"))
+        self.assertIn("Unknown assistant", self.manager.send_user_message("/brain gpt"))
         self.assertEqual(self.manager.brain_name, "frontier")
 
 

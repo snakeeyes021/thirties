@@ -16,7 +16,7 @@ def _note_date(iso: str) -> str:
         return ""
 
 
-BUILT_IN_TITLE = "Now built in, remove?"
+BUILT_IN_TITLE = "Thirties already does this by itself. Remove this note?"
 
 
 class ProfileMemoryDialog(Adw.Dialog):
@@ -187,9 +187,9 @@ class ProfileMemoryDialog(Adw.Dialog):
             row.set_show_apply_button(True)
             row.connect("apply", self._on_note_apply)
             why = built_in.get(note.id)
-            if why:  # Thirties now does this by itself (memory_audit.py): the user removes it, or keeps it
+            if why:  # Thirties does this by itself (memory_audit.py): the user removes it, or keeps it
                 row.set_title(BUILT_IN_TITLE + " · " + row.get_title())
-                row.set_tooltip_text(f"Thirties now does this by itself: {why}.")
+                row.set_tooltip_text(f"Thirties does this by itself: {why}.")
                 row.add_css_class("warning")
                 keep_btn = Gtk.Button(label="Keep", valign=Gtk.Align.CENTER, tooltip_text="Keep this note")
                 keep_btn.add_css_class("flat")

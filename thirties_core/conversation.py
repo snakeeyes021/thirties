@@ -86,7 +86,7 @@ class ConversationManager:
         offered = offered_brains(self.scheduler.config if self.scheduler else None)
         name = BRAIN_ALIASES.get(str(choice).strip().lower())
         if name is None or name not in offered:
-            raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(offered)}.")
+            raise ValueError(f"Unknown assistant '{choice}'. Choose one of: {', '.join(offered)}.")
         if self.scheduler is not None:
             from thirties_core.settings import Settings
             Settings(self.scheduler.state_db).set("assistant.brain", name)
