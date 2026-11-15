@@ -125,9 +125,30 @@
             ]
         },
         {
+            "name": "libspelling",
+            "buildsystem": "meson",
+            "config-opts": [
+                "-Ddocs=false",
+                "-Dsysprof=false",
+                "-Dvapi=false"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://download.gnome.org/sources/libspelling/0.4/libspelling-0.4.10.tar.xz",
+                    "sha256": "56e3f01a3a18b575beea4c34349f99cdaba316e1f7c271b1231f7bcf5d9af73b"
+                }
+            ]
+        },
+        {
             "name": "thirties",
             "builddir": true,
             "buildsystem": "meson",
+            "test-rule": "",
+            "test-commands": [
+                "cd /run/build/thirties && diff -r -x __pycache__ thirties_core /app/share/thirties/thirties_core",
+                "cd /run/build/thirties && python3 -m unittest discover tests"
+            ],
             "sources": [
                 {
                     "type": "dir",

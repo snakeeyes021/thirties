@@ -20,6 +20,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 _build/
 subprojects/
 .flatpak-builder/

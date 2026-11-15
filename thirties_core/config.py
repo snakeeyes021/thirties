@@ -143,6 +143,8 @@ class MediaConfig:
     """Public media wishlists (read-only, no logins). Empty values disable a source."""
     goodreads_user_id: str = ""
     goodreads_shelves: List[str] = field(default_factory=lambda: ["to-read"])
+    # A folder on this computer holding Goodreads library exports (CSV); the newest is the reading list
+    goodreads_export_dir: str = ""
     letterboxd_username: str = ""
     serializd_username: str = ""
     cache_hours: float = 12.0

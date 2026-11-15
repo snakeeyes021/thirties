@@ -5,7 +5,7 @@ import json
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, FakeJoplinAPI, at, event, make_scheduler, occupant
+from tests.fixtures import DAY, FakeJoplinAPI, at, event, line_with, make_scheduler, occupant
 from thirties_core.astronomy import set_debug_time
 from thirties_core.brains.slm.brain import SlmBrain
 from thirties_core.brains.slm.parse import extract_json
@@ -118,7 +118,7 @@ class TestSchedulingActions(SlmTestCase):
                  {"type": "add", "title": "Reading", "start": "8:00 PM", "duration": "1 hour"})
         out = self.say("email the plumber right after dinner, an hour, slide things back",
                        {"type": "add", "title": "Email the plumber", "after": "dinner", "duration": "an hour", "push": True})
-        self.assertIn("Added Email the plumber: 8:00 PM – 9:00 PM", out)
+        self.assertIn("Added Email the plumber: 8:00 PM – 9:00 PM", out)  # golden: the on-device brain's reply
         self.assertIn("Reading now 9:00 PM – 10:00 PM", out)
 
     def test_actions_that_depend_on_later_ones_are_retried(self):
@@ -205,7 +205,8 @@ class TestSchedulingActions(SlmTestCase):
                        {"type": "add", "title": "Dinner", "start": "6:30", "duration": "1 hour"},
                        {"type": "add", "title": "Laundry", "after": "dinner", "duration": "unknown"},
                        {"type": "add", "title": "Reading", "after": "laundry", "duration": "1 hour"})
-        self.assertIn("Added Laundry: 7:30 PM – 8:30 PM (1h). (I guessed an hour", out)
+        line_with(out, "Laundry", "7:30 PM", "8:30 PM", "guessed")  # an unknown length: a guess, and said so
+        self.assertEqual(occupant(self.m.day_plan, "19:30"), "Laundry")
         self.assertIn("Added Reading: 8:30 PM – 9:30 PM", out)
 
     def test_slide_everything_after_and_never_touch_sleep_unasked(self):
@@ -304,7 +305,7 @@ class TestSchedulingActions(SlmTestCase):
             span.actual_start, span.actual_end = start, start + timedelta(minutes=45)
             self.sched.state_db.upsert_span(span)
         out = self.say("reading at 8", {"type": "add", "title": "Reading", "start": "8"})
-        self.assertIn("Added Reading: 8:00 PM – 8:45 PM (45m). (about as long as it usually takes you)", out)
+        line_with(out, "Reading", "8:00 PM", "8:45 PM", "45m", "usually")
         reading = next(s for s in self.m.day_plan.spans if s.title == "Reading")
         self.assertEqual(reading.duration_minutes, 45)  # the real length stays underneath
 
@@ -403,7 +404,8 @@ class TestProposalsAndOutcomes(SlmTestCase):
                        {"type": "question", "topic": "free time tonight"})
         self.assertRegex(out, r"\(\d+ chunks\)")
         out = self.say("meeting at 8, three chunks", {"type": "add", "title": "Meeting", "start": "8", "duration": "3 chunks"})
-        self.assertIn("Added Meeting: 8:00 PM – 9:30 PM (3 chunks).", out)
+        line_with(out, "Meeting", "8:00 PM", "9:30 PM", "3 chunks")
+        self.assertEqual(occupant(self.m.day_plan, "21:00"), "Meeting")
 
     def test_fill_the_evening_until_a_time(self):
         self.rt.pick_replies.append('{"picks": [2, 1]}')
@@ -557,7 +559,7 @@ class TestJoplinLists(SlmTestCase):
         self.assertIn("1. List three poets", out)
         self.assertIn("add these to Joplin", out)
         out = self.say("yes please", {"type": "confirm"})
-        self.assertIn("Added 3 steps under Text search for The Acme brochure in Joplin", out)
+        line_with(out, "3 steps", "Text search for The Acme brochure")
         self.assertIn("    - [ ] List three poets", self.api.notes["n2"]["body"])
         self.assertIn('Want to start with "List three poets"', out)
         out = self.say("sure", {"type": "confirm"})
@@ -763,7 +765,8 @@ class TestParityWithGemini(ParityTestCase):
         out = self.say("oh the walk has to wait until after the shower",
                        {"type": "move", "target": "walk", "after": "shower"})  # a rule said as a move
         self.assertIn("Noted for Walk: after Shower.", out)
-        self.assertIn("Moved Walk to 7:30 PM – 8:00 PM to keep it.", out)
+        line_with(out, "Walk", "7:30 PM", "8:00 PM")
+        self.assertEqual(occupant(self.m.day_plan, "19:30"), "Walk")
         self.assertEqual(SpanFacts(self.sched.state_db).get(self.span("Walk").id).after, [self.span("Shower").id])
 
     def test_outside_things_wait_for_the_shower(self):
@@ -771,7 +774,7 @@ class TestParityWithGemini(ParityTestCase):
         self.say("shower at 7", {"type": "add", "title": "Shower", "start": "7", "duration": "30 min"})
         out = self.say("remember, outdoor stuff only after the shower",
                        {"type": "remember", "text": "Outdoor stuff only after the shower"})
-        self.assertIn("I'll keep outside things after Shower from now on.", out)
+        line_with(out, "outside", "after Shower")
         self.assertEqual(occupant(self.m.day_plan, "19:30"), "Walk")
         self.assertIn("Outdoor stuff only after the shower", [n.text for n in self.m.tools.services.memory.notes()])
 

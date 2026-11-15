@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
+from tests import interactive_eval
 from tests.interactive_eval import InteractiveEvaluator, detect_anomalies
 
 
@@ -14,6 +16,11 @@ class TestInteractiveEval(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = Path(temp_dir("thirties_tmp_"))
+        # The harness keeps sessions and reports in docs/eval_reports for real evals; a test's go in its temp dir.
+        for name, sub in (("REPORTS_DIR", ""), ("SESSIONS_DIR", "sessions")):
+            patcher = mock.patch.object(interactive_eval, name, self.temp_dir / sub)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.session_id = "test_unit_session"
         self.target_date = date(2026, 10, 9)
 
@@ -28,7 +35,7 @@ class TestInteractiveEval(unittest.TestCase):
             use_gpu=False,
         )
         self.assertEqual(session.session_id, self.session_id)
-        self.assertIn("Good day!", session.initial_greeting)
+        self.assertEqual(session.initial_greeting, "")  # no fixed greeting: the assistant speaks for itself
 
         # Step 1
         turn = InteractiveEvaluator.step_session(

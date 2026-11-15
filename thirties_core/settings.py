@@ -42,6 +42,7 @@ _ALL = [
     Setting("general.temperature_unit", "shared"),
     Setting("general.week_start", "shared"),
     Setting("media.goodreads_user_id", "shared"),
+    Setting("media.goodreads_export_dir", "device"),
     Setting("media.letterboxd_username", "shared"),
     Setting("media.serializd_username", "shared"),
     Setting("joplin.write_back", "shared"),
@@ -65,6 +66,11 @@ _ALL = [
     Setting("assistant.status_line", "shared"),
     Setting("assistant.sunrise_notice", "shared"),
     Setting("assistant.sunset_notice", "shared"),
+    Setting("people.nudges", "shared"),  # a nudge when it's been a while since someone (people.py); on by default
+    Setting("lists.one_off_notes", "shared"),  # a to-do note with no checklist: item / someday / ignore (list_settings.py)
+    Setting("lists.done_note", "shared"),      # the note done items are filed in, {"id", "title"} (list_settings.py)
+    Setting("lists.effort_unit", "shared"),    # the unit the user estimates in (efforts.py)
+    Setting("lists.effort_unit_minutes", "shared"),  # how long a day or a point of theirs is (efforts.py)
     # about this machine
     Setting("assistant.brain", "device"),
     Setting("assistant.slm_model", "device"),  # the smaller model on a device where the bigger one doesn't fit (fit.py)
@@ -91,6 +97,10 @@ _ALL = [
     Setting("setup.done", "device"),
     Setting("background.enabled", "device"),
     Setting("background.autostart", "device"),
+    Setting("tickets.rush", "device"),  # the daily rush-ticket check (tickets.py): one machine, off
+    Setting("tickets.theatre", "device"),
+    Setting("tickets.listing_url", "device"),
+    Setting("tickets.rush_terms", "device"),
 ]
 SETTINGS: Dict[str, Setting] = {s.key: s for s in _ALL}
 

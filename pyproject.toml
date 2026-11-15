@@ -21,3 +21,9 @@ slm = ["litert-lm-api"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["thirties_core*"]
+
+# A first type pass over the core (CI's lint job reports it; it doesn't gate yet).
+[tool.mypy]
+files = ["thirties_core"]
+python_version = "3.12"
+ignore_missing_imports = true

@@ -5,6 +5,7 @@ import re
 import unittest
 
 from thirties_core.astronomy import set_debug_time
+from tests.fixtures import line_with
 from tests.slm_model_compare import measure_model, score_sorting, table
 from tests.slm_parse_eval import check, run_benchmark
 
@@ -83,8 +84,8 @@ class TestModelComparison(unittest.TestCase):
         text = table([row, {"model": "phi-4-mini", "label": "Phi-4 Mini", "backend": "llama.cpp", "params": "3.8B",
                             "licence": "MIT (verify)", "error": "Phi-4 Mini isn't in the models folder"}])
         self.assertIn("| Qwen3 4B Instruct | llama.cpp (test) | 4B | Apache-2.0 (verify) | 100% | 100% | 0 |", text)
-        self.assertIn("not run: Phi-4 Mini isn't in the models folder", text)
-        self.assertIn("- Qwen3 4B Instruct, weakest after Python:", text)
+        line_with(text, "not run", "Phi-4 Mini")
+        line_with(text, "Qwen3 4B Instruct", "weakest")
 
     def test_list_sorting_agreement(self):
         class Sorter:

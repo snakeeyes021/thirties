@@ -57,6 +57,18 @@ def build_day(events: Optional[List[CalendarEvent]] = None) -> Tuple[Determinist
     return sched, plan, pending
 
 
+def line_with(text: str, *facts: str) -> str:
+    """The line of ``text`` that mentions every one of ``facts`` (an item, a time, a day, a count).
+
+    Tests check what a message or tool result says (which item, which time) with this, not its exact sentence: the
+    wording can change, the facts can't. Exact text is kept only where it is the contract (a note body written to
+    Joplin, a few golden lines the user reads)."""
+    for line in text.splitlines():
+        if all(f in line for f in facts):
+            return line
+    raise AssertionError(f"no line mentions all of {list(facts)}:\n{text}")
+
+
 def occupant(plan: DayPlan, hhmm: str, day_offset: int = 0) -> Optional[str]:
     """Title of what is shown at a clock time, or None if open."""
     block = plan.block_at(at(hhmm, day_offset) + timedelta(minutes=1))

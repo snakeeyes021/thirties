@@ -16,8 +16,13 @@ concurrency:
 
 jobs:
   test:
-    name: Run Unit Tests
+    name: Run Unit Tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12: the oldest pyproject.toml allows. 3.13: the GNOME 50 runtime's Python (the Flatpak job runs it too).
+        python: ["3.12", "3.13"]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -25,12 +30,39 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"  # the GNOME 50 runtime's Python
+          python-version: ${{ matrix.python }}
 
       # The core is pure Python with no dependencies to install; the GTK tests skip here (no GTK, no display)
       # and run in gui-test below.
       - name: Run Test Suite
         run: python3 -m unittest discover tests
+
+  lint:
+    name: Lint and Type Check
+    runs-on: ubuntu-latest
+    # Not blocking yet: ruff's real-error rules still find one undefined name (thirty_ceil in
+    # thirties_core/assistant_tools.py), and mypy's full report is mostly mixin noise. Make ruff blocking once
+    # it's clean.
+    continue-on-error: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff and mypy
+        run: python3 -m pip install ruff==0.14.5 mypy==1.18.2
+
+      # Real errors only: syntax errors, undefined names, comparisons that are always wrong.
+      - name: Ruff (real errors)
+        run: ruff check --no-cache --output-format=github --select E9,F63,F7,F82 .
+
+      # A report, not a gate: the settings are in pyproject.toml ([tool.mypy]).
+      - name: Mypy (thirties_core)
+        run: mypy || true
 
   gui-test:
     name: Run Unit Tests with GTK (virtual display)
@@ -62,7 +94,8 @@ jobs:
     needs: [test, gui-test]
     runs-on: ubuntu-latest
     container:
-      image: bilelmoussaoui/flatpak-github-actions:gnome-nightly
+      # The image for the manifest's runtime (org.gnome.Platform 50).
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
       options: --privileged
 
     steps:
@@ -83,7 +116,11 @@ jobs:
           bundle: tech.redfoxlabs.Thirties.flatpak
           manifest-path: tech.redfoxlabs.Thirties.json
           cache-key: flatpak-builder-${{ github.sha }}
-          run-tests: false
+          # Runs the app module's test-commands (tech.redfoxlabs.Thirties.json) inside the build, on the GNOME 50
+          # runtime with what ships: its Python, PyGObject, the bundled EDS and LiteRT-LM. The installed core is
+          # checked against the source first. The GTK tests skip there (no private headless session); gui-test
+          # runs them.
+          run-tests: true
 
       - name: Upload Flatpak Artifact
         uses: actions/upload-artifact@v4

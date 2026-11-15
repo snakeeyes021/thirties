@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from thirties_core.astronomy import get_diurnal_date, set_debug_time
+from thirties_core.astronomy import set_debug_time
 from thirties_core.calendar_engine import MockCalendarEngine
 from thirties_core.config import ThirtiesConfig
 from thirties_core.brains.frontier import ACTION_CLAIM_PATTERN
@@ -300,24 +300,6 @@ class InteractiveEvaluator:
             inference_engine=engine,
         )
 
-        # Initial greeting
-        gen = config.general
-        diurnal_today = get_diurnal_date(
-            current_dt=simulated_time,
-            lat=gen.latitude,
-            lon=gen.longitude,
-            tz_name=day_plan.sunrise.tzinfo,
-        )
-        target_str = day_plan.target_date.strftime("%A, %B %d")
-        day_prefix = f"Today ({target_str})" if day_plan.target_date == diurnal_today else target_str
-
-        greeting = (
-            f"Good day! You are planning {day_prefix}.\n"
-            f"You have {day_plan.daylight_available_count}/{day_plan.daylight_discretionary_total} Daylight Thirties "
-            f"and {day_plan.dark_available_count}/{day_plan.dark_discretionary_total} Dark Thirties available.\n\n"
-            f"What would you like to focus on today?"
-        )
-
         session = EvalSession(
             session_id=sid,
             target_date=target_date,
@@ -325,7 +307,6 @@ class InteractiveEvaluator:
             simulated_time_iso=simulated_time.isoformat() if simulated_time else None,
             session_dir=s_dir,
         )
-        session.initial_greeting = greeting
         session.messages = list(conv.messages)
         session.day_plan_dict = day_plan.to_dict()
         session.save()
@@ -496,7 +477,8 @@ class InteractiveEvaluator:
 
         content.append("## Turn-by-Turn Qualitative Breakdown\n")
 
-        content.append(f"### Initial Greeting\n> **Assistant**:\n> {session.initial_greeting}\n")
+        if session.initial_greeting:  # sessions saved before the app stopped showing a fixed greeting
+            content.append(f"### Initial Greeting\n> **Assistant**:\n> {session.initial_greeting}\n")
 
         for t in session.turns:
             content.append(f"### Turn {t.turn_index}")
@@ -660,8 +642,9 @@ def main():
         print(f"Target Date: {session.target_date.strftime('%A, %B %d, %Y')}")
         print(f"Persona: {session.persona}")
         print(f"--------------------------------------------------------------------------------")
-        print(f"ASSISTANT GREETING:")
-        print(session.initial_greeting)
+        if session.initial_greeting:
+            print("ASSISTANT GREETING:")
+            print(session.initial_greeting)
         print(f"================================================================================")
 
     elif args.subcommand == "step":
@@ -725,7 +708,8 @@ def main():
         )
         print(f"=== INTERACTIVE EVAL REPL: {session.session_id} ===")
         print(f"Target Date: {session.target_date.strftime('%A, %B %d, %Y')}")
-        print(f"Greeting: {session.initial_greeting}")
+        if session.initial_greeting:
+            print(f"Greeting: {session.initial_greeting}")
         print("Commands: Type your user message to talk to bot.")
         print("          /grade a=<1-5> t=<1-5> adh=<1-5> n=\"...\"")
         print("          /status")

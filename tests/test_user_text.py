@@ -19,7 +19,14 @@ CORE_USER_TEXT = ["thirties_core/messages.py", "thirties_core/background.py", "t
                   "thirties_core/before_today.py", "thirties_core/if_time.py", "thirties_core/contextual.py",
                   "thirties_core/sun_notices.py", "thirties_core/morning.py", "thirties_core/not_yours.py",
                   "thirties_core/day_lists.py", "thirties_core/conversation.py", "thirties_core/routine_profile.py",
-                  "thirties_core/whats_next.py"]
+                  "thirties_core/whats_next.py", "thirties_core/project_pieces.py", "thirties_core/media_sources.py",
+                  "thirties_core/period_summary.py",
+                  "thirties_core/engineer_notes.py", "thirties_core/media_picks.py",
+                  "thirties_core/people.py", "thirties_core/progress.py", "thirties_core/sky.py",
+                  "thirties_core/tickets.py", "thirties_core/task_style.py",
+                  "thirties_core/break_down.py", "thirties_core/backlog_tickets.py",
+                  "thirties_core/day_actions.py", "thirties_core/conversation_index.py",
+                  "thirties_core/work_end_answer.py"]
 UI = ["src/*.ui"]
 
 HISTORY = (r"no longer|used to|anymore|any more|previously|built in|old meaning|"
@@ -139,7 +146,7 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
             bridge = ThirtiesTelegramBridge(config=config, scheduler=sched, joplin_engine=joplin,
                                             inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         bridge.client = MagicMock()
-        bridge._cmd_status(7)
+        bridge.handle_message(7, "/status")
         sent = bridge.client.send_message.call_args[0][1]
         self.assertIn("Gemini (cloud, for developers)", sent)
         self.assertFalse(INTERNAL_IDS.search(sent), sent)  # internal ids and class names only
