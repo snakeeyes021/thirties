@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from tests.fixtures import DAY, at, make_scheduler
 from thirties_core.astronomy import set_debug_time
+from thirties_core.clock import format_clock
 from thirties_core.background import BackgroundService
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import MockInferenceEngine
@@ -87,6 +88,14 @@ class TestMuteNeedsTheWords(unittest.TestCase):
             self.assertIn('say "resume check-ins" to turn them back on', out)
             self.assertTrue(self.paused().startswith("Check-ins paused until"))
             self.said("resume check-ins", "unmute_checkins")
+
+    def test_the_pause_is_shown_in_the_users_own_time(self):
+        out = self.said("stop the check-ins for today", "mute_checkins")  # until the end of the day, local time
+        shown = self.paused()
+        self.assertTrue(shown.startswith("Check-ins paused until "), shown)
+        self.assertIn(shown[len("Check-ins paused until "):], out)  # the same time the reply gave, never UTC's
+        end = self.t.day_plan.day_end
+        self.assertIn(format_clock(end), shown)
 
     def test_one_item_still_mutes_on_a_plain_word(self):
         out = self.said("no need to ask about the hinges", "mute_checkins", {"event": "oil"})

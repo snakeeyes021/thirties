@@ -150,12 +150,13 @@ class DayView(Gtk.Box):
         return (plan.target_date, tuple(tuple(sorted(s.to_dict().items())) for s in plan.spans))
 
     def refresh_plan(self, day_plan: DayPlan, force: bool = False) -> None:
-        """Show a plan. Redraws only when the plan's content changed."""
+        """Show a plan. Redraws only when the plan's content changed, or whether check-ins are paused did (Resume
+        changes no item, and the paused line must go at once)."""
         self.day_plan = day_plan
         self.solar_arc.set_day_plan(day_plan)
         self._update_title()
         self._update_tallies()
-        signature = self._plan_signature(day_plan)
+        signature = (self._plan_signature(day_plan), self._paused_text())
         if not force and signature == self._signature:
             self.timeline.sync_units()
             self.tick()
@@ -167,6 +168,12 @@ class DayView(Gtk.Box):
         self.agenda.refresh(day_plan, now)
         self.before.refresh()
         self.timeline.refresh(day_plan, self.today)
+
+    def _paused_text(self) -> str:
+        try:
+            return self.agenda.paused()
+        except Exception:  # never in the way of showing the day
+            return ""
 
     def _read_kinds(self) -> None:
         if self.ongoing_provider is None:

@@ -380,6 +380,25 @@ class DayViewTests(unittest.TestCase):
         view.agenda.refresh(self.plan, self.plan.day_start.replace(hour=16, minute=10))
         self.assertNotIn("paused", view.agenda.groups)
 
+    def test_resume_clears_the_paused_line_at_once(self) -> None:
+        # the window's own path: the tool runs, then the same plan is shown again (Resume changes no item)
+        set_debug_time(self.plan.day_start.replace(hour=16, minute=9))
+        self.addCleanup(set_debug_time, None)
+        state = {"paused": True}
+        view = DayView()
+
+        def run_tool(name, args):
+            if name == "unmute_checkins":
+                state["paused"] = False
+            view.refresh_plan(self.plan)
+            return "Check-ins are back on."
+        view.set_actions(run_tool)
+        view.agenda.paused = lambda: "Check-ins paused until 6:30 AM tomorrow" if state["paused"] else ""
+        view.refresh_plan(self.plan)
+        self.assertIn("paused", view.agenda.groups)
+        view.agenda.resume_btn.emit("clicked")
+        self.assertNotIn("paused", view.agenda.groups)
+
     def test_before_today_offers_once_to_put_old_drops_back(self) -> None:
         calls = []
         view = DayView()

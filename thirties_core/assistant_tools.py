@@ -2425,6 +2425,7 @@ class AssistantTools(KindTools):
         until = self.s.mutes.paused_until(now)
         if until is None:
             return ""
+        until = until.astimezone(now.tzinfo)  # stored in UTC: said in the user's own time
         return f"Check-ins paused until {format_clock(until)}" + (" tomorrow" if until.date() > now.date() else "")
 
     def set_urgency(self, task: str, urgency: str = "", due: Any = None, **_: Any) -> str:
