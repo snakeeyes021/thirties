@@ -105,6 +105,55 @@ def mentions(message: Optional[str], title: str, others: Iterable[str] = ()) -> 
     return bool((mine - shared) & said)
 
 
+# --- an item named by its distinctive words, when a word of it is shared with another item ---
+# small words that name nothing ("Pup into crate": "into" isn't how anyone refers to it); a time in a title isn't
+# its name either
+_MATCH_SKIP = {"into", "onto", "from", "their", "our", "your", "this", "that", "then", "just", "all", "is", "are",
+               "be", "was", "were", "up", "now", "done"}
+
+
+def match_words(text: Any) -> set:
+    return {w for w in name_words(text) if not w.isdigit() and w not in _MATCH_SKIP}
+
+
+def referenced(message: Optional[str], title: str, others: Iterable[str] = ()) -> bool:
+    """Whether the message refers to this item by its distinctive words: as mentions() reads it, or by more of its
+    words than any other item that shares them has in the message ("pup is settled in the crate" names Pup into crate
+    beside Order a crate divider and Pup's vet visit). A word it shares with another item is no reference on its
+    own: when two items match the message equally and neither is named in full, it isn't clear which is meant."""
+    if message is None or mentions(message, title, others):
+        return True
+    said, mine = match_words(message), match_words(title)
+    if not mine:
+        return False
+    if mine <= said:
+        return True
+    hits = mine & said
+    if not hits:
+        return False
+    rivals = [match_words(o) for o in others if item_name(o) != item_name(title)]
+    if hits - (set().union(*rivals) if rivals else set()):
+        return True  # a word only this item has
+    competing = [r for r in rivals if r & hits]  # the items it shares a said word with
+    return all(len(hits) > len(r & said) for r in competing)
+
+
+def tied_with(message: Optional[str], title: str, others: Iterable[str]) -> List[str]:
+    """Other items scoring level with this one on the message, counting the words the two have in common, or []
+    when none of its words are in the message."""
+    said, mine = match_words(message), match_words(title)
+    hits = mine & said
+    if not hits:
+        return []
+    out = []
+    for o in others:
+        r = match_words(o)
+        if item_name(o) != item_name(title) and r & hits and len(r & said) == len(hits):
+            out.append(o)
+    return out
+# --- end named by its distinctive words ---
+
+
 def is_outside(title: str) -> bool:
     from thirties_core.weather import OUTDOOR_RE
     return bool(OUTDOOR_RE.search(title or ""))

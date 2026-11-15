@@ -52,9 +52,31 @@ def _titles(pt: "PlanTools") -> List[str]:
 
 
 def _named(text: str, title: str, others: Iterable[str]) -> bool:
-    from thirties_core.item_facts import mentions
+    from thirties_core.item_facts import referenced
     from thirties_core.started import _names
-    return bool(text) and (mentions(text, title, others) or _names(text, title, list(others)))
+    return bool(text) and (referenced(text, title, others) or _names(text, title, list(others)))
+
+
+def _the_one_whose_time_came(pt: "PlanTools", message: str, title: str, titles: List[str]) -> bool:
+    """When the message matches this item and others equally well ("the walk's done" with three walks on the
+    plan), a done means the one whose time has come (begun, or due within the half hour: a done is often said a
+    little early): it's this one when its time has come and that of none of the others still to do has."""
+    from datetime import timedelta
+    from thirties_core.item_facts import tied_with
+    from thirties_core.models import SpanStatus
+    tied = tied_with(message, title, [t for t in titles if t != title])
+    if not tied:
+        return False
+    try:
+        now = pt._now()
+    except Exception:
+        return False
+    spans = [s for s in pt.day_plan.spans if not getattr(s, "shown_only", False)]
+
+    def started(name: str) -> bool:
+        return any(s.title == name and s.status == SpanStatus.PLANNED and s.start_dt <= now + timedelta(minutes=30)
+                   for s in spans)
+    return started(title) and not any(started(t) for t in tied)
 
 
 def _listed(text: str, title: str) -> bool:
@@ -78,6 +100,8 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = ()) -> Tuple[Optiona
     if _named(message, title, titles) or any(i and re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
         return None, message
     if BULK_RE.search(message):
+        return None, message
+    if _the_one_whose_time_came(pt, message, title, titles):
         return None, message
     refusal = (f"The user's words don't point to {title}, so it isn't marked done. If they meant it, ask which "
                "item they finished; if they named another item, mark that one by its id.")
