@@ -908,9 +908,14 @@ RULES
             return []
         spans = [s for s in plan.spans_in_view() if not s.shown_only]
         titles = {s.id: self.tools._title(s) for s in spans}
+        # a time that's part of an item's title ("10:15 Feed the cat") is its name, never a claim about the plan
+        timed = sorted((t for t in titles.values() if self._CLOCK_RE.search(t)), key=len, reverse=True)
         out: List[str] = []
         for part in re.split(r"(?<=[.!?])\s+|\n+|[,;]|\band\b|\bthen\b", reply or ""):
-            said = self._said_clocks(part)
+            bare = part
+            for t in timed:
+                bare = re.sub(re.escape(t), " ", bare, flags=re.IGNORECASE)
+            said = self._said_clocks(bare)
             if not said or part.rstrip().endswith("?") or self._ELSEWHERE_RE.search(part):
                 continue
             named = [s for s in spans if mentions(part, titles[s.id], titles.values())]
@@ -927,7 +932,7 @@ RULES
             # a range ("from 3:00 to 4:00") is a start and an end: its start is checked as one (an end that
             # matches never covers a wrong start)
             ranges = [(self._said_clocks(m.group(1)), self._said_clocks(m.group(2)))
-                      for m in self._RANGE_RE.finditer(part)]
+                      for m in self._RANGE_RE.finditer(bare)]
             ranges = [(a[0], b[0]) for a, b in ranges if a and b]
             bad_range = bool(ranges) and not all(any(a in starts[s.id] and b in ends[s.id] for s in named)
                                                  for a, b in ranges)

@@ -226,14 +226,17 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
     pt = assistant.pt
     plan = pt.day_plan
     from thirties_core.today import note_items
-    steps = {text.strip().lower(): note["title"].strip() for note in assistant._routines()
-             for text, _ in note_items(note)}  # each routine's steps, by the routine they belong to
+    from thirties_core.step_times import key as _step_key
+    # each routine's steps (as worded, and by name without a leading time), by the routine they belong to
+    steps = {k: note["title"].strip() for note in assistant._routines()
+             for text, _ in note_items(note) for k in (text.strip().lower(), _step_key(text))}
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
                     and s.end_dt > pt._now()), key=lambda s: s.start_dt)
     rows: List[Tuple[datetime, str]] = []  # (when, line)
     parts: Dict[Tuple[datetime, str], List[str]] = {}  # the morning's routines are part of the day's plan, by part
     for s in items:
-        routine = steps.get(s.title.strip().lower())
+        from thirties_core.step_times import key as step_key  # a step by name, without a leading time
+        routine = steps.get(s.title.strip().lower()) or steps.get(step_key(s.title))
         if routine is not None:
             parts.setdefault((thirty_of(s.start_dt), routine), []).append(s.title)
             continue

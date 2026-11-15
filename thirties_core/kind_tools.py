@@ -56,8 +56,9 @@ class KindTools:
         if self._db is None:
             return {"steps": set(), "roles": {}, "links": None, "lasting": None}
         routines = self._routines()
-        steps = {text.lower() for n in routines for text, _ in note_items(n)} | {n["title"].strip().lower()
-                                                                                for n in routines}
+        from thirties_core.step_times import key as step_key  # a step by name too, without a leading time
+        steps = {k for n in routines for text, _ in note_items(n) for k in (text.lower(), step_key(text))}
+        steps |= {n["title"].strip().lower() for n in routines}
         return {"steps": steps, "roles": ListCatalog(self._db).roles(), "links": TodayLinks(self._db),
                 "lasting": LastingFacts(self._db)}
 

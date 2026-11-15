@@ -743,8 +743,10 @@ class AssistantTools(KindTools):
         today, writer = self._today_note(), self._writer()
         if today is None or writer is None:
             return
-        exact = next((text for text, ticked in note_items(today) if text.lower() == title.strip().lower() and not ticked),
-                     None)
+        from thirties_core.step_times import key as step_key
+        open_lines = [text for text, ticked in note_items(today) if not ticked]
+        exact = next((text for text in open_lines if text.lower() == title.strip().lower()), None) or \
+            next((text for text in open_lines if step_key(text) == step_key(title)), None)  # written with its time
         if exact:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
 
@@ -936,10 +938,11 @@ class AssistantTools(KindTools):
     def _routine_of(self, title: str) -> Optional[Tuple[Dict[str, Any], str]]:
         """The routine note a step belongs to, and the step's exact wording; only the same wording counts."""
         from thirties_core.today import note_items
-        want = str(title).strip().lower()
+        from thirties_core.step_times import key as step_key
+        want = step_key(str(title))  # a time typed before a step is its time, not its wording (step_times.py)
         for note in self._routines():
             for text, _ in note_items(note):
-                if text.lower() == want:
+                if step_key(text) == want:
                     return note, text
         return None
 
@@ -954,13 +957,16 @@ class AssistantTools(KindTools):
         writer = self._writer()
         if writer is None:
             raise ToolError("Thirties isn't connected to Joplin.")
+        from thirties_core.step_times import clean_title, key as step_key
         name = routine["title"].strip()
         key = (self._today().isoformat(), name.lower())
         have = self._today_groups.get(key)
         if have is None:
             found = group_items(note, name)
-            have = None if found is None else {t.lower() for t in found}
-        missing = [s for s in steps if have is None or s.lower() not in have]
+            have = None if found is None else {step_key(t) for t in found}
+        raw = {step_key(s): s for s in steps}  # the note's wording, for each step's id
+        steps = list(dict.fromkeys(clean_title(s) for s in steps))  # by name: no leading time (step_times.py)
+        missing = [s for s in steps if have is None or step_key(s) not in have]
         if not missing:
             return "Already on it."
         ops = ([] if have is not None else [{"op": "add_task", "note_id": note["id"], "title": name}]) + \
@@ -969,10 +975,10 @@ class AssistantTools(KindTools):
             status, msg = writer.submit(op)
             if status in ("not_allowed", "failed"):
                 raise ToolError(msg)
-        self._today_groups[key] = (have or set()) | {s.lower() for s in missing}
+        self._today_groups[key] = (have or set()) | {step_key(s) for s in missing}
         links = TodayLinks(self._db)
         for step in missing:
-            links.link(step, TaskItem(id=line_id(self._db, routine["id"], step),
+            links.link(step, TaskItem(id=line_id(self._db, routine["id"], raw.get(step_key(step), step)),
                                       source_notebook=routine.get("source_notebook", ""),
                                       title=step, is_checkbox_item=True, parent_note_title=name,
                                       parent_note_id=routine["id"], list_role="routine"))
@@ -993,6 +999,7 @@ class AssistantTools(KindTools):
             raise ToolError(f"Which routine? Routines: {names}.")
         note = found[0]
         steps = [text for text, _ in note_items(note)]
+        from thirties_core import step_times  # a time typed before a step is its time, not its name
         if isinstance(parts, str) and parts.strip():
             try:
                 parts = json.loads(parts)
@@ -1008,26 +1015,43 @@ class AssistantTools(KindTools):
             parts = [{"start": format_clock(first + timedelta(minutes=30 * k)), "items": group}
                      for k, group in enumerate(natural_parts(note, (lambda s: lasting.for_item(s).minutes)
                                                              if lasting is not None else None))]
-        by_text = {s.lower(): s for s in steps}
-        placed, already, lines, extra = [], [], [], []
+        by_text = {step_times.key(s): s for s in reversed(steps)}  # by name; the note's wording for its id
+        placed, already, lines, extra, learned = [], [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan
         moved = self.routines.unplace_for_move(plan, note, parts)  # placed already, it moves (routines.py)
-        on_plan ={sp.title.lower() for sp in plan.spans if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
+        on_plan = {step_times.key(sp.title) for sp in plan.spans
+                   if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
         self._quiet_today = True
         try:
             for part in parts:
                 names = part.get("items") or steps
-                extra += [str(n).strip() for n in names if str(n).strip().lower() not in by_text]
-                todo = [by_text.get(str(n).strip().lower(), str(n).strip()) for n in names]  # extras as said
-                already += [t for t in todo if t.lower() in on_plan]
-                todo = [t for t in todo if t.lower() not in on_plan]
+                extra += [step_times.clean_title(str(n)) for n in names if step_times.key(str(n)) not in by_text]
+                todo = [by_text.get(step_times.key(str(n)), str(n).strip()) for n in names]  # extras as said
+                learned.append({**part, "items": [step_times.clean_title(t) for t in todo]})
+                already += [step_times.clean_title(t) for t in todo if step_times.key(t) in on_plan]
+                todo = [t for t in todo if step_times.key(t) not in on_plan]
                 if not todo:
                     continue
                 first = self.pt._start(part.get("start"))
+
+                def own_time(text: str, near: datetime) -> Optional[datetime]:
+                    """The step's own time, on this day's canvas only (a clock time before the canvas starts
+                    reads as the next morning's)."""
+                    t = step_times.step_start(text, near)
+                    return t if t is not None and plan.day_start <= t < plan.day_end else None
+                own = own_time(todo[0], first)  # the part's first step says when it starts
+                if own is not None and own != first:
+                    first = own
+                    learned[-1]["start"] = format_clock(first)
                 at = [first + timedelta(minutes=30 * k // len(todo)) for k in range(len(todo) + 1)]
                 for k, text in enumerate(todo):
-                    args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "alongside": True}
-                    if text.lower() in by_text:
+                    begin, finish = at[k], at[k + 1]
+                    mine = own_time(text, begin) if k else None  # a later step's own time
+                    if mine is not None and mine != begin:
+                        begin, finish = mine, mine + (at[k + 1] - at[k])
+                    args = {"title": step_times.clean_title(text), "start": format_clock(begin),
+                            "end": format_clock(finish), "alongside": True}
+                    if step_times.key(text) in by_text:
                         args.update(category="task", task_id=line_id(self._db, note["id"], text))
                     if day not in (None, ""):
                         args["day"] = day
@@ -1035,17 +1059,17 @@ class AssistantTools(KindTools):
                     if out.startswith(NOT_DONE_PREFIX):
                         raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
                     placed.append(text)
-                lines.append(f"{format_clock(thirty_of(first))}: {', '.join(todo)}")
+                lines.append(f"{format_clock(thirty_of(first))}: {', '.join(step_times.clean_title(t) for t in todo)}")
         finally:
             self._quiet_today = False
         if not placed:
             return f"{note['title']} is already on the plan."
         known = self.routines.known_extras(note)  # extras the user always places with it (Brush teeth): no asking
         extra = [x for x in extra if x.lower() not in known]
-        self.routines.learn(note, parts)  # how the user places it becomes its usual placement (routines.py)
+        self.routines.learn(note, learned or parts)  # how the user places it becomes its usual placement (routines.py)
         listed = ""
         if self.pt.is_current(plan):
-            self._day_begun(placed)
+            self._day_begun([step_times.clean_title(t) for t in placed])
             try:
                 listed = " " + self._routine_on_today(note, placed)
             except ToolError:
@@ -1604,6 +1628,8 @@ class AssistantTools(KindTools):
         done = self._db.completed_since(self._today() - timedelta(days=DONE_HIDES_DAYS)) if self._db else set()
         routine = {n["title"].strip().lower() for n in self._routines()}
         routine |= {text.lower() for n in self._routines() for text, _ in note_items(n)}
+        from thirties_core.step_times import key as _step_key  # a step by name, without a leading time
+        routine |= {_step_key(text) for n in self._routines() for text, _ in note_items(n)}
         routine |= self.routines.daily_titles()  # anchors and a routine's extra steps don't carry over either
         done_on_plan = {t.lower() for t in self._done_on_plan(note)}
         ctx = self._kind_context()

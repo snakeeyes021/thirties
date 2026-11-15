@@ -36,6 +36,7 @@ from thirties_core.clock import (ClockError, format_clock, format_duration, pars
                                  first_fitting_thirty, parse_duration_minutes, resolve_clock, thirty_ceil, thirty_of)
 from thirties_core.models import SpanCategory, SpanStatus
 from thirties_core.scheduler import StateDatabase, utc_now_iso
+from thirties_core.step_times import clean_title, has_leading_time, key as step_key, split_leading_time
 from thirties_core.week import DAYS, describe_days, parse_days, weekday_key, work_days
 
 if TYPE_CHECKING:
@@ -447,6 +448,7 @@ class RoutineTools:
     def __init__(self, assistant: "AssistantTools") -> None:
         self.a = assistant
         self.placing = False  # the morning set-up is placing: put_routine doesn't learn from it
+        self._titles_cleaned: set = set()  # the days whose stored step titles were cleaned (clean_stored_titles)
 
     # --- helpers ---
 
@@ -480,15 +482,30 @@ class RoutineTools:
 
     @staticmethod
     def steps(note: Dict[str, Any]) -> List[str]:
+        """The routine's steps by name, in the note's order: a clock time the note gives at the start of a step
+        ("6:15 Water the plants") is its time, not its name (step_times.py)."""
+        return list(dict.fromkeys(clean_title(raw) for raw in RoutineTools.raw_steps(note)))
+
+    @staticmethod
+    def raw_steps(note: Dict[str, Any]) -> List[str]:
+        """The steps worded exactly as in the note: what their ids are read by."""
         from thirties_core.today import note_items
         return [text for text, _ in note_items(note)]
+
+    @staticmethod
+    def raw_of(note: Dict[str, Any]) -> Dict[str, str]:
+        """Each step's name (lowercased, without its leading time) to its wording in the note."""
+        out: Dict[str, str] = {}
+        for raw in RoutineTools.raw_steps(note):
+            out.setdefault(step_key(raw), raw)
+        return out
 
     def last_done(self, note: Dict[str, Any], r: Optional[Routine] = None) -> Optional[date]:
         """The last day it was really done: what the user said, or the latest tick of any of its steps."""
         from thirties_core.item_ids import line_id
         r = r or self.book().get(note["id"], note["title"])
         days = [_day_of(r.last_done)]
-        for step in self.steps(note):
+        for step in self.raw_steps(note):
             rec = self.db.get_task_history(line_id(self.db, note["id"], step))
             days.append(_day_of(rec.completed_date) if rec and rec.completed_date else None)
         return max((d for d in days if d), default=None)
@@ -512,13 +529,14 @@ class RoutineTools:
         if self.pt.scheduler is None:
             return []
         steps = self.steps(note)
-        by_id = {i: s for s in steps for i in line_ids(self.pt.scheduler.state_db, note["id"], s)}
+        by_id = {i: clean_title(s) for s in self.raw_steps(note)
+                 for i in line_ids(self.pt.scheduler.state_db, note["id"], s)}
         by_title = {s.lower(): s for s in steps}
         tz = self.pt.day_plan.day_start.tzinfo
         end = datetime.combine(before, datetime.min.time(), tzinfo=tz)
         seen: Dict[str, List[Tuple[datetime, str]]] = {}
         for span in self.db.get_spans_between(end - timedelta(days=HISTORY_DAYS), end):
-            step = by_id.get(span.task_id or "") or by_title.get(span.title.strip().lower())
+            step = by_id.get(span.task_id or "") or by_title.get(step_key(span.title))
             if step and span.status != SpanStatus.SKIPPED and not span.is_envelope:
                 start = span.planned_start or span.start_dt
                 seen.setdefault(step, []).append((start, _hhmm(thirty_of(start.astimezone(tz)))))
@@ -563,14 +581,15 @@ class RoutineTools:
         named = set()
         for part in _as_list(parts) or [{}]:
             names = (part.get("items") if isinstance(part, dict) else None) or steps
-            named |= {str(n).strip().lower() for n in names if str(n).strip()}
+            named |= {step_key(str(n)) for n in names if str(n).strip()}
         if not named:
             return []
-        ids = {i for s in steps if s.lower() in named for i in line_ids(self.db, note["id"], s)} if self.db else set()
-        done = {s.title.strip().lower() for s in plan.spans if s.status == SpanStatus.DONE}
+        ids = ({i for s in self.raw_steps(note) if step_key(s) in named for i in line_ids(self.db, note["id"], s)}
+               if self.db else set())
+        done = {step_key(s.title) for s in plan.spans if s.status == SpanStatus.DONE}
         moving = [s for s in plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
-                  and s.source != "calendar" and s.title.strip().lower() in named
-                  and s.title.strip().lower() not in done
+                  and s.source != "calendar" and step_key(s.title) in named
+                  and step_key(s.title) not in done
                   and (not s.task_id or s.task_id in ids)]
         gone = {s.id for s in moving}
         plan.spans = [s for s in plan.spans if s.id not in gone]
@@ -613,11 +632,10 @@ class RoutineTools:
         if span is None or span.is_envelope or self.placing or self.db is None or outer_tool() != "update_event":
             return
         from thirties_core.item_ids import line_ids
-        want = span.title.strip().lower()
+        want = step_key(span.title)
         for note in self.a._routines():
-            steps = self.steps(note)
-            name = next((s for s in steps if s.lower() == want or span.task_id in line_ids(self.a._db, note["id"], s)),
-                        None)
+            name = next((clean_title(s) for s in self.raw_steps(note)
+                         if step_key(s) == want or span.task_id in line_ids(self.a._db, note["id"], s)), None)
             if name is None and want in self.known_extras(note):
                 name = span.title.strip()
             if name is not None:
@@ -631,7 +649,8 @@ class RoutineTools:
         for part in _as_list(parts):
             if not isinstance(part, dict):
                 raise ToolError("parts must be a list of {start, items}.")
-            items = [by_text.get(str(n).strip().lower(), str(n).strip()) for n in (part.get("items") or list(by_text.values()))
+            # kept by name: a time typed at the start of a step is its time, never part of the name (step_times.py)
+            items = [by_text.get(step_key(str(n)), clean_title(str(n))) for n in (part.get("items") or list(by_text.values()))
                      if str(n).strip()]
             when = part.get("start") or part.get("at")
             if when in (None, "") or not items:
@@ -676,7 +695,7 @@ class RoutineTools:
         if self.db is None:
             return set()
         steps = {s.lower() for s in self.steps(note)}
-        return {i.lower() for p in self.book().get(note["id"]).parts for i in p["items"] if i.lower() not in steps}
+        return {step_key(i) for p in self.book().get(note["id"]).parts for i in p["items"] if step_key(i) not in steps}
 
     def daily_titles(self) -> set:
         """Titles that happen again by themselves (anchors, routines and their extra steps): they never carry over
@@ -711,11 +730,65 @@ class RoutineTools:
         return min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start
                     and s.status != SpanStatus.SKIPPED), default=plan.day_end)
 
+    def clean_stored_titles(self, plan: Optional["DayPlan"] = None) -> int:
+        """Thirties' own copies of step titles that still start with a clock time (stored before a leading time was
+        read as the step's time, step_times.py): the learned placements, the daily anchors and the day's planned
+        steps get the title without it. Once per day and safe to repeat; the routine notes themselves are never
+        written. Returns how many were cleaned."""
+        if self.db is None:
+            return 0
+        plan = plan or self.pt.day_plan
+        if plan is None or plan.target_date in self._titles_cleaned:
+            return 0
+        self._titles_cleaned.add(plan.target_date)
+        from thirties_core.item_ids import line_ids
+        changed = 0
+        book = self.book()
+        notes = self.a._routines()
+        for note in notes:
+            r = book.get(note["id"], note["title"])
+            if any(has_leading_time(i) for p in r.parts for i in p.get("items", [])):
+                for p in r.parts:
+                    p["items"] = list(dict.fromkeys(clean_title(i) for i in p.get("items", [])))
+                book.save(r)
+                changed += 1
+        timed = {raw.strip().lower() for n in notes for raw in self.raw_steps(n) if has_leading_time(raw)}
+        ids = {i for n in notes for raw in self.raw_steps(n) if has_leading_time(raw)
+               for i in line_ids(self.db, n["id"], raw)}
+        anchors = book.anchors(include_removed=True)
+        keys = {a.key for a in anchors}
+        for a in anchors:
+            named, own, _ = split_leading_time(a.title)
+            if own is None:
+                continue
+            timed.add(a.key)
+            if named.strip().lower() not in keys:  # the anchor under its name; the old row stays, removed, so a
+                book.save_anchor(replace(a, title=named))  # device that hasn't cleaned it yet doesn't bring it back
+                keys.add(named.strip().lower())
+                changed += 1
+            if not a.removed:
+                a.removed = True
+                book.save_anchor(a)
+        for s in plan.spans:
+            if s.is_envelope or s.source == "calendar" or not has_leading_time(s.title):
+                continue
+            if s.title.strip().lower() in timed or (s.task_id and s.task_id in ids):
+                s.title = clean_title(s.title)
+                self.pt._persist(s)
+                changed += 1
+        if changed:
+            logger.info("Took the leading clock time off %d stored step title(s).", changed)
+        return changed
+
     def set_up_current(self) -> str:
         """Before a turn: set up the day being lived, which near sunrise is the coming one (planning at 6:30 on a
         dark morning is planning that day)."""
         if self.db is None or self.pt.scheduler is None:
             return ""
+        try:
+            self.clean_stored_titles(self.pt.day_plan)
+        except Exception as e:  # never costs the user their turn
+            logger.warning("Couldn't clean the stored step titles: %s", e)
         out = [self.set_up_day(self.pt.day_plan)]
         if self.pt._now() >= self.pt.day_plan.day_end - timedelta(hours=3):
             out.append(self.set_up_day(self.pt.plan_for(self.pt.day_plan.target_date + timedelta(days=1))))
@@ -729,6 +802,10 @@ class RoutineTools:
         plan = plan or self.pt.day_plan
         if self.db is None or self.pt.scheduler is None or not self.pt.is_current(plan):
             return ""
+        try:
+            self.clean_stored_titles(plan)
+        except Exception as e:  # never keeps the day from being set up
+            logger.warning("Couldn't clean the stored step titles: %s", e)
         key = self._setup_key(plan.target_date)
         if self.db.get_sync_meta(key):
             return ""
@@ -1011,7 +1088,7 @@ class RoutineTools:
         for note in self.a._routines():
             r = book.get(note["id"], note["title"])
             names = {s.lower() for s in self.steps(note)} | {i.lower() for p in r.parts for i in p["items"]}
-            steps = [s for s in plan.spans if not s.is_envelope and s.title.strip().lower() in names]
+            steps = [s for s in plan.spans if not s.is_envelope and step_key(s.title) in names]
             planned = [s for s in steps if s.status == SpanStatus.PLANNED]
             due = is_due(r, day, self.gen, self.last_done(note, r))
             if not planned and (steps or not due):
@@ -1107,7 +1184,7 @@ class RoutineTools:
         names.update({i.lower(): i for p in r.parts for i in p["items"]})
         groups: Dict[str, List[str]] = {}
         for span in sorted(self.pt.day_plan.spans, key=lambda s: s.start_dt):
-            name = names.get(span.title.strip().lower())
+            name = names.get(step_key(span.title))
             if name and span.status != SpanStatus.SKIPPED and not span.is_envelope:
                 groups.setdefault(_hhmm(thirty_of(span.start_dt)), []).append(name)
         old = {p["at"]: p.get("fallback", "") for p in r.parts}
@@ -1160,7 +1237,7 @@ class RoutineTools:
         skipped isn't "put off", B2), and its group leaves the Today note."""
         names = {s.lower() for s in self.steps(note)} | {i.lower() for p in r.parts for i in p["items"]}
         steps = [s for s in self.pt.day_plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
-                 and s.title.strip().lower() in names]
+                 and step_key(s.title) in names]
         for s in steps:
             s.status = SpanStatus.SKIPPED
             self.pt._persist(s)
@@ -1182,6 +1259,11 @@ class RoutineTools:
             return "Noted: no daily anchors for now."
         if not str(title or "").strip():
             raise ToolError("Give the anchor's title.")
+        named, own, _ = split_leading_time(str(title))
+        if own is not None:  # "7:00 Feed the cat": the time is the anchor's time, never part of its name
+            title = named
+            if time in (None, ""):
+                time = own.strftime("%H:%M")
         book = self.book()
         current = next((a for a in book.anchors(include_removed=True) if a.key == str(title).strip().lower()), None)
         if _true(remove):

@@ -242,7 +242,8 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     pt = assistant.pt
     ctx = assistant._kind_context()
     daily = assistant.routines.daily_titles()
-    routine_steps = {t.lower() for n in assistant._routines() for t, _ in note_items(n)}
+    from thirties_core.step_times import key as step_key  # a step by name too, without a leading time
+    routine_steps = {k for n in assistant._routines() for t, _ in note_items(n) for k in (t.lower(), step_key(t))}
     routine_names = {n["title"].strip().lower() for n in assistant._routines()}
     tasks = {t.id: t for t in assistant.s.tasks}
     listed = {t.title.strip().lower(): t for t in assistant.s.tasks if t.list_role != "today"}
