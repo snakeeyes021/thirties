@@ -8,6 +8,8 @@
 
 ## Where We Are
 
+**Gemini first (2026-11-15).** The app is being built to work the way the user wants on the Gemini brain now; the on-device brain (Gemma) catches up afterwards and holds nothing up. Gemma studies and GPU runs are paused. Work is done in parallel across areas. See AGENTS.md §4.
+
 Both brains run on one shared core, and both are measured with simulated users: Gemini, through `agy`, role-plays the user with hidden goals across 13 multi-turn scenarios, then judges the outcome. Raw reports are in `docs/eval_reports/sim/` (gitignored).
 
 | Brain | Goals met | Deterministic checks | Judge: accuracy / understanding / clarity / efficiency / tone (of 5) | Time per reply |
@@ -514,6 +516,8 @@ Reported 10-31 (Sat, day 1). The causes were checked against the stored data and
 ## Soon, not today
 - **Benchmark local models on other devices:** a desktop with an 8 GB GPU and a phone (needs the mobile app). The probe is `tests/model_spike.py` (0.2 stream H). Models that don't fit in VRAM or RAM are still candidates: some users will take spilling to RAM or disk, and the wait, in exchange for a smarter model.
 - **People to keep in touch with:** a list of friends and family with when each was last seen in person, texted, called, or spent quality time with (the categories can overlap). It can be one more list, and the assistant suggests "you haven't talked to so-and-so in a while; maybe send them a text".
+- **Where the reading list comes from:** Goodreads stopped sharing lists publicly, so 0.3.1 reads the library export the user saves by hand, and reminds them to export again when they finish a book. Think about this some more later: something that stays current by itself, such as Open Library's public reading lists (a Goodreads export can be imported there once), or whatever service shares lists openly by then.
+- Proposed: telling the assistant what you're doing now (an open-ended activity) never reshuffles the plan: it holds the plan, with no missed marks and no nudges for what it overlaps, until you say you're done or ask what's next. Ongoing work counts as worked on, not completed.
 
 ## Maybe (on probation)
 Ideas that may not be wanted. Don't build without asking.

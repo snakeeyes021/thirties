@@ -140,6 +140,12 @@ The on-device SLM (Gemma 4-E4B) is *extremely* weak. A smaller copy of the front
 
 **Status (2026-11-12):** only debug mode (the Frontier Brain on Gemini) is usable; the app's own assistant isn't ready. The first design for the on-device brain, a scaffolded pipeline, is parked after failing its studies; it stays in the code behind the developer switch (`docs/SLM_BRAIN.md`). The on-device goal stays: the next study asks how its brain layer should be built.
 
+**Gemini first (2026-11-15, overrides the order of work above):** the app is built to work the way the user wants on the Frontier Brain (Gemini) first, and the on-device brain catches up afterwards. The on-device brain is not abandoned, but it no longer holds anything up:
+- Features, fixes and releases are judged on Gemini only. No feature waits for an on-device version, and no release check runs the on-device brain.
+- No on-device studies or GPU runs for Thirties until the app works the way the user described.
+- Shared core and tool API rules (§4.1 rules 3 and 4) still hold, so the on-device brain can be brought up to the same tools later.
+- Development runs in parallel: several implementers at once, split by area so they don't share files, with one lead integrating. Testing runs in parallel too: many simulated days with agents as judges, and quick A/B comparisons judged by agents or the user.
+
 Both brains use the **same tool API** (`PlanTools`). The Frontier Brain shows in real use which tools are actually needed; the SLM Brain inherits exactly those. See `docs/ROADMAP.md` for sequencing and `docs/SLM_BRAIN.md` for the research design.
 
 ### 4.1. Rules for Working Across Brains
@@ -265,16 +271,15 @@ Evaluation output is written to `docs/eval_reports/`, which is gitignored. Commi
 ---
 
 ### 6.3. Versions, Branches and Releases
-- **One branch per version** (`feature/0.1`, `feature/0.2`, …), holding a bundle of features. Fixes are commits on it. Merging it into `main` (by PR, which the user merges) *is* the release. `main` holds released code only.
-- **One version in flight at a time.** Everything goes on the current version's branch until it's merged. The next version's branch starts from `main` after that merge. Never label work as belonging to a version whose branch doesn't exist yet.
-- **The version number is bumped at the start of a version's branch** (`meson.build` and a `<release>` entry in `data/tech.redfoxlabs.Thirties.metainfo.xml.in`, which serves as the release notes). Builds say what they are: version plus commit (About, logs, and each stored message).
-- **The branch is pushed as work lands**, with a draft PR to `main`, so "what's in 0.x" is always that PR's commit list. Commit freely; push when the user has seen the work (or says so).
-- **Releasing:** the user says the version is good after real use; the PR is marked ready and the user merges it. Then the merge commit on `main` is tagged `vX.Y.Z` and the tag pushed; CI publishes the GitHub pre-release with the Flatpak bundle.
+- **`develop` is the integration branch; `main` holds released code only.** Work is built in parallel on short-lived local branches, one per area, and the lead merges them into `develop` as each is ready and tested. Agents merge into `develop` freely. `develop` is what the user runs day to day, so it always holds the newest safe work. Nothing the user described is held back as "a later version" by default; a feature waits only if it isn't built yet.
+- **Every push is checked first**, because the repository is public. Area branches stay local; `develop` is pushed once its check passes.
+- **The version number is bumped on `develop` when a release is being readied** (`meson.build` and a `<release>` entry in `data/tech.redfoxlabs.Thirties.metainfo.xml.in`, which serves as the release notes). Builds say what they are: version plus commit (About, logs, and each stored message).
+- **Releasing:** when `develop` meets the bar below, the agent opens a PR from `develop` to `main` and the user merges it; that merge is the release. Timing and version numbers are the agents' call, not the user's. Then the merge commit on `main` is tagged `vX.Y.Z` and the tag pushed; CI publishes the GitHub pre-release with the Flatpak bundle.
 - **A release is a ratchet, not "done":** safe, better than the last release, no worse anywhere. Every friction the user reports gets a tag, proposed by the agent and overruled by the user if they disagree:
   - **Blocker:** it harms the user's data (wrong Joplin writes, lost items, wrong stored times), it's worse than the last release, or it breaks the version's headline feature. Fixed before release.
   - **Polish:** in scope and small (hours). Fixed on the branch if cheap, else the next version.
   - **Next:** new capability, a design question, or out of scope. Goes into ROADMAP.md for a later version.
-- **A version merges when:** there are no open blockers; the user has used it for 3 real days with no new blocker (polish and next items don't reset the clock); and the paired day sim is no worse than the last release (requests met, user rating, zero internal text, unit tests green). Time box: about a week, after which what's there ships if those hold. A blocker found after a release gets a patch release (`0.x.1`) off `main`, carried into the current branch.
+- **A release is ready when:** there are no open blockers, the release check (invented days, base vs candidate, the bar in code) passes against the last release (requests met, user rating, zero internal text), and the test suite is green; there is no waiting period. Time box: about a week, after which what's there ships if those hold. A blocker found after a release is fixed on `develop` and released as a patch (`0.x.1`).
 - **The agent runs this process:** it tags frictions, tracks the 3-day clock, says when a version meets the bar, proposes the release, and tells the user what's theirs to do next.
 - **ROADMAP.md** names what each version contains; finished items are checked off there.
 - **Eval copies** (worktrees, `eval/*` branches) are local only and never pushed.

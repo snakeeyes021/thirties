@@ -41,6 +41,61 @@
   </branding>
 
   <releases>
+    <release version="0.4.0" date="2026-11-15" type="development">
+      <description>
+        <p>One conversation on the desktop and the phone, what's next without asking, a schedule that keeps to what you said, a day that makes way for what you're really doing, the days ahead in pencil, Month and Year in the Timeline, projects that move a piece at a time, and help with people, goals, reading and watching.</p>
+        <ul>
+          <li>The app's chat and Telegram are one conversation: the same messages, in the same words, in both. The morning message is in the day it opens, and Telegram commands and their replies show in the app too</li>
+          <li>The Timeline has Month and Year tabs, and the Week shows what each block holds. Its marks, ticks and quarters are easier to read, and a card left Not reported can still be ticked there</li>
+          <li>On the Agenda, one tap says work started or finished, and another logs how much energy you have. An item with no time yet can be done, given a time or put off, on the Agenda and the Timeline</li>
+          <li>The days ahead are pencilled in: a later day shows what's planned for it on the Agenda and the Timeline, and its items can be done early, given a time or put off</li>
+          <li>All conversations, by day, with a search, and spell check in the message box</li>
+          <li>The night (your own sleep window) is a thin strip under the day in the Timeline; it opens when you click it or drag something into it, and you can plan in it like any other time</li>
+          <li>An empty stretch that's already over takes a record of what happened then: it's saved as done, at the times you give, and counts in your statistics; it's never asked about or carried over</li>
+          <li>Start notices and check-ins end with what's next when there's something new to say, including free stretches of an hour or more and today's items with no time yet. In Telegram, the commands are in the menu, /now and a What's next button show it whole, and a tick in the day panel reaches the phone too</li>
+          <li>Once an evening, when two or more things are still not marked and there's room tonight, one offer to move them to tonight; a yes or a thumbs up does it</li>
+          <li>Asked to stop adding what's next, the list of what's not marked yet, or the line saying which block you're in, Thirties stops, from now on or for today only; Preferences has the same three switches</li>
+          <li>Every message is plain lines: nothing already done is listed unless you ask what got done, and a list item is always named, never shown as a code</li>
+          <li>The schedule holds your own items, each once, and nothing comes off it unless you ask. An item you put on a later day stays off today until you bring it up</li>
+          <li>Before a reply goes out, what it says is checked against the plan: a move it mentions has to be on the plan, only what's finished is marked done, and a question changes nothing</li>
+          <li>Started isn't done: an item is done when you say it's finished. What you say you're doing now, or a rest you ask for, takes its time, and what's in the way moves</li>
+          <li>Anything you ask for today gets a time on today's plan, including an item added to a list for today and one pinned to the day</li>
+          <li>Free time stays free unless you fill it, and when the day is full Thirties says where things go instead of offering to drop them</li>
+          <li>Asked to choose, Thirties chooses and says why; told to stop doing something, it stops; asked why something is where it is, it answers from what it has on record</li>
+          <li>The morning says where each item kept from before went: "today at 3:00 PM", or "not today, later this week"</li>
+          <li>Say you need quiet until something's over, and Thirties holds everything it would say by itself until then; reminders go out after, and a short line says messages are back on</li>
+          <li>A reminder can carry details, and says them when it goes off. When something else is on after an item ends, the check-in asks whether you've started it</li>
+          <li>Working longer on something counts as progress: whatever it pushed aside moves later instead of being marked missed, and a project's pieces are planned together</li>
+          <li>Every project gets a small piece offered each day, and a part that ran long two days out of three gets more time the next time</li>
+          <li>A project's backlog stays off your day: a ticket from it, or a line written like one, goes on the plan only when you name it</li>
+          <li>A routine already on the plan moves when you place it again, and on a crowded day a later part of it goes at its usual fallback time. A step done late one day doesn't change where it goes the next</li>
+          <li>Say you're still doing something and it stretches to when you'll really finish, with what follows moving along only as far as it has to. Give it a length and it's marked done by itself</li>
+          <li>Pushing the day back moves only what has to move: meals stay close to their times, fixed events stay put, and the half hour after work stays clear. Meals are spaced from when you really ate</li>
+          <li>Say you're off work and Work comes off those days</li>
+          <li>An item can keep its own rules: nothing may overlap it, it depends on someone else, someone else sets its day and time, you have to set off for it by a certain time, or another item always follows it</li>
+          <li>Say how you feel and how much time you have, and what's offered fits: lighter things on a low day, bigger ones when you have energy to spare</li>
+          <li>When work ends, by the Agenda's button or by answering "Done with work?" with a yes or a time, the rest of the day is planned from then, and you hear how many daylight and dark thirties are left, with a few things that fit</li>
+          <li>The week ahead is pencilled in, and each morning that day's pencilled items become its plan</li>
+          <li>Parts of a project, epics to plan and report by, your own estimates in the unit you choose (set from an item's card too), and chores someone else at home does</li>
+          <li>After three misses in a row, or three put-offs, Thirties offers to break the item into smaller pieces, and offers its first piece once it has them. Before today has a Break It Down button for it too</li>
+          <li>Menus leave one-off items out, Thirties can make a new list when you ask, you choose how a to-do note with no checklist is read, and done items can go to a note you pick. Preferences shows how each list is read</li>
+          <li>Help writing new list items in your own style, matched to how you already write them</li>
+          <li>Thirties reads the library export you save from Goodreads (My Books → Import/Export): choose its folder in Preferences, and the newest export there is your reading list. Preferences says how old it is</li>
+          <li>When you finish a book in Thirties, one short reminder to mark it read on Goodreads and export again, at the end of that reply</li>
+          <li>Ask for something to read or watch and Thirties picks from your lists, your Media Queue first, and says which list each one came from</li>
+          <li>People to keep in touch with: tell Thirties when you saw, texted or called someone, and it nudges you when it's been a while</li>
+          <li>Goals keep the day you set them, and their own words ("in 2–4 months", "by March 1") give a real deadline from that day</li>
+          <li>Progress reports for a day or a week end with what was pushed back to the backlog</li>
+          <li>Once a week, the lasting patterns in your statistics go into the profile's Observations, where you can read and edit them</li>
+          <li>Someone else's events stay off your day unless you say otherwise. The first time one of their series comes up, Thirties asks once whether it's yours too, naming whose calendar it's on, and the answer holds for the whole series; a calendar you've said isn't yours three times isn't asked about again</li>
+          <li>An event on your calendar and someone else's, or on a calendar the household shares, is on your plan once, marked shared. Tell Thirties whose a calendar is and it uses that name from then on. On the Agenda, other people's events sit under their times, with Hide for today, Not mine and Mine too in one menu</li>
+          <li>The sun and the moon on request: the next sunrise, the moon's phase, and the next full and new moon, worked out for where you are</li>
+          <li>A daily check of your theatre for rush tickets, off until you ask for it: tell Thirties the theatre and the page that lists its shows. Preferences has its switch, and one for the keep-in-touch nudges</li>
+          <li>Thirties always works with the model and settings you chose: if its config file can't be read, reminders, check-ins, Telegram and sync don't start on stand-in choices until the file is fixed</li>
+          <li>A note to the engineers ("note to the engineers: the check-in came twice") is kept for them to read and never acted on, and Preferences shows the notes you've left</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-12" type="development">
       <description>
         <p>Plans across weeks, months and years, a day that sorts out what was missed, and safer, quieter daily use.</p>
