@@ -256,6 +256,12 @@ class TestNotMarkedYet(WhatsNextCase):
         svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
         self.assertNotIn("Re-pot the fern", svc._with_missed("🔔 6:00 PM: Dinner", at("17:20")))
 
+    def test_a_mute_never_hides_them_from_the_slice(self) -> None:
+        self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
+        self.assertIn("Check-ins paused until", self.manager.execute_tool("mute_checkins", {}))
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
+        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+
     def test_a_notice_still_lists_what_no_slice_showed(self) -> None:
         from unittest.mock import MagicMock
         from thirties_core.background import BackgroundService

@@ -555,7 +555,8 @@ class ConversationManager:
         moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
         # A status view: worked out fresh from the plan for every slice, so what's still unmarked shows again in the
         # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
-        unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now)  # never the list twice
+        # never the list twice; muted or not (a mute quiets check-ins, never where things stand)
+        unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now, muted_too=True)
         part = whats_next.render(self.day_plan, now, moved, mode, said, unmarked)
         if part and unmarked and self.scheduler is not None:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
