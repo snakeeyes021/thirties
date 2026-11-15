@@ -148,6 +148,7 @@ class TestDoneNote(LaneCase):
         self.assertIn("done items go to Completed log", out)
 
     def do_bank(self):
+        self.t.user_message = "called the bank"  # a done goes with the user's words about it (done_reference.py)
         self.t.execute("log_outcome", {"event": self.task("Call the bank").id, "status": "done"})
         set_debug_time(at("14:05"))
         self.log.sweep(self.t.assistant)

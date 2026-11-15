@@ -1014,10 +1014,13 @@ RULES
             lines.append("(That move didn't happen: " + "; ".join(u for u in unmade if u != "nothing") + ".)")
         if undone:
             lines.append("(" + "; ".join(undone) + ".)")
+        from thirties_core.plain_corrections import in_app_words, on_the_plan  # the app's names and times
         if wrong:
-            lines.append("(On the plan: " + "; ".join(wrong) + ".)")
+            lines.append(on_the_plan(wrong))
         if kept:
             lines.append("(" + "; ".join(kept) + ".)")
+        plan = getattr(self.tools, "day_plan", None)
+        lines = in_app_words(lines, [self.tools._title(s) for s in plan.spans] if plan is not None else [])
         return reply.rstrip() + "\n\n" + "\n".join(lines)
 
     def _no_unseen_correction(self, turn_start: int, reply: str, retry) -> str:

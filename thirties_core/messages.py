@@ -168,15 +168,18 @@ def _note(s: EventSpan) -> str:
 
 
 def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only: bool = False) -> List[str]:
-    """The plan from ``start`` on (the whole day without one), by blocks: each row a block and what's in it,
-    things at the same time joined with +, and an end time only before a gap (clock.agenda_lines). The one row
+    """The plan from ``start`` on (the whole day without one), by blocks: each item once, in the block it starts
+    in, things at the same time joined with +, a long item with its end, and others with an end time only before a
+    gap (clock.once_lines). The one row
     formatter: the schedule (render_schedule) and what's next after a change (whats_next) both lay rows out
     here. Done items are never rows (11-02: done items still on the schedule were noise), not even for the whole
     day. ``planned_only``: what's still to come (nothing skipped or unanswered either)."""
     items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start) and s.status != SpanStatus.DONE
              and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]  # done: never listed
     rows = [(s.start_dt, s.end_dt, s.title, _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
-    return agenda_lines(rows)
+    # each item once, a long one with its end: an item lasting all morning was a row in every thirty it touched,
+    # and read as several items (clock.once_lines)
+    return agenda_lines(rows, once=True)
 
 
 def plain_rows(rows: List[str]) -> List[str]:
