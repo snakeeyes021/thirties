@@ -42,7 +42,9 @@ def listed(plan, db=None) -> List[Any]:
 
 
 def line(span) -> str:
-    return f"{span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)}"
+    """One plain line, naming whose calendar it's on when Python knows (others_events.py)."""
+    whose = getattr(span, "whose", "")
+    return f"{span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)}" + (f", {whose}" if whose else "")
 
 
 def text_for(plan, db=None) -> str:
@@ -79,9 +81,51 @@ def hide(pt, event: Any) -> str:
     return f"Hidden for today: {found[0].title}. It's back tomorrow; say \"not mine\" to hide it every time."
 
 
+def whose_calendar(name: str) -> str:
+    """How a calendar is named to the user: "Jamie's calendar", "the Choir calendar", "the jo@example.org
+    calendar"."""
+    name = (name or "").strip()
+    if not name:
+        return "someone else's calendar"
+    if "calendar" in name.lower():
+        return name if name[:1].isupper() or "'" in name else f"the {name}"
+    words = name.split()
+    if "@" not in name and len(words) == 1 and name[:1].isupper():  # a first name: a person
+        return f"{name}'" + ("" if name.endswith("s") else "s") + " calendar"
+    return f"the {name} calendar"
+
+
+def invite_lines(plan, pending) -> List[str]:
+    """The unanswered invites, one line each, naming whose calendar each is on when it isn't the user's own
+    (the question asks whether the user is going, and says whose calendar it's on); then someone else's events
+    to ask about once (others_events.py)."""
+    by_id = {e.id: e for e in (pending or [])}
+    out = []
+    for s in plan.spans_in_view():
+        # an unanswered invite, or an event shown from a calendar that isn't clearly the user's and still asked about
+        if not (s.tentative or (s.shown_only and s.source_event_id in by_id)):
+            continue
+        text = f"{s.title}, {format_clock(s.start_dt)} – {format_clock(s.end_dt)} id={s.id}"
+        event = by_id.get(s.source_event_id)
+        if event is not None and not event.is_primary:
+            where = getattr(s, "whose", "") or whose_calendar(event.calendar_name)
+            text += (f" (on {where}, not the user's own: ask whether it's theirs and say it's on {where}; "
+                     f"until they say, it stays off their day)")
+        elif s.shown_only:
+            text += " (on someone else's calendar: not the user's unless they say they're going)"
+        out.append(text)
+    for s in plan.spans_in_view():
+        if getattr(s, "ask", ""):
+            out.append(f"{s.title}, {format_clock(s.start_dt)} – {format_clock(s.end_dt)} id={s.id} (on {s.whose}, "
+                       f"someone else's calendar, not an invite: ask once whether it's theirs too, saying it's on "
+                       f"{s.whose}; it stays off their day until they say. Theirs: resolve_calendar_event "
+                       f"attend=true; not theirs: attend=false. Both hold for the whole series)")
+    return out
+
+
 def ids_text(plan, db=None) -> str:
     """For the Agenda: the ids it shows in the section, one per line ("- id")."""
     return "\n".join(f"- {s.id}" for s in listed(plan, db))
 
 
-__all__ = ["HEADING", "listed", "line", "text_for", "hide", "hidden", "ids_text"]
+__all__ = ["HEADING", "listed", "line", "text_for", "hide", "hidden", "ids_text", "whose_calendar", "invite_lines"]

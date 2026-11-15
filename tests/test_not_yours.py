@@ -19,7 +19,8 @@ class NotYoursTest(unittest.TestCase):
     def test_its_own_section_last_in_time_order(self):
         text = self.t.schedule_text()
         section = text.split("Not yours today:\n")[1]
-        self.assertEqual(section, "Band practice, 2:00 PM – 3:30 PM\nSchool play, 7:00 PM – 9:00 PM")
+        self.assertEqual(section, "Band practice, 2:00 PM – 3:30 PM, Jamie's calendar\n"
+                                  "School play, 7:00 PM – 9:00 PM, Jamie's calendar")  # whose, plainly
         self.assertNotIn("Band", text.split("Not yours today:")[0])
 
     def test_hide_that_one_for_today_only(self):

@@ -5,7 +5,7 @@ events marked free take no time. Invented calendars and events."""
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.calendar_engine import CalendarEvent, EDSCalendarEngine, MockCalendarEngine, unread_text
 from thirties_core.plan_tools import PlanTools
 
@@ -95,7 +95,7 @@ class TestUnreadCalendars(unittest.TestCase):
         manager = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(),
                                       active_notes=[])
         facts, _ = prepare(manager)
-        self.assertIn("Couldn't read the calendar Classes, so its events may be missing.", facts)
+        line_with(facts, "Classes", "missing")
 
     def test_nothing_is_said_when_every_calendar_reads(self):
         plan, pending = self.sched.build_day_plan(DAY)
@@ -108,6 +108,21 @@ class TestUnreadCalendars(unittest.TestCase):
         self.cals.fetch_events_for_day = lambda d, tz: seen.append(d) or fetch(d, tz)
         self.sched.build_day_plan(DAY)
         self.assertEqual(seen, [DAY, DAY + timedelta(days=1)])
+
+
+class TestInvitesInTheMorning(unittest.TestCase):
+    def test_an_invite_not_answered_is_among_the_mornings_facts(self):
+        from tests.fixtures import event
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.morning import prepare
+        sched = make_scheduler([event("potluck", "18:00", "20:00", "Neighbours' potluck", invite=True)])
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(),
+                                      active_notes=[])
+        facts, _ = prepare(manager)
+        self.assertIn("Calendar invites not answered yet", facts)
+        self.assertIn("Neighbours' potluck, 6:00 PM", facts)
 
 
 class TestEventsThatTakeNoTime(unittest.TestCase):

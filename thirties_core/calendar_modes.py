@@ -7,7 +7,11 @@ see, exactly (case aside): a calendar's name is the key on every device, so a gu
 can find again. Anything else comes back with the list, for the model to ask which one. Choices:
 
 - ``mine``: the user's commitments, planned around;
-- ``ask``: unset, the default (Thirties asks about each event of someone else's calendar, once per series);
+- ``shared``: a household's calendar (everyone's, the user's too): on the user's plan, marked shared
+  (others_events.py; a calendar named like "Family" or "Household" is this until the user says otherwise);
+- unset, the default: someone else's events are left out of the user's day, shown as theirs, and asked about only
+  when the user is invited themselves;
+- ``ask``: Thirties asks about each event of someone else's calendar, once per series, naming the calendar;
 - ``show``: show only, on the Agenda as someone else's, taking no time, never asked about;
 - ``ignore``: never read.
 """
@@ -22,25 +26,30 @@ from thirties_core.connectors import calendars_of
 CALENDAR_MODE_TOOL_SPECS: List[Dict[str, Any]] = [{
     "name": "set_calendar_mode",
     "description": "What one of the user's calendars is to them, when they say so (\"my partner's calendar is "
-                   "show-only\", \"ignore the Holidays calendar\"). mine: their commitments; ask: ask about each "
-                   "event (the default for someone else's calendar); show: show only, takes no time; ignore: never "
-                   "read. Use the calendar's exact name; leave calendar out to list them.",
+                   "show-only\", \"ignore the Holidays calendar\", \"that's my partner's calendar\"). mine: their commitments; "
+                   "shared: everyone's in the house, theirs too; ask: ask about each event; default: someone else's events are left out unless the user is invited (the starting "
+                   "choice); show: show only, takes no time; ignore: never read. Use the calendar's exact name; "
+                   "leave calendar out to list them.",
     "parameters": {"calendar": "The calendar's exact name (leave out to list the calendars and their choices).",
-                   "mode": "mine, ask, show, ignore, or holidays (shown only; one on a work day means no work)."},
+                   "mode": "mine, shared, ask, default, show, ignore, or holidays (shown only; one on a work day "
+                           "means no work). Leave out when only saying whose it is.",
+                   "whose": "Who the calendar belongs to, in the user's words (\"my partner\", \"Sam\"), when they say."},
     "required": [],
 }]
 
 # The words a user (or a model) uses for each choice; "" is "ask" (unset).
 _MODE_WORDS = {
     "mine": "mine", "my own": "mine", "own": "mine",
-    "ask": "", "unset": "", "default": "", "ask me": "",
+    "shared": "shared", "ours": "shared", "family": "shared", "everyone's": "shared", "household": "shared",
+    "ask": "ask", "ask me": "ask", "unset": "", "default": "", "leave out": "", "left out": "",
     "show": "show", "show only": "show", "show-only": "show", "shown only": "show", "show_only": "show",
     "not mine": "show", "view only": "show",
     "ignore": "ignore", "hide": "ignore", "ignored": "ignore", "never": "ignore", "off": "ignore",
     "holidays": "holidays", "holiday": "holidays", "days off": "holidays",
 }
 
-_LABEL = {"mine": "mine", "": "ask about its events", "show": "show only", "ignore": "ignored",
+_LABEL = {"mine": "mine", "shared": "shared, everyone's (on your plan)", "": "left out unless you're invited", "ask": "ask about its events", "show": "show only",
+          "ignore": "ignored",
           "holidays": "holidays (no work on them)"}
 
 
@@ -75,7 +84,8 @@ def _listing(calendars: List[Dict[str, Any]]) -> str:
                      for c in calendars)
 
 
-def set_calendar_mode(scheduler, settings, calendar: Any = None, mode: Any = None, plan=None) -> str:
+def set_calendar_mode(scheduler, settings, calendar: Any = None, mode: Any = None, plan=None,
+                      whose: Any = None) -> str:
     """Set (or, with no calendar, list) a calendar's choice. Raises CalendarModeError for anything unclear."""
     calendars = known_calendars(scheduler, plan)
     if not calendars:
@@ -92,13 +102,19 @@ def set_calendar_mode(scheduler, settings, calendar: Any = None, mode: Any = Non
                                 + f"The calendars are: {_listing(calendars)}. Ask the user which one, then use its "
                                   f"exact name.")
     cal = match[0]
+    said = ""
+    if whose not in (None, "") and getattr(scheduler, "state_db", None) is not None:
+        from thirties_core.others_events import possessive, set_owner
+        said = f"{cal['name']}: {possessive(set_owner(scheduler.state_db, cal['name'], str(whose)))} calendar, from now on."
+        if mode in (None, ""):
+            return said
     word = str(mode or "").strip().lower()
     if word not in _MODE_WORDS:
-        raise CalendarModeError(f"'{mode}' isn't a choice: mine, ask, show (show only) or ignore.")
+        raise CalendarModeError(f"'{mode}' isn't a choice: mine, ask, default, show (show only) or ignore.")
     key = _MODE_WORDS[word]
-    if key == "" and cal.get("mine"):
+    if key in ("", "ask") and cal.get("mine"):
         raise CalendarModeError(f"{cal['name']} is the user's own calendar, so its events already count as theirs; "
-                                f"'ask' is for other people's calendars. Choose mine, show or ignore.")
+                                f"'{word}' is for other people's calendars. Choose mine, show or ignore.")
     assert key in CALENDAR_MODES or key == ""
     modes = dict(getattr(scheduler.config.calendar, "modes", None) or {})
     lowered = cal["name"].strip().lower()
@@ -109,7 +125,8 @@ def set_calendar_mode(scheduler, settings, calendar: Any = None, mode: Any = Non
     scheduler.config.calendar.modes = modes
     if settings is not None:
         settings.set("calendar.modes", modes)
-    return f"{cal['name']}: {_LABEL[key or ('mine' if cal.get('mine') else '')]} from now on (on every device)."
+    return ((said + " ") if said else "") + \
+        f"{cal['name']}: {_LABEL[key or ('mine' if cal.get('mine') else '')]} from now on (on every device)."
 
 
 def refresh_calendar_spans(tools) -> None:

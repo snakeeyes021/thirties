@@ -39,6 +39,7 @@ class SeriesTest(unittest.TestCase):
 
     def test_resolving_someone_elses_event_decides_the_series(self):
         sched = make_scheduler([partners("pottery", "19:00", "21:00"), partners("pottery", "19:00", "21:00", day_offset=7)])
+        sched.config.calendar.modes = {"jamie": "ask"}  # the user chose to be asked about this calendar
         plan, pending = sched.build_day_plan(DAY)
         self.assertEqual(len(pending), 1)
         tools = PlanTools(plan, pending, sched)
@@ -86,7 +87,7 @@ class CalendarModesTest(unittest.TestCase):
         tools = PlanTools(plan, pending, sched)
         text = tools.schedule_text()
         self.assertNotIn("School play", text.split("Not yours today:")[0])  # never in the user's own schedule
-        self.assertTrue(text.endswith("Not yours today:\nSchool play, 7:00 PM – 9:00 PM"), text)  # its own section, last
+        self.assertTrue(text.endswith("Not yours today:\nSchool play, 7:00 PM – 9:00 PM, Jamie's calendar"), text)  # its own section, last
         tools.execute("add_event", {"title": "Dinner", "start": "7:00 PM", "duration": "1 hour"})
         self.assertEqual(occupant(tools.day_plan, "19:00"), "Dinner")
 
@@ -115,6 +116,8 @@ class CalendarModeToolTest(unittest.TestCase):
         holiday = CalendarEvent(id="hol@1", summary="Halloween eve", start_dt=at("09:00"), end_dt=at("10:00"),
                                 calendar_name="Holidays in United States", is_primary=False, is_ambiguous=True)
         self.sched = make_scheduler([partners("pottery", "19:00", "21:00"), holiday])
+        self.asked = {"jamie": "ask", "holidays in united states": "ask"}  # both chosen to be asked about
+        self.sched.config.calendar.modes = dict(self.asked)
         plan, pending = self.sched.build_day_plan(DAY)
         self.tools = PlanTools(plan, pending, self.sched)
 
@@ -123,8 +126,8 @@ class CalendarModeToolTest(unittest.TestCase):
         out = self.tools.execute("set_calendar_mode", {"calendar": "jamie", "mode": "show-only"})
         self.assertIn("Jamie: show only", out)
         from thirties_core.settings import Settings
-        self.assertEqual(Settings(self.sched.state_db).get("calendar.modes"), {"jamie": "show"})
-        self.assertEqual(self.sched.config.calendar.modes, {"jamie": "show"})
+        self.assertEqual(Settings(self.sched.state_db).get("calendar.modes"), {**self.asked, "jamie": "show"})
+        self.assertEqual(self.sched.config.calendar.modes, {**self.asked, "jamie": "show"})
         pottery = next(s for s in self.tools.day_plan.spans if s.title == "Evening pottery")
         self.assertTrue(pottery.shown_only)
         self.assertEqual([e.summary for e in self.tools.ambiguous_events], ["Halloween eve"])
@@ -134,22 +137,71 @@ class CalendarModeToolTest(unittest.TestCase):
         self.assertNotIn("Halloween eve", [s.title for s in self.tools.day_plan.spans])
         out = self.tools.execute("set_calendar_mode", {"calendar": "Holidays in United States", "mode": "ask"})
         self.assertIn("ask about its events", out)
-        self.assertEqual(self.sched.config.calendar.modes, {})
+        self.assertEqual(self.sched.config.calendar.modes, self.asked)
         self.assertIn("Halloween eve", [e.summary for e in self.tools.ambiguous_events])
 
     def test_a_near_name_lists_the_calendars_and_changes_nothing(self):
         out = self.tools.execute("set_calendar_mode", {"calendar": "Holidays", "mode": "ignore"})
         self.assertTrue(out.startswith("NOT_DONE"), out)
         self.assertIn("Holidays in United States", out)
-        self.assertEqual(self.sched.config.calendar.modes, {})
+        self.assertEqual(self.sched.config.calendar.modes, self.asked)
 
     def test_listing_and_a_bad_mode(self):
         self.assertIn("Jamie (ask about its events)", self.tools.execute("set_calendar_mode", {}))
         self.assertIn("isn't a choice", self.tools.execute("set_calendar_mode", {"calendar": "Jamie", "mode": "x"}))
 
 
-if __name__ == "__main__":
-    unittest.main()
+class OthersLeftOutTest(unittest.TestCase):
+    """Someone else's events stay off the user's day unless they say, and an ask names whose calendar."""
+
+    def test_unset_someone_elses_event_is_left_out_and_shown_as_theirs(self):
+        sched = make_scheduler([partners("callbacks", "19:00", "21:00", title="Stage callbacks")])
+        plan, pending = sched.build_day_plan(DAY)
+        self.assertEqual(pending, [])  # not asked about
+        callbacks = next(s for s in plan.spans_in_view() if s.title == "Stage callbacks")
+        self.assertTrue(callbacks.shown_only)
+        self.assertFalse(callbacks.is_firm)
+        tools = PlanTools(plan, pending, sched)
+        text = tools.schedule_text()
+        self.assertNotIn("Stage callbacks", text.split("Not yours today:")[0])  # not part of the user's own day
+        self.assertIn("Stage callbacks", text.split("Not yours today:")[1])
+
+    def test_invited_themselves_it_asks_and_names_the_calendar(self):
+        invite = partners("gala", "19:00", "21:00", title="Fundraiser gala")
+        invite.response_status = "needsAction"  # the user is on the invite list, not answered yet
+        sched = make_scheduler([invite])
+        plan, pending = sched.build_day_plan(DAY)
+        self.assertEqual([e.summary for e in pending], ["Fundraiser gala"])
+        from thirties_core.not_yours import invite_lines
+        line = invite_lines(plan, pending)[0]
+        self.assertIn("on Jamie's calendar", line)
+        self.assertIn("not the user's own", line)
+
+    def test_a_chosen_ask_calendar_asks_and_names_it_in_the_prompt(self):
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        sched = make_scheduler([partners("read", "18:00", "20:00", title="Table read", calendar="Riverside Players")])
+        sched.config.calendar.modes = {"riverside players": "ask"}
+        plan, pending = sched.build_day_plan(DAY)
+        m = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(), active_notes=[])
+        prompt = m.messages[0]["content"]
+        self.assertIn("Table read, 6:00 PM – 8:00 PM", prompt)
+        self.assertIn("on the Riverside Players calendar", prompt)
+
+    def test_attending_a_left_out_series_puts_it_on_the_day(self):
+        sched = make_scheduler([partners("pottery", "19:00", "21:00")])
+        spans, _ = events_to_spans([partners("pottery", "19:00", "21:00")],
+                                   {series_key(partners("pottery", "19:00", "21:00")): "attend"})
+        self.assertTrue(spans[0].is_firm)
+        self.assertFalse(spans[0].shown_only)
+
+    def test_whose_calendar(self):
+        from thirties_core.not_yours import whose_calendar
+        self.assertEqual(whose_calendar("Jamie"), "Jamie's calendar")
+        self.assertEqual(whose_calendar("Jules"), "Jules' calendar")
+        self.assertEqual(whose_calendar("jo@example.org"), "the jo@example.org calendar")
+        self.assertEqual(whose_calendar("Family Calendar"), "Family Calendar")
+        self.assertEqual(whose_calendar("Holidays in United States"), "the Holidays in United States calendar")
 
 
 class TestHolidays(unittest.TestCase):
@@ -172,3 +224,7 @@ class TestHolidays(unittest.TestCase):
         sched.state_db.upsert_span(EventSpan("w", "Work", at("09:00"), at("13:00"), SpanCategory.WORK, source="user"))
         plan, _ = sched.build_day_plan(DAY)  # they said they're working: it stays
         self.assertTrue([s for s in plan.spans if s.category == SpanCategory.WORK])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -44,6 +44,7 @@ class CalendarEvent:
     response_status: str = "accepted"  # accepted, tentative, declined, needsAction
     is_ambiguous: bool = False
     series_id: str = ""  # the recurring series it belongs to (the iCalendar UID); empty: series_of(id)
+    invited: bool = False  # the user is on its guest list (their own RSVP is response_status)
 
     @property
     def series(self) -> str:
@@ -57,7 +58,9 @@ class CalendarEvent:
 # Per-calendar choices (Preferences, keyed by the calendar's display name, lowercased: EDS uids differ between
 # computers, names don't). Unset: "mine" for the user's own calendars, ask about each event (once per series)
 # for anyone else's.
-CALENDAR_MODES = ("mine", "show", "ignore", "holidays")  # holidays: shown only, and one on a work day means no work
+CALENDAR_MODES = ("mine", "shared", "ask", "show", "ignore", "holidays")  # holidays: shown only, and one on a work
+                                                               # day means no work; ask: ask about each event
+                                                               # (the user's choice); shared: the household's
                                                         # (10-30: a public holiday almost always means
                                                         # no work that day)
 
@@ -65,6 +68,11 @@ CALENDAR_MODES = ("mine", "show", "ignore", "holidays")  # holidays: shown only,
 # the events visible on the Agenda as someone else's, taking no time (the per-calendar "show only"). Dropped is
 # the default because the friction was these events coming back at all (O1).
 NOT_MINE_SERIES_BECOMES = "ignore"
+
+# What someone else's event is when nobody has said (their events go on the user's day only when the user says
+# so): left out of the user's day, shown as theirs (Not yours today). It's asked about only when the user is
+# invited to it themselves (their own RSVP is open), or the calendar is set to "ask".
+OTHERS_UNSET_BECOMES = "show"
 
 
 def series_of(event_id: str) -> str:
@@ -81,7 +89,8 @@ def series_key(event: "CalendarEvent | str") -> str:
 
 
 def calendar_mode(event: CalendarEvent, modes: Optional[Dict[str, str]]) -> str:
-    """The user's choice for the event's calendar: "mine", "show", "ignore", or "" when unset."""
+    """The user's choice for the event's calendar: "mine", "ask", "show", "ignore", "holidays", or "" when
+    unset."""
     if not modes:
         return ""
     for name in (event.calendar_name, event.calendar_id):
@@ -123,9 +132,11 @@ def events_to_spans(
     is "show") become show-only spans: on the Agenda, taking no time, never
     asked about. An occurrence's own decision wins over its series'.
     """
+    from thirties_core import others_events
     decisions = decisions or {}
     spans: List[EventSpan] = []
     pending: List[CalendarEvent] = []
+    events, also_on = others_events.merge_copies(events)  # one item per real event (a family dinner on 3 calendars)
 
     for event in events:
         mode = calendar_mode(event, modes)
@@ -133,16 +144,29 @@ def events_to_spans(
         if decision == "not_mine":
             decision = None if NOT_MINE_SERIES_BECOMES == "show" else "decline"
             mode = "show" if NOT_MINE_SERIES_BECOMES == "show" else mode
+        unset = mode == ""
+        # whose it is (others_events.py): a shared event becomes the user's; someone else's, unasked, is left out
+        mode, whose, shared = others_events.ownership(event, mode, decision, also_on.get(event.id, []), decisions)
+        if mode == "shared":
+            mode = "mine"
         if mode == "ignore" or event.response_status == "declined" or decision == "decline":
             continue
-        shown_only = mode in ("show", "holidays") and decision != "attend"
+        # someone else's own event (on their calendar, with no RSVP asked of the user) that the user hasn't
+        # answered about: asked about once, and meanwhile shown as theirs, never as one of the user's items
+        # (11-08: other people's events on the user's schedule)
+        theirs = (mode == "" and not event.is_primary and decision is None
+                  and event.response_status not in ("tentative", "needsAction"))
+        shown_only = (mode in ("show", "holidays") and decision != "attend") or theirs
         if mode == "mine":  # the user said the calendar is theirs: only a real RSVP question makes it an invite
             is_invite = event.response_status in ("tentative", "needsAction")
         else:
             is_invite = event.is_ambiguous or event.response_status in ("tentative", "needsAction")
         tentative = is_invite and decision != "attend" and not shown_only
-        if tentative:
+        if tentative or theirs:
             pending.append(event)
+        ask = ""
+        if shown_only and unset and others_events.should_ask(event, decisions, ""):
+            ask = f"{event.calendar_name or event.calendar_id}|{event.series}"  # whose, and which series
         spans.append(EventSpan(
             id=f"cal:{event.id}",
             title=event.summary,
@@ -154,6 +178,9 @@ def events_to_spans(
             is_firm=not tentative and not shown_only,
             tentative=tentative,
             shown_only=shown_only,
+            whose=whose,
+            shared=shared and not shown_only and not tentative,
+            ask=ask,
         ))
 
     return spans, pending
@@ -385,6 +412,7 @@ class EDSCalendarEngine:
                 response_status=status,
                 is_ambiguous=ambiguous,
                 series_id=icomp.get_uid() or "",
+                invited=partstat is not None,
             ))
             return True
 
