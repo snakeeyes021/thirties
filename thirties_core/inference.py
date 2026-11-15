@@ -79,11 +79,14 @@ def agy_workspace_dir() -> Path:
 # Every agy call is logged here, from every client and eval, so evals can stay within a share of the
 # subscription's quota (agy itself can't report usage). Under ~/.local/share so the Flatpak sees the same file.
 AGY_LEDGER = Path.home() / ".local" / "share" / "thirties" / "agy_calls.log"
+AGY_CALLER_ENV = "THIRTIES_AGY_CALLER"  # set by tests and studies ("study:<run>"): the 4th column, who made the call
 AGY_QUOTA_RE = re.compile(r"quota|resource.?exhausted|\b429\b|too many requests|usage limit", re.IGNORECASE)
 
 
 def record_agy_call(model: str, outcome: str) -> None:
-    """Append one call to the ledger: unix time, model, outcome (ok, error, timeout, quota)."""
+    """Append one call to the ledger: unix time, model, outcome (ok, error, timeout, quota), and who made it: what a
+    test or study says (THIRTIES_AGY_CALLER), else the process itself (untagged:pid=…:cwd=…:argv=…), so a caller
+    nobody named can still be found."""
     try:
         AGY_LEDGER.parent.mkdir(parents=True, exist_ok=True)
         if AGY_LEDGER.exists() and AGY_LEDGER.stat().st_size > 1_000_000:
@@ -92,20 +95,29 @@ def record_agy_call(model: str, outcome: str) -> None:
                     and int(l.split("\t", 1)[0]) >= cutoff]
             AGY_LEDGER.write_text("\n".join(keep) + ("\n" if keep else ""))
         with open(AGY_LEDGER, "a") as f:
-            f.write(f"{int(time.time())}\t{model}\t{outcome}\n")
+            f.write(f"{int(time.time())}\t{model}\t{outcome}\t{agy_caller()}\n")
     except OSError as e:
         logger.debug("Could not record the agy call: %s", e)
 
 
+def agy_caller() -> str:
+    """The ledger's 4th column, kept to a single field."""
+    named = os.environ.get(AGY_CALLER_ENV, "")
+    if not named.strip():
+        import sys
+        named = f"untagged:pid={os.getpid()}:cwd={os.getcwd()}:argv={' '.join(sys.argv[:3])}"
+    return " ".join(named.split())
+
+
 def agy_ledger(since_seconds: float) -> List[Tuple[int, str, str]]:
-    """Calls logged in the last ``since_seconds``: (unix time, model, outcome)."""
+    """Calls logged in the last ``since_seconds``: (unix time, model, outcome), whoever made them."""
     if not AGY_LEDGER.exists():
         return []
     cutoff = time.time() - since_seconds
     rows = []
     for line in AGY_LEDGER.read_text().splitlines():
         parts = line.split("\t")
-        if len(parts) == 3 and parts[0].isdigit() and int(parts[0]) >= cutoff:
+        if len(parts) in (3, 4) and parts[0].isdigit() and int(parts[0]) >= cutoff:
             rows.append((int(parts[0]), parts[1], parts[2]))
     return rows
 

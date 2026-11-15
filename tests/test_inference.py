@@ -164,6 +164,21 @@ class TestTransports(unittest.TestCase):
             engine.chat([{"role": "user", "content": "b"}])
         self.assertEqual([o for _, _, o in agy_ledger(60)], ["ok", "quota"])
 
+    def test_every_call_says_who_made_it(self) -> None:
+        import os
+        from thirties_core.inference import AGY_CALLER_ENV, agy_ledger, record_agy_call
+        with patch.dict("os.environ", {AGY_CALLER_ENV: ""}):
+            record_agy_call("model-x", "ok")  # the app, or anything that didn't say
+        with patch.dict("os.environ", {AGY_CALLER_ENV: "study:run 7\tday 2"}):
+            record_agy_call("model-x", "error")
+        app, study = self.ledger.read_text().splitlines()
+        untagged = app.split("\t")[3]
+        self.assertTrue(untagged.startswith(f"untagged:pid={os.getpid()}:cwd="), untagged)
+        self.assertIn(":argv=", untagged)
+        self.assertEqual(len(app.split("\t")), 4)  # one field: no tab or line break inside it
+        self.assertEqual(study.split("\t")[1:], ["model-x", "error", "study:run 7 day 2"])
+        self.assertEqual([o for _, _, o in agy_ledger(60)], ["ok", "error"])  # both are read
+
     def test_gemini_sources_in_the_users_order_with_fallback(self) -> None:
         from thirties_core.inference import GeminiSourcesEngine
         cfg = ThirtiesConfig()
