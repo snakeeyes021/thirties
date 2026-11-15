@@ -207,7 +207,7 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),
                                  reply("All set, noted!"), reply("All set!")]
         out = self.manager.send_user_message("done with nope")
-        self.assertEqual(out, "All set, noted!\n\n(One part of that didn't go through, so it isn't recorded yet.)")
+        self.assertEqual(out, "All set, noted!\n\n(Work isn't marked yet.)")  # the item, in plain words
         self.assertNotIn("NOT_DONE", out)
 
     def test_a_refusal_the_model_got_around_isnt_reported(self) -> None:

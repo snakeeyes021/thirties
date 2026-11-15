@@ -419,8 +419,10 @@ RULES
                    for m in self._OUTCOME_CLAIM_RE.finditer(text))
 
     def _claims_change(self, text: str) -> bool:
-        """A sentence saying the plan changed; a question ("should I put it at 5?") claims nothing."""
-        return any(ACTION_CLAIM_PATTERN.search(s) and not s.rstrip().endswith("?")
+        """A sentence saying the plan changed; a question ("should I put it at 5?") claims nothing. "All fixed" and
+        "everything is back in place" claim a change too (own_up.claims_all_fixed)."""
+        from thirties_core.own_up import claims_all_fixed
+        return any((ACTION_CLAIM_PATTERN.search(s) or claims_all_fixed(s)) and not s.rstrip().endswith("?")
                    for s in re.split(r"(?<=[.!?])\s+|\n+", text or ""))
 
     RECENT_TURNS = 8
@@ -584,7 +586,9 @@ RULES
     _ADMITS_RE = re.compile(r"\b(couldn'?t|could not|can'?t|cannot|wasn'?t able|unable|didn'?t|failed|not able|"
                             r"won'?t|isn'?t on|not on (?:the|your))\b", re.IGNORECASE)
     _CLAIMS_RE = re.compile(r"\b(marked|logged|noted|all set|done|added|moved|scheduled|updated|cleaned|cleared|"
-                            r"removed|checked (?:it )?off|ticked|taken care of)\b", re.IGNORECASE)
+                            r"removed|checked (?:it )?off|ticked|taken care of|all fixed|fixed (?:it|that|them|"
+                            r"everything)|back in place|everything is (?:back|right|where|set|fixed|in place))\b",
+                            re.IGNORECASE)
 
     def _item_of(self, m: Dict[str, Any]) -> str:
         """The item a tool call was about (its title, when it was named by id), for telling failures apart."""
@@ -625,13 +629,17 @@ RULES
         failed = self._failed_changes(turn_start)
         if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
             return reply
+        if self._own_up_line(turn_start, reply) is None:  # it already says so, or nothing failed for real
+            return reply
         logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
         self._check("These didn't go through: " + " | ".join(failed) + ". Your reply says otherwise. Rewrite it so "
                     "it's true: say plainly what didn't happen and what you'll do instead.")
         fixed = self._rounds(2, changes_before, outcomes_before).strip()  # its calls are checked like any others
-        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes(turn_start)):
+        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes(turn_start)
+                      or self._own_up_line(turn_start, fixed) is None):
             return fixed
-        return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
+        line = self._own_up_line(turn_start, reply)
+        return reply.rstrip() + "\n\n" + line if line else reply
 
     # --- the turn as it was before the bookkeeping (the switch's "off") ---
 
@@ -761,6 +769,8 @@ RULES
         failed = self._failed_changes_baseline(turn_start)
         if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
             return reply
+        if self._own_up_line(turn_start, reply) is None:  # it already says so, or nothing failed for real
+            return reply
         logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
         self.messages.append({"role": "user", "content": (
             "[System check, not from the user] These didn't go through: " + " | ".join(failed) + ". Your reply "
@@ -772,9 +782,23 @@ RULES
             self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                   "name": call.get("name"), "content": output})
         fixed = str(response.get("content") or "").strip()
-        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes_baseline(turn_start)):
+        if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes_baseline(turn_start)
+                      or self._own_up_line(turn_start, fixed) is None):
             return fixed
-        return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
+        line = self._own_up_line(turn_start, reply)
+        return reply.rstrip() + "\n\n" + line if line else reply
+
+    # --- what didn't happen, said plainly, only when the reply doesn't say it (own_up.py) ---
+
+    def _own_up_line(self, turn_start: int, reply: str) -> Optional[str]:
+        from thirties_core.own_up import own_up_line
+        try:
+            return own_up_line(self.tools, self.messages, turn_start, READ_ONLY_TOOLS, NOT_DONE, reply)
+        except Exception as e:  # the check never costs the user their reply
+            logger.debug("Couldn't read what didn't happen: %s", e)
+            return None
+
+    # --- end what didn't happen ---
 
 
     # --- a move the reply says happened, when nothing moved (11-03) ---

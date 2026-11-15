@@ -78,7 +78,7 @@ class TestTurnBookkeeping(BookkeepingOn):
         self.engine.set_next_response(reply("All set: moved and added."))
         self.engine.set_next_response(reply("All set: moved and added."))  # the rewrite, still claiming it
         out = self.manager.send_user_message("move the chore to 6 and add ferns at 7")
-        self.assertIn("didn't go through", out)
+        self.assertIn("(Nonexistent chore wasn't changed.)", out)
 
     def test_a_later_call_on_the_same_item_clears_its_failure(self):
         self.add("Stretch", "5:00 PM")

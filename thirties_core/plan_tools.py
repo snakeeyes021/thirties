@@ -978,6 +978,13 @@ class PlanTools:
             # Adding what's already planned that day makes a ghost copy that nags and rolls over (10-27 to 10-30:
             # one item five times, another listed twice): moving is update_event.
             same = self._planned_copies(self.day_plan, str(title), task_id)
+            # --- re-adding what's already planned merges into it, never a second copy (change_asks.py) ---
+            if same:
+                from thirties_core.change_asks import merge_readd
+                merged = merge_readd(self, same, start, end, duration)
+                if merged is not None:
+                    return merged
+            # --- end re-adding merges ---
             if same:
                 raise ToolError(f"{self.describe(same[0])} is already planned [id {same[0].id}]. To move it, use "
                                 "update_event with that id; to plan a second session as well, add it with again=true.")
@@ -1311,6 +1318,13 @@ class PlanTools:
             # user's call: they say so, or name it
             raise ToolError(f"The user's message doesn't name {self._title(span)}, so it stays on the plan. Remove "
                             "something only when the user asks for that item; ask them if it isn't clear.")
+        # --- a removal needs the user's words for that item, like a done (change_asks.py) ---
+        if not span.is_envelope and outer_tool() == "remove_event":
+            from thirties_core.change_asks import removal_refused
+            why = removal_refused(self, span)
+            if why:
+                raise ToolError(why)
+        # --- end a removal needs the user's words ---
         self._drop(span)
         self._save_plan_after_change()
         return f"Removed {self.describe(span)}."
