@@ -31,7 +31,7 @@ class TestStoppingWhatsNext(WhatsNextCase):
         out = self.turn(ADD, "The fern's at 5:30.", said="repot the fern at 5:30")
         self.assertIn("Next:", out)
         out = self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off"}', "Done: no more Next list.",
-                        said="delete the whole Next section under it")
+                        said="delete the whole Next section under it, from now on")
         self.assertNotIn("Next:", out)
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         self.assertEqual(out, "Noted.")  # a change, and nothing under the reply
@@ -93,8 +93,10 @@ class TestWhereTheChoiceIsKept(WhatsNextCase):
         plan, cfg, db = self.manager.day_plan, self.sched.config, self.sched.state_db
         set_debug_time(at("19:40"))
         self.assertIn("Not marked yet:", render(plan, at("19:40"), config=cfg, db=db))
+        self.manager.tools.user_message = "stop listing what's not marked yet, from now on"
         self.manager.tools.execute("set_reply_extras", {"part": "not_marked", "show": "off"})
         self.assertNotIn("Not marked yet:", render(plan, at("19:40"), config=cfg, db=db))
+        self.manager.tools.user_message = "stop sending what's next from now on"
         self.manager.tools.execute("set_reply_extras", {"part": "whats_next", "show": "off"})
         self.assertEqual(render(plan, at("19:40"), config=cfg, db=db), "")
         self.assertIn("Not marked yet:", render(plan, at("19:40"), mode="next"))  # asked for outright: whole
@@ -102,12 +104,52 @@ class TestWhereTheChoiceIsKept(WhatsNextCase):
     def test_the_block_line_follows_it_where_its_built(self) -> None:
         from thirties_core.messages import render_schedule, status_line
         plan, cfg, db = self.manager.day_plan, self.sched.config, self.sched.state_db
+        self.manager.tools.user_message = "stop saying which block i'm in"
         self.manager.tools.execute("set_reply_extras", {"part": "status_line", "show": "off"})
         self.assertEqual(status_line(plan, at("17:10"), config=cfg, db=db), "")
         self.assertNotIn("You're in the", render_schedule(plan, at("17:10"), config=cfg, db=db))
         self.assertTrue(status_line(plan, at("17:10"), config=cfg, db=db, said="where am i").startswith(
             "You're in the 5:00"))
         self.assertTrue(status_line(plan, at("17:10")).startswith("You're in the"))  # no person to ask: as ever
+
+
+class TestOnlyWhenAsked(WhatsNextCase):
+    """The lines are changed only when the user's own message asks for it, and for good only when it says so."""
+
+    def call(self, said: str, part: str = "all", show: str = "off", for_today: bool = False) -> str:
+        self.manager.tools.user_message = said
+        return self.manager.tools.execute("set_reply_extras", {"part": part, "show": show,
+                                                                "for_today": for_today})
+
+    def test_a_complaint_about_the_schedule_changes_nothing(self) -> None:
+        for said in ("don't spell out the half-hour thing, just get the list right",
+                     "the agenda still shows the pottery class twice, fix it",
+                     "why is the fern at 5:30?"):
+            out = self.call(said)
+            self.assertTrue(out.startswith("NOT_DONE"), out)
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY),
+                         {"whats_next": "next", "not_marked": True, "status_line": True})
+        self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))
+
+    def test_nothing_without_a_message_from_the_user(self) -> None:
+        self.manager.tools.user_message = None
+        out = self.manager.tools.execute("set_reply_extras", {"part": "whats_next", "show": "off"})
+        self.assertTrue(out.startswith("NOT_DONE"), out)
+
+    def test_for_today_unless_the_message_says_for_good(self) -> None:
+        self.call("no need to resend the list pls", part="whats_next")
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "nothing")
+        self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))  # not the lasting one
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY + timedelta(days=1))["whats_next"],
+                         "next")  # tomorrow, as before
+        self.call("stop saying which block i'm in, from now on", part="status_line")
+        self.assertIs(settings_for(self.sched.state_db).get("assistant.status_line"), False)  # said for good
+
+    def test_bringing_one_back_needs_asking_for_it(self) -> None:
+        self.call("stop sending what's next from now on", part="whats_next")
+        self.assertTrue(self.call("fern at 5:30", part="whats_next", show="on").startswith("NOT_DONE"))
+        self.call("show me what's next again", part="whats_next", show="on")
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "next")
 
 
 class TestTheBlockLine(WhatsNextCase):

@@ -12,6 +12,7 @@ The status line also goes quiet on its own: it's shown again only once the block
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -28,15 +29,49 @@ TODAY_KEY = "reply_extras_today"  # this day's own choices: {"day": "<iso>", "va
 
 REPLY_EXTRAS_TOOL_SPECS: List[Dict[str, Any]] = [{
     "name": "set_reply_extras",
-    "description": "Stop, trim or bring back what Python adds to replies, when the user asks: 'what's next' after a "
-                   "change (its Now and Next lines), the 'Not marked yet' list in it, or the 'You're in the … block' "
-                   "line. From now on unless they say it's only for today. The one way to honour 'stop sending the "
-                   "list' or 'stop saying block'; never say it's stopped without this call.",
+    "description": "Stop, trim or bring back what Python adds to replies, only when the user's message asks for that "
+                   "outright: 'what's next' after a change (its Now and Next lines), the 'Not marked yet' list in it, "
+                   "or the 'You're in the … block' line. For today unless they say it's for good ('from now on'). The "
+                   "one way to honour 'stop sending the list' or 'stop saying block'; never say it's stopped without "
+                   "this call, and never call it for a complaint about the schedule itself.",
     "parameters": {"part": "'whats_next', 'not_marked', 'status_line', or 'all'.",
                    "show": "'off' or 'on'; for whats_next also 'rest' (the rest of today instead of the next few).",
                    "for_today": "true when the user says it's only for today."},
     "required": ["part", "show"],
 }]
+
+
+# The user's own message has to name one of the lines and ask for it to stop (or come back): a complaint about the
+# schedule ("make the list right") or a wish not to have something explained is neither.
+_ABOUT = re.compile(
+    r"what'?s next|\bnext:?\s*(?:section|list|lines?|part|bit|stuff)|[\"'“‘]next:?[\"'”’]|not marked|unmarked|"
+    r"(?:which|what) block|block (?:line|talk|thing|stuff|bit)|saying (?:the )?block|you'?re in the|status line|"
+    r"(?:re)?send(?:ing)? (?:me )?the list|the list (?:at|on) the (?:end|bottom)|"
+    r"(?:extra|added) (?:lines|stuff|bits)|lines? (?:at|on) the (?:end|bottom)|"
+    r"(?:half[- ]hour|block)\b[^.?!\n]{0,24}\bat the top|"
+    r"\b(?:stop|no|drop|skip|quit|lose|cut)\s+(?:the |those |these |all the )?(?:lists?|lines)\b", re.IGNORECASE)
+_STOP = re.compile(r"\b(?:stop|don'?t|dont|no more|no need|quit|leave (?:it|them|that) out|without|turn (?:it |them )?off|"
+                   r"hide|drop|skip|remove|delete|cut|lose|get rid|no (?:the )?(?:lists?|lines))\b", re.IGNORECASE)
+_BACK = re.compile(r"\b(?:again|back|turn (?:it |them )?on|start (?:showing|sending)|i want (?:the|it|them))\b",
+                   re.IGNORECASE)
+_LASTING = re.compile(r"\b(?:from now on|always|for good|permanently|anymore|any more|ever again|every (?:day|time)|"
+                      r"going forward|in future|never)\b", re.IGNORECASE)
+
+
+class NotAsked(ValueError):
+    """The user didn't ask for this change in their message."""
+
+
+def asked(said: Optional[str], show: str, for_today: Any) -> bool:
+    """Whether the user's message asks for this change; raises NotAsked if it doesn't. Returns True when the change is
+    for today only: it lasts only when the message says so, whatever the call asked for."""
+    said = said or ""
+    off = str(show or "").strip().lower() in ("off", "false", "no", "0", "nothing", "stop", "hide")
+    if not _ABOUT.search(said) or not (_STOP if off else _BACK).search(said):
+        raise NotAsked("The user's message doesn't ask to stop or bring back what's added to replies (what's next, "
+                       "Not marked yet, or the block line). Leave it as it is, and answer what they did ask.")
+    only_today = str(for_today).strip().lower() in ("true", "1", "yes", "today")
+    return only_today or not _LASTING.search(said)
 
 
 def _today_values(db, today: date) -> Dict[str, Any]:

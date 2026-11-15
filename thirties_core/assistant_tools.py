@@ -686,6 +686,8 @@ class AssistantTools(KindTools):
         if self.pt.scheduler is None:
             raise ToolError("There are no settings to change here.")
         try:
+            from thirties_core.reply_extras import asked  # only when the user's message asks; lasting only if it says so
+            for_today = asked(self.pt.user_message, str(show), for_today)
             return set_extras(self.pt.scheduler.config, settings_for(self._db) if self._db else None, self._db,
                               self._today(), str(part), str(show), for_today)
         except ValueError as e:
