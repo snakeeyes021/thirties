@@ -110,6 +110,21 @@ def _typo_fix(before: str, after: str) -> bool:
     return all(_one_slip(x, y) for x, y in zip(a, b))
 
 
+def _retry_after(error) -> float:
+    """How long a 429 says to wait: its retry_after, else its Retry-After header, else a few seconds."""
+    try:
+        body = json.loads(error.read().decode("utf-8") or "{}") if error.fp is not None else {}
+        value = (body.get("parameters") or {}).get("retry_after")
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
+    try:
+        return float((error.headers or {}).get("Retry-After") or 5)
+    except (TypeError, ValueError):
+        return 5.0
+
+
 class TelegramClient:
     """Minimal, dependency-free Telegram Bot API client using urllib.request."""
 
@@ -119,6 +134,8 @@ class TelegramClient:
         self.undelivered: List[tuple] = []  # (chat_id, text, when, expires, parse_mode) that never got through
         self.sent_ids: List[tuple] = []  # (chat_id, message_id) of what was sent, newest last (reactions)
         self.on_undelivered: Optional[Callable[[List[tuple]], None]] = None  # told whenever `undelivered` changes
+        self.recent: Dict[tuple, float] = {}  # (chat_id, text) -> when it last went out (or very likely did)
+        self.hold_until = 0.0  # Telegram asked us to wait (HTTP 429) until then
 
     def _undelivered_changed(self) -> None:
         if self.on_undelivered is not None:
@@ -176,8 +193,10 @@ class TelegramClient:
             logger.debug("Failed to send chat action: %s", e)
             return False
 
-    RETRY_WAITS = (2.0, 5.0)  # seconds between attempts when the network drops a send
+    RETRY_WAITS = (2.0, 5.0)  # seconds between attempts when a send provably never reached Telegram
     UNDELIVERED_HOURS = 3
+    RETRY_AFTER_MAX = 60.0  # a 429's wait, honoured in place up to this long; a longer one holds sends until then
+    SAME_TEXT_MINUTES = 10  # what went out isn't sent again from the queue within this long
 
     def send_message(
         self,
@@ -202,20 +221,33 @@ class TelegramClient:
             success = success and bool(sent)
         return success
 
-    def _send_chunk(self, chat_id: int | str, chunk: str, parse_mode: Optional[str]) -> Optional[bool]:
-        """True when sent; False when the network kept failing (worth sending later); None when refused."""
+    def _send_chunk(self, chat_id: int | str, chunk: str, parse_mode: Optional[str],
+                    key: Optional[str] = None) -> Optional[bool]:
+        """True when sent (or very likely sent); False when it provably never reached Telegram (worth sending
+        later); None when refused. ``key``: the text it's remembered by (the queue's own words, without its
+        "sent late" note).
+
+        Only a send that never reached Telegram is tried again: it couldn't connect, or the connection broke while
+        the request was going out, or Telegram answered with a server error. Once the request is out, a missing
+        answer (a read timeout) almost always means Telegram got it, so it counts as sent and is never sent again:
+        sending it again is how one message arrived dozens of times. A "too many requests" (429) is waited out once,
+        as Telegram says."""
+        if time.time() < self.hold_until:
+            return False  # Telegram asked us to wait: kept, and sent once the wait is over
         payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
         if parse_mode == "Markdown":
             payload["text"], payload["parse_mode"] = telegram_html(chunk), "HTML"
         elif parse_mode:
             payload["parse_mode"] = parse_mode
-        for attempt, wait in enumerate((*self.RETRY_WAITS, None)):
+        retries, waited = 0, False
+        while True:
             try:
                 res = self._request("sendMessage", payload, timeout=15.0)
                 if res.get("ok"):
                     mid = (res.get("result") or {}).get("message_id")
                     if mid is not None:
                         self.sent_ids.append((chat_id, mid))
+                    self._went_out(chat_id, key or chunk)
                     return True
                 raise urllib.error.HTTPError(url="", code=400, msg="Telegram API error", hdrs={}, fp=None)  # type: ignore
             except urllib.error.HTTPError as e:
@@ -224,16 +256,39 @@ class TelegramClient:
                     payload.pop("parse_mode")
                     payload["text"] = chunk
                     continue
-                if e.code < 500 and e.code != 429:
+                if e.code == 429:
+                    wait = _retry_after(e)
+                    if waited or wait > self.RETRY_AFTER_MAX:
+                        self.hold_until = time.time() + wait
+                        logger.warning("Telegram asked to wait %ss before sending more; holding sends", wait)
+                        return False
+                    logger.warning("Telegram asked to wait %ss (429); waiting once", wait)
+                    waited = True
+                    time.sleep(wait)
+                    continue
+                if e.code < 500:
                     logger.error("Telegram refused a message: %s", e)
                     return None
-                logger.warning("Telegram send failed (%s), attempt %d", e, attempt + 1)
-            except Exception as e:  # dropped connection, timeout
-                logger.warning("Telegram send failed (%s), attempt %d", e, attempt + 1)
-            if wait is None:
+                logger.warning("Telegram couldn't take a message (%s), attempt %d", e, retries + 1)
+            except urllib.error.URLError as e:  # couldn't connect or send it: it never reached Telegram
+                logger.warning("Telegram send didn't go out (%s), attempt %d", e.reason, retries + 1)
+            except Exception as e:  # out, and no answer (a read timeout, a connection dropped while waiting)
+                logger.warning("Telegram didn't confirm a message (%s): counted as sent, not sent again", e)
+                self._went_out(chat_id, key or chunk)
+                return True
+            if retries >= len(self.RETRY_WAITS):
                 return False
-            time.sleep(wait)
-        return False
+            time.sleep(self.RETRY_WAITS[retries])
+            retries += 1
+
+    def _went_out(self, chat_id: int | str, text: str) -> None:
+        now = time.time()
+        self.recent = {k: t for k, t in self.recent.items() if now - t < self.SAME_TEXT_MINUTES * 60}
+        self.recent[(str(chat_id), text)] = now
+
+    def _just_sent(self, chat_id: int | str, text: str) -> bool:
+        t = self.recent.get((str(chat_id), text))
+        return t is not None and time.time() - t < self.SAME_TEXT_MINUTES * 60
 
     def flush_undelivered(self) -> None:
         """Send what earlier failed, oldest first, marked as late; stop at the first that fails again. A notice
@@ -248,7 +303,10 @@ class TelegramClient:
         while self.undelivered:
             chat_id, chunk = self.undelivered[0][:2]
             mode = self.undelivered[0][4] if len(self.undelivered[0]) > 4 else None
-            if self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode) is False:
+            if self._just_sent(chat_id, chunk):  # the same words went out minutes ago: never twice
+                logger.info("Dropped a queued message to Telegram that already went out: %r", chunk[:80])
+            elif self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode,
+                                  key=chunk) is False:
                 return
             self.undelivered.pop(0)
             self._undelivered_changed()
@@ -534,7 +592,7 @@ class ThirtiesTelegramBridge:
             f"🕒 *Now*: {format_clock(now)} (thirty #{curr.number:02d}, {format_clock(curr.start_dt)} – {format_clock(curr.end_dt)})\n"
             f"📝 *Doing*: {doing}\n"
             f"⏳ *Left in this thirty*: {rem_mins} minutes"
-            f"{sleep_str}", missed_for(self.conv_manager.tools, now))  # what's not marked yet, right under it
+            f"{sleep_str}", missed_for(self.conv_manager.tools, now, muted_too=True))  # what's not marked yet
         self.client.send_message(chat_id, msg, parse_mode="Markdown")
 
     def _cmd_day(self, chat_id: int) -> None:
@@ -545,7 +603,8 @@ class ThirtiesTelegramBridge:
         now = self._get_current_time()
         live = plan.day_start <= now < plan.day_end
         text = render_schedule(plan, now if live else None, whole_day=True,
-                               missed=missed_for(self.conv_manager.tools, now) if live else [], label="today")
+                               missed=missed_for(self.conv_manager.tools, now, muted_too=True) if live else [],
+                               label="today")
         if live and getattr(self.conv_manager.tools, "assistant", None) is not None:
             from thirties_core.if_time import text_for
             text += text_for(self.conv_manager.tools.assistant)  # after the day's timed items
