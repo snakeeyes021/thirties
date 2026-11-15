@@ -87,6 +87,8 @@
           <li>Long or marked-up list lines go on Today by their short title; a done item doesn't leave an earlier copy asking about it; old plan pins expire; a routine never goes on as one opaque item; and done times are only ones you said (or Thirties' estimate)</li>
           <li>Thirties now tells you when one of your memory notes covers something it handles by itself, so you can remove it: after each update it's marked "Thirties already does this by itself. Remove this note?" in Profile, Memory, and nothing is removed without your tap</li>
           <li>An agent's work-log note is planned as time on its project</li>
+          <li>Every reply that changes your plan ends with what's next: what's on now, the next few things, anything the change moved, and what's not marked yet today, one line each, in the app and on Telegram</li>
+          <li>An item you mark done again after taking the done back is ticked in Joplin again, and taking a done back unticks the item on its own list as well as on Today</li>
           <li>Thirties' own assistant runs privately on your computer (Gemma), and it isn't ready yet, so it's behind a developer switch; until it is, Thirties runs in debug mode on Gemini as a stand-in, which works as before</li>
         </ul>
       </description>
