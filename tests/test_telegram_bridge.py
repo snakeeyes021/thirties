@@ -259,7 +259,7 @@ class TestThirtiesTelegramBridge(BridgeCase):
         args, kwargs = self.bridge.client.send_message.call_args
         msg = args[1]
         self.assertIn("Thirties System Status", msg)
-        self.assertIn("Inference Backend", msg)
+        self.assertIn("Assistant", msg)
 
     def test_natural_conversation_routes_to_gemini(self):
         self.bridge.handle_message(chat_id=1001, text="Help me plan my afternoon")

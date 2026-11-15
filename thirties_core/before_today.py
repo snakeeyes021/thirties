@@ -305,29 +305,45 @@ class BeforeToday:
         """The one-time offer: put items filed in Dropped notes back on their own lists, open, where they were
         (they still don't come back by themselves), or leave them off. One ``item`` at a time, or all of them; once
         none is left to answer, or all are left off, it isn't offered again."""
-        put_back = str(put_back).strip().lower() not in ("false", "0", "no", "leave")
+        from thirties_core.assistant_tools import ToolError
+        said = str(put_back).strip().lower()
+        if said in ("true", "1", "yes", "put back", "put it back", "put them back", "back"):
+            put_back = True
+        elif said in ("false", "0", "no") or said.startswith("leave"):
+            put_back = False
+        else:
+            raise ToolError("put_back must be true (put back) or false (leave off).")
+        if self.db is None:
+            raise ToolError("There's nothing taken off a list to put back here.")
         items = self.old_filed_drops()
         if item:
             low = str(item).strip().lower()
             items = [r for r in items if r["title"].strip().lower() == low] or \
-                [r for r in items if low and low in r["title"].strip().lower()][:1]
+                [r for r in items if low and low in r["title"].strip().lower()]
             if not items:
-                from thirties_core.assistant_tools import ToolError
                 raise ToolError(f"'{item}' isn't one of the items taken off their lists earlier.")
-        back = []
+            if len(items) > 1:  # never a guess: the user says which
+                raise ToolError(f"'{item}' matches several: " + "; ".join(r["title"] for r in items) + ". Which one?")
+        if put_back and self.a._writer() is None:
+            raise ToolError("Joplin isn't connected, so nothing could be put back on its list. Try again once it is.")
+        back, failed = [], []
         for rec in items:
             if put_back:
-                if not self.a._undrop_in_joplin(rec):
-                    back.append(rec["title"])
+                err = self.a._undrop_in_joplin(rec)
+                (failed if err else back).append((rec["title"], err))
             else:
                 OpenPool(self.db).set(rec["title"], offer_left=True)
-        if not item or not self.old_filed_drops():
+        if not self.old_filed_drops():  # every item answered: never offered again (a failed one stays offered)
             self.db.set_sync_meta(self.OFFER_KEY, "answered")
         if not put_back:
             return f"Left {items[0]['title']} off its list." if item else "Left them all off their lists."
-        if not back:
-            return "Nothing needed putting back."
-        return f"Put {back[0]} back on its list." if item else "Put back on their lists: " + ", ".join(back) + "."
+        out = []
+        if back:
+            out.append(f"Put {back[0][0]} back on its list." if len(back) == 1 and item else
+                       "Put back on their lists: " + ", ".join(t for t, _ in back) + ".")
+        if failed:
+            out.append("Couldn't put back: " + "; ".join(f"{t} {e}" for t, e in failed) + ". It's still offered.")
+        return " ".join(out)
 
     def _drop(self, rec: Dict[str, Any], by: str) -> str:
         self.take_off_today(rec)

@@ -188,8 +188,11 @@ class ProfileMemoryDialog(Adw.Dialog):
             row.connect("apply", self._on_note_apply)
             why = built_in.get(note.id)
             if why:  # Thirties does this by itself (memory_audit.py): the user removes it, or keeps it
+                from thirties_core.memory_audit import BUILT_IN
                 row.set_title(BUILT_IN_TITLE + " · " + row.get_title())
-                row.set_tooltip_text(f"Thirties does this by itself: {why}.")
+                # one of today's reasons, in the user's words; a reason stored from an older list isn't shown
+                row.set_tooltip_text(f"Thirties does this by itself: {why}." if why in {w for w, _ in BUILT_IN}
+                                     else "Thirties does this by itself.")
                 row.add_css_class("warning")
                 keep_btn = Gtk.Button(label="Keep", valign=Gtk.Align.CENTER, tooltip_text="Keep this note")
                 keep_btn.add_css_class("flat")

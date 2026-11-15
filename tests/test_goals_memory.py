@@ -116,7 +116,7 @@ class TestMemoryAudit(unittest.TestCase):
         memory = Services.for_db(sched.state_db).memory
         meals = memory.add("Add the meals to every day by themselves, unasked.")
         fact = memory.add("Prefers the window seat on trains.")
-        k = next(i for i, (why, _) in enumerate(BUILT_IN, 1) if "anchors such as meals" in why)
+        k = next(i for i, (why, _) in enumerate(BUILT_IN, 1) if "everyday things such as meals" in why)
         calls = []
 
         class Judge:

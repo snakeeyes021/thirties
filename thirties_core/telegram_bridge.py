@@ -627,7 +627,6 @@ class ThirtiesTelegramBridge:
         self.client.send_message(chat_id, "🆕 Started a new conversation. What's next?")
 
     def _cmd_status(self, chat_id: int) -> None:
-        inf_name = type(self.inference_engine).__name__
         model_name = getattr(self.inference_engine, "model_name", "N/A")
         services = self.conv_manager.tools.services
         tasks_count = len(services.tasks) if services else 0
@@ -637,12 +636,11 @@ class ThirtiesTelegramBridge:
 
         msg = (
             "⚙️ *Thirties System Status*\n\n"
-            f"🧠 *Inference Backend*: `{inf_name}`\n"
             f"🧠 *Assistant*: {BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)}\n"
             f"🤖 *Model*: `{model_name}`\n"
             f"🔄 *Joplin Sync*: {sync_enabled}\n"
-            f"🔔 *Block Buzzes*: {notify_enabled}\n"
-            f"📋 *Backlog Tasks*: {tasks_count}\n"
+            f"🔔 *Check-ins*: {notify_enabled}\n"
+            f"📋 *List items*: {tasks_count}\n"
             f"📒 *Active Notes*: {notes_count}\n"
             f"📱 *Connected Chats*: {len(self.active_chats)}"
         )

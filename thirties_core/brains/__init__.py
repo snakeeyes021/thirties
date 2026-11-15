@@ -30,11 +30,13 @@ class Brain(Protocol):
         ...
 
 
-BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud, for developers)",
-          "pipeline": "Gemini on the shared pipeline (being tested)"}
+BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud)",
+          "pipeline": "Gemini (step by step)"}
+# Typed with /brain to pick each one ("/brain gemini"); the internal ids stay inside.
+BRAIN_WORDS = {"frontier": "gemini", "slm": "gemma", "pipeline": "gemini-steps"}
 BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontier",
                  "slm": "slm", "gemma": "slm", "local": "slm", "device": "slm", "on-device": "slm",
-                 "pipeline": "pipeline", "gemini-pipeline": "pipeline"}
+                 "pipeline": "pipeline", "gemini-pipeline": "pipeline", "gemini-steps": "pipeline"}
 
 
 GEMMA_FLAG_ENV = "THIRTIES_OFFER_GEMMA"  # also brings back the pipeline brain (parked: docs/SLM_BRAIN.md)
@@ -95,5 +97,5 @@ def make_brain(config, tools, inference_engine, tasks=None, active_notes=None, c
     return FrontierBrain(tools, inference_engine, tasks=tasks, active_notes=active_notes)
 
 
-__all__ = ["BRAINS", "BRAIN_ALIASES", "Brain", "FrontierBrain", "brain_choice", "brain_unavailable_reason", "make_brain",
+__all__ = ["BRAINS", "BRAIN_ALIASES", "BRAIN_WORDS", "Brain", "FrontierBrain", "brain_choice", "brain_unavailable_reason", "make_brain",
            "gemma_offered", "offered_brains", "GEMMA_FLAG_ENV"]

@@ -47,17 +47,17 @@ WORKAROUNDS: List[Tuple[str, str, str]] = [
     (r"\b(?:never|don'?t|do not)\b.*\b(?:move|change|touch|shift)\b.*\b(?:work|sleep)\b",
      "Work and Sleep change only when the user talks about them", "0.2.0"),
     (r"\bCALL\b|\btool (?:call|syntax|text)|\binternal text",
-     "no tool syntax or internal text ever reaches a reply", "0.2.0"),
+     "replies never show behind-the-scenes text", "0.2.0"),
     (r"\b(?:duplicate|ghost|twice|copies)\b.*\b(?:plan|schedul|item|event)|\b(?:plan|schedul)\w*\b.*\b(?:duplicate|"
      r"twice)\b",
      "moving or redrawing an item moves it and never leaves a copy", "0.2.0"),
     (r"\b(?:tick|check(?:ed)? off|mark)\w*\b.*\b(?:wrong|exact|similar|fuzzy|match)",
-     "every write to the lists goes through an exact link to the item, never a guess by its wording", "0.2.0"),
+     "ticking or changing a list item always changes that exact item, never a similar one", "0.2.0"),
     (r"\b(?:never|don'?t|do not|stop)\b.*\b(?:check(?:ing)? in|ask(?:ing)?|schedul\w*)\b.*\b(?:relax|downtime|down "
      r"time|rest|break)\b",
      "check-ins follow the chosen message level, and downtime is never filled with plans or check-ins", "0.2.0"),
     (r"\b(?:never|don'?t|do not)\b.*\boffer\b.*\b(?:meal|routine)",
-     "routines and daily anchors such as meals go on the day by themselves", "0.2.0"),
+     "routines and everyday things such as meals go on the day by themselves", "0.2.0"),
     # rules a note had to carry that are now built in (0.3)
     (r"\bhalf[- ]?hour\b.*\bblocks?\b|\bblocks?\b.*\bhalf[- ]?hour\b|\bschedul\w*\b.*\b(?:by|in) (?:the )?blocks?\b",
      "Thirties places what it picks on half-hour blocks by itself; the times the user gives stay as they are", "0.3.0"),
@@ -65,7 +65,7 @@ WORKAROUNDS: List[Tuple[str, str, str]] = [
      r"\bproposals?\b.*\b(?:directly|right away|straight away)\b",
      "a proposed schedule is the schedule: it goes on at once and is said as a notice", "0.3.0"),
     (r"\btickets?\b.*\b(?:schedul\w*|plan\w*)\b|\b(?:schedul\w*|plan\w*)\b.*\btickets?\b",
-     "a project's backlog (an agent's work log too) is planned as time on the project, never ticket by ticket", "0.3.0"),
+     "a project's list (an agent's work log too) is planned as time on the project, never item by item", "0.3.0"),
     (r"\broutines?\b.*\b(?:overviews?|summar(?:y|ies)|morning (?:message|schedule))\b|"
      r"\b(?:overviews?|summar(?:y|ies))\b.*\broutines?\b",
      "the morning's schedule lists the routines, part by part", "0.3.0"),

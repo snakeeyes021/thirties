@@ -24,7 +24,9 @@ UI = ["src/*.ui"]
 HISTORY = (r"no longer|used to|anymore|any more|previously|built in|old meaning|"
            r"now (?:only|built|does|works|uses|means)|\d+\.\d+\.\d+")
 INTERNAL = r"horizons?|rollovers?|roll(?:s|ed|ing)? over|pool|back-?off|intents?|brains?|frontier|slm|spans?"
-BANNED = re.compile(rf"\b(?:{HISTORY}|{INTERNAL})\b", re.IGNORECASE)
+DEVELOPER = r"debug|developers?|for now|being tested|stand-?in"  # hints meant for whoever builds the app
+BANNED = re.compile(rf"\b(?:{HISTORY}|{INTERNAL}|{DEVELOPER})\b", re.IGNORECASE)
+INTERNAL_IDS = re.compile(r"\b(?:frontier|slm|pipeline)\b")
 
 
 def _is_text(value: str) -> bool:
@@ -79,6 +81,68 @@ class TestUserText(unittest.TestCase):
         self.assertTrue(BANNED.search("Thirties no longer does that"))
         self.assertFalse(BANNED.search("Put any of these back on their lists?"))
         self.assertFalse(BANNED.search("What's happening now, and time until sleep"))  # "now" itself is fine
+        self.assertTrue(BANNED.search("Gemini (cloud, debug mode)"))
+
+
+class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
+    """Text put together while the app runs: the names and reasons filled into it, and two replies as sent."""
+
+    def test_the_values_filled_into_user_text(self):
+        from thirties_core.brains import BRAIN_WORDS, BRAINS
+        from thirties_core.memory_audit import BUILT_IN
+        for text in list(BRAINS.values()) + [why for why, _ in BUILT_IN]:
+            self.assertFalse(BANNED.search(text), text)
+        self.assertFalse(any(INTERNAL_IDS.search(w) for w in BRAIN_WORDS.values()))
+
+    def test_brain_replies_name_what_the_user_types(self):
+        from tests.fixtures import DAY, at, make_scheduler
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        set_debug_time(at("10:00"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        m = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(), active_notes=[])
+        for said in ("/brain", "/brain gpt"):
+            reply = m.send_user_message(said)
+            plain = re.sub(r"`?/\w+`?", "", reply)
+            self.assertFalse(BANNED.search(plain) or INTERNAL_IDS.search(plain), reply)
+        self.assertIn("Choose one of: gemini", m.send_user_message("/brain gpt"))
+
+    def test_telegram_status_as_sent(self):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+        from tests.fixtures import at
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.calendar_engine import MockCalendarEngine
+        from thirties_core.config import TelegramConfig, ThirtiesConfig
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.scheduler import DeterministicScheduler, StateDatabase
+        from thirties_core.telegram_bridge import TelegramClient, ThirtiesTelegramBridge
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        config = ThirtiesConfig(telegram=TelegramConfig(enabled=True, bot_token="FAKE", allowed_chat_ids=[7]))
+        sched = DeterministicScheduler(config=config, state_db=StateDatabase(Path(tmp.name) / "s.sqlite"),
+                                       calendar_engine=MockCalendarEngine([]))
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        with patch.object(TelegramClient, "get_me", return_value={"username": "bot"}):
+            bridge = ThirtiesTelegramBridge(config=config, scheduler=sched, joplin_engine=joplin,
+                                            inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        bridge.client = MagicMock()
+        bridge._cmd_status(7)
+        sent = bridge.client.send_message.call_args[0][1]
+        self.assertIn("Gemini (cloud)", sent)
+        self.assertFalse(BANNED.search(sent) or INTERNAL_IDS.search(sent), sent)
+
+    def test_what_software_centres_show(self):
+        root = ET.parse(ROOT / "data/tech.redfoxlabs.Thirties.metainfo.xml.in").getroot()
+        for node in root.iter():
+            if node.tag in ("p", "li", "summary", "name") and node.text:
+                self.assertFalse(re.search(rf"\b(?:{DEVELOPER})\b", node.text, re.IGNORECASE), node.text)
 
 
 if __name__ == "__main__":
