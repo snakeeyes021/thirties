@@ -256,13 +256,13 @@ class TestTransports(unittest.TestCase):
         self.assertEqual(res["tool_calls"], [])
 
     def test_litert_availability_detection(self) -> None:
-        engine = LiteRTInferenceEngine()
+        engine = LiteRTInferenceEngine(ThirtiesConfig())
         if not engine.is_available():
             self.skipTest("No LiteRT-LM runtime or Gemma model installed on this machine.")
         self.assertTrue(engine.is_available())
 
     def test_litert_chat_parses_calls(self) -> None:
-        engine = LiteRTInferenceEngine()
+        engine = LiteRTInferenceEngine(ThirtiesConfig())
         session = MagicMock()
         session.send_message.return_value = 'CALL add_event {"title": "Writing", "start": "8:00 PM", "duration": "1 hour"}\nScheduled.'
         with patch.dict(sys.modules, {"litert_lm": MagicMock()}), \

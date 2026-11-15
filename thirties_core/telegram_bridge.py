@@ -883,6 +883,9 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config if args.config else None)
+    if cfg.load_error:
+        logger.error("Not starting: the config file couldn't be read: %s", cfg.load_error)
+        sys.exit(1)
     if args.token:
         cfg.telegram.bot_token = args.token
     if args.no_notify:

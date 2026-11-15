@@ -23,6 +23,8 @@ class AppCore:
     def __init__(self, use_keyring: bool = True, desktop_notify: Optional[DesktopNotify] = None,
                  config: Optional[ThirtiesConfig] = None) -> None:
         self.config = config or load_config()
+        if config is None:
+            logger.info("Config file: %s", self.config.loaded_from or "none (built-in defaults and your settings)")
         self.scheduler = DeterministicScheduler(self.config)
         self.settings: Settings = settings_for(self.scheduler.state_db, use_keyring)
         self.settings.apply(self.config)
@@ -45,6 +47,13 @@ class AppCore:
     # --- the background service ---
 
     def start_service(self) -> None:
+        if self.config.load_error:
+            # The defaults would stand in for the user's own choices (their model, their places) in everything
+            # done unseen: reminders, check-ins, Telegram, list sorting. Nothing runs in the background until
+            # the file is fixed and the app restarted.
+            logger.error("Background work (reminders, check-ins, Telegram, sync) not started: the config file "
+                         "couldn't be read: %s", self.config.load_error)
+            return
         if self.service is None:
             self.service = BackgroundService(self.config, self.desktop_notify, scheduler=self.scheduler,
                                              joplin_engine=self.joplin_engine, inference_engine=self.inference_engine,
@@ -66,6 +75,7 @@ class AppCore:
             target, source = getattr(self.config, section.name), getattr(fresh, section.name)
             for f in dataclasses.fields(target):
                 setattr(target, f.name, getattr(source, f.name))
+        self.config.loaded_from, self.config.load_error = fresh.loaded_from, fresh.load_error
         self._build_engines()
         was_running = self.service is not None and self.service.running
         self.stop_service()

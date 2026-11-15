@@ -257,7 +257,7 @@ class InteractiveEvaluator:
                 return FastHybridInferenceEngine(daemon=daemon)
             except Exception as e:
                 logger.warning("Could not launch PersistentGemmaEngine: %s. Falling back to LiteRT.", e)
-        return LiteRTInferenceEngine()
+        return LiteRTInferenceEngine(ThirtiesConfig())
 
     @staticmethod
     def start_session(

@@ -83,6 +83,30 @@ AGY_CALLER_ENV = "THIRTIES_AGY_CALLER"  # set by tests and studies ("study:<run>
 AGY_QUOTA_RE = re.compile(r"quota|resource.?exhausted|\b429\b|too many requests|usage limit", re.IGNORECASE)
 
 
+def users_config(config: Optional[ThirtiesConfig], who: str) -> ThirtiesConfig:
+    """The config an engine runs on: always the one it's handed (the user's, loaded with their settings, or a test's
+    own). An engine never makes up the built-in defaults by itself: that sent calls to the default model instead of
+    the one the user chose."""
+    if config is None:
+        raise ValueError(f"{who} needs a config: pass the app's (load_config() with the settings applied).")
+    return config
+
+
+def agy_outcome(res: subprocess.CompletedProcess) -> str:
+    """What the ledger records for one agy run: "ok" only when it answered (exit 0 and a successful result), the
+    same outcome as a failed exit when the output says the usage limit is reached (AGY_QUOTA_RE), else "error".
+    Exit 0 alone isn't enough: agy can end normally with an error result."""
+    stdout = res.stdout if isinstance(res.stdout, str) else ""
+    stderr = res.stderr if isinstance(res.stderr, str) else ""
+    output = stderr + stdout[-2000:]
+    result = _stream_result(stdout)
+    if result is not None and result.get("error"):
+        output += f"\n{result.get('error')}"
+    if res.returncode == 0 and result is not None and result.get("status", "SUCCESS") == "SUCCESS":
+        return "ok"
+    return "quota" if AGY_QUOTA_RE.search(output) else "error"
+
+
 def record_agy_call(model: str, outcome: str) -> None:
     """Append one call to the ledger: unix time, model, outcome (ok, error, timeout, quota), and who made it: what a
     test or study says (THIRTIES_AGY_CALLER), else the process itself (untagged:pid=…:cwd=…:argv=…), so a caller
@@ -278,7 +302,7 @@ class AntigravityInferenceEngine:
     """Dispatches conversation turns to Gemini (e.g. Gemini 3.8 Flash) via the Antigravity CLI."""
 
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
-        self.config = config or ThirtiesConfig()
+        self.config = users_config(config, "The agy engine")
         self.inf_cfg: InferenceConfig = self.config.inference
         self.model = self.inf_cfg.gemini_model or "gemini-3.8-flash-medium"
         self.custom_agy_path = self.inf_cfg.agy_path
@@ -343,8 +367,7 @@ class AntigravityInferenceEngine:
     def _run(self, cmd: List[str], prompt_text: str, workspace) -> subprocess.CompletedProcess:
         stdin_text = json.dumps({"event": "user", "message": {"content": prompt_text}}) + "\n"
         res = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True, timeout=self.timeout, cwd=workspace)
-        record_agy_call(self.model, "ok" if res.returncode == 0 else
-                        ("quota" if AGY_QUOTA_RE.search((res.stderr or "") + res.stdout[-2000:]) else "error"))
+        record_agy_call(self.model, agy_outcome(res))
         return res
 
     def chat(
@@ -499,7 +522,7 @@ class GeminiInferenceEngine:
     """Dispatches conversation turns directly to the Google Gemini REST API."""
 
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
-        self.config = config or ThirtiesConfig()
+        self.config = users_config(config, "The Gemini API engine")
         self.inf_cfg: InferenceConfig = self.config.inference
         # Config names follow agy's "<model>-<thinking level>" convention; the REST API
         # takes the level as a separate parameter.
@@ -614,7 +637,7 @@ class LiteRTInferenceEngine:
     """LiteRT-LM on-device inference engine leveraging local GPU acceleration."""
 
     def __init__(self, config: Optional[ThirtiesConfig] = None) -> None:
-        self.config = config or ThirtiesConfig()
+        self.config = users_config(config, "The on-device engine")
         self.inf_cfg: InferenceConfig = self.config.inference
         self.temperature = self.inf_cfg.temperature
         self._engine_instance: Any = None
@@ -956,7 +979,7 @@ def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEn
     (LiteRT) only while it's offered (the developer switch, brains.gemma_offered): never picked or fallen back on
     without it."""
     from thirties_core.brains import gemma_offered
-    cfg = config or ThirtiesConfig()
+    cfg = users_config(config, "get_inference_engine")
     backend = (cfg.inference.backend or "gemini").lower()
     if backend == "litert" and not gemma_offered(cfg):
         logger.warning("The on-device model isn't offered (developer switch off): using Gemini instead of LiteRT.")

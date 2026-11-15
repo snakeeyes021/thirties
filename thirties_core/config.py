@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -159,6 +162,12 @@ class ThirtiesConfig:
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
 
+    # Where load_config() found the file (None: there was none, the built-in defaults), and why it couldn't be read
+    # when it couldn't (then the defaults stand in, and the app does no background work: AppCore.start_service).
+    # Plain attributes, not fields: every field is a config section.
+    loaded_from = None
+    load_error = None
+
     def resolve_joplin_db_path(self, desktop_only: bool = False) -> Optional[Path]:
         """Locate Joplin's database.sqlite, checking configured path, ~/.config, and Flatpak paths.
 
@@ -196,13 +205,30 @@ class ThirtiesConfig:
         return state_dir / "state.sqlite"
 
 
-def get_default_config_path() -> Path:
+def _in_flatpak() -> bool:
+    return Path("/.flatpak-info").exists() or bool(os.environ.get("FLATPAK_ID"))
+
+
+def config_path_candidates() -> List[Path]:
+    """Where config.toml may be, best first. Inside the Flatpak, XDG_CONFIG_HOME is the app's own folder
+    (~/.var/app/<id>/config), which shows the host's ~/.config/thirties only through the manifest's
+    xdg-config/thirties permission; the host's own path is tried after it, so the Flatpak and a host process
+    read the same file."""
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return config_home / "thirties" / "config.toml"
+    paths = [config_home / "thirties" / "config.toml"]
+    if _in_flatpak():
+        paths.append(Path.home() / ".config" / "thirties" / "config.toml")
+    return list(dict.fromkeys(paths))
+
+
+def get_default_config_path() -> Path:
+    candidates = config_path_candidates()
+    return next((p for p in candidates if p.is_file()), candidates[0])
 
 
 def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
-    """Load configuration from a TOML file, falling back to defaults if not found."""
+    """Load configuration from a TOML file; with none, the built-in defaults. A file that exists but can't be read
+    is said plainly in the log and recorded (``load_error``), never passed over in silence."""
     path = Path(config_path) if config_path else get_default_config_path()
     path = Path(os.path.expanduser(str(path)))
 
@@ -212,8 +238,11 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-    except Exception:
-        return ThirtiesConfig()
+    except Exception as e:
+        logger.error("Couldn't read the config file %s (%s): using the built-in defaults instead.", path, e)
+        cfg = ThirtiesConfig()
+        cfg.loaded_from, cfg.load_error = path, f"{path}: {e}"
+        return cfg
 
     general_data = data.get("general", {})
     joplin_data = data.get("joplin", {})
@@ -227,7 +256,7 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
     if sync_data.get("enabled") and "mode" not in sync_data:
         sync_data = {**sync_data, "mode": "joplin"}
 
-    return ThirtiesConfig(
+    cfg = ThirtiesConfig(
         general=GeneralConfig(**general_data) if general_data else GeneralConfig(),
         joplin=JoplinConfig(**joplin_data) if joplin_data else JoplinConfig(),
         calendar=CalendarConfig(**calendar_data) if calendar_data else CalendarConfig(),
@@ -237,3 +266,5 @@ def load_config(config_path: Optional[Path | str] = None) -> ThirtiesConfig:
         assistant=AssistantConfig(**assistant_data) if assistant_data else AssistantConfig(),
         media=MediaConfig(**media_data) if media_data else MediaConfig(),
     )
+    cfg.loaded_from = path
+    return cfg
