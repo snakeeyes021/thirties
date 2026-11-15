@@ -934,7 +934,7 @@ class PlanTools:
             if same is not None:
                 linked.add(same.id)
         given, given_short = low(title), short(title)
-        return [s for s in plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
+        return [s for s in plan.spans_in_view() if s.status == SpanStatus.PLANNED and not s.is_envelope
                 and s.source != "calendar"
                 and ((s.task_id and s.task_id in linked) or low(s.title) == given
                      or (given == given_short and short(s.title) == given)
@@ -990,6 +990,13 @@ class PlanTools:
                                 "update_event with that id; to plan a second session as well, add it with again=true.")
         self._separate_things(str(title))
         start_dt = self._start(start)
+        # --- an early-morning time never lands on tomorrow unsaid (day_edges.py) ---
+        if not self.by_hand and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            from thirties_core.day_edges import refuse_early
+            why = refuse_early(self, str(title).strip(), start_dt)
+            if why:
+                raise ToolError(why)
+        # --- end early-morning time ---
         end_dt = None
         if end not in (None, ""):
             end_dt = self._end(end, start_dt)
@@ -1051,7 +1058,8 @@ class PlanTools:
         elif self.assistant and self.day_plan.target_date > self.today():
             from thirties_core.day_lists import ahead_note
             extra += f" {ahead_note(self.assistant, self.day_plan)}"
-        return f"Added {self.describe(span)} [id {span.id}].{extra}"
+        from thirties_core.day_edges import day_note
+        return f"Added {self.describe(span)}{day_note(self, span)} [id {span.id}].{extra}"
 
     def _record_past(self, title: str, start: Any, end: Any, duration: Any, category: str,
                      task_id: Optional[str]) -> str:
@@ -1059,6 +1067,9 @@ class PlanTools:
         user's own), nothing about it planned. Being done, it gets no check-ins, is never missed or rolled over,
         and counts in the statistics like anything else done."""
         start_dt = self._start(start)
+        from thirties_core.day_edges import this_morning_meant  # done this morning, before the plan began
+        earlier = this_morning_meant(self, start_dt)
+        start_dt = earlier or start_dt
         if end not in (None, ""):
             end_dt = self._end(end, start_dt)
         elif duration not in (None, ""):
@@ -1077,12 +1088,17 @@ class PlanTools:
         span = EventSpan(new_span_id(), title, start_dt, end_dt, SpanCategory.TASK if task_id else cat,
                          task_id=task_id, status=SpanStatus.DONE)
         span.actual_start, span.actual_end, span.time_source = start_dt, end_dt, "reported"
-        self.day_plan.spans.append(span)
-        self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        before_the_day = end_dt <= self.day_plan.day_start  # kept and counted, but not on this day's plan
+        if not before_the_day:
+            self.day_plan.spans.append(span)
+            self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
         if task_id and self._state_db is not None:
             self._state_db.record_task_completed(task_id, self.day_plan.target_date)
         self._save_plan_after_change()
+        if before_the_day:
+            return (f"Recorded {self.describe(span)} this morning [id {span.id}] as done (it already happened; it "
+                    "was before today's plan begins, so it isn't shown on it).")
         return f"Recorded {self.describe(span)} [id {span.id}] as done (it already happened)."
 
     def update_event(
@@ -1130,6 +1146,14 @@ class PlanTools:
                 new_end = new_start + (span.end_dt - span.start_dt)  # "move X to 5" moves it, keeping its length
         if new_end <= new_start:
             raise ToolError(f"That would make {span.title} end ({format_clock(new_end)}) before it starts ({format_clock(new_start)}).")
+        # --- an early-morning time never lands on tomorrow unsaid, and nothing leaves the day (day_edges.py) ---
+        if not span.is_envelope and not self.by_hand and (new_start, new_end) != (span.start_dt, span.end_dt):
+            from thirties_core import day_edges
+            why = ((day_edges.refuse_early(self, span.title, new_start) if start not in (None, "") else None)
+                   or day_edges.refuse_off_the_day(self, span.title, new_start, new_end))
+            if why:
+                raise ToolError(why)
+        # --- end early-morning time ---
         if new_start == span.start_dt and new_end == span.end_dt and not title:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
@@ -1167,7 +1191,8 @@ class PlanTools:
         notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
-        return f"Changed {before} → {self.describe(span)}.{extra}{getattr(self, '_kept_note', '')}"
+        from thirties_core.day_edges import day_note
+        return f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}{getattr(self, '_kept_note', '')}"
 
     def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any,
                      alongside: bool = False) -> str:

@@ -334,8 +334,9 @@ class TestRoutinesOnToday(TodayTestCase):
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
         self.api.notes["n_today"]["body"] = "- [ ] Morning Routine\n    - [ ] Shower\n- [x] Old done thing\n"  # yesterday
         set_debug_time(at("06:30"))
-        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:30 AM", "parts": [
-            {"start": "6:30 AM", "items": ["Feed the fish", "Brush teeth"]}]})
+        # at 7:00, where today's plan starts (6:30 this morning is before it; on the plan it's tomorrow's 6:30)
+        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "7:00 AM", "parts": [
+            {"start": "7:00 AM", "items": ["Feed the fish", "Brush teeth"]}]})
         set_debug_time(at("08:00"))
         self.t.assistant.start_the_day()  # the sunrise duty: already done for today, so nothing more
         self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n    - [ ] Feed the fish\n    - [ ] Brush teeth\n")
