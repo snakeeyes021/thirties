@@ -199,7 +199,7 @@ class TestReminderTools(unittest.TestCase):
         self.assertIn("Mon Oct 19 9:00 AM: Call mom", self.m.execute_tool("list_reminders", {}))
         self.assertIn("Cancelled the reminder: Call mom", self.m.execute_tool("cancel_reminder", {"reminder": "mom"}))
         self.assertIn("10:30 AM", self.m.execute_tool("set_reminder", {"text": "Stretch", "time": "in 30 minutes"}))
-        self.assertIn("No more check-ins until", self.m.execute_tool("mute_checkins", {}))
+        self.assertIn("Check-ins paused until", self.m.execute_tool("mute_checkins", {}))
 
 
 class TestMessageLevels(unittest.TestCase):

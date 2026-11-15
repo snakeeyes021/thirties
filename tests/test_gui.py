@@ -365,6 +365,21 @@ class DayViewTests(unittest.TestCase):
         self.assertNotIn("Book group", cards)  # a quiet note where it starts, never a card
         self.assertEqual([lbl.get_text() for lbl, _ in view.timeline.canvas.notes], ["Book group (not yours)"])
 
+    def test_paused_check_ins_show_in_the_agenda_with_resume(self) -> None:
+        calls, notices = [], []
+        view = DayView()
+        view.set_actions(lambda name, args: calls.append((name, args)) or "Check-ins are back on.",
+                         on_notice=notices.append)
+        view.agenda.paused = lambda: "Check-ins paused until 6:30 AM tomorrow"
+        view.agenda.refresh(self.plan, self.plan.day_start.replace(hour=16, minute=9))
+        self.assertIn("paused", view.agenda.groups)
+        view.agenda.resume_btn.emit("clicked")
+        self.assertEqual(calls, [("unmute_checkins", {})])
+        self.assertEqual(notices, ["Check-ins are back on."])
+        view.agenda.paused = lambda: ""
+        view.agenda.refresh(self.plan, self.plan.day_start.replace(hour=16, minute=10))
+        self.assertNotIn("paused", view.agenda.groups)
+
     def test_before_today_offers_once_to_put_old_drops_back(self) -> None:
         calls = []
         view = DayView()

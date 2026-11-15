@@ -89,6 +89,15 @@ EXPLICIT_RESTRUCTURE = re.compile(
 EXPLICIT_YES = re.compile(r"\b(yes|yeah|yep|sure|ok|okay|do it|go ahead|sounds good|please do|split|move)\b",
                           re.IGNORECASE)
 EXPLICIT_REWRITE = re.compile(r"\b(rewrite|replace|start over|scrap|clear|wipe|delete|remove)\b", re.IGNORECASE)
+# Pausing every check-in: the user names what to stop (check-ins, reminders, messages...) or asks for quiet for a
+# stretch of time. A bare "stop", or a complaint, never pauses everything.
+_QUIETED = r"(check[- ]?ins?|checking in|reminders?|messages|notifications?|notices?|pings?|nudges?|questions)"
+EXPLICIT_MUTE = re.compile(
+    r"\b(stop|pause|mute|silence|hold|no more|turn off|switch off|quiet|enough)\b[^.!?]{0,40}\b" + _QUIETED + r"\b|"
+    r"\b" + _QUIETED + r"\b[^.!?]{0,20}\b(off|stop|pause|on hold)\b|"
+    r"\b(quiet|silence|leave me alone|do not disturb|don'?t disturb)\b[^.!?]{0,30}"
+    r"\b(rest of the (day|evening|night)|today|tonight|until|for (a|an|the|now|now on))\b",
+    re.IGNORECASE)
 
 
 def explicit(intent: str, said: Optional[str]) -> bool:
@@ -98,7 +107,7 @@ def explicit(intent: str, said: Optional[str]) -> bool:
     if intent == "hide_calendar":
         return bool(EXPLICIT_HIDE.search(said) and EXPLICIT_CALENDAR.search(said))
     pattern = {"archive": EXPLICIT_REMOVAL, "forget": EXPLICIT_FORGET, "list_restructure": EXPLICIT_RESTRUCTURE,
-               "triage": EXPLICIT_YES, "profile_rewrite": EXPLICIT_REWRITE}.get(intent)
+               "triage": EXPLICIT_YES, "profile_rewrite": EXPLICIT_REWRITE, "mute_all": EXPLICIT_MUTE}.get(intent)
     return bool(pattern is not None and pattern.search(said))
 
 
@@ -117,6 +126,8 @@ def destructive_intent(tool: str, args: Dict[str, Any]) -> Optional[str]:
         return "triage"
     if tool == "update_profile" and str(args.get("replace") or "").strip().lower() in ("true", "1", "yes"):
         return "profile_rewrite"
+    if tool == "mute_checkins" and args.get("event") in (None, ""):
+        return "mute_all"
     return None
 
 
@@ -135,6 +146,10 @@ def guard(tool: str, args: Dict[str, Any], said: Optional[str]) -> Tuple[str, Di
         return "", args, ("NOT_DONE: that would change the whole calendar, and the user only talked about an event. "
                           "Hide that event instead (resolve_calendar_event with attend=false, for this time or the "
                           "series), and say so; change the calendar only if they say the calendar.")
+    if intent == "mute_all":  # a bare "stop" about something else never silences the whole day
+        return "", args, ("NOT_DONE: that would pause every check-in, and the user didn't ask for that outright. "
+                          "If they're unhappy about something (a message repeated, a wrong reminder), act on that "
+                          "instead; to quiet one item, give its event. Otherwise ask, in one short question.")
     means = INTENTS[intent].means if intent in INTENTS else "move a group of items to another list"
     return "", args, (f"NOT_DONE: that would {means}, and the user didn't ask for that outright. "
                       "Ask them first, in one short question.")

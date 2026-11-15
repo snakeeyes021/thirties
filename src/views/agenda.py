@@ -90,6 +90,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.fixed: Callable[[EventSpan], bool] = lambda span: span.source == "calendar" or span.is_firm
         self.skip_menus: Dict[str, Gtk.MenuButton] = {}  # routine title -> its Skip menu (tests reach it here)
         self.read_tool: Optional[Tool] = None  # a read-only tool, run without refreshing (set by the window)
+        self.paused: Callable[[], str] = lambda: ""  # "Check-ins paused until 6:30 AM" while they are (the window)
         # an item's short title and its description (11-06: no raw lines, markdown or ids on screen); the window
         # sets these to read the user's own notes and known ids too
         from thirties_core.titles import split_title
@@ -104,6 +105,11 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.replan_btn.connect("clicked", self._on_replan)
 
     # --- building ---
+
+    def _on_resume(self, _button) -> None:
+        out = self.run_tool("unmute_checkins", {}) if self.run_tool else ""
+        if out and self.on_notice:
+            self.on_notice(out)
 
     def _group(self, key: str, title: str, description: str = "") -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title=title, description=description)
@@ -125,6 +131,15 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = Adw.ActionRow(title=unread, use_markup=False)
             row.add_prefix(Gtk.Image(icon_name="dialog-warning-symbolic"))
             self._group("calendar_unread", "").add(row)
+        paused = self.paused() if now is not None else ""
+        if paused:  # quiet, with the way back
+            row = Adw.ActionRow(title=paused, use_markup=False)
+            row.add_prefix(Gtk.Image(icon_name="notifications-disabled-symbolic"))
+            self.resume_btn = Gtk.Button(label="Resume", valign=Gtk.Align.CENTER)
+            self.resume_btn.add_css_class("flat")
+            self.resume_btn.connect("clicked", self._on_resume)
+            row.add_suffix(self.resume_btn)
+            self._group("paused", "").add(row)
         theirs = [s for s in plan.spans_in_view() if s.shown_only]
         spans = [s for s in plan.spans_in_view() if not s.shown_only]  # someone else's: their own section, last
         # gone by with nothing said (marked "not reported"): not done, so never under Done; still to sort out

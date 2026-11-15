@@ -555,6 +555,25 @@ class CheckinMutes:
             conn.execute("INSERT INTO checkin_mutes (id, span_id, until_utc, updated_at) VALUES (?, ?, ?, ?)",
                          (uuid.uuid4().hex[:12], span_id, until.astimezone(timezone.utc).isoformat(), utc_now_iso()))
 
+    def unmute(self, now: datetime, span_id: Optional[str] = None) -> int:
+        """End the mutes still running: every one, or one item's (``span_id``). They're ended (their time set to
+        now), never deleted, so every device agrees. Returns how many."""
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT id, span_id, until_utc FROM checkin_mutes").fetchall()
+            ended = [r["id"] for r in rows if datetime.fromisoformat(r["until_utc"]) > now
+                     and (span_id is None or r["span_id"] == span_id)]
+            for rid in ended:
+                conn.execute("UPDATE checkin_mutes SET until_utc = ?, updated_at = ? WHERE id = ?",
+                             (now.astimezone(timezone.utc).isoformat(), utc_now_iso(), rid))
+        return len(ended)
+
+    def paused_until(self, now: datetime) -> Optional[datetime]:
+        """When the pause on every check-in ends, if one is running."""
+        with self.db._get_connection() as conn:
+            rows = conn.execute("SELECT until_utc FROM checkin_mutes WHERE span_id = ''").fetchall()
+        ends = [datetime.fromisoformat(r["until_utc"]) for r in rows]
+        return max((e for e in ends if e > now), default=None)
+
     def is_muted(self, span_id: str, now: datetime) -> bool:
         with self.db._get_connection() as conn:
             rows = conn.execute("SELECT span_id, until_utc FROM checkin_mutes").fetchall()
@@ -566,7 +585,9 @@ class CheckinMutes:
 
     def merge_record(self, record: Dict[str, Any]) -> bool:
         with self.db._get_connection() as conn:
-            cur = conn.execute("INSERT OR IGNORE INTO checkin_mutes (id, span_id, until_utc, updated_at) "
-                               "VALUES (:id, :span_id, :until_utc, :updated_at)", record)
+            cur = conn.execute("INSERT INTO checkin_mutes (id, span_id, until_utc, updated_at) "
+                               "VALUES (:id, :span_id, :until_utc, :updated_at) ON CONFLICT(id) DO UPDATE SET "
+                               "until_utc = excluded.until_utc, updated_at = excluded.updated_at "
+                               "WHERE excluded.updated_at > checkin_mutes.updated_at", record)  # an unmute travels
             return cur.rowcount > 0
 

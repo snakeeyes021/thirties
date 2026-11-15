@@ -303,6 +303,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "unmute_checkins",
+        "description": "Turn check-ins back on: all of them, or one item's. When the user asks to resume, or says a "
+                       "mute was wrong.",
+        "parameters": {"event": "The item's id or title (leave empty for all)."},
+        "required": [],
+    },
+    {
         "name": "set_urgency",
         "description": "Record how pressing an item on the user's lists is, when they say so (\"that's not "
                        "urgent\", \"the thermals are for this winter\", \"the ENT call has to happen this week\"). "
@@ -2395,8 +2402,30 @@ class AssistantTools(KindTools):
             end = self.pt._end(until, now)
         self.s.mutes.mute(end, span.id if span else "")
         if span:
-            return f"I won't ask about {span.title} again."
-        return f"No more check-ins until {format_clock(end)}" + (" tomorrow." if end.date() > now.date() else ".")
+            return (f"I won't ask about {span.title} again; say \"ask about {span.title} again\" to turn that back "
+                    "on.")
+        return (f"Check-ins paused until {format_clock(end)}" + (" tomorrow" if end.date() > now.date() else "")
+                + "; say \"resume check-ins\" to turn them back on.")
+
+    def unmute_checkins(self, event: Any = None, **_: Any) -> str:
+        if self.s.mutes is None:
+            raise ToolError("Check-ins aren't available here.")
+        now = self.pt._now()
+        span = self.pt._find_span(event) if event not in (None, "") else None
+        ended = self.s.mutes.unmute(now, span.id if span else None)
+        if span:
+            return f"I'll ask about {span.title} again." if ended else f"Check-ins about {span.title} weren't off."
+        return "Check-ins are back on." if ended else "Check-ins weren't paused."
+
+    def checkins_paused(self) -> str:
+        """A quiet line for the app while every check-in is paused: "Check-ins paused until 6:30 AM"."""
+        if self.s.mutes is None:
+            return ""
+        now = self.pt._now()
+        until = self.s.mutes.paused_until(now)
+        if until is None:
+            return ""
+        return f"Check-ins paused until {format_clock(until)}" + (" tomorrow" if until.date() > now.date() else "")
 
     def set_urgency(self, task: str, urgency: str = "", due: Any = None, **_: Any) -> str:
         from thirties_core.lists import URGENCIES, ListCatalog, urgency_label
@@ -2447,6 +2476,7 @@ class AssistantTools(KindTools):
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,
             "mute_checkins": self.mute_checkins,
+            "unmute_checkins": self.unmute_checkins,
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
             "if_there_is_time": lambda item="", action="", time=None, **_: __import__(

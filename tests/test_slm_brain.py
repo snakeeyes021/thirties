@@ -588,9 +588,9 @@ class TestMessages(SlmTestCase):
         self.say("taxes 2 to 3", {"type": "add", "title": "Taxes", "start": "2:00 PM", "end": "3:00 PM"})
         self.m.add_assistant_message("👋 Just checking in: did you get to Taxes?")
         out = self.say("not yet, but no need to keep asking, I'll let you know", {"type": "chat"})
-        self.assertEqual(out, "I won't ask about Taxes again.")
+        self.assertTrue(out.startswith("I won't ask about Taxes again;"), out)
         out = self.say("and stop checking in for today please", {"type": "chat"})
-        self.assertIn("No more check-ins until", out)
+        self.assertIn("Check-ins paused until", out)
 
 
     def test_yes_to_the_morning_rollover(self):

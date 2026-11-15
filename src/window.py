@@ -79,6 +79,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
         self.day_view.before.rows_provider = self._before_today  # the same records as the chat (11-06)
+        self.day_view.agenda.paused = lambda: (self.conv_manager.tools.assistant.checkins_paused()
+                                               if self.conv_manager is not None
+                                               and self.conv_manager.tools.assistant is not None else "")
         self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
         self.day_view.agenda.describe = self._describe
         self.content_toolbar.set_content(self.day_view)

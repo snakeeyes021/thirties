@@ -25,7 +25,7 @@ class TestMutedStillShown(unittest.TestCase):
         plan, pending = self.sched.build_day_plan(DAY)
         self.m = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(),
                                      active_notes=[])
-        self.assertIn("No more check-ins until", self.m.execute_tool("mute_checkins", {}))  # mute everything
+        self.assertIn("Check-ins paused until", self.m.execute_tool("mute_checkins", {}))  # mute everything
 
     def test_the_schedule_still_lists_whats_not_marked(self):
         out = self.m.execute_tool("show_schedule", {})
@@ -48,3 +48,69 @@ class TestMutedStillShown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMuteNeedsTheWords(unittest.TestCase):
+    """Pausing every check-in takes the user's own words for it; a mute can always be undone."""
+
+    def setUp(self):
+        set_debug_time(at("16:09"))
+        self.addCleanup(set_debug_time, None)
+        self.sched = make_scheduler()
+        self.sched.state_db.upsert_span(EventSpan("oil", "Oil the hinges", at("17:00"), at("17:30"),
+                                                  SpanCategory.ACTIVITY))
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.m = ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(),
+                                     active_notes=[])
+        self.t = self.m.tools
+
+    def said(self, words, tool, args=None):
+        self.t.user_message = words
+        try:
+            return self.t.execute(tool, args or {})
+        finally:
+            self.t.user_message = None
+
+    def paused(self):
+        return self.t.assistant.checkins_paused()
+
+    def test_a_bare_stop_or_a_complaint_never_pauses_everything(self):
+        for words in ("Whoa, enough, haha", "stop", "ugh, not that one again"):
+            out = self.said(words, "mute_checkins")
+            self.assertTrue(out.startswith("NOT_DONE"), (words, out))
+            self.assertEqual(self.paused(), "")
+
+    def test_asking_for_it_pauses_them_and_says_how_to_undo(self):
+        for words in ("stop the check-ins for today", "quiet until tomorrow please", "pause reminders"):
+            out = self.said(words, "mute_checkins")
+            self.assertIn("Check-ins paused until", out, words)
+            self.assertIn('say "resume check-ins" to turn them back on', out)
+            self.assertTrue(self.paused().startswith("Check-ins paused until"))
+            self.said("resume check-ins", "unmute_checkins")
+
+    def test_one_item_still_mutes_on_a_plain_word(self):
+        out = self.said("no need to ask about the hinges", "mute_checkins", {"event": "oil"})
+        self.assertIn("I won't ask about Oil the hinges again", out)
+        self.assertEqual(self.paused(), "")  # just that one
+        self.assertIn("I'll ask about Oil the hinges again", self.said("ask about it again", "unmute_checkins",
+                                                                       {"event": "oil"}))
+
+    def test_a_wrong_mute_is_undone(self):
+        self.said("stop the check-ins for today", "mute_checkins")
+        self.assertEqual(self.said("I didn't mean mute, turn them back on", "unmute_checkins"),
+                         "Check-ins are back on.")
+        self.assertEqual(self.paused(), "")
+        self.assertFalse(self.t.services.mutes.is_muted("oil", at("16:20")))
+
+    def test_an_unmute_travels_to_the_other_computer(self):
+        from thirties_core.memory import CheckinMutes
+        self.said("stop the check-ins for today", "mute_checkins")
+        mine = CheckinMutes(self.sched.state_db)
+        other = CheckinMutes(make_scheduler().state_db)
+        for r in mine.all_records():
+            other.merge_record(r)
+        self.assertTrue(other.is_muted("oil", at("16:20")))
+        self.said("resume check-ins", "unmute_checkins")
+        for r in mine.all_records():
+            other.merge_record(r)
+        self.assertFalse(other.is_muted("oil", at("16:20")))
