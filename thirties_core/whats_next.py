@@ -74,10 +74,10 @@ def _moved_line(moved: List[EventSpan], plan: DayPlan, said: str) -> str:
 
 def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: str = DEFAULT_MODE,
            said: str = "", unmarked: Optional[List[EventSpan]] = None) -> str:
-    """The slice: "Now:" and what's in the current block (no line when nothing is), then the next few rows (or
-    the rest of today), laid out by the schedule's own row formatter, then any moved item not among them, and
-    someone else's events in that stretch on a "Not yours" line, and last "Not marked yet:" (no section when
-    nothing is). "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
+    """The slice, its sections a blank line apart (messages.join_sections): "Now:" and what's in the current block
+    (none when nothing is), the next few rows (or the rest of today) laid out by the schedule's own row formatter,
+    any moved item not among them, "Not marked yet:" (none when nothing is), and someone else's events in that
+    stretch on a "Not yours" line. "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
     keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
     what the user asked not to be asked about); worked out from the plan when not given."""
     from thirties_core.messages import plain_rows, schedule_rows
@@ -88,29 +88,26 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     here = [s for s in mine if s.start_dt < block + HALF and s.end_dt > block]
     on_top = [s for s in here if not s.is_envelope]
     here = on_top or here  # what's placed on Work is what's happening; Work alone when nothing is
-    lines = ["Now: " + ", then ".join(slice_lines([(max(s.start_dt, block), s.end_dt, s.title) for s in here]))] \
-        if here else []
+    now_line = "Now: " + ", then ".join(slice_lines([(max(s.start_dt, block), s.end_dt, s.title) for s in here])) \
+        if here else ""
     upcoming = sorted((s for s in mine if s.start_dt >= block + HALF), key=lambda s: s.start_dt.timestamp())
     rows = plain_rows(schedule_rows(plan, block + HALF, planned_only=True))  # the whole rest: "(until" as shown
     shown_rows = rows if mode == "rest" else rows[:NEXT_ROWS]
-    if shown_rows:
-        lines += ["Next:" if mode == "next" else "The rest of today:"] + shown_rows
-    else:
-        lines.append("Nothing else is planned today.")
+    next_block = "\n".join(["Next:" if mode == "next" else "The rest of today:"] + shown_rows) if shown_rows \
+        else "Nothing else is planned today."
     shown_until = block + HALF
     if shown_rows:
         cut = upcoming if mode == "rest" else _items_in_rows(upcoming, len(shown_rows))
         shown_until = max((s.end_dt for s in cut), default=block + HALF)
     shown_ids = {s.id for s in here} | {s.id for s in upcoming if s.start_dt < shown_until}
     elsewhere = [s for s in moved if s.id not in shown_ids]
-    if elsewhere:
-        lines.append(_moved_line(elsewhere, plan, said))
     theirs = [s for s in plan.spans_in_view() if s.shown_only and s.end_dt > block and s.start_dt < shown_until]
-    if theirs:
-        lines.append("Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
-                                               for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())))
-    lines += unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)  # today's only
-    return "\n".join(lines)
+    behind = unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)  # today's only
+    from thirties_core.messages import join_sections
+    return join_sections(  # Now, Next, Also moved, Not marked yet, Not yours: a blank line between each
+        now_line, next_block, _moved_line(elsewhere, plan, said) if elsewhere else "", "\n".join(behind),
+        "Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
+                                  for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())) if theirs else "")
 
 
 def unmarked_lines(spans: List[EventSpan]) -> List[str]:

@@ -38,7 +38,8 @@ class WhatsNextCase(unittest.TestCase):
         return self.manager.send_user_message(said)
 
     def tail(self, out: str) -> list:
-        return out.split("\n\n")[-1].splitlines()
+        """What's next under the reply: its lines, without the blank lines between its sections."""
+        return [line for line in out.split("\n\n", 1)[-1].splitlines() if line.strip()]
 
 
 class TestWhatsNext(WhatsNextCase):
@@ -147,6 +148,44 @@ class TestOneRowFormatter(WhatsNextCase):
         for row in rows:
             self.assertIn("- " + row, shown)  # the schedule's own row, word for word (it adds only its marker)
         self.assertIn("8:00 PM – Movie", render(plan, at("19:40")).splitlines())  # the same (until) rule too
+
+
+HEADERS = ("Now:", "Next:", "The rest of today:", "Also moved:", "Not marked yet:", "Not yours:", "You're in the")
+
+
+def sections_apart(test, text: str) -> None:
+    """Each header (but the first) has an empty line above it."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if i and line.startswith(HEADERS):
+            test.assertEqual(lines[i - 1], "", f"no blank line before {line!r} in:\n{text}")
+
+
+class TestTheLayout(WhatsNextCase):
+    """Every section a blank line apart, in one order: Now, Next, Also moved, Not marked yet, Not yours."""
+
+    def test_every_section_a_blank_line_apart_in_order(self):
+        from thirties_core.whats_next import render
+        plan = self.manager.day_plan
+        plan.spans.append(EventSpan("tune", "Tune the ukulele", at("16:00"), at("16:30"), SpanCategory.ACTIVITY))
+        moved = [EventSpan("late", "Wax the skis", at("22:00"), at("22:30"), SpanCategory.ACTIVITY)]
+        plan.spans.extend(moved)
+        text = render(plan, at("17:10"), moved, mode="next")
+        sections_apart(self, text)
+        heads = [line.split(":")[0] for line in text.splitlines() if line.startswith(HEADERS)]
+        self.assertEqual(heads, ["Now", "Next", "Also moved", "Not marked yet", "Not yours"])
+        self.assertNotIn("\n\n\n", text)  # one blank line, never two
+
+    def test_the_reply_the_schedule_and_a_notice_too(self):
+        from thirties_core.messages import render_schedule, with_missed
+        plan = self.manager.day_plan
+        plan.spans.append(EventSpan("tune", "Tune the ukulele", at("16:00"), at("16:30"), SpanCategory.ACTIVITY))
+        out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Nice.", said="fed the cat")
+        self.assertTrue(out.startswith("Nice.\n\n"))
+        sections_apart(self, out)
+        sections_apart(self, render_schedule(plan, at("17:10")))
+        notice = with_missed("🔔 6:00 PM: Dinner", [plan.spans[-1]])
+        self.assertEqual(notice, "🔔 6:00 PM: Dinner\n\nNot marked yet:\n- Tune the ukulele")
 
 
 class TestTheSlice(unittest.TestCase):

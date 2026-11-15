@@ -351,7 +351,7 @@ class TestBridgeBursts(BridgeCase):
         with patch.object(self.bridge, "_get_current_time", return_value=at("09:05")):
             with patch("thirties_core.plan_tools.PlanTools._now", return_value=at("09:05")):
                 self.bridge.handle_message(chat_id=1001, text="/now")
-        self.assertIn("\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
+        self.assertIn("\n\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
 
 
     def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):

@@ -560,7 +560,8 @@ class ConversationManager:
         part = whats_next.render(self.day_plan, now, moved, mode, said, unmarked)
         if part and unmarked and self.scheduler is not None:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
-        return reply.rstrip() + "\n\n" + part if part else reply
+        from thirties_core.messages import join_sections
+        return join_sections(reply, part) if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
               attempts: int) -> str:
