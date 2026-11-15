@@ -479,7 +479,7 @@ class ClaudeCliInferenceEngine:
                  binary: Optional[str] = None) -> None:
         if os.environ.get(TEST_BRAIN_ENV) != "1":
             raise TestBrainRefused(f"The Claude brain is for tests and simulations only ({TEST_BRAIN_ENV}=1).")
-        self.config = config or ThirtiesConfig()
+        self.config = users_config(config, "The Claude test engine")
         self.model = model or CLAUDE_CLI_MODEL
         self.binary = binary or shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude")
         self.timeout = self.config.inference.timeout_seconds

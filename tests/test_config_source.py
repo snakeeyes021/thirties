@@ -30,6 +30,8 @@ class EnginesNeedAConfigTest(unittest.TestCase):
         for build in (AntigravityInferenceEngine, GeminiInferenceEngine, LiteRTInferenceEngine, get_inference_engine):
             with self.subTest(build.__name__), self.assertRaises(ValueError):
                 build(None)
+        with patch.dict(os.environ, {inference.TEST_BRAIN_ENV: "1"}), self.assertRaises(ValueError):
+            inference.ClaudeCliInferenceEngine(None)  # the test brain too
 
     def test_the_engine_runs_the_model_from_the_config_it_was_given(self):
         cfg = ThirtiesConfig()
@@ -194,7 +196,10 @@ class TestRunLedgerTest(unittest.TestCase):
         with patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
                 patch("thirties_core.inference.subprocess.run", side_effect=agy_answer):
             AntigravityInferenceEngine(ThirtiesConfig()).chat([{"role": "user", "content": "hi"}])
-        self.assertTrue(Path(inference.AGY_LEDGER).is_file())  # the run's own ledger got the fake call
+        self.assertTrue(Path(inference.AGY_LEDGER).is_file())  # the run's own ledger got the fake call,
+        last = Path(inference.AGY_LEDGER).read_text().splitlines()[-1].split("\t")
+        self.assertEqual(len(last), 4)                          # with who made it
+        self.assertTrue(last[3])
 
 
 if __name__ == "__main__":
