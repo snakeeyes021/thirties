@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_ceil, thirty_of
 from thirties_core.horizons import HORIZON_READ_ONLY, HORIZON_TOOL_SPECS, horizon_handlers
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)

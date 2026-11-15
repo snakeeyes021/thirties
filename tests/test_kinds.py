@@ -224,6 +224,13 @@ class TestTheMorningRollover(KindsTestCase):
         plan = self.t.assistant.rollover_plan()
         self.assertEqual(plan[0]["start"], at("21:00").isoformat())
 
+    def test_when_its_time_is_taken_it_goes_in_the_next_open_stretch_after(self):
+        self.add("Clean the garage shelves", "7:15 PM", day=Y)
+        self.add("Pottery class", "7:00 PM", "1 hour")  # today, over yesterday's time
+        plan = self.t.assistant.rollover_plan()
+        self.assertEqual(plan[0]["title"], "Clean the garage shelves")
+        self.assertEqual(plan[0]["start"], at("20:00").isoformat())  # right after, on the half hour
+
     def test_today_lines_for_daily_things_and_project_time_arent_kept(self):
         self.api.notes["n_today"]["body"] = "- [ ] Call the bank\n- [ ] Dinner\n- [ ] Garden app dev\n- [ ] Fix the sync bug\n"
         TodayLinks(self.sched.state_db).link("Fix the sync bug", item("t_bug", "Fix the sync bug", "n_dev"))
