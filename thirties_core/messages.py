@@ -172,9 +172,11 @@ def with_missed(status: str, missed: Sequence[EventSpan]) -> str:
     return status + ("\n" + missed_block(missed) if missed else "")
 
 
-def missed_for(tools, now: datetime) -> List[EventSpan]:
-    """missed_items for a PlanTools' day, leaving out items the user said not to ask about (mute_checkins)."""
-    mutes = tools.services.mutes if getattr(tools, "services", None) else None
+def missed_for(tools, now: datetime, muted_too: bool = False) -> List[EventSpan]:
+    """missed_items for a PlanTools' day. A mute (mute_checkins) only quiets what Thirties says by itself, notices
+    and check-ins, so those leave muted items out; a view the user asks for (the schedule, /now) passes
+    ``muted_too`` and shows where everything stands."""
+    mutes = tools.services.mutes if getattr(tools, "services", None) and not muted_too else None
     return missed_items(tools.day_plan, now, skip=(lambda s: mutes.is_muted(s.id, now)) if mutes else None)
 
 
@@ -185,14 +187,18 @@ def now_section(tools) -> str:
     now = tools._now()
     if not (plan.day_start <= now < plan.day_end):
         return ""
-    missed = missed_for(tools, now)
+    missed = missed_for(tools, now, muted_too=True)  # where things stand, muted or not
+    askable = {s.id for s in missed_for(tools, now)}
     lines = ["NOW", status_line(plan, now)]
     if missed:
         shown = MissedTracker(tools._state_db).titles_shown(now)
-        new = [s.title for s in missed if s.title.strip().lower() not in shown]
+        new = [s.title for s in missed if s.title.strip().lower() not in shown and s.id in askable]
+        muted = [s.title for s in missed if s.id not in askable]
         lines.append("Not marked yet (their time is over, nothing said): " + ", ".join(s.title for s in missed) + ". "
                      + ("The user has already been shown all of these: don't ask about them again."
-                        if not new else "Not shown to the user yet: " + ", ".join(new) + "."))
+                        if not new else "Not shown to the user yet: " + ", ".join(new) + ".")
+                     + (" Check-ins are muted for " + ", ".join(muted) + ": never ask about those, though a schedule "
+                        "still lists them." if muted else ""))
     return "\n".join(lines) + "\n\n"
 
 

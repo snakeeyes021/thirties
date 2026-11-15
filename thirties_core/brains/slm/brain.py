@@ -2205,7 +2205,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                 from thirties_core.messages import MissedTracker, missed_for, render_schedule
                 now = self._now()
                 if plan.day_start <= now < plan.day_end:
-                    missed = missed_for(self.tools, now)
+                    missed = missed_for(self.tools, now, muted_too=True)
                     if missed:
                         MissedTracker(self.tools._state_db).mark(now, missed)
                     from thirties_core.if_time import text_for

@@ -74,7 +74,7 @@ class MessageTools:
         plan = tools.day_plan
         now = tools._now()
         live = tools.is_current(plan) and plan.day_start <= now < plan.day_end
-        missed = missed_for(tools, now) if live else []
+        missed = missed_for(tools, now, muted_too=True) if live else []  # asked for: muted or not
         text = render_schedule(plan, now if live else None, whole_day=_as_bool(whole_day), missed=missed)
         if live and getattr(tools, "assistant", None) is not None:  # after the day's timed items (if_time.py)
             from thirties_core.if_time import text_for
