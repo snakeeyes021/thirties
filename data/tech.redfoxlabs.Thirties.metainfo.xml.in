@@ -46,6 +46,8 @@
         <p>One conversation on the desktop and the phone, what's next without asking, a schedule that keeps to what you said, a day that makes way for what you're really doing, the days ahead in pencil, Month and Year in the Timeline, projects that move a piece at a time, and help with people, goals, reading and watching.</p>
         <ul>
           <li>The app's chat and Telegram are one conversation: the same messages, in the same words, in both. The morning message is in the day it opens, and Telegram commands and their replies show in the app too</li>
+          <li>When the assistant's usage limit is reached, a simpler assistant answers until it's back, and Thirties says so once; if none is available, your lists, the Day page and ticking things off still work, and your message is answered when the assistant returns</li>
+          <li>Something is marked done, and ticked in Joplin, only when you've said which item you mean; a question about why something isn't marked is never taken as "not done"</li>
           <li>The Timeline has Month and Year tabs, and the Week shows what each block holds. Its marks, ticks and quarters are easier to read, and a card left Not reported can still be ticked there</li>
           <li>On the Agenda, one tap says work started or finished, and another logs how much energy you have. An item with no time yet can be done, given a time or put off, on the Agenda and the Timeline</li>
           <li>The days ahead are pencilled in: a later day shows what's planned for it on the Agenda and the Timeline, and its items can be done early, given a time or put off</li>
