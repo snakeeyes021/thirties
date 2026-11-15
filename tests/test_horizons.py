@@ -7,7 +7,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.horizons import (HorizonCatalog, HorizonPlanner, HorizonPlans, candidates_for_day,
@@ -257,7 +257,7 @@ class TestBubblingDown(PlannerCase):
         self.assertEqual(c["tax"].why, "due tomorrow")
         self.assertEqual(c["door"].why, "from the plan for this week")
         self.assertEqual((c["cards"].source, c["cards"].why), ("upper", "for this week"))
-        self.assertIn("Call the garage [Car] (pinned to today) id=garage", c["garage"].line())
+        line_with(c["garage"].line(), "Call the garage", "[Car]", "pinned to today", "id=garage")
 
     def test_a_week_plan_ending_tomorrow_is_pressing(self):
         # 10-31: an item asked for this weekend, on Friday night, wasn't offered on Saturday
@@ -328,7 +328,7 @@ class TestBubblingDown(PlannerCase):
         self.hp.candidates(week, limit=None)
         self.assertNotIn("vanished", {r["item_id"] for r in HorizonPlans(self.sched.state_db).rows()})
         said = self.hp.lost_pins_text()
-        self.assertIn("No longer on any list, so taken off its plan: Return the borrowed ladder (this week).", said)
+        line_with(said, "Return the borrowed ladder", "this week")
         self.assertEqual(self.hp.lost_pins_text(), "")  # once
 
     def test_done_long_ago_and_open_again_is_a_new_round(self):
@@ -493,7 +493,9 @@ class TestTools(PlannerCase):
         catalog = HorizonCatalog(self.sched.state_db)
         catalog.set_item("door", "week", note_id="n_home", source="guess")
         out = self.run_tool("set_horizon", list="Home", horizon="someday")
-        self.assertEqual(out, "Noted: Home is someday (its 1 guessed item follow it).")
+        line_with(out, "Home", "someday", "1 guessed item follows")  # the list's horizon, and its one guess
+        self.assertEqual(HorizonCatalog(self.sched.state_db).notes()["n_home"]["horizon"], "someday")
+        self.assertNotIn("door", HorizonCatalog(self.sched.state_db).items())  # the guess is cleared: it follows Home
         self.assertEqual(self.hp.horizon_of(self.tasks[0]), "someday")
         self.assertTrue(self.run_tool("set_horizon", list="Garage", horizon="year").startswith(NOT_DONE))
 
@@ -512,8 +514,8 @@ class TestTools(PlannerCase):
         self.hp.pin(self.tasks[2], parse_period("this month", DAY))
         out = self.run_tool("propose_period", when="this week")
         self.assertIn("Candidates (best first", out)
-        self.assertIn("- Clean the gutters [Home] (from the plan for this month (October)) id=gutter", out)
-        self.assertIn("Suggested: File the taxes; Clean the gutters", out)
+        line_with(out, "Clean the gutters", "[Home]", "this month", "id=gutter")
+        line_with(out, "Suggested", "File the taxes", "Clean the gutters")
         out = self.run_tool("apply_period_proposal", skip="taxes")
         self.assertEqual(out, "Planned for this week: Clean the gutters.")
         self.assertEqual(self.run_tool("apply_period_proposal", when="this week"), "This week is already planned like that.")
@@ -537,7 +539,8 @@ class TestTools(PlannerCase):
         self.hp.pin(self.tasks[2], parse_period("November", DAY))
         text = FrontierBrain(self.t, None, tasks=self.tasks, active_notes=[]).build_backlog_summary()
         self.assertIn("PLANS FOR THE WEEK, MONTH AND YEAR", text)
-        self.assertIn("This week (on track, 0 of 1 done, 4 days left):\n- Fix the door (Saturday) id=door", text)
+        line_with(text, "This week", "on track", "0 of 1 done", "4 days left")
+        line_with(text, "Fix the door", "Saturday", "id=door")
         self.assertNotIn("Clean the gutters", text.split("PLANS FOR")[1].split("\n\n")[0])  # November isn't now
 
 

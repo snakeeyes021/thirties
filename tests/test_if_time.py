@@ -5,7 +5,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import patch
 
-from tests.fixtures import DAY, at
+from tests.fixtures import DAY, at, line_with
 from tests.test_today import TodayTestCase
 from thirties_core import if_time
 from thirties_core.astronomy import set_debug_time
@@ -63,7 +63,7 @@ class AddedTodayTest(Base):
         with patch("thirties_core.if_time.first_slot", return_value=None), \
                 patch("thirties_core.if_time.doubled_slot", return_value=None):
             out = self.say("and oil the hinges today", "add_to_today", {"items": ["Oil the hinges"]})
-        self.assertIn("Today is full, even doubled up, so Oil the hinges is under If there's time.", out)
+        line_with(out, "Oil the hinges", "If there's time")
         self.assertIsNone(self.span("Oil the hinges"))
         self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Oil the hinges"])
 

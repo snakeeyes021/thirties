@@ -1100,6 +1100,9 @@ class HorizonPlanner:
         """Not pinned: only items from lists and projects (and, when due, menus), never someday."""
         if t.someday or t.id.startswith("media:"):
             return False
+        from thirties_core.backlog_tickets import reads_like_ticket
+        if reads_like_ticket(t.title):
+            return False  # an agent's ticket in an ordinary list: never offered on its own (backlog_tickets.py)
         if t.list_role not in CANDIDATE_ROLES and not (t.list_role == "menu" and t.due):
             return False
         return True
@@ -1523,7 +1526,7 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
                 if t.parent_note_id == note["id"]:
                     t.horizon = hp.horizon_of(t)
             return f"Noted: {note['title']} is {HORIZON_WHY[h]}" + (
-                f" (its {cleared} guessed item{'s' if cleared != 1 else ''} follow it)." if cleared else ".")
+                f" (its {cleared} guessed item{'s follow' if cleared != 1 else ' follows'} it)." if cleared else ".")
         if not task:
             raise ToolError("Say which item (task) or which list.")
         t = hp.find_task(task)

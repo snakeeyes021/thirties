@@ -269,6 +269,8 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     ended: List[str] = []
     pool_items: List[Dict[str, str]] = []
     missed: List[Dict[str, str]] = []  # one-offs planned yesterday and skipped or left unmarked (backoff.py)
+    from thirties_core.project_pieces import displaced_ids
+    displaced = displaced_ids(db, yesterday.target_date)  # an overrun used their time: never a miss
     off_today: List[str] = []
     seen = set()
 
@@ -319,13 +321,15 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low not in asked_before:
             ask.append(s.title)
         pool_items.append(rollable_item(s.title, low))
-        missed.append(_miss(s, pool_items[-1].get("task_id") or "", tasks))
+        if s.id not in displaced:
+            missed.append(_miss(s, pool_items[-1].get("task_id") or "", tasks))
 
     for s in yesterday.spans:  # skipped is a miss too: the same one-offs, by the same rules
         low = s.title.strip().lower()
         if s.status != SpanStatus.SKIPPED or s.is_envelope or low in done_titles \
                 or s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.is_firm or pt._is_fixed(s) \
-                or never_rolls(s.title, s) or any(m["title"].strip().lower() == low for m in missed):
+                or never_rolls(s.title, s) or any(m["title"].strip().lower() == low for m in missed) \
+                or s.id in displaced:
             continue
         task = tasks.get(s.task_id or "") or listed.get(low)
         missed.append(_miss(s, s.task_id or (task.id if task is not None else ""), tasks))

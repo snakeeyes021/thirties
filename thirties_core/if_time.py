@@ -101,8 +101,9 @@ def doubled_slot(pt, minutes: int, after: Optional[datetime] = None) -> Optional
     while t + need <= end:
         inside = [s for s in pt.day_plan.spans if s.status == SpanStatus.PLANNED and not s.shown_only
                   and s.start_dt < t + need and s.end_dt > t]
+        # nor beside something that keeps its time (a rest the user asked for is a gap, not room to share)
         fixed = [s for s in inside if s.category in (SpanCategory.CALENDAR, SpanCategory.WORK, SpanCategory.SLEEP)
-                 or s.is_firm or s.is_envelope]
+                 or s.is_firm or s.is_envelope or pt._is_fixed(s)]
         if not fixed and len(inside) <= 1:
             return t
         t += timedelta(minutes=30)

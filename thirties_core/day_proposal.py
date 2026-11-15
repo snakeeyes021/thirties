@@ -38,6 +38,28 @@ MAX_CANDIDATES = 8   # what the model chooses from: enough to choose, never the 
 MAX_DEFAULT = 3      # Python's own proposal (no model): a few things, not a full day
 PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a later "yes"
 MIN_FREE_MINUTES = 60  # less free time than this ahead: nothing to propose
+# Energy: what the user says about it sorts what's offered (energy.py). On a low day Python's own proposal
+# is lighter: fewer, short things, with more room between.
+LOW_ENERGY_DEFAULT = 2      # Python's own proposal on a low day: this many
+MORNING_ROOM = timedelta(hours=2)  # a later day pencilled in: its first hours awake are left for its routines
+LOW_ENERGY_GAP = timedelta(hours=1)
+
+
+def energy_today(assistant: "AssistantTools", plan: "DayPlan") -> Optional[int]:
+    from thirties_core import energy
+    return energy.today(assistant, plan)
+
+
+def low_energy(assistant: "AssistantTools", plan: "DayPlan") -> bool:
+    from thirties_core import energy
+    level = energy.today(assistant, plan)
+    return level is not None and level <= energy.LOW
+
+
+def is_light(candidate: Dict[str, Any]) -> bool:
+    from thirties_core import energy
+    return energy.is_light(candidate)
+
 
 from thirties_core.morning import POLICY  # one written rule for proposing (A1)
 
@@ -66,9 +88,12 @@ def usual_minutes(assistant: "AssistantTools", task: Optional[TaskItem], title: 
 PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "day_options",
-        "description": "What's pressing and the free time left in the day, for proposing what to do with it. "
-                       "Read-only.",
-        "parameters": {},
+        "description": "What's pressing and the free time left in the day, for proposing what to do with it, or "
+                       "for \"two free hours and plenty of energy: what's best to do?\". Sorted to fit the "
+                       "user's energy. Read-only (energy is noted when given).",
+        "parameters": {"energy": "How the user says they feel: their words ('very motivated') or 1 (drained) to 5 "
+                                 "(great), if they said.",
+                       "hours": "How much time they say they have, e.g. '3 hours' (default: the free time left)."},
         "required": [],
     },
     {
@@ -143,18 +168,25 @@ class DayProposal:
         return min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start
                     and s.status != SpanStatus.SKIPPED), default=plan.day_end)
 
-    def slots(self, plan: Optional["DayPlan"] = None) -> List[Tuple[datetime, datetime, str]]:
-        """The free stretches left before bed, in whole thirties, each with what's around it ("after Work")."""
+    def slots(self, plan: Optional["DayPlan"] = None, until: Optional[datetime] = None,
+              ahead: bool = False) -> List[Tuple[datetime, datetime, str]]:
+        """The free stretches left before bed (or ``until``, the time the user said they have), in whole thirties,
+        each with what's around it ("after Work"). ``ahead``: a later day, whose routines go on only that morning:
+        its first hours after waking are left for them."""
         plan = plan or self.pt.day_plan
         now = self.pt._now()
         start = max(now, plan.day_start)
         wake = max((s.end_dt for s in plan.spans if s.category == SpanCategory.SLEEP
                     and s.end_dt <= plan.day_start + timedelta(hours=12)), default=plan.day_start)
-        start = max(start, wake)
+        start = max(start, wake + (MORNING_ROOM if ahead else timedelta(0)))
         bed = self._bedtime(plan)
+        if until is not None:
+            bed = min(bed, until)
         saved, self.pt.day_plan = self.pt.day_plan, plan
         try:
             windows = self.pt.open_windows(after=start if start > plan.day_start else None, before=bed)
+            from thirties_core.breathing import clip  # room after work: not where Thirties puts things
+            windows = clip(plan, windows)
         finally:
             self.pt.day_plan = saved
         out = []
@@ -269,15 +301,23 @@ class DayProposal:
                         "where": note["title"], "minutes": usual_minutes(self.a, None, title)})
         return out
 
-    def options_text(self, plan: Optional["DayPlan"] = None) -> str:
+    def options_text(self, plan: Optional["DayPlan"] = None, until: Optional[datetime] = None) -> str:
+        from thirties_core import energy
         plan = plan or self.pt.day_plan
-        cands, slots = self.candidates(plan), self.slots(plan)
+        cands, slots = self.candidates(plan), self.slots(plan, until)
         if not cands or not slots:
             return ""
         lines = ["Pressing and possible (most pressing first):"]
+        said = energy.line(energy.today(self.a, plan))
+        if said:
+            lines.insert(0, said)
+        if until is not None:
+            lines.insert(0, f"The time they have: until {format_clock(until)}.")
         for c in cands:
             ref = f" task_id={c['task'].id}" if c["task"] is not None else ""
-            lines.append(f"- {_short(c['title'], 120)} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}){ref}")
+            size = energy.weight(c) if said else ""  # light or bigger, when the energy makes it matter
+            lines.append(f"- {_short(c['title'], 120)} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}"
+                         f"{'; ' + size if size else ''}){ref}")
         lines.append("Free time:")
         saved, self.pt.day_plan = self.pt.day_plan, plan
         try:
@@ -320,21 +360,45 @@ class DayProposal:
                                                           "offered_at": self.pt._now().isoformat()}))
         return "\n".join(self._lines(items))
 
-    def default_items(self, plan: Optional["DayPlan"] = None) -> List[Dict[str, Any]]:
+    def default_items(self, plan: Optional["DayPlan"] = None, skip: Optional[set] = None,
+                      ahead: bool = False) -> List[Dict[str, Any]]:
         """Python's own proposal (no model to pick): the most pressing few, each at the start of the first free
-        stretch it fits, with half an hour of room between them (no cramming)."""
+        stretch it fits, with half an hour of room between them (no cramming). What was pencilled in for the day
+        (week_draft.py) goes at its pencilled time while that's free. ``skip``: titles already placed elsewhere;
+        ``ahead``: drafting a later day (nothing from today's own list)."""
+        from thirties_core.week_draft import drafted_starts
         plan = plan or self.pt.day_plan
-        windows = [[a, b] for a, b, _ in self.slots(plan)]
+        windows = [[a, b] for a, b, _ in self.slots(plan, ahead=ahead)]
         out = []
-        for c in self.candidates(plan):
+        low = low_energy(self.a, plan)  # a low day: fewer, lighter, more room
+        cands = [c for c in self.candidates(plan) if c["title"].strip().lower() not in (skip or set())
+                 and not (ahead and c.get("task") is not None and c["task"].list_role == "today")]
+        if low:
+            from thirties_core.energy import is_due
+            cands = [c for c in cands if is_light(c) or is_due(c, plan.target_date)]
+        gap = LOW_ENERGY_GAP if low else timedelta(minutes=30)
+        pencilled = {} if ahead or self.db is None else drafted_starts(self.db, plan.target_date)
+        for c in cands:
             need = timedelta(minutes=c["minutes"])
+            at = pencilled.get(c["title"].strip().lower())
+            home = next((w for w in windows if at is not None and w[0] <= at and at + need <= w[1]), None)
+            if home is not None:  # firmed up at its pencilled time
+                out.append({"title": c["title"], "task_id": c["task"].id if c["task"] is not None else None,
+                            "start": at.isoformat(), "minutes": c["minutes"]})
+                windows.remove(home)
+                windows += [w for w in ([home[0], at], [at + need + gap, home[1]]) if w[1] - w[0] >= timedelta(minutes=30)]
+                windows.sort()
+            if home is not None:
+                if len(out) >= (LOW_ENERGY_DEFAULT if low else MAX_DEFAULT):
+                    break
+                continue
             for w in windows:
                 if w[1] - w[0] >= need:
                     out.append({"title": c["title"], "task_id": c["task"].id if c["task"] is not None else None,
                                 "start": w[0].isoformat(), "minutes": c["minutes"]})
-                    w[0] = w[0] + need + timedelta(minutes=30)
+                    w[0] = w[0] + need + gap
                     break
-            if len(out) >= MAX_DEFAULT:
+            if len(out) >= (LOW_ENERGY_DEFAULT if low else MAX_DEFAULT):
                 break
         return sorted(out, key=lambda i: i["start"])
 
@@ -366,7 +430,14 @@ class DayProposal:
                     raise ToolError(f"'{ref}' is an item id Thirties doesn't know any more: use the item's words.")
                 task = self.a._exact_task(words)
                 ref = words
-            title = task.title if task is not None else ref
+            from thirties_core.project_pieces import piece_title
+            title = piece_title(self.a.s.tasks, task) if task is not None else ref  # "Item: piece" for a piece
+            from thirties_core.traits import time_set_by  # someone else sets its day and time
+            who = time_set_by(self.pt, title, task.id if task is not None else None)
+            if who:
+                problems.append(f"{title}: {who} sets its day and time, so Thirties doesn't schedule it (it goes on "
+                                f"when {who} gives a time)")
+                continue
             from thirties_core.backoff import MissStreaks, signature
             from thirties_core.item_facts import mentions
             said = self.pt.user_message
@@ -394,6 +465,10 @@ class DayProposal:
                                     "time keeps it")
                     continue
                 start, end = slot, slot + timedelta(minutes=minutes)
+            from thirties_core.breathing import after_work  # right as work ends: after a breather instead
+            for a, b in after_work(self.pt.day_plan):
+                if a <= start < b:
+                    start, end = self.pt._snap(b, b + (end - start))
             fits = any(a <= start and end <= b for a, b in free)
             clash = next((t for t in taken if t[0] < end and start < t[1]), None)
             if not fits or clash:
@@ -439,6 +514,7 @@ class DayProposal:
             else:
                 placed.append(f"- {format_clock(thirty_of(start))} – {_short(item['title'])}")
         self.db.set_sync_meta(self._key(key_day), json.dumps({**data, "state": "applied"}))
+        placed = self._together(key_day, placed)
         parts = []
         if placed:
             parts.append("On the plan:\n" + "\n".join(placed))
@@ -448,8 +524,46 @@ class DayProposal:
             parts.append("Couldn't place: " + "; ".join(failed) + ".")
         return "\n".join(parts) or "Nothing to put on."
 
-    def day_options(self, **_: Any) -> str:
-        return self.options_text() or "Nothing pressing, or no free time left today."
+    def _together(self, day: date, placed: List[str]) -> List[str]:
+        """A project's pieces back to back, one stretch, unrelated items before or after (project_pieces.py); the
+        lines then say where each one ended up."""
+        from thirties_core.project_pieces import keep_together
+        if len(placed) < 2:
+            return placed
+        plan = self.pt.plan_for(day.isoformat()) if day != self.pt.day_plan.target_date else self.pt.day_plan
+        try:
+            if not keep_together(self.pt, plan):
+                return placed
+        except Exception as e:
+            logger.warning("Couldn't keep the project's pieces together: %s", e)
+            return placed
+        out = []
+        for line in placed:
+            title = line.split(" – ", 1)[1]
+            span = next((sp for sp in plan.spans if _short(sp.title) == title and sp.status == SpanStatus.PLANNED), None)
+            out.append(f"- {format_clock(thirty_of(span.start_dt))} – {title}" if span is not None else line)
+        return sorted(out, key=lambda l: next((sp.start_dt.timestamp() for sp in plan.spans
+                                               if _short(sp.title) == l.split(" – ", 1)[1]), 0))
+
+    def day_options(self, energy: Any = None, hours: Any = None, **_: Any) -> str:
+        """What to offer, sorted to fit the energy the user gave (kept in the energy log), within the time they
+        said they have."""
+        from thirties_core import energy as energy_words
+        from thirties_core.assistant_tools import ToolError
+        plan = self.pt.day_plan
+        level = energy_words.level_from(energy)
+        if energy not in (None, "") and level is None:
+            raise ToolError(f"'{energy}' doesn't say how much energy; give 1 (drained) to 5 (great).")
+        if level is not None and level != energy_words.today(self.a, plan):
+            self.a.s.energy.record(level, at=self.pt._now(), note=str(energy) if not str(energy).isdigit() else "")
+        until = None
+        if hours not in (None, ""):
+            try:
+                until = max(self.pt._now(), plan.day_start) + timedelta(minutes=parse_duration_minutes(hours))
+            except (ClockError, ValueError):
+                raise ToolError(f"'{hours}' isn't a length of time, e.g. '3 hours'.")
+        return self.options_text(plan, until) or (
+            "Nothing pressing fits in that time." if until else "Nothing pressing, or no free time left today.")
 
     def handlers(self) -> Dict[str, Any]:
         return {"day_options": self.day_options, "propose_day": self.propose_day,
@@ -490,7 +604,25 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         out = [c for c in out if c.get("task") is None or in_season(planner.months_of(c["task"]), plan.target_date)]
     except Exception as e:
         logger.warning("Couldn't check the seasons of the day's candidates: %s", e)
-    return out[:MAX_CANDIDATES]
+    try:  # an item with open pieces is offered as its first one (project_pieces.py)
+        from thirties_core.project_pieces import first_pieces
+        out = first_pieces(dp.a, out, plan.target_date, {sp.task_id for sp in plan.spans if sp.task_id})
+    except Exception as e:
+        logger.warning("Couldn't find the items' first pieces: %s", e)
+    from thirties_core.traits import time_set_by  # what someone else times is never proposed
+    out = [c for c in out if not time_set_by(dp.a.pt, c["title"], c["task"].id if c.get("task") is not None else None)]
+    from thirties_core import energy  # sorted to fit the energy (what's due keeps its place)
+    out = energy.fit_order(out, energy.today(dp.a, plan), plan.target_date)
+    if dp.db is not None:  # what was pencilled in for the day comes first, and firms up
+        from thirties_core.week_draft import drafted_starts
+        pencilled = drafted_starts(dp.db, plan.target_date)
+        if pencilled:
+            out = sorted(out, key=lambda c: c["title"].strip().lower() not in pencilled)
+            for c in out:
+                if c["title"].strip().lower() in pencilled and "pencilled in" not in c["why"]:
+                    c["why"] = f"pencilled in for {format_clock(pencilled[c['title'].strip().lower()])}; {c['why']}"
+    from thirties_core.project_pieces import with_steady_pieces  # a piece of each project, every day
+    return with_steady_pieces(dp.a, plan, out, MAX_CANDIDATES)
 
 
 def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -522,6 +654,17 @@ MORNING_FACTS = (
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:
+    """The morning proposal (_morning_proposal), then the rest of the week pencilled in afresh (week_draft.py)."""
+    out = _morning_proposal(manager, facts, brief)
+    try:
+        from thirties_core.week_draft import refresh
+        refresh(manager.tools)
+    except Exception as e:  # the morning never fails for want of the week's draft
+        logger.warning("Couldn't pencil in the days ahead: %s", e)
+    return out
+
+
+def _morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:
     """The morning proposal as a message: (text, already_in_the_conversation). The Frontier brain picks in a turn of
     its own, and its message also says ``facts`` (what's planned, yesterday's leftovers: one message, 10-31);
     otherwise (or if that fails) Python proposes the obvious few, and the caller adds the facts. ('', False) when

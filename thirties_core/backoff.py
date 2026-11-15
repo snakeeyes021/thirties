@@ -30,7 +30,7 @@ from typing import Any, Dict, Iterable, List, Optional
 KEY = "miss_streaks"   # {key: {"title", "task_id", "misses", "last_miss", "counted", "sig", "asked", "answer"}}
 ASK_AFTER = 3          # consecutive misses before the one question
 DUE_NEAR_DAYS = 2      # a due date this close overrides the back-off
-CHOICES = ("keep", "park", "drop")
+CHOICES = ("keep", "park", "drop", "break")  # break: held until it's broken into pieces (break_down.py)
 QUESTION = "Still want {title}? Keep for this week / Park for later / Drop"   # one line per item
 
 
@@ -156,6 +156,8 @@ class MissStreaks:
             return None
         if rec.get("answer") == "park":
             return date.max  # waits at its month-level horizon
+        if rec.get("answer") == "break":
+            return date.max  # waits to be broken into pieces; then its run ends (break_down.release)
         if misses <= 0 or last is None:
             return None
         free = last + timedelta(days=rest_days(misses) + 1)  # whole days in between, then it may come

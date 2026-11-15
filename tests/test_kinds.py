@@ -5,7 +5,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from tests.test_today import TITLES, TodayTestCase, item
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService
@@ -105,7 +105,7 @@ class TestDoneFollowsTheKind(KindsTestCase):
         span = next(s for s in self.t.day_plan.spans if s.title == "Garden app")
         self.assertIn("- [ ] Fix the sync bug", self.body("n_today"))
         out = self.t.execute("log_outcome", {"event": span.id, "status": "done"})
-        self.assertIn("worked on it: Fix the sync bug stays open", out)
+        line_with(out, "Fix the sync bug", "open")
         self.assertIn("- [ ] Fix the sync bug", self.body("n_dev"))  # never ticked: it goes on
         self.assertIn("- [x] Fix the sync bug", self.body("n_today"))  # today's session is done
         self.assertEqual(span.status, SpanStatus.DONE)

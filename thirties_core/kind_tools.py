@@ -136,7 +136,15 @@ class KindTools:
         from thirties_core import kinds
         plan = self._plan_of(span)
         return kinds.is_moot(span, now or self.pt._now(), self.kind_of(span, ctx), plan.day_end, plan.spans,
-                             self.pt._is_fixed(span))
+                             self.pt._is_fixed(span), self._relies(span))
+
+    def _relies(self, span: EventSpan) -> bool:
+        """It depends on someone else (traits.py): the clock never settles it."""
+        try:
+            from thirties_core.traits import relies_on
+            return bool(relies_on(self.pt, span))
+        except Exception:
+            return False
 
     def settle_moot(self, plan=None, now: Optional[datetime] = None,
                     ctx: Optional[Dict[str, Any]] = None) -> List[EventSpan]:
@@ -150,12 +158,18 @@ class KindTools:
         else:
             plans = [plan]
         changed: List[EventSpan] = []
+        if self.pt.is_current(self.pt.day_plan):  # what's in progress keeps going, or finishes by itself
+            try:
+                from thirties_core.planning_tick import tick
+                tick(self.pt, now)
+            except Exception as e:
+                logger.warning("The planning check failed: %s", e)
         for p in plans:
             if not any(kinds.trackable(s) and s.status == SpanStatus.PLANNED and s.end_dt <= now for s in p.spans):
                 continue
             ctx = ctx or self._kind_context()
             changed += kinds.settle_moot(p.spans, now, p.day_end, lambda s: self.kind_of(s, ctx), self.pt._is_fixed,
-                                         self.pt._persist)
+                                         self.pt._persist, self._relies)
         if changed:
             logger.info("Gone moot, stored as unknown: %s.", ", ".join(s.title for s in changed))
         return changed

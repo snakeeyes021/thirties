@@ -107,7 +107,8 @@ class TestGemmaDayTimes(SlmTestCase):
         self.assertEqual(len(self.rt.parse.seen), before)  # Python read it: no model call
         self.assertEqual((self.work().actual_start, self.work().start_dt), (at("07:15"), at("07:15")))
         self.m.send_user_message("done with work")
-        self.assertEqual(self.m.last_raw_reply, "Recorded: finished work 4:40 PM.")
+        self.assertTrue(self.m.last_raw_reply.startswith("Recorded: finished work 4:40 PM. After work: "),
+                        self.m.last_raw_reply)  # what's left of the day, in thirties
         self.assertEqual(self.work().actual_end, at("16:40"))
 
     def test_in_a_message_with_other_requests_python_reads_its_part(self):
@@ -126,8 +127,8 @@ class TestGemmaDayTimes(SlmTestCase):
 
     def test_yes_to_done_with_work(self):
         self.m.add_assistant_message("💼 Done with work? If so, when did you finish? (It was planned until 4:00 PM.)")
-        self.m.send_user_message("yep, at 4:30")
-        self.assertEqual(self.m.last_raw_reply, "Recorded: finished work 4:30 PM.")
+        out = self.m.send_user_message("yep, at 4:30")  # answered by Python, before either brain (work_end_answer.py)
+        self.assertTrue(out.startswith("Noted: finished work 4:30 PM.\n\nAfter work: 2 daylight thirties and "), out)
 
 
 if __name__ == "__main__":

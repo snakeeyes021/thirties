@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 from datetime import date
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.goals import check_goal, prompt_lines, split_line, stale_goals, stamp_new_lines
@@ -32,14 +32,14 @@ class TestGoals(unittest.TestCase):
     def test_rewriting_a_section_doesnt_freshen_old_goals(self):
         old = "- Ship the garden app\n- Garden app testing (as of 2026-10-01)"
         new = stamp_new_lines(old, "- Garden app testing\n- Ship the garden app\n- Ship 0.2", TODAY)
-        self.assertEqual(new, "- Garden app testing (as of 2026-10-01)\n- Ship the garden app\n- Ship 0.2 (as of 2026-10-30)")
+        self.assertEqual(new, "- Garden app testing (as of 2026-10-01)\n- Ship the garden app\n- Ship 0.2 (set 2026-10-30)")
 
     def test_checking_a_goal(self):
         sections = {"Near-term goals": "- Fix the squeaky door\n- Garden app testing (as of 2026-10-01)"}
         section, content, said = check_goal(sections, "squeaky door", "done", TODAY)
         self.assertEqual((section, content), ("Near-term goals", "- Garden app testing (as of 2026-10-01)"))
         _, content, _ = check_goal(sections, "Garden app testing", "current", TODAY)
-        self.assertIn("- Garden app testing (as of 2026-10-30)", content)
+        self.assertIn("- Garden app testing (set 2026-10-01; as of 2026-10-30)", content)  # set stays
         with self.assertRaises(ValueError):
             check_goal(sections, "t", "current", TODAY)  # both goals have a "t": ambiguous
         with self.assertRaises(ValueError):
@@ -54,19 +54,74 @@ class TestGoals(unittest.TestCase):
         services.profile.set_section("Near-term goals", "- Fix the squeaky door")
         t = PlanTools(plan, pending, sched, services=services)
         t.execute("update_profile", {"section": "Near-term goals", "text": "Ship 0.2"})
-        self.assertIn("- Ship 0.2 (as of 2026-10-15)", services.profile.sections()["Near-term goals"])
+        self.assertIn("- Ship 0.2 (set 2026-10-15)", services.profile.sections()["Near-term goals"])
 
         from thirties_core.brains.frontier import FrontierBrain
         from thirties_core.inference import MockInferenceEngine
         brain = FrontierBrain(t, MockInferenceEngine(), [], [])
         prompt = brain.build_system_prompt()
         self.assertIn("GOALS TO CHECK", prompt)
-        self.assertIn("- Fix the squeaky door (near-term; never checked)", prompt)
+        line_with(prompt, "Fix the squeaky door", "near-term", "never checked")
         self.assertNotIn("Ship 0.2 (near-term", prompt)
 
         self.assertEqual(t.execute("check_goal", {"goal": "squeaky door", "state": "done"}),
                          "Took 'Fix the squeaky door' out of Near-term goals (done).")
         self.assertTrue(t.execute("check_goal", {"goal": "squeaky door", "state": "done"}).startswith(NOT_DONE))
+
+
+class TestGoalDates(unittest.TestCase):
+    """A goal keeps the day it was set, and "in 2–4 months" is a real deadline from that day."""
+
+    def test_the_deadline_from_the_goals_own_words(self):
+        from thirties_core.goals import deadline_from
+        set_on = date(2026, 10, 16)
+        cases = {"Learn three sea knots in 2–4 months": date(2027, 2, 16),
+                 "Paint the fence within 3 weeks": date(2026, 11, 6),
+                 "Read two plays in a couple of months": date(2026, 12, 16),
+                 "Finish the quilt by March": date(2027, 3, 1),
+                 "Mail the forms by Nov 20": date(2026, 11, 20),
+                 "Clear the attic this month": date(2026, 10, 31),
+                 "Run a 10k this year": date(2026, 12, 31),
+                 "Fix the squeaky door": None}
+        for text, want in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(deadline_from(text, set_on), want)
+
+    def test_checking_keeps_the_set_day_and_deadline(self):
+        from thirties_core.goals import dated, parse
+        line = dated("Learn three sea knots in 2–4 months", date(2026, 10, 16))
+        self.assertEqual(line, "- Learn three sea knots in 2–4 months (set 2026-10-16; by 2027-02-16)")
+        sections = {"Near-term goals": line}
+        _, content, _ = check_goal(sections, "sea knots", "current", date(2026, 11, 15))
+        g = parse(content)
+        self.assertEqual((g.set, g.by, g.as_of), (date(2026, 10, 16), date(2027, 2, 16), date(2026, 11, 15)))
+        _, again, _ = check_goal({"Near-term goals": content}, "sea knots", "current", date(2026, 12, 1))
+        self.assertEqual(parse(again).set, date(2026, 10, 16))  # never re-stamped
+
+    def test_staleness_counts_from_the_last_check_and_the_prompt_says_whats_left(self):
+        from thirties_core.goals import deadline_lines
+        sections = {"Near-term goals": "- Learn three sea knots in 2–4 months (set 2026-10-16; by 2027-02-16; "
+                                       "as of 2026-11-10)\n- Mail the forms (set 2026-10-01; by 2026-11-10)"}
+        today = date(2026, 11, 15)
+        self.assertEqual([g[1] for g in stale_goals(sections, today)], ["Mail the forms"])
+        self.assertEqual(deadline_lines(sections, today),
+                         ["- Learn three sea knots in 2–4 months: by Feb 16, 2027 (set Oct 16, 2026; about 3 months "
+                          "left)", "- Mail the forms: by Nov 10, 2026 (set Oct 01, 2026; 5 days past it)"])
+
+    def test_in_the_prompt(self):
+        set_debug_time(at("10:00"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        services = Services.for_db(sched.state_db)
+        t = PlanTools(plan, pending, sched, services=services)
+        t.execute("update_profile", {"section": "Near-term goals", "text": "Repaint the porch in 3 weeks"})
+        self.assertIn("(set 2026-10-15; by 2026-11-05)", services.profile.sections()["Near-term goals"])
+        from thirties_core.brains.frontier import FrontierBrain
+        from thirties_core.inference import MockInferenceEngine
+        prompt = FrontierBrain(t, MockInferenceEngine(), [], []).build_system_prompt()
+        self.assertIn("GOAL DEADLINES", prompt)
+        self.assertIn("- Repaint the porch in 3 weeks: by Nov 05, 2026 (set Oct 15, 2026; about 3 weeks left)", prompt)
 
 
 class TestMemoryAudit(unittest.TestCase):

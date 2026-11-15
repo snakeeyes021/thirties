@@ -161,7 +161,7 @@ class BackoffDays(TodayTestCase):
             self.on(offset, "Call the bank", "t_bank", "skipped")
         self.morning(0)
         said = self.t.execute("rollover_proposal", {})
-        self.assertIn("Still want Call the bank? Keep for this week / Park for later / Drop", said)
+        self.assertIn("Still want Call the bank? Keep for this week / Park for later / Drop", said)  # golden: exact text the user reads
         for offset in range(0, 4):  # no longer re-placed daily: four whole days of rest
             self.morning(offset)
             self.assertNotIn("Call the bank", self.offered(offset))

@@ -26,6 +26,10 @@ sense doing it, offering it or asking about it:
 
 A moot item with no outcome is stored as "unknown" (``SpanStatus.UNKNOWN``), not
 skipped: nobody knows whether it happened, and it isn't put off.
+
+Two kinds of item are never settled by the clock: one that **relies on others** (the sitter feeds the
+cats: traits.py) and one **in progress** (in_progress.py). Neither goes moot after a fixed item's two hours or at the
+next meal; one that relies on others stays open through the next day too, so it's asked about, never quietly let go.
 """
 
 from __future__ import annotations
@@ -131,10 +135,18 @@ def trackable(span: EventSpan) -> bool:
         and not span.tentative
 
 
+RELIES_OPEN = timedelta(days=1)  # an item that relies on others stays open this long past the end of its day
+
+
 def moot_after(span: EventSpan, kind: str, day_end: datetime, others: Iterable[EventSpan] = (),
-               fixed: bool = False) -> Optional[datetime]:
+               fixed: bool = False, relies: bool = False) -> Optional[datetime]:
     """When an item stops being worth doing, offering or asking about; None if never (a flexible one-off).
-    ``others`` are the spans around it (for the next meal); ``day_end`` is the end of its diurnal day."""
+    ``others`` are the spans around it (for the next meal); ``day_end`` is the end of its diurnal day. ``relies``:
+    it depends on someone else, so time passing never settles it within its day."""
+    if relies:
+        return day_end + RELIES_OPEN if kind in (DAILY, ONGOING) or fixed or is_meal(span.title) else None
+    if span.time_source in ("running", "auto_done"):  # in progress: it ends when it ends (in_progress.py)
+        return day_end if kind in (DAILY, ONGOING) or fixed or is_meal(span.title) else None
     points = []
     if fixed:
         points.append(span.end_dt + FIXED_MOOT_AFTER)
@@ -148,23 +160,24 @@ def moot_after(span: EventSpan, kind: str, day_end: datetime, others: Iterable[E
 
 
 def is_moot(span: EventSpan, now: datetime, kind: str, day_end: datetime, others: Iterable[EventSpan] = (),
-            fixed: bool = False) -> bool:
+            fixed: bool = False, relies: bool = False) -> bool:
     """Past its moot point with nothing reported: never offered, rolled over or asked about."""
     if not trackable(span) or span.status not in (SpanStatus.PLANNED, SpanStatus.UNKNOWN):
         return False
     if span.status == SpanStatus.UNKNOWN:
         return True
-    point = moot_after(span, kind, day_end, others, fixed)
+    point = moot_after(span, kind, day_end, others, fixed, relies)
     return point is not None and point <= now
 
 
 def settle_moot(spans: List[EventSpan], now: datetime, day_end: datetime, kind: Callable[[EventSpan], str],
-                fixed: Callable[[EventSpan], bool], persist: Callable[[EventSpan], None]) -> List[EventSpan]:
+                fixed: Callable[[EventSpan], bool], persist: Callable[[EventSpan], None],
+                relies: Optional[Callable[[EventSpan], bool]] = None) -> List[EventSpan]:
     """Store every planned item of one day that has gone moot as "unknown". Returns the ones changed."""
     changed = []
     for span in spans:
         if trackable(span) and span.status == SpanStatus.PLANNED and \
-                is_moot(span, now, kind(span), day_end, spans, fixed(span)):
+                is_moot(span, now, kind(span), day_end, spans, fixed(span), bool(relies and relies(span))):
             span.status = SpanStatus.UNKNOWN
             persist(span)
             changed.append(span)

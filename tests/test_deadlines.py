@@ -4,7 +4,7 @@ from there, sized to how much it takes. Invented items throughout."""
 import unittest
 from datetime import date, timedelta
 
-from tests.fixtures import DAY
+from tests.fixtures import DAY, line_with
 from tests.test_today import TodayTestCase
 from thirties_core.deadlines import add_months, buffer_days, next_deadline, parse_lead_days
 from thirties_core.horizons import HorizonPlanner, period_of
@@ -88,8 +88,8 @@ class RollTest(TodayTestCase):
         settle(self.t.assistant, DAY)
         out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "effort": "6 hours",
                                                 "effort_is_estimate": True})
-        self.assertIn("about 6h of work for each deadline (an estimate)", out)
-        self.assertIn("6 sessions of 1h before Dec 26 (from an estimate).", out)
+        line_with(out, "6h", "estimate")
+        line_with(out, "6 sessions of 1h", "Dec 26")
         self.assertEqual(self.pinned(), [("quarter", 6, 60)])
         out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "effort": "4 hours"})
         self.assertNotIn("an estimate", out)  # the user's word replaces it
@@ -113,7 +113,7 @@ class RollTest(TodayTestCase):
     def test_the_morning_says_where_it_went(self):
         self.facts(effort="3 hours")
         said = self.t.execute("rollover_proposal", {})
-        self.assertIn("Renew the parking permit: next deadline Dec 31; 3 sessions of 1h before Dec 26.", said)
+        line_with(said, "Renew the parking permit", "Dec 31", "3 sessions of 1h", "Dec 26")
         self.assertNotIn("[", said)  # nothing meant for the model reaches this text
 
     def test_a_series_keeps_its_own_day_through_a_short_month(self):

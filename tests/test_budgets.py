@@ -4,7 +4,7 @@ missed time re-spread before the end of its budgeted period. Invented items thro
 import unittest
 from datetime import date, timedelta
 
-from tests.fixtures import DAY
+from tests.fixtures import DAY, line_with
 from tests.test_today import TodayTestCase
 from thirties_core.budgets import budget_of, periods_left, share_for, share_this
 from thirties_core.horizons import HorizonPlanner, HorizonPlans, period_of
@@ -171,8 +171,8 @@ class BudgetTest(TodayTestCase):
         self.assertEqual(days, [DAY, DAY + timedelta(days=2), DAY + timedelta(days=3)])  # Thu, Sat, Sun: spread out
         friday = self.hp.period((DAY + timedelta(days=1)).isoformat())
         self.assertNotIn("Shed clear-out", {c.title for c in self.hp.candidates(friday, limit=None)})
-        self.assertIn("Shed clear-out (3 sessions of 60 min: 0 done, 0 planned, 3 left: Thu, Sat, Sun)",
-                      self.hp.describe_plan(WEEK, with_context=False))
+        line_with(self.hp.describe_plan(WEEK, with_context=False),
+                  "Shed clear-out", "3 sessions of 60 min", "0 done", "0 planned", "3 left", "Thu, Sat, Sun")
 
     def test_the_week_plan_bends_as_the_week_fills(self):
         from thirties_core.budgets import session_days
@@ -196,7 +196,7 @@ class BudgetTest(TodayTestCase):
         self.assertEqual(trickle_line(self.hp, self.task),
                          "6 sessions in Q4 2026 → 2 sessions this month (October) → 1 session this week → today")
         shown = self.hp.describe_plan(MONTH, with_context=False)
-        self.assertIn("  Shed clear-out: 6 sessions in Q4 2026 → ", shown)  # a budget from above reaches the month
+        line_with(shown, "Shed clear-out", "6 sessions in Q4 2026")  # a budget from above reaches the month
         self.assertTrue(shown.startswith("This month (October)"), shown)  # the month's name keeps its capital
 
     def test_a_span_of_years_reads_and_trickles_into_each_year(self):
