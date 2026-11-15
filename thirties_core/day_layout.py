@@ -114,7 +114,9 @@ def alongside(plan: DayPlan, seg: Segment) -> List[str]:
         begins = start.timestamp() <= s.start_dt.timestamp() < end.timestamp() or (first and s.overlaps(start, end))
         if (s.shown_only or s.tentative) and begins:
             when = f"{format_clock(s.start_dt)} – {format_clock(s.end_dt)}"
-            out.append(f"{s.title} {when} ({'not yours' if s.shown_only else 'invite, not answered'})")
+            from thirties_core.others_events import short_whose  # whose calendar (others_events.py)
+            theirs = short_whose(s.whose) if s.whose else "not yours"
+            out.append(f"{s.title} {when} ({theirs if s.shown_only else 'invite, not answered'})")
     return out
 
 

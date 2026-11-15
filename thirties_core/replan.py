@@ -162,6 +162,10 @@ def replan(assistant, title: str, kind: str, minutes: int, today: date, due: Opt
     """Where a missed item goes next (kinds.py: once, ongoing, daily)."""
     from thirties_core.kinds import DAILY, ONGOING
     pt = assistant.pt
+    from thirties_core.traits import time_set_by
+    who = time_set_by(pt, title)
+    if who:  # someone else sets its day and time: it waits for them, never put on a day by Thirties
+        return Placement(None, f"{who} sets its day and time")
     if kind == DAILY:
         return Placement(None, "a daily thing: today's simply ends")
     if kind == ONGOING:

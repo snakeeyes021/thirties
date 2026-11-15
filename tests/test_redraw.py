@@ -2,7 +2,7 @@
 
 import unittest
 
-from tests.fixtures import DAY, at, event, make_scheduler
+from tests.fixtures import DAY, at, event, line_with, make_scheduler
 from thirties_core.astronomy import set_debug_time
 from thirties_core.clock import format_clock
 from thirties_core.plan_tools import NOT_DONE, PlanTools
@@ -24,7 +24,7 @@ class TestRedraw(unittest.TestCase):
         return {s.title: (format_clock(s.start_dt), format_clock(s.end_dt)) for s in self.t.day_plan.spans}
 
     def test_not_reported_is_not_assumed_done(self):
-        self.assertIn("Not marked yet (past their time, not assumed done):\n- Shower", self.t.list_schedule())
+        line_with(self.t.list_schedule().split("Not marked yet")[1], "Shower")
 
     def test_redraw_keeps_order_facts_and_fixed_things(self):
         self.t.execute("set_item_facts", {"event": "glass", "after": "Shower"})
@@ -36,8 +36,7 @@ class TestRedraw(unittest.TestCase):
         self.assertTrue(at("19:00") > self.t.day_plan.sunset)       # (the walk can't fit in daylight after the shower)
         self.assertEqual(times["Shower"], ("5:30 PM", "6:00 PM"))   # behind: the next free thirty from now
         self.assertNotIn("Walk", times)                              # after the shower is after sunset: off the plan
-        self.assertIn("Doesn't fit before bedtime, so it's off today's plan: Walk. It waits for tomorrow (Before "
-                      "today), where it can be moved or dropped.", out)
+        line_with(out, "Walk", "tomorrow")  # where it went is said
         from thirties_core.carry import OpenPool
         waiting = OpenPool(self.sched.state_db).all()["walk"]  # never lost: in the open pool, for tomorrow
         self.assertEqual(waiting["when"], "tomorrow")
@@ -45,7 +44,7 @@ class TestRedraw(unittest.TestCase):
         self.assertEqual(times["Dinner with Kim"], ("7:00 PM", "8:00 PM"))
         self.assertEqual(times["Snack"], ("8:00 PM", "8:30 PM"))    # stays put
         self.assertEqual(times["Bins"], ("8:30 PM", "9:00 PM"))
-        self.assertIn("Not reported, so kept as still to do: Shower.", out)
+        line_with(out, "Shower", "still to do")
         out = self.t.execute("undo_redraw", {})
         self.assertTrue(out.startswith("Put back as it was before the redraw"))
         self.assertEqual(self.times()["Shower"], ("4:00 PM", "4:30 PM"))

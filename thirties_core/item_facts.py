@@ -49,10 +49,14 @@ CREATE TABLE IF NOT EXISTS item_facts (
 );
 """
 _COLUMNS = ["name", "title", "kind", "minutes", "fixed_at", "not_before", "after", "goes_with", "daylight",
-            "updated_at", "repeats", "months", "effort", "effort_source", "lead_days"]
+            "updated_at", "repeats", "months", "effort", "effort_source", "lead_days", "exclusive", "relies_on",
+            "time_set_by", "travel", "follow_up", "follow_after"]
 _ADDED = {"repeats": "TEXT NOT NULL DEFAULT ''", "months": "TEXT NOT NULL DEFAULT ''",
           "effort": "INTEGER NOT NULL DEFAULT 0", "effort_source": "TEXT NOT NULL DEFAULT ''",
-          "lead_days": "INTEGER NOT NULL DEFAULT 0"}
+          "lead_days": "INTEGER NOT NULL DEFAULT 0", "exclusive": "INTEGER NOT NULL DEFAULT 0",
+          "relies_on": "TEXT NOT NULL DEFAULT ''", "time_set_by": "TEXT NOT NULL DEFAULT ''",
+          "travel": "INTEGER NOT NULL DEFAULT 0", "follow_up": "TEXT NOT NULL DEFAULT ''",
+          "follow_after": "INTEGER NOT NULL DEFAULT 0"}
 # How often an item's deadline comes round again, when the user says so ("the filing window is every quarter"):
 # a missed one then moves to the next (deadlines.py), never guessed from the wording
 REPEATS = ("monthly", "quarterly", "yearly")
@@ -132,10 +136,18 @@ class Lasting:
     effort: int = 0                                     # minutes of work it needs for each deadline; 0 = not known
     effort_source: str = ""                             # 'user' (said) or 'estimate' (the model's judgement)
     lead_days: int = 0                                  # how long before the deadline the work starts; 0 = not said
+    # traits (traits.py): how the item sits in a day
+    exclusive: bool = False                             # takes up its time: nothing else may overlap it (a show)
+    relies_on: str = ""                                 # who it depends on ("the sitter"; "others"): never settled by the clock
+    time_set_by: str = ""                               # who sets its day and time: Thirties never places it
+    travel: int = 0                                     # minutes to get there: a "leave by" item goes before it
+    follow_up: str = ""                                 # what always follows it ("Put the watch back on")
+    follow_after: int = 0                               # minutes after it ends that the follow-up comes
 
     def is_empty(self) -> bool:
         return not (self.kind or self.minutes or self.fixed_at or self.not_before or self.after or self.goes_with
-                    or self.daylight or self.repeats or self.months or self.effort or self.lead_days)
+                    or self.daylight or self.repeats or self.months or self.effort or self.lead_days
+                    or self.exclusive or self.relies_on or self.time_set_by or self.travel or self.follow_up)
 
     def fixed_time(self, day_start: datetime) -> Optional[datetime]:
         """The fixed time on the day that starts at ``day_start`` (an early-morning time is the next morning's)."""
@@ -172,6 +184,18 @@ class Lasting:
                        + (" (an estimate)" if self.effort_source == "estimate" else ""))
         if self.lead_days:
             out.append(f"the work starts {self.lead_days} days before its deadline")
+        if self.exclusive:
+            out.append("takes up its time (nothing else overlaps it)")
+        if self.relies_on:
+            out.append("depends on " + ("others" if self.relies_on == "others" else self.relies_on)
+                       + " (only done when someone says so)")
+        if self.time_set_by:
+            out.append(f"{self.time_set_by} sets its day and time")
+        if self.travel:
+            out.append(f"{format_duration(self.travel)} to get there")
+        if self.follow_up:
+            out.append(f"followed by {self.follow_up}"
+                       + (f" {format_duration(self.follow_after)} after" if self.follow_after else ""))
         return [x for x in out if x]
 
 
@@ -205,6 +229,12 @@ class LastingFacts:
                        effort=int((row["effort"] if "effort" in row.keys() else 0) or 0),
                        effort_source=(row["effort_source"] if "effort_source" in row.keys() else "") or "",
                        lead_days=int((row["lead_days"] if "lead_days" in row.keys() else 0) or 0),
+                       exclusive=bool(row["exclusive"] if "exclusive" in row.keys() else 0),
+                       relies_on=(row["relies_on"] if "relies_on" in row.keys() else "") or "",
+                       time_set_by=(row["time_set_by"] if "time_set_by" in row.keys() else "") or "",
+                       travel=int((row["travel"] if "travel" in row.keys() else 0) or 0),
+                       follow_up=(row["follow_up"] if "follow_up" in row.keys() else "") or "",
+                       follow_after=int((row["follow_after"] if "follow_after" in row.keys() else 0) or 0),
                        updated_at=row["updated_at"])
 
     def all(self) -> List[Lasting]:
@@ -247,7 +277,8 @@ class LastingFacts:
     def _values(f: Lasting) -> list:
         return [f.name, f.title, f.kind, int(f.minutes), f.fixed_at, f.not_before, json.dumps(sorted(set(f.after))),
                 json.dumps(sorted(set(f.goes_with))), int(f.daylight), f.updated_at, f.repeats or "", f.months or "",
-                int(f.effort or 0), f.effort_source or "", int(f.lead_days or 0)]
+                int(f.effort or 0), f.effort_source or "", int(f.lead_days or 0), int(bool(f.exclusive)),
+                f.relies_on or "", f.time_set_by or "", int(f.travel or 0), f.follow_up or "", int(f.follow_after or 0)]
 
     def kind_override(self, title: Any, *aliases: Any) -> str:
         own = next((f for f in (self.get(t) for t in (title,) + aliases if t) if f is not None), None)
@@ -265,7 +296,8 @@ class LastingFacts:
                 return False
             defaults = {"title": "", "kind": "", "minutes": 0, "fixed_at": "", "not_before": "", "after": "[]",
                         "goes_with": "[]", "daylight": 0, "repeats": "", "months": "", "effort": 0,
-                        "effort_source": "", "lead_days": 0}
+                        "effort_source": "", "lead_days": 0, "exclusive": 0, "relies_on": "", "time_set_by": "",
+                        "travel": 0, "follow_up": "", "follow_after": 0}
             conn.execute(f"INSERT OR REPLACE INTO item_facts ({', '.join(_COLUMNS)}) "
                          f"VALUES ({', '.join('?' * len(_COLUMNS))})",
                          [record.get(c, defaults.get(c)) for c in _COLUMNS])
@@ -345,7 +377,7 @@ def redraw_facts(spans: List[Any], span_facts: Any, store: Optional[LastingFacts
         nb = lasting.not_before_time(day_start)
         if nb is not None and (f.not_before is None or nb > f.not_before):
             f.not_before = nb
-        f.anchored = f.anchored or bool(lasting.fixed_at)
+        f.anchored = f.anchored or bool(lasting.fixed_at) or bool(lasting.time_set_by)  # someone else's time: kept
     return out
 
 

@@ -28,15 +28,6 @@ logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 3
 
-# A promise that what's next or the block line will stop ("no block talk") holds only after set_reply_extras;
-# Python adds them to replies, so writing less never removes them
-_PART = r"(?:block(?: talk| mention| line)?s?|lists?|next (?:section|lines?|list)|what'?s next|not marked yet|status line)"
-EXTRAS_CLAIM_RE = re.compile(
-    rf"\bno (?:more )?{_PART}"
-    rf"|\b(?:won'?t|will not|i'?ll stop|stop(?:ped)?|not going to|no longer) (?:\w+ ){{0,2}}(?:show|send|includ|add|mention|list|say|print)\w*(?: \w+){{0,4}} {_PART}"
-    rf"|\b(?:dropped|removed|deleted|cut|took out|turned off|switched off) (?:\w+ ){{0,2}}{_PART}",
-    re.IGNORECASE)
-
 ACTION_CLAIM_PATTERN = re.compile(
     r"\b(?:i\s+have|i\'ve|i\s+did|i)\s+(?:(?:\w+ly|now|already|just)\s+)?(?:cleared|scheduled|allocated|updated|set|assigned|removed|reverted|corrected|locked|finalized|put|placed|moved|added|shifted|extended|blocked)\b"
     r"|\b(?:plan|schedule|work\s+shift|blocks?)\s+(?:has\s+been\s+)?(?:updated|cleared|scheduled|finalized|locked|set)\b"
@@ -109,6 +100,9 @@ class FrontierBrain:
         avail = plan.availability(now if is_today else None)
         services = self.tools.services
         assistant = self.tools.assistant
+        from thirties_core.extras import prompt_section as extras_section  # first: it may add to the profile
+        extras = extras_section(self.tools)  # observations, media queue, goal deadlines, people (extras.py)
+        extras = f"{extras}\n\n" if extras else ""
         profile = services.profile.as_markdown() if services and not services.profile.is_empty() else "(empty so far)"
         stale = goal_check_lines(services.profile.sections(), self.tools.today()) if services else []
         if stale:  # A7: weeks-old goals fed stale suggestions (for a goal already finished)
@@ -144,16 +138,20 @@ class FrontierBrain:
                                 + "\n\n")
 
         day_setup = (assistant.routines.prompt_section() + assistant.proposals.prompt_section()) if assistant else ""
-        pending = [s for s in plan.spans_in_view() if s.tentative]
-        invites = "\n".join(
-            f"- {s.title}, {format_clock(s.start_dt)} – {format_clock(s.end_dt)} id={s.id}" for s in pending
-        ) or "None"
+        if assistant:  # what the user chose to break down (break_down.py)
+            from thirties_core.break_down import prompt_section as break_down_section
+            day_setup += break_down_section(assistant)
+        from thirties_core.not_yours import invite_lines  # names whose calendar someone else's invite is on
+        invites = "\n".join(f"- {line}" for line in invite_lines(plan, self.tools.ambiguous_events)) or "None"
         from thirties_core.morning import POLICY as policy  # the one written rule for proposing (A1)
+        from thirties_core.others_events import prompt_rule  # other people's calendar events (others_events.py)
+        others_rule = prompt_rule()
 
         return f"""You are Thirties, the user's personal planning assistant: an astute executive assistant for their time. You help them plan, re-plan and review their day in conversation, absorb the messiness of real life, and keep their schedule accurate.
 
 PLANNING DATE: {when}
-Sunrise {format_clock(plan.sunrise)}, sunset {format_clock(plan.sunset)}. This day runs from {format_clock(plan.day_start)} until {format_clock(plan.day_end)} tomorrow morning, so tonight belongs to this day.
+Sunrise {format_clock(plan.sunrise)}, sunset {format_clock(plan.sunset)}. {self._sky(now)}
+This day runs from {format_clock(plan.day_start)} until {format_clock(plan.day_end)} tomorrow morning, so tonight belongs to this day.
 Open blocks (half-hour chunks) still ahead: {avail["daylight_open"]} in daylight, {avail["dark_open"]} in the dark.
 
 {now_section(self.tools) if is_today else ""}SCHEDULE
@@ -177,7 +175,7 @@ STATISTICS (computed from what actually happened)
 WEATHER (from the forecast)
 {weather}
 
-HOW TO CHANGE THE SCHEDULE
+{extras}HOW TO CHANGE THE SCHEDULE
 Put each tool call on its own line, exactly in this form, then write your reply to the user as normal text:
 CALL add_event {{"title": "Gardening", "start": "5:00 PM", "duration": "2 hours"}}
 CALL update_event {{"event": "<id from the schedule>", "shift": "+1 hour"}}
@@ -198,7 +196,7 @@ RULES
 9. Scheduling versus lists. When the user names something to do, call match_backlog. "Same task": schedule it with that task_id. "Only similar": don't assume or correct them; ask whether it's that item (quote it) or something new. "Nothing": schedule it as a new item. Add to a list (add_task) when they ask, or when it's clearly a to-do they'll want to track (not meals or routines). Choose the list and section yourself, with a short reason, and say where it went; never ask the user where it goes. When no list is obvious, use the drop box. When they want it both added and scheduled, do both in one add_task call by giving it start (and duration), so the two stay linked.
 10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. Each note says what it's for, and items say how pressing they are (now, soon, by a date; unmarked is no hurry): favour what's pressing, and never push someday or reference items. When the user says how pressing something is, record it with set_urgency. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or blocks, so do you ("you have two open chunks at 3:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed fish"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
-12. Track what actually happens. When the user says they did, finished, skipped or are still on something, record it with log_outcome, only for the items they named (doing Journal doesn't mean the shower happened). Ask about something not reported at most once; if they don't say, leave it. Pass started or finished only when they said the time; otherwise leave them out and Python works out when. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. After the user reports something, don't ask about the rest of the block or other items they didn't mention ("Did you get to X?"): what's not marked yet is shown with the status. If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
+12. Track what actually happens. When the user says they did, finished or skipped something, record it with log_outcome, only for the items they named (doing Journal doesn't mean the shower happened). Started isn't finished: when they say what they're doing now or that something has begun ("I'm in the shower", "heading out for errands", "the dishwasher's going"), or ask for rest now, call doing_now; mark it done only once they say it's over. A gap they ask for (rest, a break, a nap) goes on as its own item named for it ("Rest"): it keeps its time, and what was planned there moves out. Ask about something not reported at most once; if they don't say, leave it. Pass started or finished only when they said the time; otherwise leave them out and Python works out when. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. After the user reports something, don't ask about the rest of the block or other items they didn't mention ("Did you get to X?"): what's not marked yet is shown with the status. If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
 13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
 14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned; it goes on that day's plan and reaches the Today list that morning (say so). Things for a later day with no time: add_to_today with that day. Bigger picture: the user's lists are their goals, and each item belongs to a horizon (day, week, month, year, someday; set_horizon when they say so). A week plan is items dropped into the week (or onto a day of it), a month plan into the month, a year plan into the year; pin_to_period and unpin_from_period change one item, show_period answers "what's on this week?", and planning a week, month or year is propose_period (Python lists the candidates and their facts; you pick and say why), applied with apply_period_proposal when the user agrees, also after a planning offer Thirties sent. Plan days from the week's plan. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: just add each at its time. Never join two things into one title.
@@ -208,7 +206,7 @@ RULES
 19. Time is told in half-hour blocks, like reading a piano roll. Items keep their real times (the tools show them, with the block each is in); blocks are how the day is shown. A schedule or list is told by blocks: each row is a block and what's in it, things at the same time joined with + ("- 10:30 – Personal call + Break"); when one thing ends and another begins within a block, the block's time, then each on its own line; consecutive blocks with the same things are one row. Asked about one item, give its real time and its block ("Your Uber is at 12:15, in the 12:00 block"). Never change a time the user gave: 12:15 is never "12:00". Exact minutes for everything only if asked (list_schedule exact=true). Never put the word "thirty" next to a time: say block or chunk. Things set by someone else's clock (appointments, rides, flights, shows, calls at a set time) are fixed: they keep their exact time and never slide; for an unclear case, say fixed=true or false when adding it. The time now is said as it is ("it's 8:41"), never as its block. Items may overlap, nest or coincide: adding or moving one never moves, trims or splits another unless the user asks ("push everything to make room": push_later), and things sharing time are told as one entry ("Garden app dev + Recipe app dev"). Only fixed things conflict, and never a daily routine: it keeps its time and shares it. When a result says they may not go together and the user didn't say, ask once ("Alongside the shower, or push the shower and what follows back?"); if the answer holds generally, record it with set_sharing. A schedule keeps list_schedule's sections in its order: the user's items, then If there's time, then Not yours today last (someone else's events: never part of the user's day, never planned around or asked about; "hide that one" is hide_for_today).
 20. Weather: when suggesting or planning something outdoors (a walk, a run, yard work, errands on foot), check the forecast; don't suggest it into rain or bad weather, and if the user plans it there (a tool result says "Weather heads-up"), mention it once, briefly, with a better time if there is one.
 21. Today's list versus the plan: the list is what the user means to do today (their Today note); the plan is when. Everything put on today's plan goes on the list by itself. When the user says they'll do something today without a time, or agrees to a day's list, put it on the list with add_to_today. "Pencil it in" or "maybe today" is pencil_in: on the list with no time (off the plan if it was on it); say it as "on today's list, no time yet". Mornings start from the list.
-22. The plan changes only when the user asks or agrees. When they report running late or behind, record what happened (log_outcome) and leave the rest of the plan alone; speak up only if a fixed commitment (calendar, work) is at risk, once. "Push everything back" by an amount is push_back (it moves what's past and not marked too). When they ask for a new plan ("replan", "you sort it out"), call redraw: Python lays the rest of today out again in order, around fixed things, and says what doesn't fit; then show the new plan, and if something didn't fit, ask whether to plan it tomorrow or let it go. Record constraints with set_item_facts as soon as the user states them (after X, not before a time, needs daylight, stays put) so every redraw keeps them; when they say it holds every day ("dinner takes an hour", "fish food is at 5", "Journal goes with the shower", "nothing outside until after the shower"), add every_day=true. Nothing is done until the user says so: items not reported are still to do. Whenever you say where the user is now ("you're in the 10:00 block…"), what's not marked yet (see NOW) goes right after it, under "Not marked yet:", one item per line, no times; never items of the block they're still in, and not again once the user has seen them.
+22. The plan changes only when the user asks or agrees. When they report running late or behind, record what happened (log_outcome) and leave the rest of the plan alone; speak up only if a fixed commitment (calendar, work) is at risk, once. "Push everything back" by an amount is push_back (it moves what's past and not marked too). When they ask for a new plan ("replan", "you sort it out"), call redraw: Python lays the rest of today out again in order, around fixed things, and says what doesn't fit; then show the new plan; what didn't fit waits for tomorrow by itself, so say where it went, and never offer to drop something because the day ran out (dropping is the user's idea, never the day's edge). Record constraints with set_item_facts as soon as the user states them (after X, not before a time, needs daylight, stays put) so every redraw keeps them; when they say it holds every day ("dinner takes an hour", "fish food is at 5", "Journal goes with the shower", "nothing outside until after the shower"), add every_day=true. Nothing is done until the user says so: items not reported are still to do. Whenever you say where the user is now ("you're in the 10:00 block…"), what's not marked yet (see NOW) goes right after it, under "Not marked yet:", one item per line, no times; never items of the block they're still in, and not again once the user has seen them.
 23. Routines and daily anchors go on the plan by themselves each morning, at their usual times (ROUTINES AND DAILY ANCHORS shows what's on, each routine's schedule and placement): never ask whether to add them, and never say they haven't been scheduled. To place one differently today, or one that's only on request, use put_routine: give each thirty its start and the steps done in it, in the routine's order; that becomes its usual placement. When the user says it's how it always goes, set_routine confirm=true. Record how often a routine repeats, when it was last done, or where a missed part goes (its fallback) with set_routine. If a part was missed, pick its new spot from the free time, guided by its fallback. To skip a routine, use skip_routine; if the user didn't say how, ask its three choices in one short question. Record meals and other things at a set time every day with set_anchor. Never add a routine to a list, as a new item, or as one block ("Morning routine"). Daily things and time on a project ("Garden app dev") don't carry over to the next day as unfinished.
 24. When the user says their usual work or sleep hours (for some weekdays or all), record them with set_week; the plan's Work and Sleep follow.
 25. Proposing the day: when DAY OPTIONS is shown, nothing has been proposed for the day yet. Once the user's request is handled, propose one short, concrete plan for the free time with propose_day: a few things that matter now (due dates and urgency first, not the whole backlog), each at a start in the free time, and say why in one line. {policy} On changes, propose_day again. Don't propose again once they pass.
@@ -218,6 +216,7 @@ RULES
 29. Never invent. Say only what the schedule, your tools and the conversation show. If you don't know why something happened (an item marked skipped, a copy, a change), say you don't know, check with item_history, and tell them what it shows; never make up a cause. Say you can do something only if one of your tools does it; if none does, say plainly that you can't yet. What you keep for yourself (memory notes) isn't something the user can open: say "I'll make a note of that", not that it's on a list they can see.
 30. The user's notes: change their structure only when asked (edit_list_item: reword, split a line, add sub-items, move to another section or list). Done items move out of their lists into the month's Done note by themselves; if the user says something isn't done after all, reopen_item. When the user agrees to empty the drop box, dropbox_review shows each item with likely homes: propose one per line with a reason, and move each one they agree to. A list marked as sorted by time: offer once, when it fits, to split it by area (triage_list, then apply_triage_group per agreed group).
 31. Python adds lines to some replies: what's next after a change (Now, Next, Not marked yet) and the "You're in the … block" line. You can't leave them out by writing less. When the user asks to stop, trim or bring back any of them ("stop sending the list", "stop saying block", "show me what's next again"), call set_reply_extras, and only say it's done once that call went through.
+32. {others_rule}
 """
 
     def _day_list_section(self) -> str:
@@ -420,17 +419,9 @@ RULES
                    for m in self._OUTCOME_CLAIM_RE.finditer(text))
 
     def _claims_change(self, text: str) -> bool:
-        return bool(ACTION_CLAIM_PATTERN.search(text or ""))
-
-    def _promises_extras(self, text: str, turn_start: int) -> bool:
-        """The reply promises a change to what replies show, and no set_reply_extras went through this turn."""
-        return bool(EXTRAS_CLAIM_RE.search(text or "")) and not any(
-            m.get("role") == "tool" and m.get("name") == "set_reply_extras"
-            and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
-
-    EXTRAS_CHECK = ("Your reply says something Python adds to replies (what's next, Not marked yet, or the block "
-                    "line) will stop or change, but set_reply_extras wasn't called this turn, so it won't. Call "
-                    "set_reply_extras now, or correct your reply.")
+        """A sentence saying the plan changed; a question ("should I put it at 5?") claims nothing."""
+        return any(ACTION_CLAIM_PATTERN.search(s) and not s.rstrip().endswith("?")
+                   for s in re.split(r"(?<=[.!?])\s+|\n+", text or ""))
 
     RECENT_TURNS = 8
 
@@ -439,8 +430,24 @@ RULES
         (older ones are spent; the schedule in the prompt is current)."""
         user_idx = [i for i, m in enumerate(self.messages) if m.get("role") == "user"]
         cutoff = user_idx[-self.RECENT_TURNS] if len(user_idx) > self.RECENT_TURNS else 0
-        return [m for i, m in enumerate(self.messages) if (i >= cutoff or m.get("role") != "tool")
+        return [self._with_unseen_note(m) for i, m in enumerate(self.messages) if (i >= cutoff or m.get("role") != "tool")
                 and not m.get("display_only") and not m.get("spent")]
+
+    # every send-back is about a draft the user never saw: the rewrite is the first thing they read
+    UNSEEN_NOTE = ("The user hasn't seen your draft, only what you write now: write the reply fresh, never as a "
+                   "correction of an earlier message (no \"correct\", \"earlier\", \"my last message\", \"the first "
+                   "time\").")
+
+    _REDO_RE = re.compile(r"\b(?:your reply says|correct your reply|rewrite (?:it|your reply)|write (?:it|your reply) "
+                          r"(?:fresh|again)|corrects a message|didn't go through)\b", re.IGNORECASE)
+
+    def _with_unseen_note(self, m: Dict[str, Any]) -> Dict[str, Any]:
+        """A send-back asking to fix what a reply said carries the note (the rewrite is the first thing the user
+        reads); other checks ("you didn't write a reply") are shown as they are."""
+        text = str(m.get("content") or "")
+        if not self._is_check(m) or self.UNSEEN_NOTE in text or not self._REDO_RE.search(text):
+            return m
+        return {**m, "content": str(m.get("content") or "").rstrip() + " " + self.UNSEEN_NOTE}
 
     def _bookkeeping_on(self) -> bool:
         """The turn bookkeeping (failures per item, every round checked, spent drafts): off by default until its
@@ -459,12 +466,13 @@ RULES
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         changes_before = self.tools.successful_changes
         outcomes_before = self.tools.outcomes_logged
+        self._times_before = self._times()
+        self._status_before = self._statuses()
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
 
         self._reflected = False
-        self._turn_start = turn_start
         reply = self._rounds(MAX_ROUNDS, changes_before, outcomes_before)
 
         for attempt in range(2):  # a reply that's empty, or that narrates the conversation, gets one more try
@@ -483,12 +491,14 @@ RULES
         reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
                           if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
         if self._claims_change(reply) and self.tools.successful_changes == changes_before:
-            logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
-            reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
+            logger.warning("[FrontierBrain] Unverified change claim, asking for a fresh reply: %r", reply)
+            reply = self._say_true(changes_before)
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        reply = self._moves_made(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._own_up(turn_start, reply, changes_before, outcomes_before)
+        reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
             if m.get("role") == "assistant" and m.get("hidden"):
@@ -548,11 +558,6 @@ RULES
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
                     self._check("Your reply says the schedule changed, but you made no CALLs, so nothing changed. "
                                 "Make the CALLs now, or correct your reply.")
-                    continue
-                if self._promises_extras(content, self._turn_start) and not self._reflected:
-                    self._reflected = True
-                    logger.warning("[FrontierBrain] Model promised what replies show without set_reply_extras.")
-                    self._check(self.EXTRAS_CHECK)
                     continue
                 break
             needs_follow_up = (any(c.get("name") in READ_ONLY_TOOLS for c in calls)
@@ -636,6 +641,8 @@ RULES
         self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
         changes_before = self.tools.successful_changes
         outcomes_before = self.tools.outcomes_logged
+        self._times_before = self._times()
+        self._status_before = self._statuses()
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
@@ -681,12 +688,6 @@ RULES
                         "CALLs, so nothing changed. Make the CALLs now, or correct your reply."
                     )})
                     continue
-                if self._promises_extras(content, turn_start) and not reflected:
-                    reflected = True
-                    logger.warning("[FrontierBrain] Model promised what replies show without set_reply_extras.")
-                    self.messages.append({"role": "user", "content": "[System check, not from the user] "
-                                          + self.EXTRAS_CHECK})
-                    continue
                 break
             needs_follow_up = (
                 any(c.get("name") in READ_ONLY_TOOLS for c in calls)
@@ -722,12 +723,14 @@ RULES
         reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
                           if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
         if self._claims_change(reply) and self.tools.successful_changes == changes_before:
-            logger.warning("[FrontierBrain] Suppressing unverified change claim: %r", reply)
-            reply = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
+            logger.warning("[FrontierBrain] Unverified change claim, asking for a fresh reply: %r", reply)
+            reply = self._say_true(changes_before)
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        reply = self._moves_made(turn_start, reply, self._one_more_round)
         reply = self._own_up_baseline(turn_start, reply)
+        reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
@@ -773,6 +776,303 @@ RULES
             return fixed
         return reply.rstrip() + "\n\n(One part of that didn't go through, so it isn't recorded yet.)"
 
+
+    # --- a move the reply says happened, when nothing moved (11-03) ---
+
+    _MOVED_RE = re.compile(r"\b(moved|shifted|pushed|bumped|slid|rescheduled|swapped|brought\s+(?:\w+\s+){0,3}?"
+                           r"(?:up|forward|earlier))\b", re.IGNORECASE)
+    _NOT_YET_RE = re.compile(r"\b(could|can|should|would|shall|might|may|to)\s+be\s+$|\b(if|want|wants|like|shall i|"
+                             r"should i|could|can)\b[^.!?\n]*$", re.IGNORECASE)
+
+    def _times(self) -> Dict[str, Any]:
+        """Every span's times on the day being planned, by id: what a turn's moves are checked against."""
+        plan = getattr(self.tools, "day_plan", None)
+        return {s.id: (s.start_dt, s.end_dt) for s in (plan.spans if plan is not None else [])}
+
+    def _named(self, sentence: str) -> List[Any]:
+        """The plan's items a sentence names: every word of an item's title, or of a routine's name (its steps)."""
+        from thirties_core.item_facts import mentions, name_words
+        said = name_words(sentence)
+        plan = self.tools.day_plan
+        titles = {s.id: self.tools._title(s) for s in plan.spans}
+        named = [s for s in plan.spans if mentions(sentence, titles[s.id], titles.values())]
+        assistant = getattr(self.tools, "assistant", None)
+        if assistant is not None:
+            try:
+                for note in assistant._routines():
+                    words = name_words(note.get("title", ""))
+                    if words and words <= said:
+                        steps = {t.lower() for t in assistant.routines.steps(note)}
+                        steps |= assistant.routines.known_extras(note)
+                        named += [s for s in plan.spans if s.title.strip().lower() in steps and s not in named]
+            except Exception as e:  # the check never costs the user their reply
+                logger.debug("Couldn't read the routines for the claim check: %s", e)
+        return named
+
+    # the tools that move things (or put them somewhere new): one that went through is a move made this turn
+    MOVING_TOOLS = {"update_event", "swap_events", "push_back", "redraw", "undo_redraw", "put_routine", "add_event",
+                    "add_to_today", "apply_day_proposal", "clear_time", "remove_event"}
+
+    def _unmade_moves(self, turn_start: int, reply: str) -> List[str]:
+        """What the reply says was moved this turn but wasn't: "Feed the fish is still at 9:00 AM" per named item, or
+        "nothing" when it names none and no call that moves things went through. A sentence that asks, offers or
+        admits is no claim."""
+        before = getattr(self, "_times_before", None)
+        if before is None:
+            return []
+        anything = any(m.get("role") == "tool" and m.get("name") in self.MOVING_TOOLS
+                       and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
+        out: List[str] = []
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
+            m = self._MOVED_RE.search(sentence)
+            if m is None or sentence.rstrip().endswith("?") or self._ADMITS_RE.search(sentence):
+                continue
+            lead = sentence[:m.start()]
+            if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
+                continue
+            named = self._named(sentence)
+            if not named:
+                if not anything:
+                    out.append("nothing")
+                continue
+            still = [s for s in named if s.id in before and before[s.id] == (s.start_dt, s.end_dt)]
+            if len(still) == len(named):  # none of what it names moved
+                out += [f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}" for s in still[:3]]
+        return list(dict.fromkeys(out))
+
+    # "Laundry is done", "the dishes are finished": a done said of a named item (beside "marked ... done")
+    _SAID_DONE_RE = re.compile(r"\b(?:is|are|was|were|'s)\s+(?:now\s+|all\s+)?(?:marked\s+|logged\s+(?:as\s+)?)?"
+                               r"(?:done|finished|complete)\b", re.IGNORECASE)
+
+    def _statuses(self) -> Dict[str, Any]:
+        plan = getattr(self.tools, "day_plan", None)
+        return {s.id: s.status for s in (plan.spans if plan is not None else [])}
+
+    def _unmade_dones(self, reply: str) -> List[str]:
+        """Items the reply says are done (or marked) that weren't marked this turn: "Run the dishwasher isn't recorded as
+        done" per item. Only where every item the sentence names is still unmarked (a sentence about two things, one
+        of them marked, is left alone); a sentence naming nothing is the outcome check's."""
+        from thirties_core.models import SpanStatus
+        before = getattr(self, "_status_before", None)
+        if before is None:
+            return []
+        out: List[str] = []
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
+            m = self._OUTCOME_CLAIM_RE.search(sentence) or self._SAID_DONE_RE.search(sentence)
+            if m is None or sentence.rstrip().endswith("?") or self._ADMITS_RE.search(sentence):
+                continue
+            lead = sentence[:m.start()]
+            if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
+                continue
+            named = [s for s in self._named(sentence) if not s.is_envelope and s.source != "calendar"]
+            if named and all(s.status == SpanStatus.PLANNED and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED
+                             for s in named):
+                out += [f"{self.tools._title(s)} isn't recorded as done" for s in named[:3]]
+        return list(dict.fromkeys(out))
+
+    # a clock time said in a reply: "3:30", "3:30 PM", "4pm", "noon"
+    _CLOCK_RE = re.compile(r"\b(\d{1,2}):(\d{2})(?:\s*([ap])\.?m\b\.?)?|\b(\d{1,2})\s*([ap])\.?m\b\.?|\b(noon)\b", re.IGNORECASE)
+    # where a time is about something other than an item on today's plan
+    _ELSEWHERE_RE = re.compile(r"\b(tomorrow|yesterday|last night|next week|monday|tuesday|wednesday|thursday|friday|"
+                               r"saturday|sunday|usually|every day|each day|ping|remind\w*|alarm|arriv\w*|due|"
+                               r"deliver\w*|bedtime)\b", re.IGNORECASE)
+    _RANGE_RE = re.compile(r"(\b\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\b\.?)?)\s*(?:–|-|to|until|till)\s*"
+                           r"(\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\b\.?)?)", re.IGNORECASE)
+    _REMOVED_RE = re.compile(r"\b(removed|deleted|took\b[^.!?\n]{0,40}\boff\b|(?:is|are|'s)\s+(?:now\s+)?off\s+(?:the|your|"
+                             r"today'?s)\s+(?:schedule|plan|list|day))", re.IGNORECASE)
+
+    @staticmethod
+    def _clock_key(dt) -> tuple:
+        return (dt.hour % 12, dt.minute)
+
+    def _said_clocks(self, text: str) -> List[tuple]:
+        out = []
+        for m in self._CLOCK_RE.finditer(text or ""):
+            if m.group(6):
+                out.append((0, 0))
+            elif m.group(1):
+                out.append((int(m.group(1)) % 12, int(m.group(2))))
+            else:
+                out.append((int(m.group(4)) % 12, 0))
+        return out
+
+    def _wrong_times(self, reply: str) -> List[str]:
+        """Times the reply gives for a named item that aren't the item's on the plan after the turn ("meal prep is
+        set for 3:30" with meal prep at 4:00): "Meal prep is at 4:00 PM" per item. A part of a sentence is checked
+        only when none of its times is a time of what it names (start or end, as given or by its block, or when it
+        really happened); one about another day, a reminder or a delivery is left alone."""
+        from thirties_core.clock import thirty_ceil, thirty_of
+        from thirties_core.item_facts import mentions
+        plan = getattr(self.tools, "day_plan", None)
+        if plan is None:
+            return []
+        spans = [s for s in plan.spans_in_view() if not s.shown_only]
+        titles = {s.id: self.tools._title(s) for s in spans}
+        out: List[str] = []
+        for part in re.split(r"(?<=[.!?])\s+|\n+|[,;]|\band\b|\bthen\b", reply or ""):
+            said = self._said_clocks(part)
+            if not said or part.rstrip().endswith("?") or self._ELSEWHERE_RE.search(part):
+                continue
+            named = [s for s in spans if mentions(part, titles[s.id], titles.values())]
+            if not named:
+                continue
+            known, starts, ends = set(), {}, {}
+            for s in named:
+                st = {self._clock_key(dt) for dt in (s.start_dt, thirty_of(s.start_dt), s.actual_start, s.planned_start)
+                      if dt is not None}
+                en = {self._clock_key(dt) for dt in (s.end_dt, thirty_ceil(s.end_dt), s.actual_end, s.planned_end)
+                      if dt is not None}
+                starts[s.id], ends[s.id] = st, en
+                known |= st | en
+            # a range ("from 3:00 to 4:00") is a start and an end: its start is checked as one (an end that
+            # matches never covers a wrong start)
+            ranges = [(self._said_clocks(m.group(1)), self._said_clocks(m.group(2)))
+                      for m in self._RANGE_RE.finditer(part)]
+            ranges = [(a[0], b[0]) for a, b in ranges if a and b]
+            bad_range = bool(ranges) and not all(any(a in starts[s.id] and b in ends[s.id] for s in named)
+                                                 for a, b in ranges)
+            if bad_range or not any(c in known for c in said):
+                out += [f"{titles[s.id]} is at {format_clock(s.start_dt)}" for s in named[:2]]
+        return list(dict.fromkeys(out))
+
+    def _not_removed(self, reply: str) -> List[str]:
+        """Items the reply says were taken off that are still planned as they were: "Shower is still on the plan at
+        2:00 PM"."""
+        from thirties_core.models import SpanStatus
+        before, status = getattr(self, "_times_before", None), getattr(self, "_status_before", None)
+        if before is None or status is None:
+            return []
+        out: List[str] = []
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
+            m = self._REMOVED_RE.search(sentence)
+            if m is None or sentence.rstrip().endswith("?") or self._ADMITS_RE.search(sentence):
+                continue
+            lead = sentence[:m.start()]
+            if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
+                continue
+            named = [s for s in self._named(sentence) if not s.is_envelope and s.source != "calendar"]
+            if named and all(s.status == SpanStatus.PLANNED and status.get(s.id) == SpanStatus.PLANNED
+                             and before.get(s.id) == (s.start_dt, s.end_dt) for s in named):
+                out += [f"{self.tools._title(s)} is still on the plan at {format_clock(s.start_dt)}" for s in named[:3]]
+        return list(dict.fromkeys(out))
+
+    def _moves_made(self, turn_start: int, reply: str, retry) -> str:
+        """After the brain's turn, before anything is sent: what the reply says happened is checked against what
+        the tools did, claim by claim. Moves (the items it names moved; naming none, a move went through), dones (the
+        items it names were marked), times it gives for an item (the plan's), and removals (the items are off). A
+        reply that disagrees is sent back once with the facts; if it still disagrees, a plain line with the plan's
+        facts is added. The words alone never pass for a change (a turn that logged a done and claimed a move it never
+        made; "the dishwasher's going" replied to as done; "set for 3:30" over a plan at 4:00)."""
+        # --- how it talks, too (reply_checks.py): the time now is fixed outright; the rest goes into the rewrite ---
+        from thirties_core import reply_checks
+        try:
+            now = self.tools._now()
+        except Exception:
+            now = None
+        reply = reply_checks.fix_now_time(reply, now)
+
+        def problems(text: str):
+            return (self._unmade_moves(turn_start, text), self._unmade_dones(text), self._wrong_times(text),
+                    self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
+                    reply_checks.unkept_promises(self, turn_start, text))
+        unmade, undone, wrong, kept, talk, promised = problems(reply)
+        if not (unmade or undone or wrong or kept or talk or promised):
+            return reply
+        logger.warning("[FrontierBrain] Reply disagrees with the plan: %r (%s)", reply[:200],
+                       unmade + undone + wrong + kept + talk + promised)
+        said = []
+        if unmade:
+            said.append("something was moved, but " + ("nothing on the plan moved this turn" if unmade == ["nothing"]
+                                                         else "; ".join(u for u in unmade if u != "nothing")))
+        if undone:
+            said.append("something is done, but " + "; ".join(undone)
+                        + " (started isn't finished: what they're doing now is doing_now)")
+        if wrong:
+            said.append("times the plan doesn't have: " + "; ".join(wrong))
+        if kept:
+            said.append("something was taken off, but " + "; ".join(kept))
+        if promised:  # what each promise needs (reply_checks.unkept_promises)
+            said += reply_checks.promise_checks(promised)
+        check = ("Your reply says " + ", and ".join(said) + ". Make the change now, or correct your reply so it "
+                 "matches the plan." if said else "")
+        if talk:
+            check += (" " if check else "") + "Rewrite your reply: " + "; ".join(talk) + "."
+        self._check(check)
+        fixed = reply_checks.fix_now_time((retry() or "").strip(), now)
+        if fixed and not any(problems(fixed)):
+            return fixed
+        if promised:  # a promise Python can't keep goes
+            reply = reply_checks.drop_sentences(reply, promised)
+        if talk:
+            reply = reply_checks.morning_fill(self, turn_start, reply_checks.last_resort(reply))
+        if not (unmade or undone or wrong or kept):
+            return reply
+        lines = []
+        if unmade == ["nothing"]:
+            lines.append("(Nothing has moved yet, so the plan is as it was.)")
+        elif unmade:
+            lines.append("(That move didn't happen: " + "; ".join(u for u in unmade if u != "nothing") + ".)")
+        if undone:
+            lines.append("(" + "; ".join(undone) + ".)")
+        if wrong:
+            lines.append("(On the plan: " + "; ".join(wrong) + ".)")
+        if kept:
+            lines.append("(" + "; ".join(kept) + ".)")
+        return reply.rstrip() + "\n\n" + "\n".join(lines)
+
+    def _no_unseen_correction(self, turn_start: int, reply: str, retry) -> str:
+        """A reply that corrects a message the user never saw (a draft sent back this turn: "I need to correct my
+        last message", "my first attempt didn't take") gets one fresh rewrite; if it still opens so, the opening
+        is cut (reply_checks.unseen_corrections)."""
+        from thirties_core import reply_checks
+        if not reply_checks.unseen_corrections(self, turn_start, reply):
+            return reply
+        logger.warning("[FrontierBrain] Reply corrects a draft the user never saw: %r", reply[:200])
+        self._check("Your reply corrects a message the user never saw. Write it fresh: what's true now, as if for "
+                    "the first and only time.")
+        fresh = (retry() or "").strip()
+        if fresh and not reply_checks.unseen_corrections(self, turn_start, fresh):
+            return fresh
+        return reply_checks.strip_corrections(fresh or reply)
+
+    UNCHANGED_LINE = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
+
+    def _sky(self, now) -> str:
+        """The moon and tomorrow's sun, computed (sky.py): a fact to say, never a guess."""
+        try:
+            from thirties_core.sky import sky_line
+            gen = self.tools.scheduler.config.general if getattr(self.tools, "scheduler", None) else None
+            return sky_line(now, getattr(gen, "latitude", None), getattr(gen, "longitude", None))
+        except Exception:
+            return ""
+
+    def _say_true(self, changes_before: int) -> str:
+        """A reply claiming a change that never happened gets one fresh try in the model's own words (fresh text
+        over fixed lines); the fixed line only if that fails too."""
+        self._check("Your reply says the plan changed, but nothing changed this turn. Make the change now, or write "
+                    "your reply again so it's true: what you'd do next, or the one fact you still lack.")
+        fresh = (self._rounds(2, changes_before, self.tools.outcomes_logged) if self._bookkeeping_on()
+                 else self._one_more_round()).strip()
+        if fresh and (self.tools.successful_changes > changes_before or not self._claims_change(fresh)):
+            return fresh
+        return self.UNCHANGED_LINE
+
+    def _one_more_round(self) -> str:
+        """The model's retry (the baseline turn's), its calls run: a second round when the first only made calls, so
+        the reply that follows them is the one kept."""
+        content = ""
+        for _ in range(2):
+            response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
+            self.messages.append(response)
+            calls = response.get("tool_calls", []) or []
+            for call in calls:
+                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
+                                      "name": call.get("name"), "content": output})
+            content = str(response.get("content") or "")
+            if content.strip() or not calls:
+                break
+        return content
 
     _META_RE = re.compile(
         r"(^|\n)\s*(wait[,!.]|notice that|let'?s check|let me check|looking at the (prompt|transcript|history)|"

@@ -66,6 +66,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "replace_overlaps": "true only when the user says it replaces what's there ('instead', 'replace'): trims or "
                                 "removes the planned activities it covers (never fixed ones).",
             "alongside": "true if it happens during something fixed (an audiobook on the drive to an appointment).",
+            "happened": "true for a record of something that already happened at that time (it's over): it's "
+                        "recorded as done, with exactly those times, never planned.",
             "push_later": "true only when the user asks to make room by sliding what follows later, in order.",
             "fixed": "true if its time is set by someone else's clock (an appointment, a ride, a show, a call at a "
                      "set time): it keeps its exact time and never slides. false if it's flexible. Leave it out "
@@ -201,6 +203,22 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "doing_now",
+        "description": "The user says what they're doing now, or that something has just started (\"I'm in the "
+                       "shower\", \"heading out for errands\", \"the dishwasher's going\", \"I need to rest for an "
+                       "hour\"). It goes in the current block, started now; what was planned in its time moves to the "
+                       "first free time after it (they aren't doing it now). Not a done: mark it done when they say "
+                       "it's finished.",
+        "parameters": {
+            "item": "The item's id or title (a new one is added as said).",
+            "until": "Clock time it lasts until, if they said.",
+            "duration": "How long it lasts, if they said (else its usual length).",
+            "by_itself": "true for something that runs by itself while they do other things (a dishwasher, a "
+                         "load of laundry): recorded as started, nothing moves.",
+        },
+        "required": ["item"],
+    },
+    {
         "name": "push_back",
         "description": "Push the rest of today back by an amount ('push everything back 45 minutes'). Every flexible "
                        "item still to do moves that much later, including the one happening now and ones past their "
@@ -329,6 +347,10 @@ ENVELOPE_WORDS_RE = re.compile(r"\b(work\w*|job|shift|office|sleep\w*|slept|bed\
 REPLACE_WORDS_RE = re.compile(r"\b(instead|replac\w*|rather|swap\w*|drop\w*|cancel\w*|scrap\w*|ditch\w*|remov\w*|"
                               r"clear\w*|bump\w*|nix|get rid|in place of|over\s?(?:write|ride)\w*|trim\w*|cut\w*|"
                               r"shorten\w*)\b", re.IGNORECASE)
+# the user asking for something to come off the plan, without necessarily naming it ("take that off")
+REMOVE_WORDS_RE = re.compile(r"\b(remov\w*|delet\w*|drop\w*|cancel\w*|scrap\w*|ditch\w*|nix|get rid|take\b.{0,30}\boff|"
+                             r"off (?:the|my) (?:plan|schedule|day|list)|clear\w*|never ?mind|forget (?:it|that|about)|"
+                             r"not (?:doing|going)|instead|replac\w*|rather)\b", re.IGNORECASE)
 PUSH_WORDS_RE = re.compile(r"\b(push\w*|back|later|slid\w*|shift\w*|bump\w*|delay\w*|postpon\w*|mov\w*|make room|"
                            r"after|behind|late|run(?:s|ning)? (?:over|long)|ran (?:over|long)|overr?an|reflow\w*|"
                            r"rest of|everything|resched\w*|slip\w*)\b", re.IGNORECASE)
@@ -672,6 +694,10 @@ class PlanTools:
         two half-hours at 8:00), it stays and shares the time.
         """
         hard = self._conflicts(span)
+        from thirties_core.traits import overlap_refusal  # an exclusive item takes up its time
+        refused = None if span.is_envelope else overlap_refusal(self, span, alongside)
+        if refused:
+            raise ToolError(refused)
         if span.is_envelope:
             if not hard:
                 return []
@@ -762,6 +788,107 @@ class PlanTools:
             notes.append(f"{self.describe(span).replace(', ', ' now ', 1)}")
         return notes
 
+    def _make_room(self, span: EventSpan) -> List[str]:
+        """Move the flexible things planned in ``span``'s time to the first free stretch after it (in order, each
+        keeping its length): what the user is doing now, or a gap they asked for, isn't shared. Fixed things, work,
+        sleep, someone else's events and what's already marked stay; what can't fit before bedtime stays and is
+        named."""
+        now = self._now()
+        bed = min((s.start_dt for s in self.day_plan.spans if s.category == SpanCategory.SLEEP
+                   and s.start_dt > span.start_dt and s.status != SpanStatus.SKIPPED), default=self.day_plan.day_end)
+        inside = sorted((s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt)
+                         if s.id != span.id and s.status == SpanStatus.PLANNED and self._movable(s)
+                         and not s.shown_only and not self._is_fixed(s) and s.end_dt > now),
+                        key=lambda s: s.start_dt)
+        notes = []
+        for s in inside:
+            length = s.end_dt - s.start_dt
+            spot = next((a for a, b in self.open_windows(after=max(span.end_dt, now))
+                         if b - a >= length and a + length <= bed), None)
+            if spot is None:
+                notes.append(f"{self._title(s)} stays at {format_clock(s.start_dt)}: no free time left for it today")
+                continue
+            s.start_dt, s.end_dt = spot, spot + length
+            if s.source == "routine":
+                s.source = "user"
+            self._persist(s)
+            notes.append(f"moved {self._title(s)} to {format_clock(spot)}")
+        if inside:
+            self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        return notes
+
+    def _if_doing_now(self, span: EventSpan, notes: List[str]) -> List[str]:
+        """An item put in the current block that the user's words say they're doing now ("heading to the store
+        now"), however it was put there: it's doing_now, so what shared its time moves out (the plan kept a shower
+        beside errands the user was already out on, and "Now" listed both)."""
+        from thirties_core.started import only_started
+        now = self._now()
+        if (span.is_envelope or not self.is_current(self.day_plan) or not thirty_of(now) <= span.start_dt <= now
+                + timedelta(minutes=5) or not only_started(self.user_message, span.title,
+                                                          [s.title for s in self.day_plan.spans if s.id != span.id])):
+            return notes
+        span.actual_start = span.actual_start or now
+        self._persist(span)
+        return [n for n in notes if not n.startswith("alongside ")] + self._make_room(span)
+
+    def doing_now(self, item: Any, until: Any = None, duration: Any = None, by_itself: Any = False, **_: Any) -> str:
+        """What the user is doing now (started.py): in the current block, started now, and what was planned in its
+        time moves after it. Never a done."""
+        plan, now = self.day_plan, self._now()
+        if not (self.is_current(plan) and plan.day_start <= now < plan.day_end):
+            raise ToolError("doing_now is for what's happening now, today.")
+        start = thirty_of(now)
+        span = None
+        try:
+            found = self._find_span(item)
+            if found.status == SpanStatus.PLANNED and not found.is_envelope and found.source != "calendar":
+                span = found
+        except ToolError:
+            span = None
+        if span is None and self.assistant is not None:
+            self.assistant.refuse_routine_as_item(str(item))
+        title = span.title if span is not None else self._words_for(str(item).strip())[0]
+        if not title.strip():
+            raise ToolError("Say what they're doing.")
+        if until not in (None, ""):
+            end = self._end(until, now)
+        elif duration not in (None, ""):
+            end = now + timedelta(minutes=parse_duration_minutes(duration))
+        elif span is not None:
+            end = start + (span.end_dt - span.start_dt)
+        else:
+            from thirties_core.item_facts import for_new_item
+            _, end, _ = for_new_item(self._lasting(), title, [], start, None, False, self.user_message,
+                                     [s.title for s in plan.spans], plan.day_start)
+            end = end or start + timedelta(minutes=30)
+        end = max(end, start + timedelta(minutes=5))
+        if span is None:
+            task = self.assistant._exact_task(title) if self.assistant is not None else None
+            task_id = task.id if task is not None and not task.id.startswith("media:") else None
+            span = EventSpan(new_span_id(), title, start, end, SpanCategory.TASK if task_id else SpanCategory.ACTIVITY,
+                             task_id=task_id)
+            plan.spans.append(span)
+            added = True
+        else:
+            span.start_dt, span.end_dt = start, end
+            if span.source == "routine":
+                span.source = "user"
+            added = False
+        span.actual_start = now
+        plan.spans.sort(key=lambda s: s.start_dt)
+        self._persist(span)
+        from thirties_core.turn_guards import after_add
+        after_add(self, span)
+        notes = [] if _as_bool(by_itself) else self._make_room(span)
+        self._save_plan_after_change()
+        if added and self.assistant is not None:
+            listed = self.assistant.list_today(span)
+            notes += [listed.strip("()")] if listed else []
+        said = (f"{self._title(span)} started at {format_clock(now)}" + ("" if _as_bool(by_itself) else
+                f", on the plan {format_clock(start)} – {format_clock(end)}"))
+        return (f"{said}; not done yet." + (f" ({'; '.join(notes)})" if notes else "")
+                + " Mark it done when they say it's finished.")
+
     def _save_plan_after_change(self) -> None:
         if self.day_plan.is_finalized:
             # A finalized plan that changes is no longer final.
@@ -774,6 +901,41 @@ class PlanTools:
     # ------------------------------------------------------------------
     # Tools
     # ------------------------------------------------------------------
+
+    def _words_for(self, title: Any, task_id: Optional[str] = None) -> Tuple[str, Optional[str]]:
+        """A title given as an item's raw id becomes that item's words (11-06: an item went on the plan as
+        31a1d3808b2c9b79; a rename to an id did the same): never a raw id as a title."""
+        from thirties_core.titles import is_raw_id, resolve_raw
+        if not is_raw_id(title):
+            return str(title), task_id
+        known = resolve_raw(self.scheduler.state_db if self.scheduler else None, str(title),
+                            self.services.tasks if self.services is not None else [])
+        if not known:
+            raise ToolError(f"'{title}' is an item id Thirties doesn't know any more: use the item's words.")
+        return known, task_id or str(title)
+
+    def _planned_copies(self, plan: DayPlan, title: str, task_id: Optional[str] = None) -> List[EventSpan]:
+        """What the day already has planned of this item: the same list item, or the same words, where one of the
+        two is the other's short title (a long list line on the plan and its short title added again are one item;
+        two long lines that share a headline are two)."""
+        from thirties_core.titles import title_of
+
+        def low(text: str) -> str:
+            return str(text).strip().lower()
+
+        def short(text: str) -> str:
+            return low(title_of(text))
+        linked = {task_id} if task_id else set()
+        if self.assistant is not None:
+            same = self.assistant._exact_task(str(title))
+            if same is not None:
+                linked.add(same.id)
+        given, given_short = low(title), short(title)
+        return [s for s in plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
+                and s.source != "calendar"
+                and ((s.task_id and s.task_id in linked) or low(s.title) == given
+                     or (given == given_short and short(s.title) == given)
+                     or (low(s.title) == short(s.title) and low(s.title) == given_short))]
 
     def add_event(
         self,
@@ -788,20 +950,16 @@ class PlanTools:
         push_later: Any = False,
         fixed: Any = None,
         again: Any = False,
+        happened: Any = False,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
             raise ToolError("The item needs a title.")
+        if _as_bool(happened):
+            return self._record_past(str(title).strip(), start, end, duration, category, task_id)
         if self.assistant is not None:
             self.assistant.refuse_routine_as_item(str(title))
-        from thirties_core.titles import is_raw_id, resolve_raw
-        if is_raw_id(title):  # 11-06: an item went on the plan as 31a1d3808b2c9b79: never a raw id as a title
-            known = resolve_raw(self.scheduler.state_db if self.scheduler else None, str(title),
-                                self.services.tasks if self.services is not None else [])
-            if not known:
-                raise ToolError(f"'{title}' is an item id Thirties doesn't know any more: use the item's words.")
-            task_id = task_id or str(title)
-            title = known
+        title, task_id = self._words_for(title, task_id)
         try:
             cat = SpanCategory((category or "activity").lower())
         except ValueError:
@@ -816,9 +974,7 @@ class PlanTools:
         if not _as_bool(again) and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
             # Adding what's already planned that day makes a ghost copy that nags and rolls over (10-27 to 10-30:
             # one item five times, another listed twice): moving is update_event.
-            same = [s for s in self.day_plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
-                    and s.source != "calendar"
-                    and ((task_id and s.task_id == task_id) or s.title.strip().lower() == str(title).strip().lower())]
+            same = self._planned_copies(self.day_plan, str(title), task_id)
             if same:
                 raise ToolError(f"{self.describe(same[0])} is already planned [id {same[0].id}]. To move it, use "
                                 "update_event with that id; to plan a second session as well, add it with again=true.")
@@ -842,6 +998,9 @@ class PlanTools:
         is_fixed = (looks_fixed(str(title)) and gave_time(self.user_message, start_dt)) if fixed in (None, "") \
             else _as_bool(fixed)
         is_fixed = is_fixed or bool(self._state_db is not None and self._lasting().for_item(str(title)).fixed_at)
+        from thirties_core.started import is_rest
+        rest = is_rest(str(title)) and cat not in (SpanCategory.WORK, SpanCategory.SLEEP)
+        is_fixed = is_fixed or rest  # a gap the user asked for keeps its time: nothing is placed in it
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP) and not is_fixed:
             start_dt, end_dt = self._keep_to_blocks(start_dt, end_dt)  # flexible: keeps to blocks; fixed: real time
         if not _as_bool(alongside) and not is_fixed:
@@ -862,8 +1021,14 @@ class PlanTools:
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
+        from thirties_core.turn_guards import after_add
+        after_add(self, span)  # rest is never checked in on
         if is_fixed and not span.is_envelope and self._state_db is not None:
             self._set_fixed(span, True)
+        if rest and not _as_bool(alongside):  # what was planned in the gap moves out of it
+            notes = [n for n in notes if not n.startswith("alongside ")] + self._make_room(span)
+        elif not _as_bool(alongside):
+            notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(lasting + notes)})" if lasting or notes else ""
         extra += kept
@@ -877,6 +1042,38 @@ class PlanTools:
             from thirties_core.day_lists import ahead_note
             extra += f" {ahead_note(self.assistant, self.day_plan)}"
         return f"Added {self.describe(span)} [id {span.id}].{extra}"
+
+    def _record_past(self, title: str, start: Any, end: Any, duration: Any, category: str,
+                     task_id: Optional[str]) -> str:
+        """Something that already happened, recorded after the fact: done, its actual times exactly as given (the
+        user's own), nothing about it planned. Being done, it gets no check-ins, is never missed or rolled over,
+        and counts in the statistics like anything else done."""
+        start_dt = self._start(start)
+        if end not in (None, ""):
+            end_dt = self._end(end, start_dt)
+        elif duration not in (None, ""):
+            end_dt = start_dt + timedelta(minutes=parse_duration_minutes(duration))
+        else:
+            raise ToolError("Give an end time or a duration.")
+        if end_dt.timestamp() > self._now().timestamp():
+            raise ToolError(f"{title} ends at {format_clock(end_dt)}, which hasn't come yet: plan it instead "
+                            "(happened=true is only for something already over).")
+        try:
+            cat = SpanCategory((category or "activity").lower())
+        except ValueError:
+            raise ToolError(f"Unknown category '{category}'. Use activity or task.")
+        if cat not in (SpanCategory.ACTIVITY, SpanCategory.TASK):
+            raise ToolError("Only an activity or a task can be recorded after the fact.")
+        span = EventSpan(new_span_id(), title, start_dt, end_dt, SpanCategory.TASK if task_id else cat,
+                         task_id=task_id, status=SpanStatus.DONE)
+        span.actual_start, span.actual_end, span.time_source = start_dt, end_dt, "reported"
+        self.day_plan.spans.append(span)
+        self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        self._persist(span)
+        if task_id and self._state_db is not None:
+            self._state_db.record_task_completed(task_id, self.day_plan.target_date)
+        self._save_plan_after_change()
+        return f"Recorded {self.describe(span)} [id {span.id}] as done (it already happened)."
 
     def update_event(
         self,
@@ -900,6 +1097,7 @@ class PlanTools:
         if span.source == "calendar":
             raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
         if title:
+            title, _ = self._words_for(title, span.task_id)
             self._separate_things(str(title))
         if to_day not in (None, ""):
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
@@ -956,6 +1154,7 @@ class PlanTools:
             span.source = "user"
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
+        notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
         return f"Changed {before} → {self.describe(span)}.{extra}{getattr(self, '_kept_note', '')}"
@@ -978,6 +1177,11 @@ class PlanTools:
             new_end = new_start + length
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source="user", task_id=span.task_id, notes=span.notes)
+        there = [s for s in self._planned_copies(target_plan, moved.title, span.task_id) if s.id != span.id]
+        if there and not span.is_envelope:
+            raise ToolError(f"{self.describe(there[0])} is already planned on "
+                            f"{target_plan.target_date.strftime('%A, %B %d')} [id {there[0].id}]: move that one "
+                            "(update_event with its id), or remove this one if it's the same thing.")
         self.day_plan = target_plan
         try:
             self._place(moved, False, alongside=alongside)
@@ -1093,6 +1297,17 @@ class PlanTools:
                 raise ToolError(f"{span.title} is an unconfirmed invite; use resolve_calendar_event with attend=false.")
             raise ToolError(f"{span.title} comes from the user's calendar. If they aren't going, decline it with "
                             f"resolve_calendar_event (attend=false); to delete it, they remove it from their calendar.")
+        from thirties_core.item_facts import mentions
+        from thirties_core.plan_log import outer_tool
+        if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
+                and self.user_message is not None
+                and not REMOVE_WORDS_RE.search(self.user_message)
+                and not mentions(self.user_message, self._title(span),
+                                 [self._title(s) for s in self.day_plan.spans if s.id != span.id])):
+            # 10-28: an item vanished from the plan that nobody asked to take off. Taking something off is the
+            # user's call: they say so, or name it
+            raise ToolError(f"The user's message doesn't name {self._title(span)}, so it stays on the plan. Remove "
+                            "something only when the user asks for that item; ask them if it isn't clear.")
         self._drop(span)
         self._save_plan_after_change()
         return f"Removed {self.describe(span)}."
@@ -1289,6 +1504,11 @@ class PlanTools:
                           and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not facts[s.id].anchored
                           and (s.start_dt >= start_from or s.end_dt <= now)), key=lambda s: s.start_dt)
         movable = self._in_fact_order(movable, facts)
+        if self.assistant is not None:  # a project's pieces back to back, unrelated items before or after
+            from thirties_core.project_pieces import group_in_order, project_notes, project_of
+            notes = project_notes(self._state_db)
+            if notes:
+                movable = group_in_order(movable, lambda s: project_of(self.assistant, s, notes))
         # meals first, each at the earliest room inside its window (meals.py); the rest flows around them
         from thirties_core.meals import late_line, window as meal_window
         windows = {s.id: w for s in movable if not facts[s.id].after
@@ -1299,6 +1519,9 @@ class PlanTools:
         original = {s.id: (s.start_dt, s.end_dt) for s in movable}
         blockers = [s for s in plan.active_spans() if s.id not in ids and not s.tentative and s.end_dt > start_from
                     and s.status == SpanStatus.PLANNED]
+        from thirties_core.breathing import Pace, gap_spans  # breathing room
+        blockers += gap_spans(plan, start_from)
+        pace = Pace()
         ends: Dict[str, datetime] = {s.id: s.end_dt for s in plan.spans if s.id not in ids}
         placed: Dict[str, Tuple[datetime, datetime]] = {}
         no_room: List[EventSpan] = []
@@ -1344,7 +1567,7 @@ class PlanTools:
                 if end > meal[1]:  # the window was full: it gives way, and the reply says so
                     late.append(late_line(span.title, meal[1], "no free stretch for it"))
                 continue  # a meal doesn't move the rest along: they flow around it
-            cursor = end
+            cursor = pace.next(t, end)
         if self._state_db is not None:
             self._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}", json.dumps(
                 {"moved": {s.id: [s.start_dt.isoformat(), s.end_dt.isoformat()] for s in movable if s.id in placed},
@@ -1367,7 +1590,7 @@ class PlanTools:
                        + (". It waits for tomorrow (Before today), where it can be moved or dropped."
                           if waiting and len(no_room) == 1 else
                           ". They wait for tomorrow (Before today), where each can be moved or dropped."
-                          if waiting else ". Plan it tomorrow, or let it go?"))
+                          if waiting else ". It goes on another day, where there's room."))
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")
@@ -1431,8 +1654,12 @@ class PlanTools:
             flags.append("UNCONFIRMED invite")
         elif s.is_firm:
             flags.append("fixed calendar commitment")
+        if s.shared and s.whose:  # others_events.py: the user's, and someone else's too
+            flags.append(f"shared, also on {s.whose}")
         if s.status.value != "planned":
             flags.append(s.status.value)
+        elif s.time_source in ("running", "auto_done"):  # in progress, not done (in_progress.py)
+            flags.append("in progress" + (", done by itself at its end" if s.time_source == "auto_done" else ""))
         if upcoming_from and s.end_dt <= upcoming_from:
             flags.append("already over")
         return flags
@@ -1445,6 +1672,10 @@ class PlanTools:
         shown_blocks = set()
         # someone else's events (show-only calendars) are for the Agenda only: the assistant never brings them up (O1)
         in_view = [s for s in plan.spans_in_view() if not s.shown_only]
+        # what's marked already (done, skipped) is a line of its own, never a row of what's planned: rows that mixed
+        # them read as still to do (two short items, one of them done, shown as one row of the schedule)
+        marked = [s for s in in_view if not s.is_envelope and s.status != SpanStatus.PLANNED]
+        in_view = [s for s in in_view if s.is_envelope or s.status == SpanStatus.PLANNED]
         clusters: List[List[EventSpan]] = []
         for s in (x for x in in_view if not x.is_envelope):
             if clusters and s.start_dt < max(x.end_dt for x in clusters[-1]):
@@ -1493,8 +1724,10 @@ class PlanTools:
         behind = missed_for(self, now, muted_too=True) if plan.day_start <= now < plan.day_end else []
         from thirties_core.calendar_engine import unread_text
         unread = unread_text(plan.calendar_unread)
+        done_line = ("\nMarked already (not still to do): " + "; ".join(
+            f"{self._title(s)} ({s.status.value}, {format_clock(s.start_dt)})" for s in marked) if marked else "")
         return ((unread + " Free time below may not be free.\n" if unread else "")
-                + "Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet")
+                + "Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet") + done_line
                 + f"\n{scope}: {free}"
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
@@ -1527,7 +1760,8 @@ class PlanTools:
         invite = next((e for e in self.ambiguous_events if e.id == span.source_event_id), None)
         # Obvious default: a decision on someone else's event is about the series (O1: a shared calendar's weekly event came
         # back every week); on the user's own calendar it's about this one time.
-        whole = _as_bool(series) if series not in (None, "") else bool(invite is not None and not invite.is_primary)
+        from thirties_core.others_events import default_series  # someone else's: the series, mine or not
+        whole = _as_bool(series) if series not in (None, "") else default_series(span, invite)
         if self._state_db and span.source_event_id:
             if whole:
                 self._state_db.set_event_decision(series_key(invite or span.source_event_id),
@@ -1540,10 +1774,16 @@ class PlanTools:
             decided |= {e.id for e in self.ambiguous_events if series_key(e) == key}
         self.ambiguous_events = [e for e in self.ambiguous_events if e.id not in decided]
         every = " (every time it comes up)" if whole else ""
+        if whole:  # someone else's event that isn't an invite: the rest of its series on this day too
+            decided |= {s.source_event_id for s in self.day_plan.spans if s.source == "calendar" and s.source_event_id
+                        and series_key(s.source_event_id) == series_key(invite or span.source_event_id)}
         if going:
             for s in self.day_plan.spans:
                 if s.source_event_id in decided:
-                    s.tentative, s.is_firm = False, True
+                    was_theirs = s.shown_only or s.ask  # "that's mine" on someone else's: on the plan, also theirs
+                    s.tentative, s.is_firm, s.shown_only = False, True, False
+                    if was_theirs:
+                        s.ask, s.shared = "", bool(s.whose)
             return f"{self.describe(span)} is confirmed and now fixed on the schedule{every}."
         self.day_plan.spans = [s for s in self.day_plan.spans if s.source_event_id not in decided]
         return f"Declined {self.describe(span)}{every}; that time is free."
@@ -1594,6 +1834,7 @@ class PlanTools:
             "slot_options": self.slot_options,
             "set_sharing": self.set_sharing,
             "push_back": self.push_back,
+            "doing_now": self.doing_now,
         }
         if self.assistant:
             handlers.update(self.assistant.handlers())
@@ -1608,6 +1849,15 @@ class PlanTools:
         guarded, args, guard_note = guard(name, args, self.user_message)
         if not guarded:
             return guard_note
+        from thirties_core.backlog_tickets import ticket_guard  # a ticket goes on only when the user names it
+        held = ticket_guard(self, name, args)
+        if held:
+            return held
+        # --- what this turn may change, from the user's words (turn_guards.py) ---
+        from thirties_core import turn_guards
+        held = turn_guards.refuse(self, name, args, READ_ONLY_TOOLS, outermost=self._home_plan is None)
+        if held:
+            return f"{NOT_DONE}: {held}"
         saved = self.day_plan
         outermost = self._home_plan is None
         if outermost:

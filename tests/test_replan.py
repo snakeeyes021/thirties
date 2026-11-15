@@ -3,7 +3,7 @@
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, build_day
+from tests.fixtures import DAY, at, build_day, line_with
 from thirties_core.astronomy import set_debug_time
 from thirties_core.kinds import DAILY, ONCE, ONGOING
 from thirties_core.plan_tools import PlanTools
@@ -99,12 +99,12 @@ class SettleTest(TodayTestCase):
         said = self.t.execute("rollover_proposal", {})
         rec = OpenPool(self.sched.state_db).all()["mail the warranty card asap"]
         self.assertEqual(rec["start"], DAY.isoformat(), said)
-        self.assertIn("Keep: Mail the warranty card ASAP, today.", said)
+        line_with(said, "Mail the warranty card ASAP", "today", "4:00 PM")  # where it went, plainly
 
     def test_the_morning_names_each_placement(self):
         self.miss("Return the library books")
         said = self.t.execute("rollover_proposal", {})
-        self.assertIn("Keep: Return the library books, tomorrow.", said)  # applied, and said so it can be corrected
+        line_with(said, "Return the library books", "tomorrow")  # applied, and said so it can be corrected
 
     def test_a_week_with_no_room_leaves_it_at_its_horizon(self):
         from thirties_core.carry import OpenPool, settle

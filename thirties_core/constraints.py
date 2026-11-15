@@ -115,7 +115,8 @@ def nearest(pt, title: str, span_id: Optional[str], minutes: int, want: datetime
     now = pt._now()
     length = timedelta(minutes=minutes)
     candidates = []
-    for a, b in pt.open_windows(after=now):
+    from thirties_core.breathing import clip  # room after work: not where Thirties puts things
+    for a, b in clip(pt.day_plan, pt.open_windows(after=now)):
         t = thirty_ceil(max(a, now)) if a < now else a
         while t + length <= b:
             if problem(pt, title, span_id, t, t + length) is None:

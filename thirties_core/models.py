@@ -110,6 +110,11 @@ class EventSpan:
     # Someone else's calendar event, shown for context only ("show only" calendars): it takes no time, is never
     # asked about and never moves anything (O1: the user's partner's rehearsals).
     shown_only: bool = False
+    # Whose calendar it's on, when not only the user's ("Jamie's calendar"), and whether it's shared with the user
+    # (on their plan, also someone else's); ask: someone else's event to ask about once (others_events.py).
+    whose: str = ""
+    shared: bool = False
+    ask: str = ""
     status: SpanStatus = SpanStatus.PLANNED
     notes: str = ""
     # What actually happened, once known. time_source says how reliable the times are:
@@ -159,6 +164,8 @@ class EventSpan:
             "is_firm": self.is_firm,
             "tentative": self.tentative,
             "shown_only": self.shown_only,
+            "whose": self.whose,
+            "shared": self.shared,
             "status": self.status.value,
             "notes": self.notes,
             "actual_start": self.actual_start.isoformat() if self.actual_start else None,
@@ -182,6 +189,8 @@ class EventSpan:
             is_firm=data.get("is_firm", False),
             tentative=data.get("tentative", False),
             shown_only=data.get("shown_only", False),
+            whose=data.get("whose", ""),
+            shared=data.get("shared", False),
             status=SpanStatus(data.get("status", "planned")),
             notes=data.get("notes", ""),
             actual_start=datetime.fromisoformat(data["actual_start"]) if data.get("actual_start") else None,

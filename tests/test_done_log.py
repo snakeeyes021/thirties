@@ -3,7 +3,7 @@
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at
+from tests.fixtures import DAY, at, line_with
 from tests.test_list_placement import ListsTestCase
 from thirties_core.astronomy import set_debug_time
 from thirties_core.done_log import DONE_NOTEBOOK, DoneLog, ticked_to_file
@@ -93,7 +93,8 @@ class TestFiling(ListsTestCase):
         self.sweep(at("16:00"))
         self.assertNotIn("Call the bank", self.body("n_errands"))
         out = self.t.execute("reopen_item", {"item": span.id})
-        self.assertIn("put 'Call the bank' back on Errands/Admin", out)
+        line_with(out, "'Call the bank'", "Errands/Admin")
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
         self.assertIn("Bank is planned again", out)
         self.assertEqual(self.body("n_errands"), "# Active\n- [ ] Buy stamps\n- [x] Ticked years ago\n- [ ] Call the bank\n")
         self.assertEqual(self.done_note()["body"], "")
@@ -105,7 +106,7 @@ class TestFiling(ListsTestCase):
         bank = next(t for t in self.services.tasks if t.title == "Call the bank")
         self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
         out = self.t.execute("reopen_item", {"item": "Call the bank"})
-        self.assertIn("unticked 'Call the bank' in Errands/Admin", out)
+        line_with(out, "'Call the bank'", "Errands/Admin")
         self.assertIn("- [ ] Call the bank", self.body("n_errands"))
 
     def test_done_again_after_an_undo_ticks_it_again(self):

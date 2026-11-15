@@ -4,7 +4,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService
@@ -94,10 +94,11 @@ class TestRecording(DayTimesCase):
                              actual_end=at(ended, d), time_source="reported")
             spans += [sleep, work]
         facts = day_time_facts(spans)
-        self.assertIn("You usually wake around 7:30 AM, about 30 minutes later than planned (3 mornings recorded).",
-                      facts)
-        self.assertIn("Work usually starts about 15 minutes later than planned (3 days recorded).", facts)
-        self.assertIn("A workday usually runs about 8h (planned 7h 30m; 3 days recorded).", facts)
+        self.assertEqual(len(facts), 3, facts)  # wake, work start, workday length; no bedtimes were recorded
+        text = "\n".join(facts)
+        line_with(text, "wake", "7:30 AM", "30 minutes later", "3 ")  # the median, the drift, the sample size
+        line_with(text, "Work", "starts", "15 minutes later", "3 ")
+        line_with(text, "8h", "7h 30m", "3 ")  # took about 8h against 7h 30m planned
         self.assertEqual(day_time_facts(spans[:4]), [])  # two days: too few to say anything
 
 

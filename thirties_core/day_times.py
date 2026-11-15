@@ -174,6 +174,66 @@ def record_day_times(plan: DayPlan, now: datetime, *, woke: Any = None, slept: A
 
 
 # ----------------------------------------------------------------------------
+# Replanning from it: work started or ended, and the rest of the day follows
+# ----------------------------------------------------------------------------
+
+# Whether work that started late (or early), with nothing said about its end, runs its planned length: True expects a
+# 9:00 – 5:00 day that started at 9:40 to end at 5:40 and plans the evening from then. Off: Work and Sleep change only
+# when the user talks about them (PlanTools._envelope_ok), so the planned end stays until they say when work ended.
+WORK_KEEPS_ITS_LENGTH = False
+
+
+def replan_after_work(tools, work: EventSpan, was: Tuple[datetime, datetime], started: bool, ended: bool) -> str:
+    """After the user says when work started or ended: Work's expected end follows a late start, and the rest of the
+    day is planned from it. What now falls inside Work, or right as it ends, moves along (placement.make_way: half
+    an hour clear after work, fixed things and meals stay); an earlier end leaves the time free and says how much.
+    Returns the sentences for the reply ('' if nothing else changed)."""
+    from thirties_core.breathing import AFTER_WORK
+    from thirties_core.placement import apply_flow, flexible, make_way
+    plan = tools.day_plan
+    if started and not ended and WORK_KEEPS_ITS_LENGTH and work.actual_end is None:
+        length = (work.planned_end or was[1]) - (work.planned_start or was[0])
+        new_end = work.start_dt + length
+        if new_end != work.end_dt:
+            work.end_dt = new_end
+            tools._persist(work)
+    out: List[str] = []
+    if work.end_dt > was[1]:
+        chain = sorted((s for s in plan.active_spans() if flexible(tools, plan, s) and s.start_dt >= was[1]
+                        and s.time_source not in ("running", "auto_done")), key=lambda s: s.start_dt)
+        flow = make_way(tools, plan, chain, {}, wall=work, wall_was=was, clear_after=AFTER_WORK)
+        moved = apply_flow(tools, plan, flow)
+        if started and not ended:
+            out.append(f"Work should run until about {format_clock(work.end_dt)}.")
+        if moved:
+            out.append("Moved along after work: " + "; ".join(f"{s.title} to {format_clock(s.start_dt)}" for s in moved)
+                       + ".")
+        from thirties_core.placement import flow_lines
+        out += flow_lines(flow, moved)
+    elif work.end_dt < was[1]:
+        free = _free_after(tools, plan, work.end_dt)
+        if started and not ended:
+            out.append(f"Work should be done about {format_clock(work.end_dt)}.")
+        if free:
+            out.append(free)
+    if ended and tools.is_current(plan) and work.end_dt <= tools._now() + timedelta(minutes=30):
+        from thirties_core.after_work import offer  # the thirties left, and a few things that fit
+        offered = offer(tools, work.end_dt)
+        if offered:
+            out.append(offered)
+    return " ".join(out)
+
+
+def _free_after(tools, plan: DayPlan, t: datetime) -> str:
+    """What's free now that work ends earlier: the open stretch from then, and the daylight and dark thirties left."""
+    windows = [(a, b) for a, b in tools.open_windows(after=t) if a <= t + timedelta(hours=1)]
+    if not windows:
+        return ""
+    a, b = windows[0]
+    return f"Free from {format_clock(a)}: {tools.describe_window(a, b)}."
+
+
+# ----------------------------------------------------------------------------
 # Asking
 # ----------------------------------------------------------------------------
 

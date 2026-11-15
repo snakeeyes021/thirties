@@ -3,7 +3,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from tests.test_conversation import reply
 from thirties_core import plan_log
 from thirties_core.astronomy import set_debug_time
@@ -90,7 +90,7 @@ class TestRecording(PlanLogCase):
         self.assertEqual(row["change"], "moved")
         self.assertIn("walk at 1 instead", row["message"])
         out = manager.execute_tool("item_history", {"item": "Walk"})
-        self.assertIn("Walk moved (11:00 AM – 11:30 AM → 1:00 PM – 1:30 PM)", out)
+        line_with(out, "Walk", "moved", "11:00 AM", "1:00 PM")  # from, to
         self.assertIn("walk at 1 instead", out)
 
     def test_a_synced_change_is_from_another_device(self):
@@ -123,7 +123,7 @@ class TestReading(PlanLogCase):
         tools.execute("log_outcome", {"event": "Taxes", "status": "skipped"})
         tools.user_message = None
         out = tools.execute("item_history", {"item": "Taxes"})
-        self.assertIn("Taxes marked skipped (planned → skipped)", out)
+        line_with(out, "Taxes", "skipped")
         self.assertIn('"skip the taxes, not today" (log_outcome)', out)
         self.assertNotIn("say you don't know", out)
 

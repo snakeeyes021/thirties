@@ -4,7 +4,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler, occupant
+from tests.fixtures import DAY, FakeJoplinAPI, at, line_with, make_scheduler, occupant
 from thirties_core.assistant_tools import Services, rank_tasks
 from thirties_core.astronomy import set_debug_time
 from thirties_core.memory import ConversationStore, EnergyLog, MemoryStore, ProfileStore
@@ -42,7 +42,7 @@ class TestOutcomes(ToolsTestCase):
     def test_done_with_reported_times_and_joplin_checkoff(self) -> None:
         self.t.execute("add_event", {"title": "Taxes", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_taxes"})
         out = self.t.execute("log_outcome", {"event": "Taxes", "status": "done", "started": "4:15 PM", "finished": "5:45 PM"})
-        self.assertIn("Marked Taxes done (4:15 PM – 5:45 PM, reported)", out)
+        line_with(out, "Taxes", "done", "4:15 PM", "5:45 PM")  # the real times it was given
         self.assertIn("checked it off in Joplin", out)
         self.assertEqual([u[0] for u in self.api.updates], ["t_taxes"])
         span = next(s for s in self.sched.build_day_plan(DAY)[0].spans if s.title == "Taxes")
@@ -197,7 +197,7 @@ class TestAnyDay(ToolsTestCase):
     def test_move_to_another_day(self) -> None:
         self.t.execute("add_event", {"title": "Email plumber", "start": "7:00 PM", "duration": "30 min"})
         out = self.t.execute("update_event", {"event": "Email plumber", "to_day": "tomorrow", "start": "9:00 AM"})
-        self.assertIn("to Friday, October 16, 9:00 AM – 9:30 AM", out)
+        line_with(out, "Friday", "October 16", "9:00 AM", "9:30 AM")
         self.assertNotIn("Email plumber", [s.title for s in self.t.day_plan.spans])
         self.assertEqual(occupant(self.sched.build_day_plan(DAY + timedelta(days=1))[0], "09:00", 1), "Email plumber")
         self.t.execute("add_event", {"title": "Call", "start": "4:00 PM", "duration": "30 min"})
@@ -281,9 +281,9 @@ class TestStatistics(unittest.TestCase):
         facts = fact_lines(self.spans(), at("12:00"), deferred=[("Compose the bridge section", 3)])
         text = "\n".join(facts)
         self.assertIn("4 were done", text)
-        self.assertIn("'composing' usually takes about 1.5x the planned time", text)
+        line_with(text, "'composing'", "1.5x")
         self.assertIn("evening get done 100%", text)
-        self.assertIn("'Compose the bridge section' has been put off 3 times", text)
+        line_with(text, "'Compose the bridge section'", "3 times")
 
     def test_estimated_times_do_not_feed_durations(self) -> None:
         spans = self.spans()

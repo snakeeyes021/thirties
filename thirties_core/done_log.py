@@ -200,10 +200,14 @@ def dropped_line(day: date, title: str, list_title: str, why: str = "") -> str:
 
 
 def done_note_id(api, db, month: str, create: bool = True, title_tpl: str = DONE_NOTE_TITLE,
-                 key_prefix: str = "done_note") -> Optional[str]:
+                 key_prefix: str = "done_note", chosen: bool = True) -> Optional[str]:
     """The id of the month's Done note, made (with the Thirties notebook) the first time it's needed. Joplin must
     be up. The note is marked "ignore", so it's never read as a list. It's looked for by title before one is made,
     and when Joplin has synced in a second one (two devices each made it), they're merged into the older one."""
+    if chosen and title_tpl == DONE_NOTE_TITLE:  # the note the user chose for done items, while it's in Joplin
+        picked = chosen_done_note(api, db)       #
+        if picked is not None:
+            return picked
     key = f"{key_prefix}:{month}"
     cached = db.get_sync_meta(key)
     title = title_tpl.format(month=month)
@@ -241,6 +245,45 @@ def done_note_id(api, db, month: str, create: bool = True, title_tpl: str = DONE
     except Exception as e:
         logger.warning("Couldn't mark the Done note as not a list: %s", e)
     return note_id
+
+
+def chosen_done_note(api, db) -> Optional[str]:
+    """The id of the note the user chose for done items (list_settings.done_note), if it's still in Joplin and
+    isn't one of their lists; None otherwise (the month's Done note then). It's marked "ignore" unless the user
+    gave it a role, so its dated lines are never read as things to do."""
+    from thirties_core.list_settings import done_note
+    chosen = done_note(db)
+    if not chosen:
+        return None
+    try:
+        got = api.get_note(chosen["id"], fields="id,title")
+    except Exception:
+        got = None
+    if not got or not got.get("id"):
+        logger.warning("The chosen done note isn't in Joplin; filing in the month's Done note")
+        return None
+    from thirties_core.lists import ListCatalog
+    catalog = ListCatalog(db)
+    had = catalog.roles().get(chosen["id"])
+    if had and had.get("role") not in ("ignore", "reference"):
+        logger.warning("The chosen done note is one of the user's lists (%s); filing in the month's Done note",
+                       had.get("role"))
+        return None  # never file done lines into a list or a routine
+    if not had or had.get("role") != "ignore":
+        catalog.set_role(chosen["id"], "ignore", got.get("title") or chosen.get("title", ""), source="user")
+    return chosen["id"]
+
+
+def done_note_ids(api, db, month: str) -> List[str]:
+    """Where a filed line may be, to take it back out: the chosen note, then the month's Done note."""
+    out = []
+    chosen = chosen_done_note(api, db)
+    if chosen:
+        out.append(chosen)
+    monthly = done_note_id(api, db, month, create=False, chosen=False)
+    if monthly and monthly not in out:
+        out.append(monthly)
+    return out
 
 
 def file_done_op(note_id: str, title: str, list_title: str, day: date, occurrence: int = 0) -> Dict[str, Any]:
@@ -448,8 +491,11 @@ class DoneLog:
         """A line unticked in the Done note means "not done after all": the item goes back to its list."""
         out = []
         months = sorted({r["month"] for r in self.filed()}, reverse=True)[:2]
-        for month in months:
-            note_id = self.db.get_sync_meta(f"done_note:{month}")
+        from thirties_core.list_settings import done_note
+        chosen = (done_note(self.db) or {}).get("id")  # the note the user chose for done items, too
+        places = [(month, nid) for month in months
+                  for nid in dict.fromkeys(x for x in (self.db.get_sync_meta(f"done_note:{month}"), chosen) if x)]
+        for month, note_id in places:
             note = writer.api.get_note(note_id, fields="id,title,body") if note_id else None
             if not note:
                 continue
@@ -499,6 +545,6 @@ def clear_completed(db, task_id: str) -> None:
 
 
 __all__ = ["DoneLog", "MERGED_SUFFIX", "merge_done_bodies", "DONE_NOTEBOOK", "DONE_NOTE_TITLE", "FILED_ROLES",
-           "FILE_AFTER", "done_note_id", "done_line",
+           "FILE_AFTER", "done_note_id", "done_note_ids", "chosen_done_note", "done_line",
            "file_done_op", "worked_on_op", "ticked_to_file", "clear_completed", "filed_key", "file_dropped_op",
            "dropped_line", "DROPPED_NOTE_TITLE"]

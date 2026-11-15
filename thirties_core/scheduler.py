@@ -603,7 +603,7 @@ class DeterministicScheduler:
         """The day's calendar events, and the calendars that couldn't be read ("" for all of them). A calendar that
         can't be read keeps what it showed at its last good read; with none, it's named, so the day isn't taken for
         free."""
-        events: Dict[str, CalendarEvent] = {}
+        events: Dict[Tuple[str, str], CalendarEvent] = {}  # per calendar: one event can be on several (others_events)
         unread: List[str] = []
         for d in dict.fromkeys((plan.day_start.date(), plan.day_end.date())):
             try:
@@ -617,7 +617,7 @@ class DeterministicScheduler:
             fetched += self._last_good(d, fetched, read, failed, unread)
             for e in fetched:
                 if e.overlaps_interval(plan.day_start, plan.day_end):
-                    events[e.id] = e
+                    events[(e.calendar_id, e.id)] = e
         return list(events.values()), list(dict.fromkeys(unread))
 
     def _last_good(self, d: date, fetched: List[CalendarEvent], read: List[str], failed: List[Tuple[str, str]],
@@ -674,6 +674,8 @@ class DeterministicScheduler:
                                                   getattr(self.config.calendar, "modes", None))
         calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]
         self._holiday_off(plan, events)
+        from thirties_core.days_off import apply as days_off  # no Work on a day the user is off
+        days_off(self, plan)
         from thirties_core.calendar_outcomes import CalendarOutcomes
         CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar
         plan.spans.extend(calendar_spans)

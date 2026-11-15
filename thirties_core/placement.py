@@ -161,10 +161,11 @@ def candidate_slots(tools: "PlanTools", plan: DayPlan, minutes: int, now: Option
 
 
 def _windows(tools: "PlanTools", plan: DayPlan, after: Optional[datetime], before: Optional[datetime]):
+    from thirties_core.breathing import clip  # room after work: not where Thirties puts things
     saved = tools.day_plan
     tools.day_plan = plan
     try:
-        return tools.open_windows(after, before)
+        return clip(plan, tools.open_windows(after, before))
     finally:
         tools.day_plan = saved
 
@@ -183,77 +184,208 @@ def slot_options_text(tools: "PlanTools", plan: DayPlan, minutes: int, now: Opti
     return "\n".join(lines + ([overview] if overview else []))
 
 
-# --- push everything back (S4) ---
+# --- making way: push everything back, and the rest moving along when something runs long ---
+
+def inside_fixed(tools: "PlanTools", plan: DayPlan, span: EventSpan) -> Optional[EventSpan]:
+    """The fixed event this item sits inside (a lesson's parts inside the lesson), or None: what's inside a fixed
+    event happens with it, so it never moves on its own."""
+    for f in plan.active_spans():
+        if f.id == span.id or f.is_envelope or f.status == SpanStatus.SKIPPED or not tools._is_fixed(f):
+            continue
+        if f.start_dt <= span.start_dt and span.end_dt <= f.end_dt and f.end_dt - f.start_dt > span.end_dt - span.start_dt:
+            return f
+    return None
+
+
+def flexible(tools: "PlanTools", plan: DayPlan, span: EventSpan) -> bool:
+    """Thirties may move it on its own: a planned activity or task, not fixed, not timed by someone else, not inside
+    a fixed event."""
+    from thirties_core.traits import time_set_by
+    return (tools._movable(span) and span.status == SpanStatus.PLANNED
+            and span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not tools._is_fixed(span)
+            and not time_set_by(tools, span) and inside_fixed(tools, plan, span) is None)
+
+
+@dataclass
+class Flow:
+    placed: Dict[str, Tuple[datetime, datetime]]  # what moves, to where
+    no_room: List[EventSpan]                     # would run into bedtime (or past daylight): stays where it was
+    kept: List[EventSpan]                        # in the way of nothing: kept its time (there was room)
+    meals_kept: List[EventSpan]                  # meals that stayed put while the rest went round them
+    late: List[str]                              # a meal that had to go past its window
+
+
+def make_way(tools: "PlanTools", plan: DayPlan, chain: List[EventSpan], seed: Dict[str, timedelta],
+             wall: Optional[EventSpan] = None, wall_was: Optional[Tuple[datetime, datetime]] = None,
+             clear_after: timedelta = timedelta(0)) -> Flow:
+    """Where each item of ``chain`` (flexible items, in start order) goes when the day ahead moves along.
+
+    ``seed`` gives the items that move by a set amount (pushing back: what's behind or first in line). ``wall`` is an
+    item that runs long (still doing it): it now ends later than ``wall_was``. Everything else moves only as far as
+    it has to: each keeps up to half an hour of the room it had before it, and the rest of a gap absorbs the push, so
+    what's far enough off keeps its time (11-09: the rest could stay where it was). Fixed things, what's inside them and
+    what someone else times never move; what lands on them goes right after. A meal stays roughly where it is: the
+    rest goes round it, and it moves only when the thing running long covers it, never past its window (10-31:
+    lunch and dinner moved by the whole push). Lengths are kept. What would run into bedtime stays where it was.
+    ``clear_after``: what moves past the wall starts at least this long after it (breathing room after work)."""
+    from thirties_core.meals import late_line, window as meal_window
+    from thirties_core.traits import is_exclusive, time_set_by
+    facts = tools._facts() if tools._state_db is not None else None
+    ids = {s.id for s in chain}
+    sleep = [s for s in plan.active_spans() if s.category == SpanCategory.SLEEP]
+    walls = [s for s in plan.active_spans() if s.id not in ids and not s.is_envelope and s.status == SpanStatus.PLANNED
+             and (tools._is_fixed(s) or is_exclusive(tools, s) or time_set_by(tools, s))
+             and (wall is None or s.id != wall.id)]
+    if wall is not None:
+        walls.append(wall)
+    out = Flow({}, [], [], [], [])
+
+    def daylight(span: EventSpan) -> bool:
+        return bool(facts and facts.get(span.id).daylight)
+
+    def hits(t: datetime, end: datetime, obstacles) -> List:
+        return [o for o in obstacles if o[0] < end and t < o[1]]
+
+    obstacles = [(w.start_dt, w.end_dt + (clear_after if w is wall else timedelta(0)), w.id) for w in walls]
+    # meals first: in place, unless what runs long covers them (then just past it, inside their window)
+    meals = [s for s in chain if s.id not in seed and meal_window(s.title, plan.day_start) is not None]
+    for meal in meals:
+        length = meal.end_dt - meal.start_dt
+        t, end = meal.start_dt, meal.end_dt
+        if wall is not None and wall.start_dt < end and t < wall.end_dt:
+            closes = meal_window(meal.title, plan.day_start)[1]
+            t, end = tools._snap(wall.end_dt, wall.end_dt + length)
+            if end > closes:
+                out.late.append(late_line(meal.title, closes, f"{wall.title} is still going"))
+        if (t, end) != (meal.start_dt, meal.end_dt):
+            out.placed[meal.id] = (t, end)
+        else:
+            out.meals_kept.append(meal)
+        obstacles.append((t, end, meal.id))
+    shifts: Dict[str, timedelta] = {m.id: (out.placed[m.id][0] - m.start_dt if m.id in out.placed else timedelta(0))
+                                    for m in meals}
+    front_was = wall_was[1] if wall_was else None   # where the moving run ended, as planned
+    front_now = wall.end_dt if wall is not None else None  # and where it ends now
+    done: List[EventSpan] = list(meals)
+    for span in chain:
+        if span.id in shifts:
+            continue
+        s0, e0 = span.start_dt, span.end_dt
+        length = e0 - s0
+        if span.id in seed:
+            shift = seed[span.id]
+            window = meal_window(span.title, plan.day_start)
+            if window is not None and e0 + shift > window[1]:  # a meal behind its time moves, but no further than needs be
+                shift = max(min(shift, max(window[1] - e0, tools._now() - s0)), timedelta(0))
+        else:
+            partner = next((p for p in reversed(done) if p.start_dt <= s0 < p.end_dt), None)
+            if partner is None and wall is not None and wall_was and wall.start_dt <= s0 < wall_was[1]:
+                shift = timedelta(0)  # it started during what runs long: it goes on alongside it
+            elif partner is not None:
+                shift = shifts[partner.id]  # it shares time with the one before it: they move together
+            elif front_was is None or front_now is None:
+                shift = timedelta(0)
+            else:
+                room = max(s0 - front_was, timedelta(0))
+                need = front_now + min(room, BREATHING_ROOM)
+                if wall is not None and clear_after and s0 >= (wall_was[1] if wall_was else wall.end_dt):
+                    need = max(need, wall.end_dt + clear_after)
+                shift = max(need - s0, timedelta(0))
+        t, end = s0 + shift, e0 + shift
+        if shift > timedelta(0):
+            t, end = tools._snap(t, end)
+            for _ in range(50):
+                hit = hits(t, end, obstacles)
+                if not hit:
+                    break
+                t, end = tools._snap(max(h[1] for h in hit), max(h[1] for h in hit) + length)
+        fits = end <= plan.day_end and not any(b.start_dt < end and t < b.end_dt for b in sleep) \
+            and not (daylight(span) and end > plan.sunset)
+        if not fits:
+            out.no_room.append(span)
+            t, end = s0, e0
+        elif (t, end) != (s0, e0):
+            out.placed[span.id] = (t, end)
+        elif front_now is not None:
+            out.kept.append(span)
+        shifts[span.id] = t - s0
+        done.append(span)
+        front_was = max(front_was, e0) if front_was else e0
+        front_now = max(front_now, end) if front_now else end
+    return out
+
+
+def apply_flow(tools: "PlanTools", plan: DayPlan, flow: Flow, extra_undo: Optional[Dict[str, Tuple[datetime, datetime]]] = None) -> List[EventSpan]:
+    """Put the moves on the plan, keeping what was there for undo (undo_redraw). Returns the moved items."""
+    moved = [s for s in plan.spans if s.id in flow.placed]
+    if tools._state_db is not None:
+        before = {s.id: [s.start_dt.isoformat(), s.end_dt.isoformat()] for s in moved}
+        for sid, (a, b) in (extra_undo or {}).items():
+            before[sid] = [a.isoformat(), b.isoformat()]
+        tools._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}",
+                                      json.dumps({"moved": before, "removed": []}))
+    for span in moved:
+        span.start_dt, span.end_dt = flow.placed[span.id]
+        tools._persist(span)
+    plan.spans.sort(key=lambda s: s.start_dt)
+    tools._save_plan_after_change()
+    return sorted(moved, key=lambda s: s.start_dt)
+
+
+def plain_lines(spans: List[EventSpan]) -> List[str]:
+    """What moved, by thirties as the agenda lays it out, as plain lines (time first, never '- ' bullets)."""
+    from thirties_core.clock import agenda_lines
+    return [line[2:] if line.startswith("- ") else line.strip()
+            for line in agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in spans])]
+
+
+def flow_lines(flow: Flow, moved: List[EventSpan]) -> List[str]:
+    """The reply's lines about what else happened: kept, meals, no room."""
+    out = []
+    if flow.kept:  # the push was absorbed by a gap: from there on, the day is as it was
+        out.append(f"There was room before {flow.kept[0].title}, so it and what follows keep their times.")
+    if flow.meals_kept and moved:
+        names = " and ".join(s.title for s in flow.meals_kept)
+        out.append(f"{names} stays where it was; the rest goes around it." if len(flow.meals_kept) == 1 else
+                   f"{names} stay where they were; the rest goes around them.")
+    out += flow.late
+    if flow.no_room:
+        out.append("Would run into bedtime, so it stays where it was: " + ", ".join(s.title for s in flow.no_room)
+                   + (". Plan it tomorrow, or let it go?" if len(flow.no_room) == 1 else ". Plan them tomorrow, or let them go?"))
+    return out
+
 
 def push_back(tools: "PlanTools", by: int, since: Optional[datetime] = None) -> str:
-    """Move every flexible item still to do ``by`` minutes later. Without ``since``, that's everything from the
-    thirty that was ``by`` ago on (whole blocks: 10-31, a late wake-up and a one-hour push left Feed
-    fish at 8:00 behind Make coffee at 8:06), plus what's happening now: items past their time that weren't marked
-    didn't happen, and pushing back is how the user says so. Items that shared time still do; fixed things, work and sleep stay, and an
-    item that would land on a fixed thing goes right after it (and so does what follows it). What would run into
-    bedtime stays where it was and is named, never dropped."""
+    """Move the day ahead ``by`` minutes later. Without ``since``, from the thirty that was ``by`` ago on (whole
+    blocks: 10-31, a late wake-up and a one-hour push left Feed fish at 8:00 behind Make coffee at 8:06), plus what's
+    happening now: items past their time that weren't marked didn't happen, and pushing back is how the user says so.
+    Those, and the first thing in line, move by the full amount; what follows moves only as far as it has to
+    (make_way): fixed things and what's inside them, work and sleep stay, meals stay roughly in place, and a gap
+    later in the day absorbs the push. What would run into bedtime stays where it was and is named, never dropped."""
     plan = tools.day_plan
     now = tools._now()
     live = plan.day_start <= now < plan.day_end
     delta = timedelta(minutes=by)
     lo = since if since is not None else (thirty_of(now - delta) if live else plan.day_start)
-    facts = tools._facts() if tools._state_db is not None else None
-
-    def daylight(span: EventSpan) -> bool:
-        return bool(facts and facts.get(span.id).daylight)
-
-    movable = sorted((s for s in plan.active_spans()
-                      if tools._movable(s) and s.status == SpanStatus.PLANNED
-                      and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and not tools._is_fixed(s)
-                      and (s.start_dt >= lo or (since is None and live and s.start_dt <= now < s.end_dt))),
-                     key=lambda s: s.start_dt)
-    ids = {s.id for s in movable}
-    # a fixed item blocks only while it's still ahead
-    fixed = [s for s in plan.active_spans() if s.id not in ids and not s.is_envelope
-             and s.status == SpanStatus.PLANNED and tools._is_fixed(s)]
-    sleep = [s for s in plan.active_spans() if s.category == SpanCategory.SLEEP]
-    placed: Dict[str, Tuple[datetime, datetime]] = {}
-    no_room: List[EventSpan] = []
-    extra = timedelta(0)
-    for span in movable:
-        length = span.end_dt - span.start_dt
-        want = span.start_dt + delta + extra
-        t, end = tools._snap(want, want + length)
-        for _ in range(50):
-            hit = [f for f in fixed if f.start_dt < end and t < f.end_dt]
-            if not hit:
-                break
-            t, end = tools._snap(max(f.end_dt for f in hit), max(f.end_dt for f in hit) + length)
-        extra = max(extra, t - (span.start_dt + delta))
-        fits = end <= plan.day_end and not any(b.start_dt < end and t < b.end_dt for b in sleep) \
-            and not (daylight(span) and end > plan.sunset)
-        if fits:
-            placed[span.id] = (t, end)
-        else:
-            no_room.append(span)
-    behind = {s.id for s in movable if s.end_dt <= now}
-    if tools._state_db is not None:
-        tools._state_db.set_sync_meta(f"redraw_undo:{plan.target_date.isoformat()}", json.dumps(
-            {"moved": {s.id: [s.start_dt.isoformat(), s.end_dt.isoformat()] for s in movable if s.id in placed},
-             "removed": []}))
-    for span in movable:
-        if span.id in placed:
-            span.start_dt, span.end_dt = placed[span.id]
-            tools._persist(span)
-    plan.spans.sort(key=lambda s: s.start_dt)
-    tools._save_plan_after_change()
-    moved = [s for s in movable if s.id in placed]
-    if not moved and not no_room:
+    chain = sorted((s for s in plan.active_spans() if flexible(tools, plan, s)
+                    and (s.start_dt >= lo or (since is None and live and s.start_dt <= now < s.end_dt))),
+                   key=lambda s: s.start_dt)
+    if not chain:
         return "Nothing to push back: nothing flexible is left to do from then on."
-    from thirties_core.clock import agenda_lines
-    out = [f"Pushed back {format_duration(by)}:"] + agenda_lines([(s.start_dt, s.end_dt, s.title, "") for s in moved])
-    unmarked = [s.title for s in moved if s.id in behind]
+    behind = {s.id for s in chain if live and s.start_dt <= now}
+    from thirties_core.meals import window as meal_window
+    first = min((s.start_dt for s in chain if s.id not in behind and meal_window(s.title, plan.day_start) is None),
+                default=None)  # the first thing in line (a meal ahead stays roughly where it is)
+    seed = {s.id: delta for s in chain if s.id in behind or (not behind and s.start_dt == first)}
+    flow = make_way(tools, plan, chain, seed)
+    moved = apply_flow(tools, plan, flow)
+    if not moved and not flow.no_room:
+        return "Nothing to push back: nothing flexible is left to do from then on."
+    out = [f"Pushed back {format_duration(by)}:"] + plain_lines(moved)
+    unmarked = [s.title for s in moved if s.id in behind and s.end_dt - delta <= now]
     if unmarked:
         out.append("Not marked, so moved along as still to do: " + ", ".join(unmarked) + ".")
-    if no_room:
-        out.append("Would run into bedtime, so it stays where it was: " + ", ".join(s.title for s in no_room)
-                   + (". Plan it tomorrow, or let it go?" if len(no_room) == 1 else ". Plan them tomorrow, or let them go?"))
-    return "\n".join(out)
+    return "\n".join(out + flow_lines(flow, moved))
 
 
 # --- early ticks (soak friction 3) ---

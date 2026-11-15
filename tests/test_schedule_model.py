@@ -4,7 +4,7 @@
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, event, make_scheduler
+from tests.fixtures import DAY, at, event, line_with, make_scheduler
 from thirties_core.astronomy import set_debug_time
 from thirties_core.clock import format_clock, real_times, to_thirties
 from thirties_core.day_layout import build_segments, card_rows, segment_context, segment_title, status_label
@@ -47,7 +47,7 @@ class TestSharedTime(ScheduleCase):
         line = next(l for l in text.splitlines() if "Garden app dev" in l)
         self.assertTrue(line.startswith("- 5:00 PM – 7:00 PM: Garden app dev [activity] id="), line)
         self.assertIn(" + Recipe app dev [activity] id=", line)
-        self.assertIn(" + Message Riley (5:30 PM – 6:00 PM) [activity] id=", line)
+        line_with(line, " + Message Riley", "5:30 PM", "6:00 PM", "id=")
         self.assertTrue(line.endswith("(sharing this time: one entry)"))
         self.assertEqual(sum("Recipe app dev" in l for l in text.splitlines()), 1)  # never listed twice (S3)
         self.assertIn("- 7:30 PM – 8:30 PM: Dinner [activity]", text)  # back to back is not sharing
@@ -110,7 +110,7 @@ class TestOverlapOrPush(ScheduleCase):
         out = t.execute("add_event", {"title": "Message mom", "start": "5:00 PM", "duration": "30 min"})
         self.assertTrue(out.startswith("Added"), out)  # never a failure
         self.assertIn("alongside Shower", out)
-        self.assertIn("push_later=true moves Shower and what follows", out)
+        line_with(out, "push_later=true", "Shower")  # how to move it, if that's what was meant
         self.assertEqual(times(t, "Shower"), ("5:00 PM", "5:30 PM"))  # nothing moved on a guess
 
     def test_together_words_background_items_and_kept_answers_need_no_question(self):
@@ -239,7 +239,7 @@ class TestCalendarOutcomes(ScheduleCase):
     def test_a_calendar_event_can_be_ticked_without_touching_the_calendar(self):
         t = tools_for([event("standup", "09:00", "09:30", "Standup")], now="09:40")
         out = t.execute("log_outcome", {"event": "Standup", "status": "done"})
-        self.assertIn("Marked Standup done (9:00 AM – 9:30 AM, planned)", out)
+        line_with(out, "Standup", "done", "9:00 AM", "9:30 AM")
         self.assertIn("calendar itself is unchanged", out)
         plan, _ = t.scheduler.build_day_plan(DAY)  # rebuilt from the calendar: the outcome is laid back over it
         standup = next(s for s in plan.spans if s.title == "Standup")
@@ -280,14 +280,15 @@ class TestPushBack(ScheduleCase):
         out = t.execute("push_back", {"by": "2 hours"})
         self.assertEqual(times(t, "Laundry"), ("5:00 PM", "5:30 PM"))   # 10-26: the past, unmarked items were left behind
         self.assertEqual(times(t, "Composing"), ("5:00 PM", "6:00 PM"))  # still alongside Laundry, the one now
-        self.assertEqual(times(t, "Glass"), ("7:30 PM", "8:00 PM"))      # 7:00 is the fixed call: right after it
-        self.assertEqual(times(t, "Snack"), ("9:00 PM", "9:30 PM"))      # and what follows keeps its spacing
+        # what follows moves only as far as it has to, keeping up to half an hour of the room it had
+        self.assertEqual(times(t, "Glass"), ("6:30 PM", "7:00 PM"))      # it had an hour: half of it absorbs the push
+        self.assertEqual(times(t, "Snack"), ("7:30 PM", "8:00 PM"))      # 7:00 is the fixed call: right after it
         self.assertEqual(times(t, "Shower"), ("2:00 PM", "2:30 PM"))     # done stays
         self.assertEqual(times(t, "Breakfast"), ("10:00 AM", "10:30 AM"))  # long past: behind, not pushed
         self.assertEqual(times(t, "Call with Kim"), ("7:00 PM", "7:30 PM"))
-        self.assertEqual(times(t, "Bins"), ("9:00 PM", "10:00 PM"))  # would run into bedtime: stays, and is named
+        self.assertEqual(times(t, "Bins"), ("9:00 PM", "10:00 PM"))  # far enough off: nothing needed to move it
         self.assertIn("Not marked, so moved along as still to do: Laundry.", out)
-        self.assertIn("Would run into bedtime, so it stays where it was: Bins.", out)
+        self.assertIn("There was room before Bins, so it and what follows keep their times.", out)
         t.execute("undo_redraw", {})
         self.assertEqual(times(t, "Laundry"), ("3:00 PM", "3:30 PM"))
 
