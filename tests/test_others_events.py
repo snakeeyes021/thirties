@@ -78,9 +78,18 @@ class OwnershipTest(Designed):
         self.assertTrue(spans[0].shared and spans[0].is_firm)  # a family dinner: everyone's, the user's too
         self.assertEqual(spans[0].whose, "Jamie's calendar and Robin's calendar")
 
-    def test_a_household_calendar_is_everyones(self):
-        t = self.day([ev("movie", "Quiz night", "20:00", "22:00", calendar="Family")])
-        s = self.span("Quiz night")
+    def test_a_household_calendars_event_is_asked_about_not_assumed(self):
+        """A swim lesson on the Family calendar may be the partner's run: off the plan until the user says."""
+        t = self.day([ev("swim", "Leo swim lesson", "09:00", "10:00", calendar="Family")])
+        s = self.span("Leo swim lesson")
+        self.assertTrue(s.shown_only and s.ask and not s.is_firm)
+        self.assertEqual(s.whose, "the Family calendar")
+        out = others_events.after_reply(t, "Here's your day.")
+        self.assertIn("Leo swim lesson (9:00 AM – 10:00 AM) is on the Family calendar. Is that yours too?", out)
+
+    def test_a_household_title_for_everyone_is_still_shared(self):
+        self.day([ev("movie", "Family quiz night", "20:00", "22:00", calendar="Family")])
+        s = self.span("Family quiz night")
         self.assertTrue(s.is_firm and s.shared and not s.shown_only)
         self.assertEqual(others_events.marker(s), "shared, also on the Family calendar")
 
@@ -104,6 +113,17 @@ class OwnershipTest(Designed):
         s = self.span("School gala")
         self.assertTrue(s.tentative and not s.is_firm)
         self.assertIn("on Jamie's calendar", invite_lines(t.day_plan, t.ambiguous_events)[0])
+
+    def test_a_title_that_says_whose_it_is_is_theirs_and_never_asked(self):
+        self.day([ev("parents", "Robin's parents in town", "12:00", "15:00", calendar="Robin"),
+                  ev("hair", "Jamie: haircut", "09:00", "10:00"),
+                  ev("leo", "Leo's playdate", "10:00", "11:00", calendar="Family"),
+                  ev("pickup", "Pick up Maya", "17:30", "18:00")])
+        for title in ("Robin's parents in town", "Jamie: haircut", "Leo's playdate"):
+            s = self.span(title)
+            self.assertTrue(s.shown_only and not s.ask, title)
+        self.assertTrue(self.span("Pick up Maya").ask)  # only mentions someone: still asked
+        self.assertFalse(others_events.names_someone_else(ev("cm", "Children's museum trip", "11:00", "12:00")))
 
     def test_a_title_for_everyone_is_shared(self):
         self.day([ev("bbq", "BBQ, all of us", "17:00", "19:00", calendar="Robin")])
@@ -145,7 +165,8 @@ class AskOnceTest(Designed):
         t = self.day([ev("pickup", "Pick up Maya", "17:30", "18:00")])
         self.assertTrue(self.span("Pick up Maya").ask)
         out = others_events.after_reply(t, "Here's your day.")
-        self.assertIn("Pick up Maya, 5:30 PM – 6:00 PM is on Jamie's calendar. Is that yours too?", out)
+        self.assertEqual(out, "Here's your day. Pick up Maya (5:30 PM – 6:00 PM) is on Jamie's calendar. Is that yours "
+                              "too? Until you say, it stays off your plan.")  # one message, not a block of its own
         self.assertEqual(others_events.after_reply(t, "Anything else?"), "Anything else?")  # once
         plan, _ = self.sched.build_day_plan(DAY)
         self.assertFalse(next(s for s in plan.spans_in_view() if s.title == "Pick up Maya").ask)  # remembered
@@ -156,6 +177,16 @@ class AskOnceTest(Designed):
         self.assertEqual(others_events.after_reply(t, said), said)
         self.assertFalse(self.span("Pick up Maya").ask)
 
+    def test_joined_to_the_models_own_calendar_question(self):
+        t = self.day([ev("pilates", "Pilates", "08:00", "09:00"), ev("fit", "Haircut", "17:00", "18:00"),
+                      ev("ptc", "Parent-teacher conference", "15:30", "16:00", status="needsAction", invited=True)])
+        said = "Here's the day.\n\nThe conference at 3:30 is on Jamie's calendar. Are you going?\n\nNext:\n3 PM – Work"
+        out = others_events.after_reply(t, said)
+        self.assertEqual(out.count("\n\n"), 2)  # no new block
+        self.assertIn("Are you going? Also, Pilates (8:00 AM – 9:00 AM) and Haircut (5:00 PM – 6:00 PM) are "
+                      "on Jamie's calendar. Are either of those yours too?", out)
+        self.assertTrue(out.endswith("3 PM – Work"))
+
     def test_a_decided_series_is_never_asked(self):
         first = ev("choir", "Choir practice", "19:00", "22:00")
         sched = make_scheduler([first])
@@ -165,8 +196,10 @@ class AskOnceTest(Designed):
 
     def test_shared_and_invites_are_never_the_once_question(self):
         self.day([ev("movie", "Quiz night", "20:00", "22:00", calendar="Family"),
+                  ev("movie", "Quiz night", "20:00", "22:00", calendar="Alex", mine=True),  # also on theirs: shared
                   ev("gala", "School gala", "18:00", "20:00", status="needsAction", invited=True)])
         self.assertFalse(self.span("Quiz night").ask)
+        self.assertTrue(self.span("Quiz night").shared)
         self.assertFalse(self.span("School gala").ask)
 
     def test_a_calendar_that_proves_not_the_users_stops_being_asked(self):
@@ -183,6 +216,19 @@ class AskOnceTest(Designed):
         self.sched.calendar_engine.events.append(new)
         plan, _ = self.sched.build_day_plan(DAY)
         self.assertFalse(next(s for s in plan.spans_in_view() if s.title == "Thing 9").ask)
+
+    def test_a_calendar_that_proves_everyones_goes_on_the_plan_as_shared(self):
+        events = [ev(f"f{i}", f"Outing {i}", f"{10 + i}:00", f"{10 + i}:30", calendar="Family") for i in range(3)]
+        t = self.day(events)
+        others_events.after_reply(t, "ok")
+        for i in range(3):
+            t.execute("resolve_calendar_event", {"event": self.span(f"Outing {i}").id, "attend": True})
+        out = others_events.after_reply(t, "ok")
+        self.assertIn("I'll stop asking about the Family calendar: new events on it go on your plan as shared", out)
+        self.sched.calendar_engine.events.append(ev("f9", "Grandma visits", "14:00", "17:00", calendar="Family"))
+        plan, _ = self.sched.build_day_plan(DAY)
+        s = next(x for x in plan.spans_in_view() if x.title == "Grandma visits")
+        self.assertTrue(s.is_firm and s.shared and not s.ask)
 
     def test_one_mine_keeps_a_calendar_asking(self):
         events = [ev(f"s{i}", f"Thing {i}", f"{10 + i}:00", f"{10 + i}:30") for i in range(4)]

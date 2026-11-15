@@ -8,7 +8,7 @@ can find again. Anything else comes back with the list, for the model to ask whi
 
 - ``mine``: the user's commitments, planned around;
 - ``shared``: a household's calendar (everyone's, the user's too): on the user's plan, marked shared
-  (others_events.py; a calendar named like "Family" or "Household" is this until the user says otherwise);
+  (others_events.py; a calendar named like "Family" is asked about per series until the user chooses);
 - unset, the default: someone else's events are left out of the user's day, shown as theirs, and asked about only
   when the user is invited themselves;
 - ``ask``: Thirties asks about each event of someone else's calendar, once per series, naming the calendar;

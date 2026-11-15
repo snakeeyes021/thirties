@@ -4,12 +4,13 @@ Every calendar event is one of four kinds, from the calendar data and the user's
 
 - **mine**: on the user's own calendar (or a calendar they said is theirs);
 - **shared**: the same event is on the user's calendar and someone else's (same series, or the same title and
-  times); or it's on a household calendar ("Family", "Household", "Home", "Everyone", or one the user called
-  shared); or the user is a guest on someone else's event and accepted; or its title says it's everyone's ("family
-  dinner", "all of us"). On the user's plan, marked shared;
+  times); or it's on a calendar the user called shared; or the user is a guest on someone else's event and
+  accepted; or its title says it's everyone's ("family dinner", "all of us"). On the user's plan, marked shared;
 - **invite**: the user is a guest and hasn't answered: asked about, naming whose calendar it's on;
-- **theirs**: on someone else's calendar, the user isn't on it, nobody said: left off the user's plan (their
-  events go on it only when the user says so), shown faintly as theirs, never counted against their free time.
+- **theirs**: on someone else's calendar (or a household one: "Family", "Household"…), the user isn't on it, nobody
+  said: left off the user's plan (their events go on it only when the user says so), shown faintly as theirs, never
+  counted against their free time. A title that says whose it is ("Robin's parents in town") is theirs and never
+  asked about.
 
 Copies of one event on several calendars are one item. A calendar is named the way the user would say it
 ("Jamie's calendar"; "your partner's calendar" once they've said whose it is). The learning (per series, per calendar,
@@ -18,7 +19,9 @@ who a calendar belongs to) is kept with the other event decisions, so it syncs b
 What's said about them (after_reply): the first time a series from someone else's calendar is on the day, Thirties
 asks once, naming whose calendar it's on ("Are you going to this one too? It's on your partner's calendar."),
 and remembers the answer for the whole series; until then it stays off the user's plan. A calendar whose
-events the user has said "not mine" to three times, and "mine" to none, isn't asked about again. (Chosen over
+events the user has said "not mine" to three times, and "mine" to none, isn't asked about again; one said "mine"
+three times and "not mine" never (a family calendar that's everyone's) puts its new events on the plan as shared.
+The question is part of the reply, never a block of its own. (Chosen over
 leaving them out silently with a daily line, 2026-11-15: on simulated days it halved the events shown in the wrong
 place, for about one extra question every other day.)
 """
@@ -37,7 +40,7 @@ EVERYONE_TITLE_RE = re.compile(r"\b(family|everyone|everybody|all of us|both of 
 
 OWNER_KEY = "whose:{calendar}"        # decisions table: who a calendar belongs to, in the user's words ("your partner")
 ASKED_KEY = "asked:{series}"          # decisions table: asked about this series once (value: its calendar's name)
-QUIET_SAID_KEY = "quiet_said:{calendar}"  # decisions table: said once that it stops asking about this calendar
+QUIET_SAID_KEY = "quiet_said:{calendar}"  # decisions table: what was said once it stops asking ("theirs"/"ours")
 QUIET_AFTER = 3   # three series from one calendar said "not mine", none "mine": stop asking about that calendar
 
 
@@ -136,13 +139,35 @@ def merge_copies(events: List[Any]) -> Tuple[List[Any], Dict[str, List[str]]]:
 
 
 def is_household(calendar_name: str, mode: str) -> bool:
-    return mode == "shared" or (mode == "" and bool(HOUSEHOLD_CALENDAR_RE.search(calendar_name or "")))
+    """A calendar the household shares ("Family", "Household"…) that the user hasn't chosen for."""
+    return mode == "" and bool(HOUSEHOLD_CALENDAR_RE.search(calendar_name or ""))
+
+
+# Words before "'s" that aren't a person ("Children's museum", "today's").
+_NOT_A_PERSON = {"today", "tomorrow", "tonight", "mother", "father", "valentine", "year", "years", "children",
+                 "women", "men", "st", "saint", "april", "patrick", "president", "veteran", "veterans", "world",
+                 "everyone", "everybody", "nobody", "somebody", "week", "month", "day"}
+
+
+def names_someone_else(event) -> bool:
+    """The title says whose it is, and it's someone else's: a person's name with "'s" ("Robin's parents in town",
+    "Leo's swim"), or the calendar owner's name ("Jamie: haircut", "Jamie haircut" on Jamie's calendar). Never asked
+    about: theirs. A title that only mentions someone ("Pick up Maya") isn't this."""
+    title = event.summary or ""
+    for m in re.finditer(r"\b([A-Z][a-z]+)['’]s\b", title):
+        if m.group(1).lower() not in _NOT_A_PERSON:
+            return True
+    owner = (event.calendar_name or "").strip().split()
+    if owner and owner[0][:1].isupper() and "@" not in owner[0] and len(owner) == 1 \
+            and not HOUSEHOLD_CALENDAR_RE.search(owner[0]):
+        return bool(re.match(rf"\s*{re.escape(owner[0])}\b", title, re.I))
+    return False
 
 
 def ownership(event, mode: str, decision: Optional[str], also_on: List[str],
               decisions: Optional[Dict[str, str]]) -> Tuple[str, str, bool]:
     """(mode to use, whose phrase, shared) for one event. The mode may become "mine" (a shared event: on the user's
-    plan) or "show" (someone else's, nobody said: left out)."""
+    plan) or "show" (someone else's, or not yet known: left out)."""
     if event.is_primary:
         if also_on:  # also on someone else's calendar: everyone's, the user's included
             return mode, " and ".join(whose(n, decisions) for n in also_on), True
@@ -161,26 +186,28 @@ def ownership(event, mode: str, decision: Optional[str], also_on: List[str],
         return mode, phrase, False  # an invite: asked about, naming whose calendar
     if mode == "ask":
         return mode, phrase, False
-    if is_household(event.calendar_name, mode) or getattr(event, "invited", False) \
-            or EVERYONE_TITLE_RE.search(event.summary or ""):
-        return "mine", phrase, True  # a household calendar, an invite they accepted, a family dinner: theirs too
-    return "show", phrase, False  # someone else's, nobody said: left out
+    if mode == "shared" or getattr(event, "invited", False) or EVERYONE_TITLE_RE.search(event.summary or ""):
+        return "mine", phrase, True  # a calendar they called shared, an invite they accepted, a family dinner
+    if calendar_learned(cal_key(event.calendar_name or event.calendar_id), decisions or {}) == "ours" \
+            and not names_someone_else(event):
+        return "mine", phrase, True  # a calendar whose events have proven to be theirs too
+    return "show", phrase, False  # someone else's, or not known yet: left out until they say
 
 
 def should_ask(event, decisions: Optional[Dict[str, str]], modes_mode: str) -> bool:
-    """Ask about this event of someone else's: its series is undecided, never asked, and its calendar hasn't
-    proven to be "not the user's"."""
-    if event.is_primary or modes_mode not in ("",):
+    """Ask about this event of someone else's (or of a household calendar): its series is undecided, never asked,
+    its title doesn't already say it's someone else's, and what was learned about its calendar doesn't settle it."""
+    if event.is_primary or modes_mode not in ("",) or names_someone_else(event):
         return False
     from thirties_core.calendar_engine import series_key
     d = decisions or {}
     if d.get(event.id) or d.get(series_key(event)) or d.get(ASKED_KEY.format(series=event.series)):
         return False
-    return not calendar_quiet(cal_key(event.calendar_name or event.calendar_id), d)
+    return calendar_learned(cal_key(event.calendar_name or event.calendar_id), d) == ""
 
 
-def calendar_quiet(calendar: str, decisions: Dict[str, str]) -> bool:
-    """Per-calendar learning: QUIET_AFTER of its series asked about and said "not mine", none "mine"."""
+def _answers(calendar: str, decisions: Dict[str, str]) -> Tuple[int, int]:
+    """(mine, not mine): the user's answers about this calendar's series that Thirties asked about."""
     mine = not_mine = 0
     for key, value in decisions.items():
         if not key.startswith("asked:") or cal_key(value) != calendar:
@@ -190,7 +217,22 @@ def calendar_quiet(calendar: str, decisions: Dict[str, str]) -> bool:
             mine += 1
         elif decision in ("not_mine", "decline"):
             not_mine += 1
-    return mine == 0 and not_mine >= QUIET_AFTER
+    return mine, not_mine
+
+
+def calendar_learned(calendar: str, decisions: Dict[str, str]) -> str:
+    """Per-calendar learning: "theirs" after QUIET_AFTER series said "not mine" and none "mine"; "ours" after
+    QUIET_AFTER said "mine" and none "not mine" (a household calendar that turns out to be everyone's); else ""."""
+    mine, not_mine = _answers(calendar, decisions)
+    if mine == 0 and not_mine >= QUIET_AFTER:
+        return "theirs"
+    if not_mine == 0 and mine >= QUIET_AFTER:
+        return "ours"
+    return ""
+
+
+def calendar_quiet(calendar: str, decisions: Dict[str, str]) -> bool:
+    return calendar_learned(calendar, decisions) == "theirs"
 
 
 # --- what's said ------------------------------------------------------------------------------------------------
@@ -211,12 +253,41 @@ def questions(plan, now=None) -> List[Any]:
                    and (now is None or s.end_dt > now)), key=lambda s: s.start_dt)
 
 
-def question_text(spans: List[Any]) -> str:
-    if len(spans) == 1:
-        s = spans[0]
-        return (f"{_line(s)} is on {s.whose}. Is that yours too? Until you say, it stays off your plan.")
-    return ("These are on other people's calendars today. Are any of them yours too? Until you say, they stay off "
-            "your plan.\n" + "\n".join(f"{_line(s)}, {s.whose}" for s in spans))
+def _and(items: List[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def question_text(spans: List[Any], also: bool = False) -> str:
+    """One short question, grouped by whose calendar: "Pilates (8:00 – 9:00 AM) and Haircut (5:00 – 6:00
+    PM) are on Jamie's calendar. Are either of those yours too?" ``also``: it follows the reply's own question."""
+    by_whose: Dict[str, List[Any]] = {}
+    for s in spans:
+        by_whose.setdefault(s.whose, []).append(s)
+    sentences = []
+    for i, (where, group) in enumerate(by_whose.items()):
+        items = _and([f"{s.title} ({format_clock(s.start_dt)} – {format_clock(s.end_dt)})" for s in group])
+        lead = "Also, " if also and i == 0 else ""
+        sentences.append(f"{lead}{items} {'is' if len(group) == 1 else 'are'} on {where}.")
+    ask = "Is that yours too?" if len(spans) == 1 else ("Are either of those yours too?" if len(spans) == 2
+                                                         else "Are any of those yours too?")
+    return " ".join(sentences) + f" {ask} Until you say, {'it stays' if len(spans) == 1 else 'they stay'} off your plan."
+
+
+def _merged(reply: str, question: str) -> str:
+    """The question in the reply, as one message: added to the reply's own question about the calendar when it has
+    one, else to its last paragraph (never a block of its own under it)."""
+    parts = reply.rstrip().split("\n\n")
+    for i in range(len(parts) - 1, -1, -1):
+        p = parts[i]
+        if "?" in p and re.search(r"calendar", p, re.I) and "\n" not in p.strip():
+            parts[i] = p.rstrip() + " " + question
+            return "\n\n".join(parts)
+    last = parts[-1]
+    if last.strip() and "\n" not in last.strip() and not last.lstrip().startswith(("- ", "•")):
+        parts[-1] = last.rstrip() + " " + question
+        return "\n\n".join(parts)
+    from thirties_core.messages import join_sections
+    return join_sections(reply, question)
 
 
 def after_reply(tools, reply: str) -> str:
@@ -231,7 +302,6 @@ def after_reply(tools, reply: str) -> str:
 
 
 def _after_reply(tools, reply: str) -> str:
-    from thirties_core.messages import join_sections
     plan = tools.day_plan
     sched = getattr(tools, "scheduler", None)
     db = sched.state_db if sched is not None else None
@@ -245,7 +315,8 @@ def _after_reply(tools, reply: str) -> str:
     if asks:
         missing = [s for s in asks if not _mentioned(reply, s.title)]
         if missing:
-            out = join_sections(out, question_text(missing))
+            asked_itself = len(missing) < len(asks) or bool(re.search(r"calendar[^?\n]*\?", reply, re.I))
+            out = _merged(out, question_text(missing, also=asked_itself))
         asked = {s.ask for s in asks}
         for s in plan.spans:  # the rest of each series on this day: asked too
             if getattr(s, "ask", "") in asked:
@@ -253,21 +324,24 @@ def _after_reply(tools, reply: str) -> str:
         for ref in asked:
             calendar, _, series = ref.partition("|")
             db.set_event_decision(ASKED_KEY.format(series=series), calendar)
-    return _quiet_notice(db, out)
+    return _learned_notice(db, out)
 
 
-def _quiet_notice(db, reply: str) -> str:
-    """Once a calendar has proven not to be the user's, say once that Thirties stops asking about it."""
+def _learned_notice(db, reply: str) -> str:
+    """Once a calendar has proven to be someone else's, or everyone's, say so once."""
     from thirties_core.messages import join_sections
     decisions = db.get_event_decisions()
     calendars = {v for k, v in decisions.items() if k.startswith("asked:") and v}
     for cal in sorted(calendars):
+        learned = calendar_learned(cal_key(cal), decisions)
         key = QUIET_SAID_KEY.format(calendar=cal_key(cal))
-        if calendar_quiet(cal_key(cal), decisions) and not decisions.get(key):
-            db.set_event_decision(key, "1")
+        if learned and decisions.get(key) != learned:
+            db.set_event_decision(key, learned)
             name = whose(cal, decisions)
-            reply = join_sections(reply, f"I'll stop asking about {name}: its events stay off your plan unless you "
-                                         f"say one is yours.")
+            reply = join_sections(reply, (f"I'll stop asking about {name}: its events stay off your plan unless you "
+                                          f"say one is yours.") if learned == "theirs" else
+                                         (f"I'll stop asking about {name}: new events on it go on your plan as "
+                                          f"shared, unless you say one isn't yours."))
     return reply
 
 
