@@ -378,6 +378,9 @@ class PlanTools:
         self.outcomes_logged = 0  # successful log_outcome calls
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
         self.by_hand = False  # a tool run from the app's own controls (a drag, a button): the user did it
+        # (what the user said last, the last message they saw) before this turn: what their words can point back
+        # to (done_reference.py)
+        self.prior_exchange: Optional[tuple] = None
         self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
     # ------------------------------------------------------------------

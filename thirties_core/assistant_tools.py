@@ -1284,7 +1284,15 @@ class AssistantTools(KindTools):
             from thirties_core.started import not_finished
             name = span.title if span is not None else (task.title if task is not None else str(event))
             others = [s.title for s in self.pt.day_plan.spans if span is None or s.id != span.id]
-            said = not_finished(getattr(self.pt, "user_message", None), name, others)
+            words = getattr(self.pt, "user_message", None)
+            # --- done only for what the user's words point to (done_reference.py) ---
+            if span is not None or task is not None:
+                from thirties_core.done_reference import check as pointed_to
+                held, words = pointed_to(self.pt, name, [x.id for x in (span, task) if x is not None])
+                if held:
+                    raise ToolError(held)
+            # --- end done only for what the user's words point to ---
+            said = not_finished(words, name, others)
             if said == "begun":
                 raise ToolError(f"The user said {name} has started, not that it's finished, so it isn't done yet. "
                                 "Record it with doing_now; mark it done when they say it's over.")

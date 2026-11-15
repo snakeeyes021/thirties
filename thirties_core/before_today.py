@@ -221,7 +221,11 @@ class BeforeToday:
         if action == "done":  # the normal done path: ticked in Joplin, filed in the month's Done note
             task = next((t for t in self.a.s.tasks if rec.get("task_id") and t.id == rec["task_id"]), None)
             if task is not None and self._on_plan(rec) is None:
-                out = f"Marked {title} done " + self.a._complete_backlog_task(task, for_good=True) + "."
+                from thirties_core.done_reference import check as pointed_to  # only what the user's words name
+                held, _ = pointed_to(self.a.pt, title, [task.id])
+                if held:
+                    raise ToolError(held)
+                out =f"Marked {title} done " + self.a._complete_backlog_task(task, for_good=True) + "."
             else:
                 out = self.a.pt.execute("log_outcome", {"event": title, "status": "done"})
             pool.drop([title])
