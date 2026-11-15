@@ -351,7 +351,7 @@ class WriteLog:
 
 # Operations that change a note's structure or move items between notes, applied by thirties_core/note_ops.py.
 STRUCTURE_OPS = {"rename", "split", "move", "untick", "file_done", "unfile_done", "worked_on", "move_many",
-                 "file_dropped", "unfile_dropped"}
+                 "file_dropped", "unfile_dropped", "create_list"}
 
 
 # Changes whose title only finds an item already in a note (its new wording, if any, is in another field): a

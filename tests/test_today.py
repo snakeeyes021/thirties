@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
+from tests.fixtures import DAY, FakeJoplinAPI, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.lists import ListCatalog
@@ -92,7 +92,7 @@ class TestAddingToToday(TodayTestCase):
         # 10-24: add_task and add_event in one reply left the plan item unlinked, so ticking it did nothing in Joplin
         out = self.t.execute("add_task", {"title": "Garden app: check the build id", "list": "errands",
                                           "start": "7:00 PM", "schedule_as": "Ask the vendor about the build id"})
-        self.assertIn("Added 'Garden app: check the build id' to Errands/Admin. Added Ask the vendor about the build id", out)
+        line_with(out, "'Garden app: check the build id'", "Errands/Admin", "Ask the vendor about the build id")
         self.assertIn("(also added to today's list)", out)
         span = next(s for s in self.t.day_plan.spans if s.title == "Ask the vendor about the build id")
         self.assertEqual(span.duration_minutes, 30)
@@ -173,8 +173,11 @@ class TestBrains(TodayTestCase):
         ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
         notes = self.services.joplin.fetch_active_notes()
         text = FrontierBrain(self.t, None, tasks=self.services.tasks, active_notes=notes).build_backlog_summary()
-        self.assertIn("Today's list (Today To-Do):\n- [done] Call the bank\n- Rinse the tank filter\n"
-                      "Routine (Morning Routine):\n- [done] Shower\n- Journal", text)
+        today, routine = text.split("Today To-Do")[1].split("Morning Routine")
+        line_with(today, "[done]", "Call the bank")
+        self.assertNotIn("[done]", line_with(today, "Rinse the tank filter"))
+        line_with(routine, "[done]", "Shower")
+        self.assertNotIn("[done]", line_with(routine, "Journal"))
 
 
 class TestWhatsLeft(TodayTestCase):
@@ -254,7 +257,36 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n" + "".join(f"    - [ ] {s}\n" for s in self.STEPS))
         self.assertEqual(self.body("n_routine"), self.routine)  # the template is never written to
         again = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:00 PM"})
-        self.assertEqual(again, "Morning Routine is already on the plan.")
+        self.assertTrue(again.startswith("Moved Morning Routine: 6:00 PM: "), again)  # 11-03: placed, it moves
+        steps = [s for s in self.t.day_plan.spans if s.title in self.STEPS]
+        self.assertEqual(len(steps), 7)  # moved, not doubled
+        self.assertTrue(all(s.start_dt >= at("18:00") for s in steps))
+        self.assertEqual(self.body("n_routine"), self.routine)
+
+    def test_moving_one_placed_part_moves_only_it_and_keeps_what_is_done(self):
+        self.t.execute("put_routine", {"routine": "morning routine", "parts": [
+            {"start": "10:00 AM", "items": ["Feed the fish", "Make coffee"]},
+            {"start": "11:00 AM", "items": ["Make bed", "Shower", "Journal"]}]})
+        fish = next(s for s in self.t.day_plan.spans if s.title == "Feed the fish")
+        fish.status = SpanStatus.DONE
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+            {"start": "3:00 PM", "items": ["Feed the fish", "Shower"]}]})
+        self.assertTrue(out.startswith("Moved Morning Routine: 3:00 PM: Shower."), out)
+        self.assertIn("Already planned: Feed the fish", out)
+        spans = {s.title: s for s in self.t.day_plan.spans if s.title in self.STEPS}
+        self.assertEqual(spans["Shower"].start_dt, at("15:00"))
+        self.assertEqual(spans["Feed the fish"].start_dt, at("10:00"))  # done stays where it was done
+        self.assertEqual(spans["Make bed"].start_dt, at("11:00"))       # not named: stays
+        self.assertEqual(sum(1 for s in self.t.day_plan.spans if s.title == "Shower"), 1)
+        stored = [s for s in self.sched.state_db.get_spans_between(at("00:00"), at("23:59")) if s.title == "Shower"]
+        self.assertEqual([s.start_dt for s in stored], [at("15:00")])  # the old one is gone from the database too
+
+    def test_a_refused_move_leaves_the_routine_where_it_was(self):
+        self.t.execute("put_routine", {"routine": "morning routine", "start": "10:00 AM"})
+        before = sorted((s.title, s.start_dt) for s in self.t.day_plan.spans if s.title in self.STEPS)
+        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "half past never"})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(sorted((s.title, s.start_dt) for s in self.t.day_plan.spans if s.title in self.STEPS), before)
 
     def test_scheduling_a_routine_is_never_a_new_line_in_it(self):
         out = self.t.execute("add_task", {"title": "Morning Routine steps", "list": "Morning Routine",
@@ -401,7 +433,7 @@ class TestMorning(TodayTestCase):
         out = self.t.execute("rollover_proposal", {})
         # 11-06: in effect by itself; today's keep is on today's schedule already, and the morning says so
         self.assertEqual(out.split("\n")[0], "Kept 3 from before (1 on today's plan): see Before today.")
-        self.assertIn("Keep: Buy stamps, today.", out)
+        self.assertIn("Keep: Buy stamps, today at 4:00 PM.", out)  # where it went, plainly
         rows = {r["title"]: r for r in self.t.assistant.before.rows()["keep"]}
         self.assertIsNotNone(rows["Buy stamps"]["at"])  # placed
         self.assertEqual(rows["Call the bank"]["when"], "tomorrow")  # replanned: the first day with room, not today
@@ -482,7 +514,7 @@ class TestMorning(TodayTestCase):
             "keep": [{"item": "Call the bank", "when": "tomorrow", "why": "the branch is closed today"},
                      {"item": "rinse the tank filter", "when": "this weekend"}],
             "drop": [{"item": "Watch the comet", "why": "it was last night"}]})
-        self.assertIn("Keep:\nCall the bank – tomorrow\nRinse the tank filter – this weekend\nDrop:\nWatch the comet", out)
+        self.assertIn("Keep:\nCall the bank – tomorrow\nRinse the tank filter – this weekend\nDrop:\nWatch the comet", out)  # golden: exact text the user reads
         pool = OpenPool(self.sched.state_db).all()
         self.assertEqual(pool["call the bank"]["start"], (DAY + timedelta(days=1)).isoformat())  # waits there now
         self.assertTrue(pool["watch the comet"]["pending_drop"])  # dropped only on a yes

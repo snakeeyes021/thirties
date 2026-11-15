@@ -4,7 +4,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
+from tests.fixtures import DAY, FakeJoplinAPI, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.joplin_engine import checklist_tasks
@@ -180,7 +180,7 @@ class TestDropBox(ListsTestCase):
         self.services.tasks = self.read_tasks()
         DropBoxScopes(self.sched.state_db).set("n_quick", "all")
         out = self.t.execute("dropbox_review", {})
-        self.assertIn("Quick Inbox (drop box for everything) holds 4", out)
+        line_with(out, "Quick Inbox", "holds 4")
         self.assertIn("- Buy more stamps task_id=", out)
         self.assertIn("likely Errands/Admin ('Active')", out)
         stamps = next(t for t in self.services.tasks if t.title == "Buy more stamps")

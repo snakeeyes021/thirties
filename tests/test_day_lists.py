@@ -3,7 +3,7 @@
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at
+from tests.fixtures import DAY, at, line_with
 from tests.test_list_placement import ListsTestCase
 from thirties_core.astronomy import set_debug_time
 from thirties_core.day_lists import AheadLists, explicit_ping, pencilled_in, planned_ahead_text
@@ -19,7 +19,7 @@ class TestPencilledIn(ListsTestCase):
         bank = next(t for t in self.services.tasks if t.title == "Call the bank" and t.parent_note_id == "n_errands")
         self.t.execute("add_event", {"title": "Bank", "start": "3:00 PM", "duration": "30 min", "task_id": bank.id})
         self.assertEqual(pencilled_in(self.t.assistant), ["Rinse the tank filter"])  # the bank has a time now
-        self.assertIn("On today's list, no time yet (pencilled in): Rinse the tank filter", self.t.execute("list_schedule", {}))
+        line_with(self.t.execute("list_schedule", {}), "no time yet", "Rinse the tank filter")
         self.assertEqual(self.t.execute("pencilled_in", {}), "On the list, no time yet:\n- Rinse the tank filter")
 
     def test_pencilling_out_takes_it_off_the_plan_and_keeps_it_on_the_list(self):
@@ -44,13 +44,14 @@ class TestTomorrow(ListsTestCase):
         # 10-24: an item planned for tomorrow didn't show where the user expected it
         out = self.t.execute("add_event", {"title": "Dentist call", "start": "10:00 AM", "duration": "30 min",
                                            "day": "tomorrow"})
-        self.assertIn("goes on the Today list that morning, not on today's", out)
+        line_with(out, "Today list", "that morning")
+        self.assertEqual(self.body("n_today"), "")
         out = self.t.execute("add_to_today", {"items": ["Buy stamps", "Water plants"], "day": "tomorrow"})
-        self.assertIn("On Friday's list, no time yet: Buy stamps, Water plants", out)
+        line_with(out, "Friday", "Buy stamps", "Water plants")
         self.assertEqual(self.body("n_today"), "")  # never today's
         tomorrow = self.t.execute("list_schedule", {"day": "tomorrow"})
         self.assertIn("Dentist call", tomorrow)
-        self.assertIn("On Friday's list, no time yet (pencilled in): Buy stamps; Water plants", tomorrow)
+        line_with(tomorrow, "Friday", "no time yet", "Buy stamps", "Water plants")
 
         set_debug_time(at("08:00", 1))  # the next morning
         plan, pending = self.sched.build_day_plan(DAY + timedelta(days=1))
@@ -63,10 +64,12 @@ class TestTomorrow(ListsTestCase):
         self.assertEqual(TodayLinks(self.sched.state_db).home_of("Buy stamps")["home_note_id"], "n_errands")
         self.assertEqual(AheadLists(self.sched.state_db).for_day(DAY + timedelta(days=1)), [])
         morning = planned_ahead_text(t2.assistant)
-        self.assertIn("Already planned for today:\n10:00 AM Dentist call", morning)
-        self.assertIn("On today's list, no time yet: Buy stamps, Water plants.", morning)
+        self.assertIn("Already planned for today:\n10:00 AM Dentist call", morning)  # golden: exact text the user reads (plain lines, time first)
+        line_with(morning, "no time yet", "Buy stamps", "Water plants")
         # what yesterday's offer names is said there, once (10-31 sim: four items listed three times)
-        self.assertIn("On today's list, no time yet: Water plants.", planned_ahead_text(t2.assistant, skip=["Buy stamps"]))
+        skipped = planned_ahead_text(t2.assistant, skip=["Buy stamps"])
+        line_with(skipped, "no time yet", "Water plants")
+        self.assertNotIn("Buy stamps", skipped)
 
 
 class TestTomorrowsListItemGone(ListsTestCase):

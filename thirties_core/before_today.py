@@ -154,6 +154,10 @@ class BeforeToday:
         """The answer to "Still want this?" (backoff.py): keep for this week, park for later, or drop."""
         from thirties_core.assistant_tools import ToolError
         from thirties_core.backoff import CHOICES, MissStreaks
+        from thirties_core.break_down import answer as break_answer  # "Break it into smaller pieces"
+        said = break_answer(self.a, item, choice)
+        if said is not None:
+            return said
         choice = str(choice or "").strip().lower()
         choice = {"keep for this week": "keep", "park for later": "park", "later": "park"}.get(choice, choice)
         if choice not in CHOICES:

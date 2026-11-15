@@ -14,6 +14,7 @@ every note each one touches.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from thirties_core import note_edits as ne
@@ -49,7 +50,64 @@ def apply(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
         return _done(writer, op, occ)
     if kind in ("file_dropped", "unfile_dropped"):
         return _dropped(writer, op, occ)
+    if kind == "create_list":
+        return _create_list(writer, op)
     return False, f"gone: unknown operation {kind!r}"
+
+
+def create_list_op(title: str, notebook: str, items: List[str]) -> Dict[str, Any]:
+    """A new list: a note called ``title`` in the notebook named ``notebook`` ("Tasks" or "Tasks > Home"),
+    holding ``items`` as open lines."""
+    return {"op": "create_list", "title": title.strip(), "notebook": notebook.strip(),
+            "items": [str(x).strip() for x in items if str(x).strip()]}
+
+
+def _folder_paths(folders: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    by_id = {f["id"]: f for f in folders if f.get("id")}
+
+    def path(f: Dict[str, Any], seen=()) -> str:
+        parent = by_id.get(f.get("parent_id") or "")
+        if parent is None or parent["id"] in seen:
+            return f.get("title") or ""
+        return path(parent, seen + (f["id"],)) + " > " + (f.get("title") or "")
+    return {path(f).strip().lower(): f for f in by_id.values()}
+
+
+def _create_list(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
+    """Make the note, once: only in a notebook Thirties reads (else it would never be seen), never over a note
+    of the same name there, and never twice (a retry after Joplin went away finds the one it made)."""
+    if op.get("_made"):
+        got = writer.api.get_note(op["_made"], fields="id,title")
+        if got and got.get("id"):
+            return True, f"note:{op['_made']}"
+    paths = _folder_paths(writer.api.get_folders() or [])
+    want = re.sub(r"\s*>\s*", " > ", op.get("notebook") or "").strip().lower()
+    folder = paths.get(want)
+    if folder is None:
+        tops = [f for p, f in paths.items() if p.split(" > ")[-1] == want]
+        folder = tops[0] if len(tops) == 1 else None
+    if folder is None:
+        return False, f"gone: there's no notebook called '{op.get('notebook')}' in Joplin."
+    path = next(p for p, f in paths.items() if f["id"] == folder["id"])
+    cfg = writer.cfg
+    top = path.split(" > ")[0]
+    excluded = any(path == nb.lower() or path.startswith(nb.lower() + " >") for nb in (cfg.excluded_notebooks or []))
+    allowed = not cfg.allowed_notebooks or any(path == nb.lower() or path.startswith(nb.lower() + " >")
+                                               for nb in cfg.allowed_notebooks)
+    if excluded or not allowed:
+        return False, (f"gone: Thirties doesn't read the notebook '{op.get('notebook')}', so a list there would never "
+                       f"be seen. Pick one it reads, or add {top!r} in Preferences → Tasks.")
+    same = [n for n in writer.api.get_folder_notes(folder["id"]) or []
+            if re.sub(r"\s+", " ", n.get("title") or "").strip().lower() == op["title"].lower()]
+    if same:
+        return False, f"gone: there's already a note called '{op['title']}' there."
+    body = "".join(f"- [ ] {x}\n" for x in op.get("items") or [])
+    made = writer.api.create_note(op["title"], body, parent_id=folder["id"])
+    if not made or "id" not in made:
+        return False, "Joplin didn't make the new note."
+    op["_made"] = made["id"]
+    writer._edits.append((made["id"], op["title"], "", body))
+    return True, f"note:{made['id']}"
 
 
 def _move(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
@@ -118,16 +176,22 @@ def _move_many(writer, op: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def _done(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
-    from thirties_core.done_log import DoneLog, done_line, done_note_id
+    from thirties_core.done_log import DoneLog, done_line, done_note_id, done_note_ids
     from datetime import date
     log = DoneLog(writer.db)
     if op["op"] == "unfile_done":
         rec = log.get(op["key"])
         if rec is None:
             return False, "gone: Thirties has no record of filing it."
-        done_id = done_note_id(writer.api, writer.db, rec["month"], create=False)
-        if done_id is None:
+        places = done_note_ids(writer.api, writer.db, rec["month"])  # the chosen note, then the month's
+        if not places:
             return False, "gone: the Done note isn't in Joplin any more."
+        done_id = places[0]
+        for nid in places:  # the one that holds its line (the chosen note may have changed since it was filed)
+            got = writer.api.get_note(nid, fields="id,body")
+            if got and ne.take_item(got.get("body") or "", rec["line"], 0):
+                done_id = nid
+                break
 
         def take_line(body: str) -> Optional[str]:
             taken = ne.take_item(body, rec["line"], 0)

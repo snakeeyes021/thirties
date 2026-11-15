@@ -39,6 +39,8 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
         from thirties_core.lists import ListCatalog
         catalog = ListCatalog(scheduler.state_db)
         tasks = catalog.apply(tasks)
+        from thirties_core.list_settings import apply_one_off
+        tasks = apply_one_off(scheduler.state_db, tasks)  # one-off notes as the user set (list_settings.py)
         ignored = {nid for nid, r in catalog.roles().items() if r["role"] == "ignore"}
         notes = [n for n in notes if n["id"] not in ignored]
         scheduler.attach_history_to_tasks(tasks)

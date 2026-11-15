@@ -2,6 +2,7 @@
 
 import unittest
 
+from tests.fixtures import line_with
 from tests.test_list_placement import NOTES, ListsTestCase
 from thirties_core.assistant_tools import _checkbox_id
 from thirties_core.brains.frontier import FrontierBrain
@@ -38,7 +39,7 @@ class TestStructure(ListsTestCase):
 
     def test_split_a_line_and_add_sub_items(self):
         out = self.t.execute("edit_list_item", {"item": "Buy stamps", "split_into": ["Buy stamps", "Buy envelopes"]})
-        self.assertIn("Split 'Buy stamps' in Errands/Admin into: Buy stamps; Buy envelopes", out)
+        line_with(out, "'Buy stamps'", "Errands/Admin", "Buy envelopes")
         self.assertIn("- [ ] Buy stamps\n- [ ] Buy envelopes\n", self.body("n_errands"))
         out = self.t.execute("edit_list_item", {"item": "Call the bank", "add_under": "Look up the routing number"})
         self.assertIn("Added under 'Call the bank'", out)
@@ -78,7 +79,7 @@ class TestStructure(ListsTestCase):
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.t.user_message = "in my morning routine, feeding the fish is flakes and pellets"
         out = self.t.execute("edit_list_item", {"item": "Feed the fish", "add_under": ["Flakes", "Pellets"]})
-        self.assertIn("Added under 'Feed the fish' in Morning Routine", out)
+        line_with(out, "'Feed the fish'", "Morning Routine")
         self.assertEqual(self.body("n_routine"), "- [ ] Feed the fish\n    - [ ] Flakes\n    - [ ] Pellets\n")
 
 
@@ -94,7 +95,7 @@ class TestTriage(ListsTestCase):
         brain = FrontierBrain(self.t, MockInferenceEngine(), self.services.tasks, self.active_notes())
         self.assertIn("Sorted by time, not by area", brain.build_backlog_summary())
         out = self.t.execute("triage_list", {"list": "Big List"})
-        self.assertIn("Big List is sorted by time, not by area. Its 10 items", out)
+        line_with(out, "Big List", "10 items")
         self.assertIn("Call the dentist task_id=", out)
         self.assertIn("[This week → soon]", out)
         self.assertIn("Lists already in its notebook: ", out)

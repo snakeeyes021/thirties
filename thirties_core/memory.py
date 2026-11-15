@@ -116,15 +116,34 @@ def is_internal(m: Dict[str, Any]) -> bool:
     return bool(m.get("hidden")) or bool(_INTERNAL_RE.match(str(m.get("content") or "")))
 
 
+def mark_delivery(messages: List[Dict[str, Any]], words: str, undelivered: bool) -> bool:
+    """On the latest assistant message that says ``words`` (what the phone got, without its formatting; a long
+    message reaches it in parts): set or clear its "not delivered to your phone" mark. True when one was found."""
+    from thirties_core.telegram_bridge import plain_text
+    words = plain_text(words).strip()
+    if not words:
+        return False
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and words in plain_text(str(m.get("content") or "")):
+            if undelivered:
+                m["undelivered"] = True
+            elif not m.pop("undelivered", False):
+                continue  # this one got there: an earlier one with the same words is the one that waited
+            return True
+    return False
+
+
 def day_title(plan_date: date) -> str:
     """A conversation's title before the user has said anything: its day ("Friday, November 14")."""
     return plan_date.strftime("%A, %B %-d")
 
 
 def conversation_title(conv: "Conversation") -> str:
-    """The user's own first words (shortened), never a hidden or system message; the day until they've spoken."""
+    """The user's own first words (shortened), never a hidden or system message or a command typed on the phone
+    (/now); the day until they've spoken."""
     first = next((str(m.get("content") or "").strip() for m in conv.messages
-                  if m.get("role") == "user" and not is_internal(m) and str(m.get("content") or "").strip()), "")
+                  if m.get("role") == "user" and not is_internal(m) and m.get("kind") != "command"
+                  and str(m.get("content") or "").strip()), "")
     if not first:
         return day_title(conv.plan_date)
     return (first[:60] + "…") if len(first) > 60 else first
@@ -238,6 +257,22 @@ class ConversationStore:
 
     def current_or_new(self, plan_date: date) -> Conversation:
         return self.latest_for_day(plan_date) or self.create(plan_date)
+
+    def append(self, plan_date: date, message: Dict[str, Any]) -> Conversation:
+        """A message for the day it's about (the next day's morning, sent before sunrise): into that day's
+        current conversation, or a new one. The app's chat for that day opens with it."""
+        conv = self.current_or_new(plan_date)
+        conv.messages.append(message)
+        self.save(conv)
+        return conv
+
+    def mark_delivery(self, plan_date: date, words: str, undelivered: bool) -> bool:
+        """Set or clear the quiet "not delivered to your phone" mark on the day's latest message with these words."""
+        conv = self.latest_for_day(plan_date)
+        if conv is None or not mark_delivery(conv.messages, words, undelivered):
+            return False
+        self.save(conv)
+        return True
 
     def between(self, start: date, end: date) -> List[Conversation]:
         with self.db._get_connection() as conn:

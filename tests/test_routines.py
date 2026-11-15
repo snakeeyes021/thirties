@@ -8,7 +8,7 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import mark_up, DAY, FakeJoplinAPI, at, event, make_scheduler
+from tests.fixtures import mark_up, DAY, FakeJoplinAPI, at, event, line_with, make_scheduler
 from thirties_core.assistant_tools import Services, _checkbox_id
 from thirties_core.astronomy import set_debug_time
 from thirties_core.lists import ListCatalog
@@ -174,7 +174,7 @@ class TestTheMorningSetUp(RoutineCase):
         # missed: from now, alongside Work (11-03: a routine may overlap Work; 11-05: it went
         # after work, to 3 PM)
         self.assertEqual(self.spans(self.t, "Feed the fish")[0].start_dt, at("13:00"))
-        self.assertIn("usually goes at 9:00 AM; that's passed, so it's at 1:00 PM", out)
+        line_with(out, "9:00 AM", "1:00 PM")  # its usual time has passed: where it went instead
 
     def test_planning_before_sunrise_sets_up_the_coming_day(self):
         self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [{"start": "9:00 AM", "items": FIRST}]})
@@ -194,7 +194,7 @@ class TestTheMorningSetUp(RoutineCase):
         self.assertNotIn("Deep Clean", out)
         self.assertFalse(self.spans(self.t, "Vacuum"))
         section = self.t.assistant.routines.prompt_section()
-        self.assertIn("Deep Clean: every 12 days; last done Oct 10; next due Thu Oct 22", section)
+        line_with(section, "Deep Clean", "every 12 days", "Oct 10", "Oct 22")  # the rule, last done, next due
 
     def test_the_confirmed_placement_stays_until_the_user_changes_it(self):
         self.place_the_users_way()
@@ -277,7 +277,9 @@ class TestDailyAnchors(RoutineCase):
 
     def test_they_go_on_every_morning_and_a_fixed_one_keeps_its_time(self):
         out = self.t.assistant.routines.set_up_current()
-        self.assertIn("Lunch at 12:00 PM; Fish food at 5:00 PM; Dinner at 6:00 PM", out)
+        line_with(out, "Lunch", "12:00 PM", "Fish food", "5:00 PM", "Dinner", "6:00 PM")
+        self.assertEqual([self.spans(self.t, t)[0].start_dt for t in ("Lunch", "Fish food", "Dinner")],
+                         [at("12:00"), at("17:00"), at("18:00")])
         dinner = self.spans(self.t, "Dinner")[0]
         self.assertEqual(dinner.duration_minutes, 60)  # dinner takes an hour (R6)
         fish = self.spans(self.t, "Fish food")[0]
@@ -332,8 +334,8 @@ class TestDailyAnchors(RoutineCase):
             conn.execute("DELETE FROM daily_anchors")
         db.set_sync_meta("anchors_offered", "")
         self.assertIn("OFFER ONCE", self.t.assistant.routines.prompt_section())
-        self.assertIn("Lunch at 12:00 PM (30m), Dinner at 6:00 PM (1h)",
-                      self.t.assistant.routines.prompt_section())  # still today
+        line_with(self.t.assistant.routines.prompt_section(),
+                  "Lunch", "12:00 PM", "30m", "Dinner", "6:00 PM", "1h")  # still today
         set_debug_time(at("09:00", 1))
         self.assertNotIn("OFFER ONCE", self.tools_for(TOMORROW).assistant.routines.prompt_section())
 
@@ -350,8 +352,7 @@ class TestSkipping(RoutineCase):
         self.assertTrue(self.spans(self.t, "Vacuum"))
         out = self.t.execute("skip_routine", {"routine": "deep clean"})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("skip Deep Clean today (it's back Fri Oct 16), skip this time (the next one is Tue Oct 27), or "
-                      "skip it until a day they pick", out)
+        line_with(out, "Deep Clean", "Fri Oct 16", "Tue Oct 27")  # the three choices, with their dates
         choices = self.t.assistant.routines.skip_choices("Deep Clean")
         self.assertEqual([(c["how"], c["back"]) for c in choices],
                          [("today", date(2026, 10, 16)), ("this_time", date(2026, 10, 27)), ("until", None)])
@@ -397,7 +398,7 @@ class TestWeeklyPatterns(RoutineCase):
         self.assertEqual(spans["Sleep"].end_dt, at("09:00", 2))  # Saturday's sleep-in
         self.assertEqual(parse_days("Mon-Thu"), ["mon", "tue", "wed", "thu"])
         self.assertEqual(parse_days("Monday and Thursday"), ["mon", "thu"])
-        self.assertIn("Mon, Tue, Wed, Thu: work 8:30 AM – 4:00 PM", describe_week(gen))
+        line_with(describe_week(gen), "Mon, Tue, Wed, Thu", "work", "8:30 AM", "4:00 PM")
 
     def test_the_user_says_their_week_and_work_follows_from_today(self):
         self.t.user_message = "I work 7 to 3 on weekdays, off weekends"
@@ -449,7 +450,7 @@ class TestPlacedOnWaking(RoutineCase):
             {"start": "on waking", "items": ["Feed the fish", "Make coffee"]},
             {"start": "right after that", "items": ["Shower", "Journal"]}]})
         self.assertIn("on waking: Feed the fish, Make coffee", out)
-        self.assertIn("right after the part before: Shower, Journal", out)
+        line_with(out, "after", "Shower, Journal")
         book = self.t.assistant.routines.book()
         note = self.t.assistant._routines()[0]
         self.assertEqual([p["at"] for p in book.get(note["id"], note["title"]).parts], ["wake", "wake+1"])
@@ -490,6 +491,51 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
         self.t.assistant.routines.set_up_current()
         self.assertEqual(self.spans(self.t, "Feed the fish")[0].start_dt, at("10:00"))
         self.assertEqual(self.spans(self.t, "Make bed")[0].start_dt, at("10:30"))
+
+class TestTheFallbackWhenTheDayIsCrunched(RoutineCase):
+    """The morning routine happens when the user actually wakes, even during Work; the
+    shower group goes in the next block, or at its fallback (3 PM) when the day is crunched. The fallback was only
+    shown to the model; now the morning set-up places by it."""
+
+    def set_up(self, fallback, up="09:45"):
+        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+            {"start": "on waking", "items": FIRST}, {"start": "right after that", "items": SECOND}]})
+        if fallback:
+            self.t.execute("set_routine", {"routine": "Morning Routine", "fallback": ["", fallback]})
+        set_debug_time(at(up))
+        summary = self.t.assistant.routines.set_up_current()
+        return (self.spans(self.t, "Feed the fish")[0].start_dt, self.spans(self.t, "Make bed")[0].start_dt, summary)
+
+    def test_up_during_work_the_first_part_now_the_second_at_its_fallback(self):
+        fish, bed, summary = self.set_up("3 PM when the day is crunched")
+        self.assertEqual(fish, at("10:00"))  # on waking, regardless of Work
+        self.assertEqual(bed, at("15:00"))
+        self.assertIn("is at 3:00 PM, where it goes when the day is full", summary)
+        work = self.spans(self.t, "Work")[0]
+        self.assertEqual((work.start_dt, work.end_dt), (at("08:30"), at("16:00")))
+
+    def test_after_work_is_when_work_ends(self):
+        self.assertEqual(self.set_up("after work")[1], at("16:00"))
+
+    def test_on_a_free_morning_the_next_block(self):
+        self.t.execute("remove_event", {"event": "Work"})  # a day off: nothing crunched
+        fish, bed, _ = self.set_up("3 PM when the day is crunched")
+        self.assertEqual((fish, bed), (at("10:00"), at("10:30")))
+
+    def test_with_no_fallback_the_next_block(self):
+        self.assertEqual(self.set_up("")[1], at("10:30"))
+
+    def test_a_fallback_already_past_keeps_the_next_block(self):
+        self.assertEqual(self.set_up("at 9 AM if it's busy")[1], at("10:30"))
+
+    def test_the_fallback_is_read_from_the_users_words(self):
+        from thirties_core.routines import fallback_start
+        plan = self.t.day_plan
+        self.assertEqual(fallback_start("3 PM when the day is crunched", plan), at("15:00"))
+        self.assertEqual(fallback_start("around 2:30pm", plan), at("14:30"))
+        self.assertEqual(fallback_start("straight after work", plan), at("16:00"))
+        self.assertIsNone(fallback_start("whenever there's room", plan))
+
 
 class TestTheFirstBlockMustFit(RoutineCase):
     """11-06: up at 9:25, the morning routine went in the 9:00 block with 5 minutes left. The current block only
@@ -536,8 +582,8 @@ class TestProposingTheDay(RoutineCase):
         self.assertEqual([c["title"] for c in cands], ["Buy stamps", "Call the bank", "Clean the garage"])
         self.assertNotIn("30-minute start", cands[2]["why"])  # put off often: no smaller re-offer (backoff.py)
         text = self.t.execute("day_options", {})
-        self.assertIn("- Buy stamps (due Saturday; Errands/Admin; about 30m) task_id=t_stamps", text)  # horizons
-        self.assertIn("Free time:\n- 4:00 PM – ", text)  # after work, before bed
+        line_with(text, "Buy stamps", "due Saturday", "Errands/Admin", "30m", "task_id=t_stamps")  # horizons
+        self.assertIn("Free time:\n- 4:30 PM – ", text)  # after work (and half an hour clear after it), before bed
 
     def test_the_proposal_is_the_plan_at_once(self):
         # 11-06: a proposed schedule is the schedule; it needs no approval
@@ -546,7 +592,10 @@ class TestProposingTheDay(RoutineCase):
         out = self.t.execute("propose_day", {"items": [{"item": "t_stamps", "start": "4:30 PM"},
                                                        {"item": "Call the bank", "start": "5:30 PM"}],
                                              "why": "the stamps are due Saturday"})
-        self.assertIn("On the plan:\n- 4:30 PM – Buy stamps\n- 5:30 PM – Call the bank", out)
+        line_with(out, "4:30 PM", "Buy stamps")
+        line_with(out, "5:30 PM", "Call the bank")
+        self.assertEqual([self.spans(self.t, t)[0].start_dt for t in ("Buy stamps", "Call the bank")],
+                         [at("16:30"), at("17:30")])
         self.assertIn("not a question", out)
         self.assertEqual(self.spans(self.t, "Buy stamps")[0].task_id, "t_stamps")
         self.assertIn("- [ ] Buy stamps", self.body("n_today"))
@@ -557,7 +606,8 @@ class TestProposingTheDay(RoutineCase):
     def test_only_into_the_free_time(self):
         out = self.t.execute("propose_day", {"items": [{"item": "Call the bank", "start": "10:00 AM"}]})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("Call the bank at 10:00 AM isn't in the free time", out)
+        line_with(out, "Call the bank", "10:00 AM", "free time")
+        self.assertFalse(self.spans(self.t, "Call the bank"))
         out = self.t.execute("propose_day", {"items": [{"item": "Call the bank", "start": "4:30 PM"},
                                                        {"item": "Buy stamps", "start": "4:30 PM"}]})
         self.assertIn("overlaps another proposed item", out)
@@ -565,7 +615,8 @@ class TestProposingTheDay(RoutineCase):
     def test_pythons_own_proposal_when_no_model_picks(self):
         items = self.t.assistant.proposals.default_items()
         self.assertEqual([(i["title"], i["start"][11:16]) for i in items],
-                         [("Buy stamps", "16:00"), ("Call the bank", "17:00"), ("Clean the garage", "18:00")])
+                         [("Buy stamps", "16:30"), ("Call the bank", "17:30"), ("Clean the garage", "18:30")])
+        # not the moment work ends at 4:00: half an hour stays clear after it (breathing room)
 
     def test_routines_and_anchors_arent_candidates(self):
         self.services.tasks += [item(_checkbox_id("n_routine", "Shower"), "Shower", "n_routine")]
@@ -623,7 +674,8 @@ class TestTheMorningMessage(RoutineCase):
         self.assertEqual(len(self.sent), 1)
         kind, text = self.sent[0]
         self.assertTrue(text.startswith("☀️ Good morning! "), text)
-        self.assertRegex(text, r"On the plan for the free time:\n4:00( PM)? Call the bank$")  # a notice
+        self.assertRegex(text, r"On the plan for the free time:\n4:30( PM)? Call the bank$")  # a notice, after
+        # the half hour kept clear after work
         self.assertTrue(any(s.title == "Call the bank" for s in self.m.day_plan.spans))
 
     def test_a_model_reply_without_a_proposal_isnt_shown_beside_pythons(self):
@@ -632,7 +684,7 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("\n4:00 Call the bank", self.sent[0][1])
+        self.assertIn("\n4:30 Call the bank", self.sent[0][1])  # half an hour clear after work
         self.assertIn("\n3:00 Make bed, Shower, Journal", self.sent[0][1])  # routines are listed, by part
         self.assertIn("\n12:00 PM Lunch", self.sent[0][1])  # and the meals
         self.assertNotIn("\n- ", self.sent[0][1])  # plain lines
@@ -643,8 +695,7 @@ class TestTheMorningMessage(RoutineCase):
         self.engine.responses = [{"role": "assistant", "content": "Morning!"}]
         self.m.send_user_message("good morning")
         prompt = self.engine.call_history[0][0]["content"]
-        self.assertIn("Put on this morning by Python: Morning Routine at 9:00 AM and 3:00 PM; Lunch at 12:00 PM.",
-                      prompt)
+        line_with(prompt, "Morning Routine", "9:00 AM", "3:00 PM", "Lunch", "12:00 PM")
         self.assertIn("DAY OPTIONS", prompt)
         self.assertIn("ROUTINES AND DAILY ANCHORS", prompt)
 

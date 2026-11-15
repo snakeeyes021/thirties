@@ -3,7 +3,7 @@ Invented items throughout."""
 
 import unittest
 
-from tests.fixtures import DAY, at, build_day
+from tests.fixtures import DAY, at, build_day, line_with
 from thirties_core.astronomy import set_debug_time
 from thirties_core.meals import meal_word, window
 from thirties_core.plan_tools import PlanTools
@@ -49,7 +49,7 @@ class MealTest(unittest.TestCase):
         self.t.execute("add_event", {"title": "Dentist", "start": "11:30 AM", "end": "2:30 PM", "fixed": True})
         set_debug_time(at("11:10"))
         out = self.t.execute("redraw", {})
-        self.assertIn("Lunch is late today: no free stretch for it before 2:00 PM.", out)
+        line_with(out, "Lunch", "late", "2:00 PM")
         self.assertEqual(span(self.t, "Lunch").start_dt, at("14:30"))  # the first room after
 
     def test_a_move_the_user_didnt_ask_for_never_pushes_lunch_out(self):

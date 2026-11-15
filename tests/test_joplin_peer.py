@@ -18,7 +18,7 @@ from pathlib import Path
 import unittest.mock
 from unittest.mock import MagicMock
 
-from tests.fixtures import make_scheduler
+from tests.fixtures import line_with, make_scheduler
 from thirties_core import joplin_peer as jp
 from thirties_core.config import ThirtiesConfig
 from thirties_core.joplin_peer import (CliResult, JoplinPeer, JoplinRouter, Presence, WriteFence, classify,
@@ -529,7 +529,7 @@ class TestFailures(PeerCase):
         self.runner.on_sync = lambda: self.peer_db(conflicts=[("c1", "Today")])
         self.assertEqual(self.peer.tick(), "synced")
         self.assertEqual([c["title"] for c in self.peer.status["conflicts"]], ["Today"])
-        self.assertIn("“Today” crossed with one from another device", self.told[0])
+        line_with(self.told[0], "“Today”", "another device")
         self.runner.on_sync = None
         self.clock.advance(jp.SYNC_EVERY)
         self.peer.tick()

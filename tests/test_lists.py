@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.assistant_tools import Services
 from thirties_core.astronomy import set_debug_time
 from thirties_core.backlog import load_backlog
@@ -135,7 +135,7 @@ class TestBrainsUseThem(unittest.TestCase):
         self.assertIn('"Wishlist" [Reference / wishlist: never suggest unless asked]', text)
         ListCatalog(self.sched.state_db).set_role("n_wish", "backlog", "Wishlist")
         text = FrontierBrain(self.tools, None, tasks=self.tasks, active_notes=notes).build_backlog_summary()
-        self.assertIn("[Project backlog: plan time on the project as one item", text)
+        line_with(text, "Wishlist", "[Project backlog")
 
     def test_the_slm_favours_whats_pressing_and_never_offers_reference_items(self):
         from thirties_core.brains.slm import SlmBrain

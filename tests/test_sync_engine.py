@@ -128,6 +128,21 @@ Here is the sync data:
         self.assertIn("Acme", ProfileStore(desktop.state_db).sections()["Near-term goals"])
         self.assertEqual([n.text for n in MemoryStore(desktop.state_db).notes()], ["Probation items are maybes"])
 
+    def test_people_sync(self) -> None:
+        from datetime import timedelta
+        from thirties_core.people import People
+        laptop, desktop = make_scheduler(), make_scheduler()
+        sam = People(laptop.state_db).add("Sam Rivera")
+        People(laptop.state_db).update(sam, every_days=14)
+        People(laptop.state_db).log(sam, "call", DAY - timedelta(days=3))
+        self._sync_from(laptop.state_db, desktop.state_db)
+        there = People(desktop.state_db).find("Sam")
+        self.assertEqual([(p.name, p.every_days) for p in there], [("Sam Rivera", 14)])
+        self.assertEqual(there[0].last_any, DAY - timedelta(days=3))
+        People(desktop.state_db).log(there[0], "text", DAY)  # a contact logged on the other computer comes back
+        self._sync_from(desktop.state_db, laptop.state_db)
+        self.assertEqual(People(laptop.state_db).find("Sam")[0].last_any, DAY)
+
     def test_day_off_beats_a_device_that_never_saw_the_day(self) -> None:
         laptop, desktop = make_scheduler(), make_scheduler()
         laptop_plan, _ = laptop.build_day_plan(DAY)

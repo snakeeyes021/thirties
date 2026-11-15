@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_clock, parse_day,
-                                 parse_duration_minutes, resolve_clock, thirty_ceil, thirty_of)
+                                 first_fitting_thirty, parse_duration_minutes, resolve_clock, thirty_ceil, thirty_of)
 from thirties_core.models import SpanCategory, SpanStatus
 from thirties_core.scheduler import StateDatabase, utc_now_iso
 from thirties_core.week import DAYS, describe_days, parse_days, weekday_key, work_days
@@ -349,6 +349,28 @@ def _at(hhmm: str, day_start: datetime) -> datetime:
     return resolve_clock(_clock_of(hhmm), day_start)
 
 
+FALLBACK_CLOCK_RE = re.compile(r"\b(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|noon)\b", re.I)
+AFTER_WORK_RE = re.compile(r"\bafter work\b", re.I)
+
+
+def fallback_start(text: str, plan: "DayPlan") -> Optional[datetime]:
+    """Where a part goes when its own spot won't do, read from the fallback the user gave (set_routine): a clock
+    time in it ('3 PM when the day is crunched') or 'after work' (today's Work end). None when it names neither,
+    or it's 'after work' on a day with no Work."""
+    if not text:
+        return None
+    m = FALLBACK_CLOCK_RE.search(text)
+    if m:
+        try:
+            return resolve_clock(m.group(1).replace(".", ""), plan.day_start)
+        except ClockError:
+            return None
+    if AFTER_WORK_RE.search(text):
+        work = [sp for sp in plan.spans if sp.category == SpanCategory.WORK and sp.status != SpanStatus.SKIPPED]
+        return thirty_ceil(max(sp.end_dt for sp in work)) if work else None
+    return None
+
+
 def _as_list(value: Any) -> List[Any]:
     if value in (None, ""):
         return []
@@ -376,7 +398,7 @@ ROUTINE_TOOL_SPECS: List[Dict[str, Any]] = [
                        "last_done": "When it was last done, if the user says (e.g. 'Oct 20', 'yesterday').",
                        "parts": "Its usual placement, as a list of {start, items} like put_routine's.",
                        "confirm": "true when the user says the way it's on the plan today is how it always goes.",
-                       "fallback": "Where a missed part goes, in the user's words (e.g. 'after work on work days'); "
+                       "fallback": "Where a missed part goes, in the user's words (e.g. 'straight after work'); "
                                    "one for every part, or a list with one per part."},
         "required": ["routine"],
     },
@@ -521,10 +543,66 @@ class RoutineTools:
         if r.placement_source == "user":
             return
         new = self._normalize_parts(note, parts)
+        late = self._caught_up(r, new)
+        new = [{**p, "items": [i for i in p["items"] if i.lower() not in late]} for p in new]
+        new = [p for p in new if p["items"]]
         if not new:
             return
         r.parts, r.placement_source = self._merge_parts(r.parts, new), "learned"
         book.save(r)
+
+    def unplace_for_move(self, plan: "DayPlan", note: Dict[str, Any], parts: Any) -> List[str]:
+        """Placing a routine that's already on the plan moves it (11-03: put_routine refused, while the user had
+        asked for it somewhere else). The steps this placement names come off the plan where they're still to do,
+        so put_routine puts them at their new time; a step already done today stays done where it was. The morning
+        set-up never moves anything: what the user placed by hand stays. Returns the steps taken off."""
+        if self.placing:
+            return []
+        from thirties_core.item_ids import line_ids
+        steps = self.steps(note)
+        named = set()
+        for part in _as_list(parts) or [{}]:
+            names = (part.get("items") if isinstance(part, dict) else None) or steps
+            named |= {str(n).strip().lower() for n in names if str(n).strip()}
+        if not named:
+            return []
+        ids = {i for s in steps if s.lower() in named for i in line_ids(self.db, note["id"], s)} if self.db else set()
+        done = {s.title.strip().lower() for s in plan.spans if s.status == SpanStatus.DONE}
+        moving = [s for s in plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope
+                  and s.source != "calendar" and s.title.strip().lower() in named
+                  and s.title.strip().lower() not in done
+                  and (not s.task_id or s.task_id in ids)]
+        gone = {s.id for s in moving}
+        plan.spans = [s for s in plan.spans if s.id not in gone]
+        state = self.pt._state_db
+        for s in moving:
+            if state is not None:
+                state.delete_span(s.id)
+        return [s.title for s in moving]
+    def _caught_up(self, r: Routine, new: List[Dict[str, Any]]) -> set:
+        """Steps placed later than their usual time once that time has already gone by today, lowercased: the user
+        is catching up on a missed step, not saying where it goes. Learning those put a morning routine's steps at
+        3:30 PM the next morning too."""
+        plan = self.pt.day_plan
+        if not r.parts or not self.pt.is_current(plan):
+            return set()
+        now = self.pt._now()
+        if not plan.day_start <= now < plan.day_end:
+            return set()
+        usual: Dict[str, datetime] = {}
+        for p in r.parts:
+            when = self._part_start(plan, p.get("at", ""))
+            for i in p["items"]:
+                if when is not None:
+                    usual[i.lower()] = when
+        late = set()
+        for p in new:
+            when = self._part_start(plan, p.get("at", ""))
+            for i in p["items"]:
+                was = usual.get(i.lower())
+                if when is not None and was is not None and was + timedelta(minutes=30) <= now and when > was:
+                    late.add(i.lower())
+        return late
 
     def learn_move(self, span) -> None:
         """A routine step the user moved by itself (update_event, from either brain or a Day page drag): its new
@@ -662,11 +740,20 @@ class RoutineTools:
         saved, self.pt.day_plan, self.placing = self.pt.day_plan, plan, True
         state: Dict[str, Any] = {"state": "done", "placed": [], "moved": [], "unplaced": [], "on_today": []}
         try:
-            self.a._day_begun()  # the morning reset of the Today note comes before anything is written to it
-            self._place_routines(plan, now, state)
-            self._place_anchors(plan, now, state)
-        except Exception as e:  # never in the way of the user's turn
-            logger.exception("Setting up %s failed: %s", plan.target_date, e)
+            from thirties_core.break_down import release  # broken down since: its first piece can be offered
+            release(self.a)
+        except Exception as e:
+            logger.warning("Couldn't release what was broken down: %s", e)
+        try:
+            # each step on its own: one that fails (the Today note, one routine) never keeps the rest of the day's
+            # routines or its meals off the plan, and never gets in the way of the user's turn
+            for step in (self.a._day_begun,  # the morning reset of the Today note comes before anything is written
+                         lambda: self._place_routines(plan, now, state),
+                         lambda: self._place_anchors(plan, now, state)):
+                try:
+                    step()
+                except Exception as e:
+                    logger.exception("Setting up %s: a step failed: %s", plan.target_date, e)
         finally:
             self.pt.day_plan, self.placing = saved, False
             self.db.set_sync_meta(key, json.dumps(state))
@@ -725,44 +812,73 @@ class RoutineTools:
             t += timedelta(minutes=30)
         return None, "missed"
 
+    def _crunched(self, plan: "DayPlan", part: Dict[str, Any], start: Optional[datetime], why: str,
+                  now: datetime) -> Tuple[Optional[datetime], str]:
+        """A later part of a routine with a fallback the user gave ('3 PM when the day is crunched', 'after
+        work'): it goes at the fallback when its own spot has passed, when there's no free time for it, or when
+        the day is crunched there: the spot falls inside Work or a fixed calendar event. Without a fallback, or
+        with one that's already passed, the part keeps its spot (on waking, and the next block after)."""
+        at = fallback_start(str(part.get("fallback") or ""), plan)
+        if at is None or at + timedelta(minutes=30) <= now or at + timedelta(minutes=30) > self._bedtime(plan):
+            return start, why
+        crunched = start is None or why == "missed" or any(
+            sp.start_dt < start + timedelta(minutes=30) and start < sp.end_dt and sp.status != SpanStatus.SKIPPED
+            and (sp.category == SpanCategory.WORK or (sp.category == SpanCategory.CALENDAR and sp.is_firm))
+            for sp in plan.spans)
+        if not crunched or (start is not None and start >= at):
+            return start, why
+        return max(at, first_fitting_thirty(now)) if at < now else at, "fallback"
+
     def _place_routines(self, plan: "DayPlan", now: datetime, state: Dict[str, Any]) -> None:
-        from thirties_core.assistant_tools import ToolError
         book = self.book()
         for note in self.a._routines():
-            r = book.get(note["id"], note["title"])
-            if not is_due(r, plan.target_date, self.gen, self.last_done(note, r)):
+            try:  # one routine that can't be placed never keeps the others off
+                self._place_routine(note, book.get(note["id"], note["title"]), plan, now, state)
+            except Exception as e:
+                logger.exception("Couldn't set up %s: %s", note.get("title"), e)
+                state["unplaced"].append(f"{note['title']}: couldn't be placed")
+
+    def _place_routine(self, note: Dict[str, Any], r: Routine, plan: "DayPlan", now: datetime,
+                       state: Dict[str, Any]) -> None:
+        from thirties_core.assistant_tools import ToolError
+        if not is_due(r, plan.target_date, self.gen, self.last_done(note, r)):
+            return
+        parts, _ = self.parts_for(note, r, plan.target_date)
+        if not parts:
+            state["unplaced"].append(f"{note['title']}: no usual time yet")
+            return
+        times = []
+        prev: Optional[datetime] = None
+        for k, part in enumerate(parts):  # in their usual order, each in its own thirty after the one before
+            # (11-05 replay: a sleep-in put both parts at 9:00)
+            start, why = self._spot(plan, part["at"], now)
+            if k > 0:  # the first part is on waking, whatever the day holds; a later one may have a fallback
+                start, why = self._crunched(plan, part, start, why, now)
+            if start is not None and prev is not None and start < prev + timedelta(minutes=30):
+                start = prev + timedelta(minutes=30)
+            prev = start or prev
+            if start is None:
+                state["unplaced"].append(f"{note['title']} ({', '.join(part['items'])}): no free time left")
                 continue
-            parts, _ = self.parts_for(note, r, plan.target_date)
-            if not parts:
-                state["unplaced"].append(f"{note['title']}: no usual time yet")
+            try:
+                out = self.a.put_routine(routine=note["title"], parts=[{"start": format_clock(start),
+                                                                        "items": part["items"]}])
+            except ToolError as e:
+                state["unplaced"].append(f"{note['title']}: {e}")
                 continue
-            times = []
-            prev: Optional[datetime] = None
-            for part in parts:  # in their usual order, each in its own thirty after the one before (11-05 replay:
-                # a sleep-in put both parts at 9:00)
-                start, why = self._spot(plan, part["at"], now)
-                if start is not None and prev is not None and start < prev + timedelta(minutes=30):
-                    start = prev + timedelta(minutes=30)
-                prev = start or prev
-                if start is None:
-                    state["unplaced"].append(f"{note['title']} ({', '.join(part['items'])}): no free time left")
-                    continue
-                try:
-                    out = self.a.put_routine(routine=note["title"], parts=[{"start": format_clock(start),
-                                                                            "items": part["items"]}])
-                except ToolError as e:
-                    state["unplaced"].append(f"{note['title']}: {e}")
-                    continue
-                if out.endswith("is already on the plan."):
-                    continue  # placed by hand already
-                times.append(format_clock(start))
-                if why == "missed":
-                    state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
-                                          f"usually goes {'' if part['at'].startswith('wake') else 'at '}{_clock_of(part['at'])}; that's passed, so it's at "
-                                          f"{format_clock(start)}.)")
-            if times:
-                state["placed"].append(f"{note['title']} at " + " and ".join(times))
-                state["on_today"].append(note["title"].strip())
+            if out.endswith("is already on the plan."):
+                continue  # placed by hand already
+            times.append(format_clock(start))
+            if why == "fallback":
+                state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
+                                      f"is at {format_clock(start)}, where it goes when the day is full.)")
+            elif why == "missed":
+                state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
+                                      f"usually goes {'' if part['at'].startswith('wake') else 'at '}{_clock_of(part['at'])}; that's passed, so it's at "
+                                      f"{format_clock(start)}.)")
+        if times:
+            state["placed"].append(f"{note['title']} at " + " and ".join(times))
+            state["on_today"].append(note["title"].strip())
 
     def _place_anchors(self, plan: "DayPlan", now: datetime, state: Dict[str, Any],
                        anchors: Optional[List[Anchor]] = None) -> None:
@@ -912,7 +1028,11 @@ class RoutineTools:
         """When its first part usually goes on this day: its clock time, or the day's waking."""
         if not r.parts:
             return None
-        at = r.parts[0].get("at", "")
+        return self._part_start(plan, r.parts[0].get("at", ""))
+
+    def _part_start(self, plan: "DayPlan", at: str) -> Optional[datetime]:
+        """When a part placed at ``at`` (a stored "HH:MM", or "wake"/"wake+N") goes on this day."""
+        at = str(at or "")
         if at.startswith("wake"):
             from thirties_core.day_times import wake_time
             history = (self.db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)

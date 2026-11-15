@@ -284,6 +284,8 @@ class SyncEngine:
         from thirties_core.day_lists import AheadLists
         from thirties_core.done_log import DoneLog
         from thirties_core.placement_lists import DropBoxScopes
+        from thirties_core.project_facts import ProjectFacts
+        from thirties_core.people import People
         return {
             "conversations": ConversationStore(self.state_db),
             "profile": ProfileStore(self.state_db),
@@ -307,6 +309,8 @@ class SyncEngine:
             "contextual_flags": ContextualFlags(self.state_db),
             "horizons": HorizonCatalog(self.state_db),
             "horizon_plans": HorizonPlans(self.state_db),
+            "project_facts": ProjectFacts(self.state_db),  # parts of projects, epics, the user's estimates
+            "people": People(self.state_db),  # people to keep in touch with, and each contact (people.py)
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

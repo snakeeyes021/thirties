@@ -128,7 +128,8 @@ class Placement:
     """The user's notes as places to put things: roles, sections, what's in them."""
 
     def __init__(self, notes: List[Dict[str, Any]], roles: Dict[str, Dict[str, str]], tasks: Iterable = (),
-                 someday_sections: Iterable[str] = (), scopes: Optional[Dict[str, str]] = None) -> None:
+                 someday_sections: Iterable[str] = (), scopes: Optional[Dict[str, str]] = None, db=None) -> None:
+        self.db = db  # for what's known of an item already (its kind: menu_refusal)
         self.notes = [n for n in notes if n.get("id")]
         self.roles = {nid: (r or {}).get("role", "") for nid, r in roles.items()}
         self.tasks = list(tasks)
@@ -146,7 +147,7 @@ class Placement:
                 notes[nid] = {"id": nid, "title": t.parent_note_title, "source_notebook": t.source_notebook}
         someday = getattr(assistant.pt.scheduler.config.joplin, "someday_sections", []) if assistant.pt.scheduler else []
         return cls(list(notes.values()), ListCatalog(db).roles() if db else {}, assistant.s.tasks, someday,
-                   DropBoxScopes(db).all() if db else {})
+                   DropBoxScopes(db).all() if db else {}, db=db)
 
     # --- notes ---
 
@@ -204,6 +205,27 @@ class Placement:
             return scored[0][2]
         raise _toolerror(f"No list is clearly '{ref}'.")
 
+    def menu_refusal(self, note: Dict[str, Any], title: str, dated: bool) -> Optional[str]:
+        """A menu holds options picked again and again in free time, so a
+        one-off never goes there: an item with a date or that can't wait, or one the user called a one-off (its
+        kind, 'once'). None when it may go there."""
+        if self.role(note) != "menu":
+            return None
+        kind = ""
+        if self.db is not None and title:
+            try:
+                from thirties_core.item_facts import LastingFacts
+                facts = LastingFacts(self.db).get(title)
+                kind = (facts.kind if facts is not None else "") or ""
+            except Exception:
+                kind = ""
+        if not dated and kind != "once":
+            return None
+        lists = [n["title"] for n in self.notes if self.role(n) in ("list", "project")]
+        return (f"{note['title']} is a menu (things to pick from again and again in free time), and this is a "
+                "one-off" + (" with a date or that can't wait" if dated else "") + ". Put it on a list instead"
+                + (f": {', '.join(lists[:6])}." if lists else "."))
+
     def refusal(self, note: Dict[str, Any]) -> Optional[str]:
         """Why a new item can't go on this note, or None."""
         why = REFUSED_ROLES.get(self.role(note))
@@ -217,7 +239,10 @@ class Placement:
     def choose_section(self, note: Dict[str, Any], section: Optional[str], title: str,
                        dated: bool) -> Tuple[Optional[str], str]:
         """(where it goes: None for the end of a note without headings, "" for the top, or a heading; how to say
-        it). Refuses a section that's wrong for the item."""
+        it). Refuses a section that's wrong for the item, and a menu for a one-off (menu_refusal)."""
+        menu = self.menu_refusal(note, title, dated)
+        if menu:
+            raise _toolerror(menu)
         sections = self.sections(note)
         heads = [s for s in sections if s.name]
         named = ", ".join(f"'{s.name}'" + (" (someday)" if s.someday else "") for s in heads

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # (opens, closes): where the meal sensibly goes. The further past "closes", the less sensible.
 MEAL_WINDOWS = {
@@ -60,4 +60,77 @@ def late_line(title: str, closes: datetime, why: str) -> str:
     return f"{title} is late today: {why} before {format_clock(closes)}."
 
 
-__all__ = ["MEAL_WINDOWS", "meal_word", "window", "late_line"]
+# --- spacing from when the user really ate ---
+# The next meal comes this long after the last one ended (lunch never comes minutes after a late breakfast)
+MEAL_GAP = timedelta(hours=3)
+# ...or, when its window closes sooner, at least this long after (lunch near the end of its window, not at 3 PM)
+MEAL_GAP_LEAST = timedelta(hours=2)
+SPACED_KEY = "meal_spaced:{span_id}"  # moved once for spacing: a time the user sets after that is theirs
+
+
+def eaten_end(span) -> Optional[datetime]:
+    """When a meal ended (done: its actual end), or will (in progress: its expected end); None if it hasn't
+    happened."""
+    from thirties_core.models import SpanStatus
+    if span.status in (SpanStatus.DONE, SpanStatus.PARTIAL):
+        return span.actual_end or span.end_dt
+    if span.status == SpanStatus.PLANNED and span.time_source in ("running", "auto_done"):
+        return span.end_dt
+    return None
+
+
+def spaced_start(last_end: datetime, length: timedelta, closes: datetime) -> datetime:
+    """Where the next meal goes after one that ended at ``last_end``: MEAL_GAP after it, or earlier (down to
+    MEAL_GAP_LEAST) to end inside its window."""
+    from thirties_core.clock import thirty_ceil
+    want = last_end + MEAL_GAP
+    if want + length > closes:
+        want = max(closes - length, last_end + MEAL_GAP_LEAST)
+    return thirty_ceil(want)
+
+
+def respace(tools, plan=None, now: Optional[datetime] = None) -> List[str]:
+    """The next meal after one just eaten (or still going) moves later if it's too soon, once: a meal the user
+    times after that, or a fixed one, stays. What it lands on moves along (placement.make_way). Returns a line for
+    each meal moved."""
+    from thirties_core.clock import format_clock
+    from thirties_core.models import SpanStatus
+    from thirties_core.placement import apply_flow, flexible, make_way
+    plan = plan or tools.day_plan
+    now = now or tools._now()
+    db = tools._state_db
+    meals = sorted((s for s in plan.spans if meal_word(s.title) is not None and s.status != SpanStatus.SKIPPED
+                    and not s.is_envelope), key=lambda s: s.start_dt)
+    out: List[str] = []
+    for i, eaten in enumerate(meals):
+        ended = eaten_end(eaten)
+        if ended is None:
+            continue
+        nxt = next((m for m in meals[i + 1:] if m.status == SpanStatus.PLANNED and m.time_source == ""
+                    and m.start_dt > max(now, eaten.start_dt)), None)
+        if nxt is None or not flexible(tools, plan, nxt) or nxt.start_dt >= ended + MEAL_GAP_LEAST:
+            continue
+        if db is not None and db.get_sync_meta(SPACED_KEY.format(span_id=nxt.id)):
+            continue
+        length = nxt.end_dt - nxt.start_dt
+        opens, closes = window(nxt.title, plan.day_start)
+        start = spaced_start(ended, length, closes)
+        if start <= nxt.start_dt:
+            continue
+        was = (nxt.start_dt, nxt.end_dt)
+        nxt.start_dt, nxt.end_dt = start, start + length
+        chain = sorted((s for s in plan.active_spans() if s.id != nxt.id and flexible(tools, plan, s)
+                        and s.end_dt > start and meal_word(s.title) is None
+                        and s.time_source not in ("running", "auto_done")), key=lambda s: s.start_dt)
+        flow = make_way(tools, plan, chain, {}, wall=nxt, wall_was=(start, start))
+        apply_flow(tools, plan, flow, extra_undo={nxt.id: was})
+        tools._persist(nxt)
+        if db is not None:
+            db.set_sync_meta(SPACED_KEY.format(span_id=nxt.id), start.isoformat())
+        out.append(f"{nxt.title} moved to {format_clock(start)}, a while after {eaten.title}"
+                   + (f" (late today: its window closes at {format_clock(closes)})" if start + length > closes else ""))
+    return out
+
+
+__all__ = ["MEAL_WINDOWS", "meal_word", "window", "late_line", "respace", "spaced_start", "MEAL_GAP",
+           "MEAL_GAP_LEAST"]
