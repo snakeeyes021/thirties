@@ -2,6 +2,7 @@
 outbox draining through the peer, the sync schedule, reading the desktop app's sync settings, and failures
 (the peer down, a sync conflict, a locked target, a sign-in or password needed)."""
 
+from tests.fixtures import temp_dir
 import hashlib
 import io
 import json
@@ -211,7 +212,7 @@ def make_desktop_profile(root, target=5, settings=None, db_settings=None, e2ee=F
 class PeerCase(unittest.TestCase):
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="thirties_peer_"))
+        self.tmp = Path(temp_dir("thirties_peer_"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         home = unittest.mock.patch.object(Path, "home", return_value=self.tmp / "home")  # never the real Joplin
         home.start()

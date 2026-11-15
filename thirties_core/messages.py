@@ -29,7 +29,8 @@ MISSED_HEADING = "Not marked yet:"
 # --- what's behind ---
 
 def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpan], bool]] = None) -> List[EventSpan]:
-    """Planned items whose time is over with nothing said, in order, once each.
+    """Today's planned items whose time is over with nothing said, in order, once each (an earlier day's are that
+    day's: Before today sorts them).
 
     An item counts only once the block it ends in is over: what's in the block the user is still in isn't missed
     (10-26 09:15: the user was asked about items of the block still under way). The same title
@@ -39,7 +40,7 @@ def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpa
     seen = set()
     for s in sorted(plan.active_spans(), key=lambda s: (s.start_dt, s.end_dt)):
         if s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.status != SpanStatus.PLANNED \
-                or s.tentative or thirty_ceil(s.end_dt) > block:
+                or s.tentative or thirty_ceil(s.end_dt) > block or s.start_dt < plan.day_start:  # today's only
             continue
         if skip is not None and skip(s):
             continue
@@ -60,6 +61,12 @@ def missed_lines(spans: Iterable[EventSpan]) -> List[str]:
             seen.add(s.title.strip().lower())
             out.append(f"- {s.title}")
     return out
+
+
+def join_sections(*sections: Optional[str]) -> str:
+    """The one place a message's sections are put together (a reply, a status, the schedule, what's next, what's
+    not marked yet, a notice): one blank line between each, empty ones left out, so the layout never drifts."""
+    return "\n\n".join(str(s).strip("\n") for s in sections if s and str(s).strip())
 
 
 def missed_block(spans: Sequence[EventSpan]) -> str:
@@ -114,10 +121,29 @@ def _row_items(plan: DayPlan) -> List[EventSpan]:
             and s.status not in (SpanStatus.SKIPPED,) and s.end_dt > s.start_dt]
 
 
-def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = None) -> str:
+# The person asking where they are now: the status line is the answer, whatever they set and however recently
+# it was shown
+WHERE_ASKED_RE = re.compile(r"\b(where am i|what(?:'s| is) (?:on )?(?:right )?now|which block|what block|"
+                            r"what am i (?:on|doing))\b", re.IGNORECASE)
+
+
+def status_wanted(config, db, day, said: str = "") -> bool:
+    """Whether replies say which block the person is in: on unless they turned it off (reply_extras.py), and
+    always when they ask where they are."""
+    if WHERE_ASKED_RE.search(said or ""):
+        return True
+    from thirties_core.reply_extras import effective
+    return bool(effective(config, db, day)["status_line"])
+
+
+def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = None, config=None, db=None,
+                said: str = "") -> str:
     """Where the user is: the block, and what's in it. An end time only when what's on now runs past the block
     and isn't followed straight on by the next thing listed (10-29: an "(until 8:30)" right before the
-    next item added nothing)."""
+    next item added nothing). With ``config`` or ``db`` (a reply to the person): "" when they turned it off and
+    didn't ask where they are (``said``)."""
+    if (config is not None or db is not None) and not status_wanted(config, db, plan.target_date, said):
+        return ""
     block = thirty_of(now)
     here = [s for s in _row_items(plan) if not s.tentative and s.status == SpanStatus.PLANNED
             and s.start_dt < block + HALF and s.end_dt > block]
@@ -141,16 +167,39 @@ def _note(s: EventSpan) -> str:
     return s.status.value if s.status != SpanStatus.PLANNED else ""
 
 
-def schedule_rows(plan: DayPlan, start: Optional[datetime] = None) -> List[str]:
+def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only: bool = False) -> List[str]:
     """The plan from ``start`` on (the whole day without one), by blocks: each row a block and what's in it,
-    things at the same time joined with +, and an end time only before a gap (clock.agenda_lines)."""
-    items = [s for s in _row_items(plan) if start is None or s.start_dt >= start]
+    things at the same time joined with +, and an end time only before a gap (clock.agenda_lines). The one row
+    formatter: the schedule (render_schedule) and what's next after a change (whats_next) both lay rows out
+    here. ``planned_only``: what's still to come (nothing done, skipped or unanswered)."""
+    items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start)
+             and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]
     rows = [(s.start_dt, s.end_dt, s.title, _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
     return agenda_lines(rows)
 
 
+def plain_rows(rows: List[str]) -> List[str]:
+    """schedule_rows' rows as plain lines: no bullets, and a block with one thing after another on one line
+    ("7:00 PM – Shower, then Journal (until 7:30 PM)"); everything else exactly as the schedule shows it."""
+    grouped: List[list] = []
+    for row in rows:
+        if row.startswith("  ") and grouped:  # what follows within that half hour
+            grouped[-1][1].append(row.strip())
+        else:
+            grouped.append([row[2:] if row.startswith("- ") else row, []])
+    lines = []
+    for head, parts in grouped:
+        if parts:
+            m = re.match(r"^(.*?–)\s*(\(until [^)]*\))?$", head)
+            when, until = (m.group(1), m.group(2)) if m else (head, None)
+            head = f"{when} {', then '.join(parts)}" + (f" {until}" if until else "")
+        lines.append(head)
+    return lines
+
+
 def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = False,
-                    missed: Optional[Sequence[EventSpan]] = None, label: str = "") -> str:
+                    missed: Optional[Sequence[EventSpan]] = None, label: str = "", config=None, db=None,
+                    said: str = "") -> str:
     """The schedule as the user reads it. For the day being lived (``now`` given): the status line, what's not
     marked yet right after it, then the rest of the day (or, asked for, the whole day). For another day: the
     day."""
@@ -163,18 +212,22 @@ def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = Fa
     upcoming = [s for s in _row_items(plan) if s.start_dt >= block + HALF]
     next_start = min((thirty_of(s.start_dt) for s in upcoming), default=None)
     missed = list(missed if missed is not None else missed_items(plan, now))
-    return with_missed(status_line(plan, now, next_start), missed) + "\n\n" + (
-        ("The whole day:\n" if whole_day else "") + "\n".join(rows) if rows else "Nothing else is planned today.")
+    return join_sections(with_missed(status_line(plan, now, next_start, config, db, said), missed),
+                         ("The whole day:\n" if whole_day else "") + "\n".join(rows) if rows
+                         else "Nothing else is planned today.")
 
 
 def with_missed(status: str, missed: Sequence[EventSpan]) -> str:
-    """A status (a reply's "you're in…" line, or a notice) with what's not marked yet right under it."""
-    return status + ("\n" + missed_block(missed) if missed else "")
+    """A status (a reply's "you're in…" line, or a notice) with what's not marked yet under it, as its own
+    section."""
+    return join_sections(status, missed_block(missed) if missed else "")
 
 
-def missed_for(tools, now: datetime) -> List[EventSpan]:
-    """missed_items for a PlanTools' day, leaving out items the user said not to ask about (mute_checkins)."""
-    mutes = tools.services.mutes if getattr(tools, "services", None) else None
+def missed_for(tools, now: datetime, muted_too: bool = False) -> List[EventSpan]:
+    """missed_items for a PlanTools' day. A mute (mute_checkins) only quiets what Thirties says by itself, notices
+    and check-ins, so those leave muted items out; a view the user asks for (the schedule, /now) passes
+    ``muted_too`` and shows where everything stands."""
+    mutes = tools.services.mutes if getattr(tools, "services", None) and not muted_too else None
     return missed_items(tools.day_plan, now, skip=(lambda s: mutes.is_muted(s.id, now)) if mutes else None)
 
 
@@ -185,14 +238,18 @@ def now_section(tools) -> str:
     now = tools._now()
     if not (plan.day_start <= now < plan.day_end):
         return ""
-    missed = missed_for(tools, now)
+    missed = missed_for(tools, now, muted_too=True)  # where things stand, muted or not
+    askable = {s.id for s in missed_for(tools, now)}
     lines = ["NOW", status_line(plan, now)]
     if missed:
         shown = MissedTracker(tools._state_db).titles_shown(now)
-        new = [s.title for s in missed if s.title.strip().lower() not in shown]
+        new = [s.title for s in missed if s.title.strip().lower() not in shown and s.id in askable]
+        muted = [s.title for s in missed if s.id not in askable]
         lines.append("Not marked yet (their time is over, nothing said): " + ", ".join(s.title for s in missed) + ". "
                      + ("The user has already been shown all of these: don't ask about them again."
-                        if not new else "Not shown to the user yet: " + ", ".join(new) + "."))
+                        if not new else "Not shown to the user yet: " + ", ".join(new) + ".")
+                     + (" Check-ins are muted for " + ", ".join(muted) + ": never ask about those, though a schedule "
+                        "still lists them." if muted else ""))
     return "\n".join(lines) + "\n\n"
 
 
@@ -264,6 +321,6 @@ def drop_repeat_checkins(reply: str, missed: Sequence[EventSpan], already: set) 
     return out, asked
 
 
-__all__ = ["MISSED_HEADING", "MissedTracker", "drop_repeat_checkins", "missed_block", "missed_for", "missed_items",
+__all__ = ["MISSED_HEADING", "MissedTracker", "drop_repeat_checkins", "join_sections", "missed_block", "missed_for", "missed_items",
            "missed_lines", "now_section", "with_missed",
            "place_schedule", "render_schedule", "schedule_rows", "status_line"]

@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.clock import EXACT_ASKED_RE, real_times, to_thirties, trim_meridiems
+from thirties_core.clock import EXACT_ASKED_RE, real_times, thirty_of, to_thirties, trim_meridiems
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
@@ -82,9 +82,13 @@ class ConversationManager:
 
     def set_brain(self, choice: str) -> str:
         """Switch this device to another brain, keeping the conversation. Returns the brain's name."""
+        from thirties_core.brains import offered_brains
+        offered = offered_brains(self.scheduler.config if self.scheduler else None)
         name = BRAIN_ALIASES.get(str(choice).strip().lower())
-        if name is None:
-            raise ValueError(f"Unknown brain '{choice}'. Choose one of: {', '.join(BRAINS)}.")
+        if name is None or name not in offered:
+            from thirties_core.brains import BRAIN_WORDS
+            raise ValueError(f"Unknown assistant '{choice}'. Choose one of: "
+                             f"{', '.join(BRAIN_WORDS.get(n, n) for n in offered)}.")
         if self.scheduler is not None:
             from thirties_core.settings import Settings
             Settings(self.scheduler.state_db).set("assistant.brain", name)
@@ -301,8 +305,12 @@ class ConversationManager:
         self.brain.messages = value
 
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Run a schedule tool directly, bypassing the model."""
-        return self.tools.execute(name, arguments)
+        """Run a schedule tool directly, bypassing the model: the app's own controls, so the user did it."""
+        self.tools.by_hand = True
+        try:
+            return self.tools.execute(name, arguments)
+        finally:
+            self.tools.by_hand = False
 
     def _now_iso(self) -> str:
         return get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")
@@ -384,7 +392,13 @@ class ConversationManager:
         elif cmd.split()[0] == "/brain":
             arg = clean_text.split(maxsplit=1)[1] if len(clean_text.split()) > 1 else ""
             if not arg:
-                reply = (f"Using {BRAINS[self.brain_name]}. Switch with /brain gemini or /brain gemma.")
+                from thirties_core.brains import offered_brains
+                others = [n for n in offered_brains(self.scheduler.config if self.scheduler else None)
+                          if n != self.brain_name]
+                from thirties_core.brains import BRAIN_WORDS
+                reply = f"Using {BRAINS[self.brain_name]}." + (
+                    " Switch with " + " or ".join(f"/brain {BRAIN_WORDS.get(n, n)}" for n in others) + "."
+                    if others else "")
             else:
                 try:
                     reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."
@@ -407,8 +421,8 @@ class ConversationManager:
         to make its reply the morning's one message. True when that's this turn's job."""
         from thirties_core import morning
         db = self.scheduler.state_db if self.scheduler is not None else None
-        if db is None or self.brain_name != "frontier" or not self.tools.is_current(self.day_plan) \
-                or morning.is_done(db, self.day_plan.target_date):
+        self._morning_facts = ""
+        if db is None or not self.tools.is_current(self.day_plan) or morning.is_done(db, self.day_plan.target_date):
             return False
         try:
             level = getattr(self.scheduler.config.assistant, "message_level", "medium")
@@ -416,6 +430,9 @@ class ConversationManager:
         except Exception as e:  # the background tries again later
             logger.warning("Preparing the morning failed: %s", e)
             return False
+        if self.brain_name != "frontier":  # the pipeline: the day is built now, and its facts go after the reply
+            self._morning_facts = facts
+            return True
         self.brain.messages.append({"role": "user", "content": morning.in_turn_instruction(facts, brief),
                                     "hidden": True})
         return True
@@ -427,6 +444,8 @@ class ConversationManager:
         merged = "\n".join(i.text for i in batch)
         self.tools.user_message = merged
         self.tools.shown_schedule = None
+        from thirties_core import whats_next
+        self._plan_before = whats_next.snapshot(self.day_plan)  # what the turn moves, for what's next
         self._stamp()
         self.reload_backlog()  # anything older is from before this turn
         if self.scheduler is not None:  # check-ins hold off while the user is talking to the assistant
@@ -444,7 +463,7 @@ class ConversationManager:
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:
-            if self.brain_name == "slm":  # its parse reads one message: give it the burst as one
+            if self.brain_name in ("slm", "pipeline"):  # its parse reads one message: give it the burst as one
                 reply = self.brain.respond(merged)
             else:  # the model sees each message as the user sent it, and answers them together
                 for i in batch[:-1]:
@@ -453,6 +472,9 @@ class ConversationManager:
         except BrainUnavailable as e:
             logger.warning("The model couldn't be reached: %s", e)
             return self._lost(batch, before, changes_before, e, via, attempts), False
+        if morning_now and getattr(self, "_morning_facts", "") and isinstance(reply, str) \
+                and not reply.startswith(("Error contacting model", "Sorry, I couldn't reach")):
+            reply = f"{reply}\n\n{self._morning_facts}"  # the pipeline's morning: what the day holds, from Python
         if morning_now:  # it went out with this reply: the background doesn't send a second one
             from thirties_core import morning
             morning.mark_done(self.scheduler.state_db, self.day_plan.target_date,
@@ -472,6 +494,8 @@ class ConversationManager:
                                if self.day_plan.target_date == self.tools.today() else None)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
+        final = self._status_as_wanted(final, merged, before)
+        final = self._with_whats_next(final, merged, before)
         if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":
@@ -488,7 +512,7 @@ class ConversationManager:
         users = [m for m in self.brain.messages[before:] if m.get("role") == "user" and "at" not in m
                  and not str(m.get("content", "")).startswith("[System check")]
         from thirties_core import build
-        if self.brain_name == "slm" and users:
+        if self.brain_name in ("slm", "pipeline") and users:
             users[0]["at"], users[0]["via"], users[0]["build"] = batch[0].at, batch[0].via, build.BUILD
             return
         for item, m in zip(batch, users):
@@ -512,6 +536,56 @@ class ConversationManager:
         listed = [s for s in missed if MISSED_HEADING in out and f"- {s.title}" in out]
         tracker.mark(now, listed, asked)
         return out
+
+    def _context(self) -> tuple:
+        """(config, state db) for what's laid out as the person wants it (reply_extras.py)."""
+        if self.scheduler is None:
+            return None, None
+        return getattr(self.scheduler, "config", None), self.scheduler.state_db
+
+    def _status_as_wanted(self, reply: str, said: str, before: int) -> str:
+        """The "You're in the … block" line once per block: left out when the block hasn't changed since a reply
+        last said it, unless the person asks where they are. Whether it's wanted at all is messages.status_wanted;
+        this also catches the line when the model wrote it itself."""
+        from thirties_core import reply_extras
+        from thirties_core.messages import WHERE_ASKED_RE, status_wanted
+        if not reply_extras.status_shown_in(reply) or WHERE_ASKED_RE.search(said or ""):
+            return reply
+        if not status_wanted(*self._context(), self.day_plan.target_date, said):
+            return reply_extras.without_status(reply)
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        last = reply_extras.status_block_last_shown(self.brain.messages[:before])  # the replies before this turn
+        if last is not None and last == thirty_of(now):
+            return reply_extras.without_status(reply)
+        return reply
+
+    def _with_whats_next(self, reply: str, said: str, before: int) -> str:
+        """After a turn that changed something, what's next, from the plan as it now stands (whats_next.py), at the
+        end of the reply. Never with a schedule already in the reply, when the user asked for it, or in a turn
+        about what replies show."""
+        from thirties_core import whats_next
+        from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
+        if self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or "") \
+                or any(m.get("name") == "set_reply_extras" for m in self.brain.messages[before:]):
+            return reply
+        changed = any(m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
+                      and str(m.get("content") or "").strip() and not str(m.get("content")).startswith(NOT_DONE)
+                      for m in self.brain.messages[before:])
+        if not changed:
+            return reply
+        from thirties_core.messages import MISSED_HEADING, MissedTracker, missed_for
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
+        # A status view: worked out fresh from the plan for every slice, so what's still unmarked shows again in the
+        # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
+        # never the list twice; muted or not (a mute quiets check-ins, never where things stand)
+        unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now, muted_too=True)
+        config, db = self._context()
+        part = whats_next.render(self.day_plan, now, moved, None, said, unmarked, config=config, db=db)
+        if part and unmarked and MISSED_HEADING in part and self.scheduler is not None:
+            MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
+        from thirties_core.messages import join_sections
+        return join_sections(reply, part) if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
               attempts: int) -> str:

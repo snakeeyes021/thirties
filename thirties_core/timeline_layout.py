@@ -527,15 +527,15 @@ def move_target(layout: DayLayout, card: Card, grab_row: int, drop_rows: float) 
 def move_call(layout: DayLayout, card: Card, grab_row: int, drop_rows: float, push: bool = False
               ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """A drag: update_event to the thirty it was dropped on, keeping its length. Dropped onto another item, the two
-    share the time (item 17); only with ``push`` (a modifier held) does what follows slide later (push_later)."""
+    share the time (item 17), a fixed one too: the user placed it there by hand (alongside). Only with ``push`` (a
+    modifier held) does what follows slide later (push_later)."""
     if not movable(card.span):
         return None
     row = move_target(layout, card, grab_row, drop_rows)
     if row == card.row:
         return None
     args: Dict[str, Any] = {"event": card.span.id, "start": format_clock(layout.slots[row].start)}
-    if push:
-        args["push_later"] = True
+    args["push_later" if push else "alongside"] = True
     return "update_event", args
 
 
@@ -553,7 +553,8 @@ def resize_extent(layout: DayLayout, card: Card, edge: str, rows: float) -> Tupl
 
 
 def resize_call(layout: DayLayout, card: Card, edge: str, rows: float) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """A resize from the top (a new start, the end kept) or the bottom (a new end, the start kept): update_event."""
+    """A resize from the top (a new start, the end kept) or the bottom (a new end, the start kept): update_event,
+    alongside whatever it now covers (placed by hand, a fixed item included)."""
     if not movable(card.span):
         return None
     first, count = resize_extent(layout, card, edge, rows)
@@ -562,10 +563,11 @@ def resize_call(layout: DayLayout, card: Card, edge: str, rows: float) -> Option
         if first == card.row:
             return None
         return "update_event", {"event": span.id, "start": format_clock(layout.slots[first].start),
-                                "end": format_clock(span.end_dt)}
+                                "end": format_clock(span.end_dt), "alongside": True}
     if count == card.rows:
         return None
-    return "update_event", {"event": span.id, "end": format_clock(layout.slots[first + count - 1].end)}
+    return "update_event", {"event": span.id, "end": format_clock(layout.slots[first + count - 1].end),
+                            "alongside": True}
 
 
 def delete_call(span: EventSpan) -> Optional[Tuple[str, Dict[str, Any]]]:

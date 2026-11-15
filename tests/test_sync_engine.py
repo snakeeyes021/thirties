@@ -1,5 +1,6 @@
 """Unit tests for thirties_core.sync_engine."""
 
+from tests.fixtures import temp_dir
 import json
 import tempfile
 import unittest
@@ -266,13 +267,13 @@ class TestFolderSync(unittest.TestCase):
         from thirties_core.scheduler import StateDatabase
         cfg = ThirtiesConfig()
         cfg.sync.mode, cfg.sync.enabled, cfg.sync.folder, cfg.sync.device_id = "folder", True, folder, name
-        db = StateDatabase(Path(tempfile.mkdtemp()) / "state.sqlite")
+        db = StateDatabase(Path(temp_dir("thirties_tmp_")) / "state.sqlite")
         return SyncEngine(config=cfg, state_db=db, joplin_engine=MagicMock()), db
 
     def test_two_computers_share_a_folder_without_clobbering(self):
         from datetime import datetime, timezone
         from thirties_core.models import EventSpan, SpanCategory
-        folder = tempfile.mkdtemp()
+        folder = temp_dir("thirties_tmp_")
         laptop, ldb = self._device("laptop", folder)
         desk, ddb = self._device("desk", folder)
         t = datetime(2026, 10, 15, 18, tzinfo=timezone.utc)

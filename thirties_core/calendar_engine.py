@@ -91,6 +91,17 @@ def calendar_mode(event: CalendarEvent, modes: Optional[Dict[str, str]]) -> str:
     return ""
 
 
+def unread_text(unread: List[str]) -> str:
+    """The plain notice for calendars that couldn't be read ("" names all of them): their time may not be free."""
+    if not unread:
+        return ""
+    if "" in unread:
+        return "Couldn't read your calendars, so events may be missing."
+    if len(unread) == 1:
+        return f"Couldn't read the calendar {unread[0]}, so its events may be missing."
+    return f"Couldn't read the calendars {', '.join(unread[:-1])} and {unread[-1]}, so their events may be missing."
+
+
 def holidays_on(events: List[CalendarEvent], day: date, modes: Optional[Dict[str, str]]) -> List[str]:
     """The names of the day's holidays: events on a calendar the user marked "holidays" that fall on ``day``."""
     return [e.summary for e in events if calendar_mode(e, modes) == "holidays"
@@ -187,6 +198,9 @@ class EDSCalendarEngine:
         self.cal_config: CalendarConfig = self.config.calendar
         self._available = False
         self._clients: Dict[str, Any] = {}
+        # the calendars the last fetch couldn't read, as (uid, name); ("", "") when none could be read at all
+        self.unread: List[Tuple[str, str]] = []
+        self.read: List[str] = []  # the calendars (uids) the last fetch read, even those with nothing that day
         self._init_eds()
 
     def _init_eds(self) -> None:
@@ -299,13 +313,25 @@ class EDSCalendarEngine:
         return None
 
     @staticmethod
+    def _occupies(icomp) -> bool:
+        """False for an event that takes no time: cancelled, or marked free (transparent)."""
+        from gi.repository import ICalGLib
+        if icomp.get_status() == ICalGLib.PropertyStatus.CANCELLED:
+            return False
+        prop = icomp.get_first_property(ICalGLib.PropertyKind.TRANSP_PROPERTY)
+        return prop is None or prop.get_transp() not in (ICalGLib.PropertyTransp.TRANSPARENT,
+                                                         ICalGLib.PropertyTransp.TRANSPARENTNOCONFLICT)
+
+    @staticmethod
     def _to_datetime(itime, tz: ZoneInfo) -> datetime:
         zone = itime.get_timezone()
         epoch = itime.as_timet_with_zone(zone) if zone is not None else itime.as_timet()
         return datetime.fromtimestamp(epoch, timezone.utc).astimezone(tz)
 
     def fetch_events_for_day(self, target_date: date, tz: ZoneInfo) -> List[CalendarEvent]:
-        """Occurrences overlapping the calendar date target_date (recurrences expanded)."""
+        """Occurrences overlapping the calendar date target_date (recurrences expanded). A calendar that can't be
+        read is named in ``unread`` (never silently an empty day)."""
+        self.unread, self.read = [], []
         if not self._available:
             return []
         start = datetime.combine(target_date, time.min, tzinfo=tz)
@@ -321,10 +347,13 @@ class EDSCalendarEngine:
                     continue
                 try:
                     events.extend(self._source_events(source, mine, emails, start, end, tz))
+                    self.read.append(source.get_uid())
                 except Exception as inner_e:
-                    logger.debug("Could not read calendar %s: %s", source.get_display_name(), inner_e)
+                    logger.warning("Couldn't read the calendar %s: %s", source.get_display_name(), inner_e)
+                    self.unread.append((source.get_uid(), source.get_display_name()))
         except Exception as e:
-            logger.warning("Error fetching events from EDS: %s", e)
+            logger.warning("Couldn't read the calendars from EDS: %s", e)
+            self.unread = [("", "")]
         return events
 
     def _source_events(self, source, mine: bool, emails: set, start: datetime, end: datetime,
@@ -335,6 +364,8 @@ class EDSCalendarEngine:
         def on_instance(icomp, instance_start, instance_end, *_args) -> bool:
             if instance_start.is_date():
                 return True  # all-day: a note about the day, not time it occupies
+            if not self._occupies(icomp):
+                return True  # cancelled, or marked free: no time taken
             summary = icomp.get_summary() or "Untitled event"
             begin = self._to_datetime(instance_start, tz)
             finish = self._to_datetime(instance_end, tz) if instance_end else begin + timedelta(minutes=30)

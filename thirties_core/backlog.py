@@ -30,6 +30,8 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
     tasks: List[TaskItem] = []
     notes: List[Dict[str, Any]] = []
     if joplin_engine is not None:
+        if scheduler is not None and hasattr(joplin_engine, "use_ids"):
+            joplin_engine.use_ids(scheduler.state_db)  # ids that follow edits and moves (item_ids.py)
         tasks.extend(joplin_engine.fetch_tasks())
         notes = joplin_engine.fetch_active_notes()
     tasks.extend(load_media_tasks(config) if media is None else media)
@@ -44,7 +46,29 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
         HorizonCatalog(scheduler.state_db).apply(tasks, date.today(), week_start_index(config))
         done = scheduler.state_db.completed_since(date.today() - timedelta(days=DONE_HIDES_DAYS))
         tasks = [t for t in tasks if t.id not in done or t.list_role == "routine"]  # done is done, even if
-    return tasks, notes                                                             # Joplin didn't get the tick
+    from thirties_core.privacy import SHIELD                                        # Joplin didn't get the tick
+    remember_private(scheduler, notes, SHIELD)  # what a cloud model must never see in full, ever
+    return tasks, notes
+
+
+PRIVATE_KEY = "private_text"  # this device's: the private lines seen so far (kept, so a restart still hides them)
+
+
+def remember_private(scheduler, notes: List[Dict[str, Any]], shield) -> None:
+    """Private notes, as of this read, added to what was private before (kept on this device across restarts)."""
+    import json
+    db = getattr(scheduler, "state_db", None) if scheduler is not None else None
+    remembered = None
+    if db is not None:
+        try:
+            remembered = json.loads(db.get_setting(PRIVATE_KEY) or "{}")
+        except ValueError:
+            remembered = None
+    shield.set_private_notes(notes, remembered)
+    if db is not None:
+        state = shield.private_state()
+        if state != remembered:
+            db.set_setting(PRIVATE_KEY, json.dumps(state))
 
 
 def load_media_tasks(config: ThirtiesConfig, opener=None) -> List[TaskItem]:

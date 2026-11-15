@@ -33,6 +33,7 @@ class AppCore:
 
     def _build_engines(self) -> None:
         self.joplin_engine = JoplinEngine(self.config)
+        self.joplin_engine.use_ids(self.scheduler.state_db)  # item ids that follow edits and moves (item_ids.py)
         self.inference_engine = get_inference_engine(self.config)
         self.sync_engine = SyncEngine(config=self.config, state_db=self.scheduler.state_db,
                                       joplin_engine=self.joplin_engine)

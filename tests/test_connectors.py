@@ -1,5 +1,6 @@
 """The connector interfaces (AGENTS.md anti-pattern 1): Joplin and EDS are implementations, not the architecture."""
 
+from tests.fixtures import temp_dir
 import json
 import tempfile
 import unittest
@@ -40,7 +41,7 @@ class ConnectorsTest(unittest.TestCase):
         self.assertEqual(calendars_of(MockCalendarEngine()), [])
 
     def test_folder_transport_reads_only_the_other_devices(self):
-        folder = tempfile.mkdtemp(prefix="thirties_sync_")
+        folder = temp_dir("thirties_sync_")
         mine, theirs = FolderTransport(folder, lambda: "laptop"), FolderTransport(folder, lambda: "desk")
         payload = {"$schema": SYNC_SCHEMA, "device_id": "laptop", "timestamp": "t"}
         self.assertTrue(mine.push(payload)[0])

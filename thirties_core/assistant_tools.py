@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_of
+from thirties_core.clock import ClockError, format_clock, format_duration, parse_day, parse_duration_minutes, thirty_ceil, thirty_of
 from thirties_core.horizons import HORIZON_READ_ONLY, HORIZON_TOOL_SPECS, horizon_handlers
 from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationStore, EnergyLog, MemoryStore,
                                   ProfileStore, ReminderStore)
+from thirties_core.item_ids import line_id, new_line_id
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
 from thirties_core.kind_tools import KindTools, rollover_question
-from thirties_core.kinds import ONGOING, put_off_counts, rolls_over
+from thirties_core.kinds import ONCE, ONGOING, put_off_counts, rolls_over
 from thirties_core.stats import fact_lines, session_lines, unreviewed_spans
 
 if TYPE_CHECKING:
@@ -185,7 +186,10 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                                 "done on the plan means ticked in the list.",
                        "duration": "How long, when scheduling it, e.g. '30 minutes'.",
                        "day": "The day, when scheduling it for another day.",
-                       "schedule_as": "A shorter name for the schedule, when the list wording is long."},
+                       "schedule_as": "A shorter name for the schedule, when the list wording is long.",
+                       "kind": "What kind of thing it is, when the user said or it's clear: 'once' (done means "
+                               "finished), 'ongoing' (time on a project; never rolls over) or 'daily'. Stored with "
+                               "the item."},
         "required": ["title", "list"],
     },
     {
@@ -243,11 +247,20 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": ["item", "action"],
     },
     {
+        "name": "still_want",
+        "description": "Answer Before today's question about an item missed several days running (\"Still want "
+                       "this?\"), as the user says: keep (an option this week again), park (later: a month-level "
+                       "horizon) or drop (stop rolling it over; its list in Joplin keeps it, untouched).",
+        "parameters": {"item": "The item's title.", "choice": "keep, park or drop."},
+        "required": ["item", "choice"],
+    },
+    {
         "name": "restore_old_drops",
-        "description": "Answer the one-time offer about items dropped before drops stopped touching Joplin (they "
-                       "were filed in Dropped notes): put_back true puts them back on their lists where they were, "
-                       "false leaves them filed. Asked once, in the Before today tab.",
-        "parameters": {"put_back": "true to put them back, false to leave them filed."},
+        "description": "Answer the one-time offer in the Before today tab about items taken off their lists "
+                       "earlier (filed in Dropped notes): put_back true puts an item (or all of them) back on its "
+                       "list where it was; false leaves it off. With no item, false leaves them all off for good.",
+        "parameters": {"put_back": "true to put back, false to leave off.",
+                       "item": "One item's title (optional: without it, all of them)."},
         "required": ["put_back"],
     },
     {
@@ -291,6 +304,13 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "required": [],
     },
     {
+        "name": "unmute_checkins",
+        "description": "Turn check-ins back on: all of them, or one item's. When the user asks to resume, or says a "
+                       "mute was wrong.",
+        "parameters": {"event": "The item's id or title (leave empty for all)."},
+        "required": [],
+    },
+    {
         "name": "set_urgency",
         "description": "Record how pressing an item on the user's lists is, when they say so (\"that's not "
                        "urgent\", \"the thermals are for this winter\", \"the ENT call has to happen this week\"). "
@@ -310,19 +330,33 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "parts": "The thirties, as a list of {start, items}: e.g. [{\"start\": \"9:00 AM\", \"items\": "
                                 "[\"Feed the fish\", \"Make coffee\"]}, {\"start\": \"3:00 PM\", \"items\": [\"Shower\"]}]. "
                                 "Items are the routine's steps, worded as in the note.",
-                       "start": "Instead of parts: one thirty for every step.",
+                       "start": "Instead of parts: when it starts; Python splits it into its natural parts (a "
+                                "thirty each, one after another), or one thirty if it fits.",
                        "day": "The day, if not today."},
         "required": ["routine"],
     },
     {
         "name": "add_to_today",
         "description": "Put things on today's list (the user's Today note), when the user says they mean to do them "
-                       "today. Items from their lists stay linked: ticking either one ticks both. Scheduling a list "
-                       "item for today adds it on its own.",
+                       "today. Each one gets its time on today's plan at once (the first free time that fits); if the "
+                       "user named a time, schedule it at that time instead (add_event), or move it there after. "
+                       "Only the user's own words ('if there's time', 'no rush', 'don't schedule it', 'on deck') "
+                       "leave it with no time, under If there's time. Items from their lists stay linked: ticking "
+                       "either one ticks both. Scheduling a list item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
                                 "user's words.",
                        "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning."},
         "required": ["items"],
+    },
+    {
+        "name": "if_there_is_time",
+        "description": "Act on an item under If there's time (today's things with no time): done; schedule (the next "
+                       "free time that fits, or the time the user names); tomorrow; week (later this week); or drop "
+                       "(it stops coming back; its own list is untouched).",
+        "parameters": {"item": "The item, as worded under If there's time.",
+                       "action": "done, schedule, tomorrow, week or drop.",
+                       "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
+        "required": ["item", "action"],
     },
     {
         "name": "get_weather",
@@ -352,6 +386,8 @@ ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "re
 ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
 from thirties_core.sun_notices import SUN_TOOL_SPECS  # noqa: E402
 ASSISTANT_TOOL_SPECS += SUN_TOOL_SPECS  # a message at sunrise / sunset: thirties_core/sun_notices.py
+from thirties_core.reply_extras import REPLY_EXTRAS_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += REPLY_EXTRAS_TOOL_SPECS  # what Python adds to replies, on or off: reply_extras.py
 from thirties_core.calendar_modes import CALENDAR_MODE_TOOL_SPECS  # noqa: E402
 ASSISTANT_TOOL_SPECS += CALENDAR_MODE_TOOL_SPECS  # mine / ask / show / ignore per calendar: calendar_modes.py
 ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
@@ -429,7 +465,8 @@ def describe_task(t: TaskItem) -> str:
 
 
 def _checkbox_id(note_id: str, text: str, occurrence: int = 0) -> str:
-    """The id the Joplin reader gives a checklist item (see joplin_engine.checklist_tasks)."""
+    """The old id of a checklist item: a hash of its note, wording and copy. Only a fallback now: ids come from
+    Thirties' id table, which follows edits and moves (item_ids.py: line_id, new_line_id, keep_id)."""
     import hashlib
     return hashlib.sha256(f"{note_id}|{text.strip()}|{occurrence}".encode("utf-8")).hexdigest()[:16]
 
@@ -447,6 +484,7 @@ class AssistantTools(KindTools):
         self._quiet_today = False  # put_routine lists its steps on Today together, as one group
         self._for_good = False  # an ongoing item's home stays open unless it's finished for good (_tick_twin)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
+        self._ticked_off: Dict[str, TaskItem] = {}  # items ticked off this session, by id: a reopen puts them back
         self._routine_tools = None
         self._proposal_tools = None
 
@@ -487,6 +525,13 @@ class AssistantTools(KindTools):
             if len(short) > 1:  # its Today copies share the title: the item on its own list is the one
                 short = [t for t in short if t.list_role != "today"]
             exact = short if len(short) == 1 else []
+        if exact and exact[0].list_role == "today" and self._db is not None:  # a Today line twinned with its home
+            from thirties_core.titles import title_of                        # item (by its short title): the home
+            from thirties_core.today import TodayLinks
+            link = TodayLinks(self._db).home_of(exact[0].title)
+            home = next((t for t in self.s.tasks if link and t.id == link.get("home_id")), None)
+            if home is not None and _same_words(title_of(home.title), exact[0].title):
+                return home
         return exact[0] if exact else None
 
     def _no_exact_match(self, ref: str, what: str = "item") -> ToolError:
@@ -535,7 +580,7 @@ class AssistantTools(KindTools):
         from thirties_core.joplin_writeback import complete_op
         status, msg = writer.submit(complete_op(task))
         if status in ("done", "queued"):
-            self.s.tasks = [t for t in self.s.tasks if t.id != task.id]
+            self._took_off(lambda t: t.id == task.id)
             self._tick_twin(task, writer)
         return {"done": "and checked it off in Joplin",
                 "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
@@ -580,13 +625,20 @@ class AssistantTools(KindTools):
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
                     # (a wishlist item), or nothing to write (a routine is a template)
                     writer.submit(complete_op(home))
-                self.s.tasks = [t for t in self.s.tasks if t.id != home.id]
+                self._took_off(lambda t: t.id == home.id)
             return
         title = links.today_title_of(task.id)
         exact = next((text for text, ticked in note_items(today) if title and text.lower() == title and not ticked), None)
         if exact:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
-            self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
+            self._took_off(lambda t: t.parent_note_id == today["id"] and t.title == exact)
+
+    def _took_off(self, gone) -> None:
+        """Items ticked off leave the session's lists; they're kept aside, so a reopen can put them back."""
+        for t in self.s.tasks:
+            if gone(t):
+                self._ticked_off[t.id] = t
+        self.s.tasks = [t for t in self.s.tasks if not gone(t)]
 
     def set_sun_notices(self, sunrise: Any = None, sunset: Any = None, **_: Any) -> str:
         from thirties_core.settings import settings_for
@@ -594,6 +646,17 @@ class AssistantTools(KindTools):
         if self.pt.scheduler is None:
             raise ToolError("There are no settings to change here.")
         return set_sun_notices(self.pt.scheduler.config, settings_for(self._db) if self._db else None, sunrise, sunset)
+
+    def set_reply_extras(self, part: Any = "", show: Any = "", for_today: Any = False, **_: Any) -> str:
+        from thirties_core.reply_extras import set_extras
+        from thirties_core.settings import settings_for
+        if self.pt.scheduler is None:
+            raise ToolError("There are no settings to change here.")
+        try:
+            return set_extras(self.pt.scheduler.config, settings_for(self._db) if self._db else None, self._db,
+                              self._today(), str(part), str(show), for_today)
+        except ValueError as e:
+            raise ToolError(str(e))
 
     def set_calendar_mode(self, calendar: Any = None, mode: Any = None, **_: Any) -> str:
         from thirties_core.calendar_modes import CalendarModeError, refresh_calendar_spans, set_calendar_mode
@@ -699,6 +762,13 @@ class AssistantTools(KindTools):
         return messages
 
     def add_to_today(self, items: Any, **_: Any) -> str:
+        """The tool: each thing gets its time today, unless the user's own words ask for none (if_time.py)."""
+        return self._add_to_today(items, "auto")
+
+    def _add_to_today(self, items: Any, timing: str = "auto") -> str:
+        """``timing``: "auto" (a time each, or If there's time when the user asked for no time), "untimed" (under If
+        there's time: the user asked), or "none" (plain lines, no time yet: the morning reset, whose proposal places
+        them once the routine is on)."""
         from thirties_core.today import TodayLinks, note_items
         if isinstance(items, str):
             items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
@@ -719,19 +789,35 @@ class AssistantTools(KindTools):
         on_today = {text.lower() for text, _ in note_items(note)}
         on_today |= {t.title.lower() for t in self.s.tasks if t.parent_note_id == note["id"]}
         added, already, queued = [], [], False
+        from thirties_core import if_time
+        untimed = timing == "untimed" or (timing == "auto" and if_time.asked_untimed(self.pt.user_message))
+        homes: Dict[str, Any] = {}  # each line's home item, by its Today wording
         for name in items or []:
             task = self._exact_task(str(name))  # only the same item links; anything else is new, as worded
-            title = task.title if task is not None else str(name).strip()
+            # a long or marked-up list line goes on Today by its short title (no raw markdown or links on screen);
+            # the link keeps it tied to the full line on its list
+            from thirties_core.titles import title_of
+            title = title_of(task.title) if task is not None else str(name).strip()
+            homes[title.lower()] = task
             if title.lower() in on_today:
-                already.append(title)
+                if untimed and not if_time.is_listed(note, title):  # on Today with a line already: under the heading
+                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
+                                   "section": if_time.HEADING, "open_only": True})
+                    added.append(title)
+                else:
+                    already.append(title)
                 continue
-            status, msg = writer.submit({"op": "add_task", "note_id": note["id"], "title": title})
+            op = {"op": "add_task", "note_id": note["id"], "title": title}
+            if untimed:
+                op["section"] = if_time.HEADING
+            status, msg = writer.submit(op)
             if status in ("not_allowed", "failed"):
                 raise ToolError(msg)
             queued = queued or status == "queued"
             if task is not None and task.parent_note_id != note["id"]:
                 TodayLinks(self._db).link(title, task)
-            self.s.tasks.append(TaskItem(id=_checkbox_id(note["id"], title), source_notebook=note.get("source_notebook", ""),
+            self.s.tasks.append(TaskItem(id=new_line_id(self._db, note["id"], title),
+                                         source_notebook=note.get("source_notebook", ""),
                                          title=title, is_checkbox_item=True, parent_note_title=note["title"],
                                          parent_note_id=note["id"], list_role="today", urgency="now"))
             on_today.add(title.lower())
@@ -739,10 +825,32 @@ class AssistantTools(KindTools):
         if added and self._db is not None:  # today's, never a leftover of an earlier day (carry.py)
             from thirties_core.carry import note_added_today
             note_added_today(self._db, self._today(), added)
+        timed, overflow = [], []
+        if added and timing == "auto" and not untimed and self.pt.is_current(self.pt.day_plan):
+            for title in added:  # each gets its time now, placed by Python; it moves only when the user moves it
+                home = homes.get(title.lower()) or self._exact_task(title)  # the item it was added for
+                if if_time.on_plan_today(self.pt, title, home) is not None:
+                    continue  # already on today's plan (scheduled first): it keeps that time
+                spot, doubled = if_time.place(self, title, home)
+                if spot is None:
+                    overflow.append(title)
+                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
+                                   "section": if_time.HEADING, "open_only": True})
+                else:
+                    timed.append(f"{title} at {format_clock(spot)}" + (" (alongside another item)" if doubled else ""))
         parts = []
-        if added:
-            parts.append("Added to today's list: " + ", ".join(added) + (" (Joplin will get it when it's open)"
-                                                                            if queued else "") + ".")
+        later = " (Joplin will get it when it's open)" if queued else ""
+        if untimed and added:
+            parts.append(f"Under {if_time.HEADING} on today's list, with no time: " + ", ".join(added) + later + ".")
+        else:
+            plain = [t for t in added if t not in overflow and not any(x.startswith(t + " at ") for x in timed)]
+            if plain:
+                parts.append("Added to today's list: " + ", ".join(plain) + later + ".")
+            if timed:
+                parts.append("On today's plan: " + ", ".join(timed) + later + ".")
+        if overflow:
+            parts.append(f"Today is full, even doubled up, so {', '.join(overflow)} "
+                         f"{'is' if len(overflow) == 1 else 'are'} under {if_time.HEADING}.")
         if already:
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
@@ -829,7 +937,8 @@ class AssistantTools(KindTools):
         self._today_groups[key] = (have or set()) | {s.lower() for s in missing}
         links = TodayLinks(self._db)
         for step in missing:
-            links.link(step, TaskItem(id=_checkbox_id(routine["id"], step), source_notebook=routine.get("source_notebook", ""),
+            links.link(step, TaskItem(id=line_id(self._db, routine["id"], step),
+                                      source_notebook=routine.get("source_notebook", ""),
                                       title=step, is_checkbox_item=True, parent_note_title=name,
                                       parent_note_id=routine["id"], list_role="routine"))
         return f"Added to today's list: {name} ({', '.join(missing)})."
@@ -856,8 +965,14 @@ class AssistantTools(KindTools):
                 raise ToolError("parts must be a list of {start, items}.")
         if not parts:
             if start in (None, ""):
-                raise ToolError("Give start (one thirty for all of it) or parts (a start and the steps for each thirty).")
-            parts = [{"start": start, "items": steps}]
+                raise ToolError("Give start (its parts go on one thirty after another from there) or parts (a start "
+                                "and the steps for each thirty).")
+            from thirties_core.routines import natural_parts  # its natural parts, one thirty each, in order
+            lasting = self.pt._lasting()
+            first = self.pt._start(start)
+            parts = [{"start": format_clock(first + timedelta(minutes=30 * k)), "items": group}
+                     for k, group in enumerate(natural_parts(note, (lambda s: lasting.for_item(s).minutes)
+                                                             if lasting is not None else None))]
         by_text = {s.lower(): s for s in steps}
         placed, already, lines, extra = [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan
@@ -877,7 +992,7 @@ class AssistantTools(KindTools):
                 for k, text in enumerate(todo):
                     args = {"title": text, "start": format_clock(at[k]), "end": format_clock(at[k + 1]), "alongside": True}
                     if text.lower() in by_text:
-                        args.update(category="task", task_id=_checkbox_id(note["id"], text))
+                        args.update(category="task", task_id=line_id(self._db, note["id"], text))
                     if day not in (None, ""):
                         args["day"] = day
                     out = self.pt.execute("add_event", args)
@@ -937,7 +1052,7 @@ class AssistantTools(KindTools):
             for line in (note.get("body") or "").splitlines():
                 m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
                 if m and m.group(2).strip().lower() == want:
-                    hits.append(TaskItem(id=_checkbox_id(note["id"], m.group(2).strip()), title=m.group(2).strip(),
+                    hits.append(TaskItem(id=line_id(self._db, note["id"], m.group(2).strip()), title=m.group(2).strip(),
                                          source_notebook=note.get("source_notebook", ""), is_checkbox_item=True,
                                          parent_note_title=note["title"], parent_note_id=note["id"]))
                     break
@@ -946,9 +1061,32 @@ class AssistantTools(KindTools):
                             "Which one? Give it as list.")
         return hits[0] if hits else None
 
+    def refuse_routine_as_item(self, title: str) -> None:
+        """A routine never goes on as one item named after it ("Morning Routine" with no steps): it goes on as
+        its parts, with put_routine."""
+        try:
+            routines = self._routines()
+        except Exception:
+            return
+        for note in routines:
+            if _same_words(note["title"], title) or _same_words(note["title"] + " routine", title):
+                raise ToolError(f"{note['title']} is a routine: put it on with put_routine, as its parts (each a "
+                                "thirty with its steps), never as one item.")
+
     def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
                  day: Any = None, schedule_as: str = "", reason: str = "", urgency: str = "", due: Any = None,
-                 **_: Any) -> str:
+                 kind: Any = None, **_: Any) -> str:
+        self.refuse_routine_as_item(str(title))
+        if kind not in (None, ""):  # the item's kind, stored when it's made (the wording only ever suggests one)
+            from thirties_core.kinds import KINDS
+            if str(kind).strip().lower() not in KINDS:
+                raise ToolError("kind must be 'once', 'ongoing' or 'daily'.")
+            if self._db is not None:
+                from thirties_core.item_facts import Lasting, LastingFacts, item_name
+                store = LastingFacts(self._db)
+                facts = store.get(title) or Lasting(name=item_name(title))
+                facts.title, facts.kind = facts.title or str(title).strip(), str(kind).strip().lower()
+                store.set(facts)
         # Which list and section: Python lists and checks, the model picks; never the user's job (placement_lists).
         from thirties_core.placement_lists import Placement
         placement = Placement.for_assistant(self)
@@ -996,7 +1134,7 @@ class AssistantTools(KindTools):
             raise ToolError(msg)
         notebook = note.get("source_notebook") or next((t.source_notebook for t in self.s.tasks
                                                         if t.parent_note_id == note_id), "")
-        new_id = _checkbox_id(note_id, title)
+        new_id = new_line_id(self._db, note_id, title)
         new = TaskItem(id=new_id, source_notebook=notebook, title=title.strip(), is_checkbox_item=True,
                        parent_note_title=note_title, parent_note_id=note_id, section=place or "",
                        list_role=placement.role(note))
@@ -1046,7 +1184,7 @@ class AssistantTools(KindTools):
             raise ToolError(msg)
         note_id = found.parent_note_id if found.is_checkbox_item else found.id
         for step in steps:
-            self.s.tasks.append(TaskItem(id=_checkbox_id(note_id, step), source_notebook=found.source_notebook,
+            self.s.tasks.append(TaskItem(id=new_line_id(self._db, note_id, step), source_notebook=found.source_notebook,
                                          title=step, is_checkbox_item=True,
                                          parent_note_title=found.parent_note_title or found.title,
                                          parent_note_id=note_id, section=found.section,
@@ -1079,6 +1217,12 @@ class AssistantTools(KindTools):
             finally:
                 self.pt.day_plan = saved
             return f"[{e.plan.target_date.strftime('%A, %B %d')}] {result}"
+        except ToolError as e:
+            bookkeeping = bool(getattr(getattr(getattr(self.pt.scheduler, "config", None), "assistant", None),
+                                       "turn_bookkeeping", False))
+            if bookkeeping and "matches several items" in str(e):
+                raise  # which one is the user's to say: never a new "done" item beside the real ones
+            span = None
         except Exception:
             span = None
         if span is not None and str(event).strip() != span.id and span.source != "calendar":
@@ -1116,6 +1260,7 @@ class AssistantTools(KindTools):
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
+        start_dt, end_dt = self._said_times_only(start_dt, end_dt, duration)
         if st != SpanStatus.SKIPPED:
             self._not_in_future(start_dt, end_dt)
         if span is not None and span.source == "calendar" and not span.tentative:
@@ -1218,7 +1363,36 @@ class AssistantTools(KindTools):
             result += " (a session on it; it carries on)"
         elif st == SpanStatus.DONE:  # not on any list (a routine's extra step, a meal): its Today line is ticked too
             self._tick_on_today(span.title)
+        if st == SpanStatus.DONE and kind == ONCE:
+            self._settle_copies(span)
         return result + "."
+
+    def _said_times_only(self, start_dt, end_dt, duration):
+        """In a turn with the user's words, an outcome keeps only times the user said (or now): a time the model
+        worked out is dropped, and Python estimates when it happened instead."""
+        message = self.pt.user_message
+        if message is None:
+            return start_dt, end_dt  # the app's own buttons, or a caller with no message: times as given
+        from thirties_core.facts import gave_time
+        now = self.pt._now()
+
+        def said(dt) -> bool:
+            return dt is None or gave_time(message, dt) or abs((dt - now).total_seconds()) <= 120
+        if duration not in (None, "") and start_dt is not None and end_dt is not None:
+            return (start_dt, end_dt) if said(start_dt) or said(end_dt) else (None, None)
+        return (start_dt if said(start_dt) else None), (end_dt if said(end_dt) else None)
+
+    def _settle_copies(self, span: EventSpan) -> None:
+        """A one-off done is done: its other copies on the day's plan whose time has passed (an earlier session
+        that didn't happen as planned, then planned again) are settled as unknown, not left "not marked yet" all
+        day. Copies still ahead stay: those are the user's to keep or take off."""
+        now = self.pt._now()
+        for other in self.pt.day_plan.spans:
+            same = (span.task_id and other.task_id == span.task_id) or \
+                other.title.strip().lower() == span.title.strip().lower()
+            if other.id != span.id and same and other.status == SpanStatus.PLANNED and other.end_dt <= now:
+                other.status = SpanStatus.UNKNOWN
+                self.pt._persist(other)
 
     def _capture_context(self, span: EventSpan) -> None:
         """B7: what surrounded the outcome, kept as it is now (the plan changes later). Never blocks the outcome."""
@@ -1357,7 +1531,7 @@ class AssistantTools(KindTools):
         recent = [self._plan_peek(self._today() - timedelta(days=1)), self._plan_peek(self._today())]
         self.settle_moot(recent[0], ctx=ctx)
         moot = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.UNKNOWN}
-        keep = [text for text, ticked in with_done(note, done) if not ticked and text.lower() not in routine
+        keep = [text for text, ticked in with_done(note, done, self._db) if not ticked and text.lower() not in routine
                 and text.lower() not in done_on_plan and text.lower() not in moot
                 and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
         from thirties_core.today import group_items
@@ -1411,19 +1585,33 @@ class AssistantTools(KindTools):
             return ""
         self._db.set_sync_meta(key, "done")
         roles, notes = ListCatalog(self._db).roles(), self._joplin_notes()
+        until = {"valid_until": self.valid_until(day)}  # this morning's housekeeping is for this day only
         done = []
         if getattr(self.pt.scheduler.config.joplin, "reset_routines", True):
             for note in notes_with_role(roles, notes, "routine"):
                 if re.search(r"^\s*-\s*\[[xX]\]", note.get("body") or "", re.M):
-                    writer.submit({"op": "untick_all", "note_id": note["id"], "title": note["title"]})
+                    writer.submit({**until, "op": "untick_all", "note_id": note["id"], "title": note["title"]})
                     done.append(f"unticked {note['title']}")
         today = self._today_note()
+        removes: List[Dict[str, Any]] = []  # the morning's change to Today, written once at the end
+        clear_only: List[str] = []
+        to_file: List[str] = []
+        if today:
+            from thirties_core.today import TodayLinks as _Links, note_items as _items
+            _links = _Links(self._db)
+            _daily = self.routines.daily_titles() | {n["title"].strip().lower()
+                                                     for n in notes_with_role(roles, notes, "routine")}
+            ticked_now = [t for t, ticked in _items(today) if ticked]
+
+            def kept_elsewhere(text: str) -> bool:
+                """Its record lives on: a home list item it's linked to, or a daily thing (done means today)."""
+                return bool(_links.home_of(text)) or text.strip().lower() in _daily
         if today:
             from thirties_core.today import group_items
             mine = self.routines.on_today_for(day)  # put on for this day already (Joplin was closed till now)
             for note in notes_with_role(roles, notes, "routine"):  # routines never carry over: yesterday's group goes
                 if group_items(today, note["title"]) is not None and note["title"].strip().lower() not in mine:
-                    writer.submit({"op": "remove", "note_id": today["id"], "title": note["title"].strip()})
+                    removes.append({"title": note["title"].strip()})
                     done.append(f"took yesterday's {note['title']} off {today['title']}")
             from thirties_core.today import note_items
             daily = self.routines.daily_titles() - mine - {n["title"].strip().lower() for n in
@@ -1433,13 +1621,20 @@ class AssistantTools(KindTools):
             for text, ticked in note_items(today):
                 if not ticked and text.lower() in daily and text not in done_lines and re.search(
                         r"^-\s*\[ \]\s*" + re.escape(text) + r"\s*$", today.get("body") or "", re.M):
-                    writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                    removes.append({"title": text, "state": "open"})
                     self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
                     done.append(f"took yesterday's {text} off {today['title']}")
         if today:  # done on the plan is done, even where its line was never ticked
             for text in self._done_on_plan(today, day):
-                writer.submit({"op": "remove", "note_id": today["id"], "title": text})
-                done.append(f"took {text} (done) off {today['title']}")
+                if kept_elsewhere(text):
+                    removes.append({"title": text})
+                    done.append(f"took {text} (done) off {today['title']}")
+                elif text in ticked_now:
+                    pass  # ticked already: it is filed in the next step
+                else:  # only on Today: ticked, then filed into Done, so the record is in Joplin too
+                    writer.submit({**until, "op": "complete", "is_checkbox_item": True, "note_id": today["id"],
+                                   "title": text})
+                    to_file.append(text)
         if today:  # yesterday's leftovers wait on their own lists, or simply end: Today is today's plan (carry.py)
             from thirties_core.today import TodayLinks, note_items
             handled = {t.lower() for t in self._done_on_plan(today, day)} | self.routines.daily_titles() | {
@@ -1449,17 +1644,44 @@ class AssistantTools(KindTools):
             for text in leftovers.get("off_today", []):
                 if text.lower() in handled or text.lower() in getattr(self, "_adding", set()) or text not in open_now:
                     continue
-                writer.submit({"op": "remove", "note_id": today["id"], "title": text})
+                removes.append({"title": text, "state": "open"})
                 self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == text)]
                 links.unlink(text)
                 done.append(f"took {text} off {today['title']} (left from before)")
-        if today and re.search(r"^\s*-\s*\[[xX]\]", today.get("body") or "", re.M):
-            writer.submit({"op": "clear_ticked", "note_id": today["id"], "title": today["title"]})
-            done.append(f"cleared what was done from {today['title']}")
+        if today:
+            # what's ticked: kept on its home list (or a daily thing), it's simply cleared; only on Today, it's filed
+            # into Done first, and a line whose filing doesn't land stays where it is: nothing vanishes
+            for text in ticked_now:
+                if kept_elsewhere(text):
+                    clear_only.append(text)
+                elif text not in to_file:
+                    to_file.append(text)
+            if getattr(writer.cfg, "file_done", True):
+                from thirties_core.done_log import file_done_op
+                for text in to_file:
+                    writer.submit({**until, **file_done_op(today["id"], text, today.get("title", ""),
+                                                           day - timedelta(days=1))})  # done the day before
+                    done.append(f"filed {text} from {today['title']} into Done")
+            if removes or clear_only:  # the rest of the morning's change to Today: one version-checked write
+                writer.submit({**until, "op": "today_reset", "note_id": today["id"], "title": today["title"],
+                               "removes": removes, "clear_only": clear_only})
+                if clear_only:
+                    done.append(f"cleared what was done from {today['title']}")
         if today:  # what was planned ahead for this day reaches Today now, never before (O2)
             from thirties_core.day_lists import onto_today
             done += onto_today(self, day)
         return "; ".join(done)
+
+    def valid_until(self, day: Optional[date] = None) -> str:
+        """When a change to Today made for ``day`` stops making sense: the end of that diurnal day (a queued
+        change for one day never runs on the next)."""
+        day = day or self._today()
+        plan = getattr(self.pt, "day_plan", None)
+        if plan is not None and plan.target_date == day:
+            end = plan.day_end
+        else:
+            end = datetime.now().astimezone() + timedelta(hours=18)
+        return end.astimezone().isoformat()
 
     @property
     def before(self):
@@ -1467,6 +1689,23 @@ class AssistantTools(KindTools):
         return BeforeToday(self)
 
     def rollover_proposal(self, **_: Any) -> str:
+        """The leftovers' notice (_rollover_notice), then the one question about items missed several days running
+        (backoff.py): one line each, asked once, answered in Before today or the chat (still_want)."""
+        text = self._rollover_notice()
+        if self._db is None:
+            return text
+        from thirties_core.backoff import MissStreaks, question_lines
+        streaks = MissStreaks(self._db)
+        still = streaks.to_ask()
+        if not still:
+            return text
+        streaks.mark_asked([r["title"] for r in still], self._today())
+        question = question_lines(still, _short)
+        if text.startswith("Nothing from yesterday"):
+            return question
+        return text.rstrip() + "\n" + question
+
+    def _rollover_notice(self) -> str:
         """The morning's proposal for what's left from before (carry.py, before_today.py; 11-06: it takes effect
         by itself). Each one-off with no outcome gets Python's first guess, a natural horizon; a Keep for today
         goes on today's schedule now, the others wait at their horizon. The morning model may revise it
@@ -1489,10 +1728,24 @@ class AssistantTools(KindTools):
             {"title": t, "task_id": getattr(tasks_by_title.get(t.lower()), "id", ""), "start": day.isoformat(),
              "end": day.isoformat()} for t in listed])
         ask = still_unknown(self, day, left["ask"])
+        spread = "".join(f"\n{_short(r['title'])}: {r['why']}." for r in left.get("respread", []))  # ongoing time moved
+        if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, its work planned back
+            from thirties_core.deadlines import moved_text
+            spread += "\n" + moved_text(left["deadlines_moved"], day, short=_short)
+        try:  # pins let go because their item is on no list any more: said once
+            from thirties_core.horizons import HorizonPlanner
+            planner = HorizonPlanner(self.pt)
+            planner.tidy_pins()
+            lost = planner.lost_pins_text()
+            spread += ("\n" + lost) if lost else ""
+        except Exception as e:
+            logger.warning("Couldn't tidy the plan's pins: %s", e)
         if not ask:
             if list_overflow:
                 from thirties_core.carry import notice_text
-                return notice_text(0, 0, 0, [_short(o["title"]) for o in list_overflow])
+                return notice_text(0, 0, 0, [_short(o["title"]) for o in list_overflow]) + spread
+            if spread:
+                return spread.strip()
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         mark_asked(self._db, ask, day)  # proposed now: never again
         week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
@@ -1500,8 +1753,10 @@ class AssistantTools(KindTools):
         keep = []
         for t in ask:
             item = by_title.get(t.lower()) or {"title": t, "task_id": "", "horizon": "week", "due": ""}
-            keep.append({**item, **default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start),
-                         "why": "", "proposed_on": day.isoformat()})
+            when = default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start)
+            if item.get("start"):  # the day replanning found for it (replan.py) wins over the horizon's window
+                when = {"when": item.get("when") or when.get("when", ""), "start": item["start"], "end": item["end"]}
+            keep.append({**item, **when, "why": item.get("why", ""), "proposed_on": day.isoformat()})
         OpenPool(self._db).add(keep, day - timedelta(days=1))
         placed, overflow = self.before.place_today(keep)  # today's Keeps are on the schedule now
         overflow += list_overflow
@@ -1509,7 +1764,7 @@ class AssistantTools(KindTools):
             "plan": [], "today": {"keep": [], "add": []}, "asked": ask, "state": "offered",
             "leftovers": {"keep": keep, "drop": []}, "overflow": [o["title"] for o in overflow],
             "offered_at": self.pt._now().isoformat()}))
-        return self.leftover_notice()
+        return self.leftover_notice() + spread
 
     def leftover_notice(self) -> str:
         """The morning's word on the leftovers, as Python says it (the model says it in its own words)."""
@@ -1522,7 +1777,8 @@ class AssistantTools(KindTools):
         on_today = [k for k in lo.get("keep", []) if k.get("end") and k["end"] <= today
                     and k["title"] not in data.get("overflow", [])]
         return notice_text(len(lo.get("keep", [])), len(on_today), len(lo.get("drop", [])),
-                           [_short(t) for t in data.get("overflow", [])])
+                           [_short(t) for t in data.get("overflow", [])],
+                           [(_short(k["title"]), k["when"]) for k in lo.get("keep", []) if k.get("when")])
 
     def leftover_brief(self) -> str:
         """For the morning model: each leftover as proposed, with what it carries, and what doesn't fit today."""
@@ -1530,8 +1786,13 @@ class AssistantTools(KindTools):
         raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
         data = json.loads(raw) if raw else {}
         lo = data.get("leftovers") or {}
+        from thirties_core.deadlines import estimates_wanted
+        wanted = estimates_wanted(self)
+        ask = ("WORK TO ESTIMATE (a deadline that repeats; how much work it needs isn't known, so one session holds "
+               "its place): " + ", ".join(_short(t) for t in wanted) + ". Estimate each and save it with "
+               "set_item_facts (effort, effort_is_estimate=true), unless the user says.") if wanted else ""
         if not lo.get("keep") and not lo.get("drop"):
-            return ""
+            return ask
         tasks = {t.id: t for t in self.s.tasks}
         lines = []
         for k in lo.get("keep", []):
@@ -1543,7 +1804,7 @@ class AssistantTools(KindTools):
             lines.append(f"- {k['title']} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; today's "
-                "are on the plan):\n" + "\n".join(lines))
+                "are on the plan):\n" + "\n".join(lines) + ("\n" + ask if ask else ""))
 
     def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python
@@ -2163,8 +2424,31 @@ class AssistantTools(KindTools):
             end = self.pt._end(until, now)
         self.s.mutes.mute(end, span.id if span else "")
         if span:
-            return f"I won't ask about {span.title} again."
-        return f"No more check-ins until {format_clock(end)}" + (" tomorrow." if end.date() > now.date() else ".")
+            return (f"I won't ask about {span.title} again; say \"ask about {span.title} again\" to turn that back "
+                    "on.")
+        return (f"Check-ins paused until {format_clock(end)}" + (" tomorrow" if end.date() > now.date() else "")
+                + "; say \"resume check-ins\" to turn them back on.")
+
+    def unmute_checkins(self, event: Any = None, **_: Any) -> str:
+        if self.s.mutes is None:
+            raise ToolError("Check-ins aren't available here.")
+        now = self.pt._now()
+        span = self.pt._find_span(event) if event not in (None, "") else None
+        ended = self.s.mutes.unmute(now, span.id if span else None)
+        if span:
+            return f"I'll ask about {span.title} again." if ended else f"Check-ins about {span.title} weren't off."
+        return "Check-ins are back on." if ended else "Check-ins weren't paused."
+
+    def checkins_paused(self) -> str:
+        """A quiet line for the app while every check-in is paused: "Check-ins paused until 6:30 AM"."""
+        if self.s.mutes is None:
+            return ""
+        now = self.pt._now()
+        until = self.s.mutes.paused_until(now)
+        if until is None:
+            return ""
+        until = until.astimezone(now.tzinfo)  # stored in UTC: said in the user's own time
+        return f"Check-ins paused until {format_clock(until)}" + (" tomorrow" if until.date() > now.date() else "")
 
     def set_urgency(self, task: str, urgency: str = "", due: Any = None, **_: Any) -> str:
         from thirties_core.lists import URGENCIES, ListCatalog, urgency_label
@@ -2180,6 +2464,8 @@ class AssistantTools(KindTools):
             raise ToolError("urgency must be 'now', 'soon', 'whenever' or 'someday'.")
         ListCatalog(self._db).set_urgency(found.id, urgency, due_day, note_id=found.parent_note_id or found.id,
                                           title=found.title, source="user")
+        from thirties_core.deadlines import restart_series
+        restart_series(self._db, found.id, due_day)  # a repeating deadline goes on from the user's new date
         found.urgency, found.due, found.someday = urgency, due_day.isoformat() if due_day else "", urgency == "someday"
         return f"Noted: '{found.title}' is {urgency_label(found)}."
 
@@ -2207,13 +2493,17 @@ class AssistantTools(KindTools):
             "propose_leftovers": self.propose_leftovers,
             "set_item_note": self.set_item_note,
             "leftover_action": lambda item="", action="", when="", **_: self.before.action(item, action, when),
-            "restore_old_drops": lambda put_back=True, **_: self.before.restore_old_drops(put_back),
+            "still_want": lambda item="", choice="", **_: self.before.still_want(item, choice),
+            "restore_old_drops": lambda put_back=True, item="", **_: self.before.restore_old_drops(put_back, item),
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
             "cancel_reminder": self.cancel_reminder,
             "mute_checkins": self.mute_checkins,
+            "unmute_checkins": self.unmute_checkins,
             "set_urgency": self.set_urgency,
             "add_to_today": self.add_to_today,
+            "if_there_is_time": lambda item="", action="", time=None, **_: __import__(
+                "thirties_core.if_time", fromlist=["act"]).act(self, item, action, time),
             "put_routine": self.put_routine,
             "break_down_task": self.break_down_task,
             "week_overview": self.week_overview,
@@ -2221,6 +2511,7 @@ class AssistantTools(KindTools):
             **self.proposals.handlers(),
             **horizon_handlers(self),
             "set_sun_notices": self.set_sun_notices,
+            "set_reply_extras": self.set_reply_extras,
             "set_calendar_mode": self.set_calendar_mode,
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }

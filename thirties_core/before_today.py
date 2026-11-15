@@ -26,8 +26,7 @@ from thirties_core.carry import DROPPED, SOMEDAY, OpenPool, resolve_when
 ACTIONS = ("accept", "done", "drop", "keep", "undrop", "archive")
 # An archive takes the item off its list in Joplin: allowed in chat only when the user's words ask for it (11-11:
 # "drop" means stop rolling it over; a real removal only on an explicit ask). Anything else is a plain drop.
-EXPLICIT_REMOVAL = re.compile(r"\b(archive|delete|remove it|get rid of|drop (it|that|this) (completely|for good|"
-                              r"entirely)|for good|never (going to|gonna|doing|do)|not ever)\b", re.I)
+from thirties_core.intents import EXPLICIT_REMOVAL  # noqa: E402  (one source: intents.py)
 
 
 class BeforeToday:
@@ -63,9 +62,16 @@ class BeforeToday:
         pt, day = self.a.pt, self._today()
         placed, overflow = [], []
         pool = OpenPool(self.db)
+        from thirties_core.backoff import MissStreaks, stated_cant_wait
+        streaks = MissStreaks(self.db)
         for item in items:
             if not item.get("end") or item["end"] > day.isoformat() or item.get("start", "") > day.isoformat():
                 continue  # not today's
+            task = next((t for t in self.a.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
+            if streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
+                            or (task.due if task is not None else ""),
+                            urgent=stated_cant_wait(self.db, task, item["title"])):
+                continue  # resting after missed days (backoff.py): Thirties doesn't put it on, from any list
             span = self._on_plan(item)
             if span is not None:
                 pool.set(item["title"], slot=span.start_dt.isoformat())
@@ -138,8 +144,44 @@ class BeforeToday:
             keep.append(row)
         keep.sort(key=lambda r: (r["at"] is None, r["at"].timestamp() if r["at"] else 0, r["title"].lower()))
         drop.sort(key=lambda r: r["title"].lower())
+        from thirties_core.backoff import MissStreaks
+        ask = [{"title": r["title"], "why": f"missed {r['misses']} days running"}
+               for r in MissStreaks(self.db).asked_open()] if self.db is not None else []
         return {"keep": keep, "drop": drop, "archive": sorted(archive.items(), reverse=True),
-                "restore": [r["title"] for r in self.old_filed_drops()]}
+                "restore": [r["title"] for r in self.old_filed_drops()], "ask": ask}
+
+    def still_want(self, item: str, choice: str) -> str:
+        """The answer to "Still want this?" (backoff.py): keep for this week, park for later, or drop."""
+        from thirties_core.assistant_tools import ToolError
+        from thirties_core.backoff import CHOICES, MissStreaks
+        choice = str(choice or "").strip().lower()
+        choice = {"keep for this week": "keep", "park for later": "park", "later": "park"}.get(choice, choice)
+        if choice not in CHOICES:
+            raise ToolError("choice must be keep, park or drop.")
+        rec = MissStreaks(self.db).answer(item, choice)
+        if rec is None:
+            raise ToolError(f"'{item}' isn't one Thirties asked about.")
+        title = rec["title"]
+        pool = OpenPool(self.db)
+        left = pool.all().get(title.strip().lower())
+        if choice == "keep":
+            if left is not None and left.get("horizon") not in (DROPPED, "gone"):
+                pool.place(title, "week", resolve_when("this week", self._today(), self._week_start()))
+            return f"{title}: kept for this week."
+        if choice == "drop":
+            if left is not None and left.get("horizon") not in (DROPPED, "gone"):
+                return self._drop(left, by="user")
+            pool.add([{"title": title, "task_id": rec.get("task_id") or ""}], self._today())
+            return self._drop(pool.all()[title.strip().lower()], by="user")
+        task = next((t for t in self.a.s.tasks if (rec.get("task_id") and t.id == rec["task_id"])
+                     or t.title.strip().lower() == title.strip().lower()), None)
+        if task is not None and self.a.pt.scheduler is not None:
+            from thirties_core.horizons import horizon_handlers
+            horizon_handlers(self.a)["set_horizon"](horizon="month", task=task.id)
+        if left is not None:
+            self.take_off_today(left)
+            pool.drop([title])  # it waits on its list at its month-level horizon, not in the daily pool
+        return f"{title}: parked for later (this month's plan, not the days)."
 
     # --- what the user does (from the tab or the chat) ---
 
@@ -252,29 +294,60 @@ class BeforeToday:
     OFFER_KEY = "old_drops_offer"
 
     def old_filed_drops(self) -> List[Dict[str, Any]]:
-        """Drops filed in a Dropped note under the old meaning, while the one-time offer is still open."""
+        """Items filed in a Dropped note (taken off their lists), while the one-time offer is open and each one
+        hasn't been answered yet."""
         if self.db is None or self.db.get_sync_meta(self.OFFER_KEY):
             return []
-        return [r for r in OpenPool(self.db).all().values() if r.get("horizon") == DROPPED and r.get("filed_key")]
+        return [r for r in OpenPool(self.db).all().values()
+                if r.get("horizon") == DROPPED and r.get("filed_key") and not r.get("offer_left")]
 
-    def restore_old_drops(self, put_back: Any = True) -> str:
-        """The one-time offer: put the items filed in Dropped notes back on their home lists, open, where they
-        were (they still don't roll over), or leave them filed. Either way it isn't offered again."""
-        put_back = str(put_back).strip().lower() not in ("false", "0", "no", "leave")
+    def restore_old_drops(self, put_back: Any = True, item: str = "") -> str:
+        """The one-time offer: put items filed in Dropped notes back on their own lists, open, where they were
+        (they still don't come back by themselves), or leave them off. One ``item`` at a time, or all of them; once
+        none is left to answer, or all are left off, it isn't offered again."""
+        from thirties_core.assistant_tools import ToolError
+        said = str(put_back).strip().lower()
+        if said in ("true", "1", "yes", "put back", "put it back", "put them back", "back"):
+            put_back = True
+        elif said in ("false", "0", "no") or said.startswith("leave"):
+            put_back = False
+        else:
+            raise ToolError("put_back must be true (put back) or false (leave off).")
+        if self.db is None:
+            raise ToolError("There's nothing taken off a list to put back here.")
         items = self.old_filed_drops()
-        back = []
-        if put_back:
-            for rec in items:
-                if not self.a._undrop_in_joplin(rec):
-                    back.append(rec["title"])
-        self.db.set_sync_meta(self.OFFER_KEY, "put back" if put_back else "left")
+        if item:
+            low = str(item).strip().lower()
+            items = [r for r in items if r["title"].strip().lower() == low] or \
+                [r for r in items if low and low in r["title"].strip().lower()]
+            if not items:
+                raise ToolError(f"'{item}' isn't one of the items taken off their lists earlier.")
+            if len(items) > 1:  # never a guess: the user says which
+                raise ToolError(f"'{item}' matches several: " + "; ".join(r["title"] for r in items) + ". Which one?")
+        if put_back and self.a._writer() is None:
+            raise ToolError("Joplin isn't connected, so nothing could be put back on its list. Try again once it is.")
+        back, failed = [], []
+        for rec in items:
+            if put_back:
+                err = self.a._undrop_in_joplin(rec)
+                (failed if err else back).append((rec["title"], err))
+            else:
+                OpenPool(self.db).set(rec["title"], offer_left=True)
+        if not self.old_filed_drops():  # every item answered: never offered again (a failed one stays offered)
+            self.db.set_sync_meta(self.OFFER_KEY, "answered")
         if not put_back:
-            return "Left them in the Dropped notes."
-        return ("Put back on their lists: " + ", ".join(back) + ".") if back else "Nothing needed putting back."
+            return f"Left {items[0]['title']} off its list." if item else "Left them all off their lists."
+        out = []
+        if back:
+            out.append(f"Put {back[0][0]} back on its list." if len(back) == 1 and item else
+                       "Put back on their lists: " + ", ".join(t for t, _ in back) + ".")
+        if failed:
+            out.append("Couldn't put back: " + "; ".join(f"{t} {e}" for t, e in failed) + ". It's still offered.")
+        return " ".join(out)
 
     def _drop(self, rec: Dict[str, Any], by: str) -> str:
         self.take_off_today(rec)
         OpenPool(self.db).set(rec["title"], horizon=DROPPED, pending_drop=False, dropped_on=self._today().isoformat(),
                               dropped_by=by)
         self.a._drop_leftovers([{"title": rec["title"]}])  # off the Today note; its own list keeps it, untouched
-        return f"Dropped {rec['title']}: it won't roll over, and it stays on its own list."
+        return f"Dropped {rec['title']}: it won't come back by itself, and it stays on its own list."

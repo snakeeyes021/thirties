@@ -355,9 +355,15 @@ class StateDatabase:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM joplin_outbox WHERE id = ?", (op_id,))
 
-    def outbox_attempt(self, op_id: int, error: str) -> None:
+    def outbox_attempt(self, op_id: int, error: str, op: Optional[str] = None) -> None:
+        """One more try that failed; ``op``: the change as it now stands (what it sent, if Joplin went away)."""
         with self._get_connection() as conn:
-            conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?", (error, op_id))
+            if op is None:
+                conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?",
+                             (error, op_id))
+            else:
+                conn.execute("UPDATE joplin_outbox SET attempts = attempts + 1, last_error = ?, op = ? WHERE id = ?",
+                             (error, op, op_id))
 
     def outbox_fail(self, op_id: int, error: str) -> None:
         with self._get_connection() as conn:
@@ -539,6 +545,8 @@ class DeterministicScheduler:
         self.config = config or ThirtiesConfig()
         self.state_db = state_db or StateDatabase()
         self.calendar_engine = calendar_engine or EDSCalendarEngine(self.config)
+        # the last good read of each calendar, by date: a calendar that fails later keeps these events
+        self._calendar_seen: Dict[date, Dict[str, List[CalendarEvent]]] = {}
 
     @property
     def tz(self) -> ZoneInfo:
@@ -589,17 +597,55 @@ class DeterministicScheduler:
 
     def fetch_calendar_events(self, plan: DayPlan) -> List[CalendarEvent]:
         """Calendar events overlapping the diurnal day (which spans two calendar dates)."""
+        return self.read_calendars(plan)[0]
+
+    def read_calendars(self, plan: DayPlan) -> Tuple[List[CalendarEvent], List[str]]:
+        """The day's calendar events, and the calendars that couldn't be read ("" for all of them). A calendar that
+        can't be read keeps what it showed at its last good read; with none, it's named, so the day isn't taken for
+        free."""
         events: Dict[str, CalendarEvent] = {}
-        for d in (plan.day_start.date(), plan.day_end.date()):
+        unread: List[str] = []
+        for d in dict.fromkeys((plan.day_start.date(), plan.day_end.date())):
             try:
-                fetched = self.calendar_engine.fetch_events_for_day(d, self.tz)
+                fetched = list(self.calendar_engine.fetch_events_for_day(d, self.tz))
+                failed = list(getattr(self.calendar_engine, "unread", None) or [])
+                read = getattr(self.calendar_engine, "read", None)
+                read = list(read) if read is not None else [e.calendar_id for e in fetched]
             except Exception as e:
-                logger.warning("Calendar fetch failed for %s: %s", d, e)
-                fetched = []
+                logger.warning("Couldn't read the calendars for %s: %s", d, e)
+                fetched, failed, read = [], [("", "")], []
+            fetched += self._last_good(d, fetched, read, failed, unread)
             for e in fetched:
                 if e.overlaps_interval(plan.day_start, plan.day_end):
                     events[e.id] = e
-        return list(events.values())
+        return list(events.values()), list(dict.fromkeys(unread))
+
+    def _last_good(self, d: date, fetched: List[CalendarEvent], read: List[str], failed: List[Tuple[str, str]],
+                   unread: List[str]) -> List[CalendarEvent]:
+        """Remember what each calendar read showed for ``d`` (nothing, for one read with no events that day), and for
+        each one that couldn't be read, return what it showed last time; a failed calendar with no earlier read goes
+        into ``unread`` (by name)."""
+        seen = self._calendar_seen.get(d)
+        if ("", "") in failed:  # nothing could be read
+            if seen is None:
+                unread.append("")
+                return []
+            logger.warning("Showing the calendars as last read for %s", d)
+            return [e for evs in seen.values() for e in evs]
+        fresh: Dict[str, List[CalendarEvent]] = {uid: [] for uid in read}
+        for e in fetched:
+            fresh.setdefault(e.calendar_id, []).append(e)
+        out: List[CalendarEvent] = []
+        for uid, name in failed:
+            if seen is not None and uid in seen:
+                fresh[uid] = seen[uid]
+                out += seen[uid]
+            else:
+                unread.append(name or uid)
+        self._calendar_seen[d] = fresh
+        for old in sorted(self._calendar_seen)[:-14]:  # a fortnight of days is plenty
+            del self._calendar_seen[old]
+        return out
 
     def build_day_plan(
         self,
@@ -623,7 +669,7 @@ class DeterministicScheduler:
         plan.spans = self.state_db.get_spans_between(plan.day_start, plan.day_end)
 
         if events is None:
-            events = self.fetch_calendar_events(plan)
+            events, plan.calendar_unread = self.read_calendars(plan)
         calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
                                                   getattr(self.config.calendar, "modes", None))
         calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]

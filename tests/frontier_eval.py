@@ -298,7 +298,8 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
     try:
         cfg = ThirtiesConfig()
         cfg.inference.gemini_model = model
-        db = StateDatabase(Path(tempfile.mkdtemp(prefix="frontier_eval_")) / "state.sqlite")
+        from tests.fixtures import temp_dir
+        db = StateDatabase(Path(temp_dir("frontier_eval_")) / "state.sqlite")
         sched = DeterministicScheduler(config=cfg, state_db=db, calendar_engine=MockCalendarEngine(list(scn.events)))
         plan, ambiguous = sched.build_day_plan(DAY)
         tasks = [

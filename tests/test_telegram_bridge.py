@@ -76,9 +76,10 @@ class TestTelegramClient(unittest.TestCase):
         ok_resp = MagicMock()
         ok_resp.read.return_value = json.dumps({"ok": True, "result": {}}).encode("utf-8")
         sent = MagicMock(__enter__=MagicMock(return_value=ok_resp))
-        mock_urlopen.side_effect = [ConnectionResetError(), sent]
+        dropped = urllib.error.URLError(ConnectionResetError())  # broke while going out: never reached Telegram
+        mock_urlopen.side_effect = [dropped, sent]
         self.assertTrue(self.client.send_message(12345, "Lunch"))  # a second try gets through
-        mock_urlopen.side_effect = [ConnectionResetError()] * 3
+        mock_urlopen.side_effect = [dropped] * 3
         self.assertFalse(self.client.send_message(12345, "We could start winding the clock"))
         self.assertEqual(len(self.client.undelivered), 1)
         mock_urlopen.side_effect = [sent]
@@ -86,6 +87,71 @@ class TestTelegramClient(unittest.TestCase):
         self.assertEqual(self.client.undelivered, [])
         body = json.loads(mock_urlopen.call_args[0][0].data)
         self.assertTrue(body["text"].startswith("(Sent late") and body["text"].endswith("winding the clock"))
+
+
+def _ok():
+    resp = MagicMock()
+    resp.read.return_value = json.dumps({"ok": True, "result": {"message_id": 7}}).encode("utf-8")
+    return MagicMock(__enter__=MagicMock(return_value=resp))
+
+
+def _too_many(seconds):
+    import io
+    answer = {"parameters": {"retry_after": float(seconds)}}  # what Telegram sends back with a 429
+    return urllib.error.HTTPError(url="", code=429, msg="Too Many Requests", hdrs={},
+                                  fp=io.BytesIO(json.dumps(answer).encode("utf-8")))
+
+
+class TestSendingOnce(unittest.TestCase):
+    """A message is sent again only when it provably never reached Telegram: one sent message is one message on
+    the phone, never dozens."""
+
+    def setUp(self):
+        self.client = TelegramClient("1:X")
+        self.saved = []
+        self.client.on_undelivered = self.saved.append
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_a_read_timeout_counts_as_sent_and_is_never_sent_again(self, mock_urlopen, _sleep):
+        mock_urlopen.side_effect = [TimeoutError("The read operation timed out"), _ok(), _ok()]
+        self.assertTrue(self.client.send_message(5, "Your evening, from 6:00"))
+        self.assertEqual(mock_urlopen.call_count, 1)  # one send, no retries
+        self.assertEqual((self.client.undelivered, self.saved), ([], []))  # and nothing queued to send again
+        self.client.flush_undelivered()
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_a_connect_error_is_tried_again(self, mock_urlopen, sleep):
+        mock_urlopen.side_effect = [urllib.error.URLError(ConnectionRefusedError()), _ok()]
+        self.assertTrue(self.client.send_message(5, "Lunch is on at 12:30"))
+        self.assertEqual(mock_urlopen.call_count, 2)
+        sleep.assert_called_once_with(TelegramClient.RETRY_WAITS[0])
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_too_many_requests_is_waited_out_once(self, mock_urlopen, sleep):
+        mock_urlopen.side_effect = [_too_many(3), _ok()]
+        self.assertTrue(self.client.send_message(5, "Bins out at 9"))
+        sleep.assert_called_once_with(3.0)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_urlopen.side_effect = [_too_many(3), _too_many(30)]
+        self.assertFalse(self.client.send_message(5, "Kettle descaled?"))  # a second 429: kept, sends held
+        self.assertEqual(mock_urlopen.call_count, 4)
+        self.assertFalse(self.client.send_message(5, "One more thing"))  # held: not even tried
+        self.assertEqual(mock_urlopen.call_count, 4)
+        self.assertEqual([u[1] for u in self.client.undelivered], ["Kettle descaled?", "One more thing"])
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_the_queue_never_sends_what_just_went_out(self, mock_urlopen, _sleep):
+        mock_urlopen.side_effect = [_ok()]
+        self.client.send_message(5, "Water the ferns", parse_mode=None)
+        self.client.undelivered.append((5, "Water the ferns", 0.0 + __import__("time").time(), None, None))
+        self.client.flush_undelivered()
+        self.assertEqual(mock_urlopen.call_count, 1)  # the queued copy is dropped, never sent
+        self.assertEqual(self.client.undelivered, [])
 
 
 class BridgeCase(unittest.TestCase):
@@ -193,7 +259,7 @@ class TestThirtiesTelegramBridge(BridgeCase):
         args, kwargs = self.bridge.client.send_message.call_args
         msg = args[1]
         self.assertIn("Thirties System Status", msg)
-        self.assertIn("Inference Backend", msg)
+        self.assertIn("Assistant", msg)
 
     def test_natural_conversation_routes_to_gemini(self):
         self.bridge.handle_message(chat_id=1001, text="Help me plan my afternoon")
@@ -249,7 +315,7 @@ class TestFormattingAndLateNotices(unittest.TestCase):
     @patch("urllib.request.urlopen")
     def test_an_expired_notice_is_dropped_not_sent_late(self, mock_urlopen, _sleep):
         client = TelegramClient("1:X")
-        mock_urlopen.side_effect = [ConnectionResetError()] * 6
+        mock_urlopen.side_effect = [urllib.error.URLError(ConnectionResetError())] * 6
         client.send_message(5, "🔔 9:30: Shower", expires=datetime.now() - timedelta(minutes=1))
         client.send_message(5, "Logged your shower.")
         self.assertEqual(len(client.undelivered), 2)
@@ -285,7 +351,7 @@ class TestBridgeBursts(BridgeCase):
         with patch.object(self.bridge, "_get_current_time", return_value=at("09:05")):
             with patch("thirties_core.plan_tools.PlanTools._now", return_value=at("09:05")):
                 self.bridge.handle_message(chat_id=1001, text="/now")
-        self.assertIn("\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
+        self.assertIn("\n\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
 
 
     def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):
@@ -302,6 +368,88 @@ class TestBridgeBursts(BridgeCase):
                  and not m["content"].startswith("[System check")]
         self.assertEqual(users[-1], "👍")
         self.assertEqual(len(self.mock_inference.call_history), 1)  # a 👍 on any other message is just a 👍
+
+
+class TestEditsAndRestarts(BridgeCase):
+    """An edited message is never acted on twice; where reading stopped, and replies not yet delivered, survive a
+    restart."""
+
+    def msg(self, update_id, message_id, text, edited=False):
+        return {"update_id": update_id, ("edited_message" if edited else "message"):
+                {"message_id": message_id, "text": text, "chat": {"id": 1001}}}
+
+    def users(self):
+        return [m["content"] for m in self.mock_inference.call_history[-1] if m["role"] == "user"
+                and not m["content"].startswith("[System check")]
+
+    def test_an_edit_to_an_answered_message_starts_no_turn(self):
+        from tests.test_conversation import reply
+        from thirties_core.telegram_bridge import EDIT_NOTICE
+        self.mock_inference.responses = [reply("Added the bike tune-up at 5.")]
+        self.bridge.handle_updates([self.msg(1, 40, "add bike tune-up at 5")])
+        self.bridge.handle_updates([self.msg(2, 40, "add bike tune-up at 6", edited=True)])
+        self.assertEqual(len(self.mock_inference.call_history), 1)  # the edit ran nothing
+        self.assertEqual(self.bridge.client.send_message.call_args[0][1], EDIT_NOTICE)
+
+    def test_a_typo_fix_passes_quietly(self):
+        from tests.test_conversation import reply
+        self.mock_inference.responses = [reply("Noted.")]
+        self.bridge.handle_updates([self.msg(1, 41, "watered the tomatos")])
+        sent = self.bridge.client.send_message.call_count
+        self.bridge.handle_updates([self.msg(2, 41, "watered the tomatoes", edited=True)])
+        self.assertEqual(len(self.mock_inference.call_history), 1)
+        self.assertEqual(self.bridge.client.send_message.call_count, sent)  # nothing said
+
+    def test_only_typing_slips_count_as_a_typo_fix(self):
+        from thirties_core.telegram_bridge import _typo_fix
+        for before, after in [("watered the tomatos", "watered the tomatoes"), ("feed teh cat", "feed the cat"),
+                              ("finsihed the dishes", "finished the dishes")]:
+            self.assertTrue(_typo_fix(before, after), after)
+        for before, after in [("add bike tune-up at 5", "add bike tune-up at 6"),
+                              ("move it to tuesday", "move it to thursday"), ("add the walk", "dont add the walk"),
+                              ("call mom", "call tom"), ("done", "gone"), ("skip the run", "skip the gym")]:
+            self.assertFalse(_typo_fix(before, after), after)
+
+    def test_an_edit_before_the_reply_is_what_was_meant(self):
+        from tests.test_conversation import reply
+        self.mock_inference.responses = [reply("Moved it.")]
+        self.bridge.handle_updates([self.msg(1, 42, "move the oil change to 3"),
+                                    self.msg(2, 42, "move the oil change to 4", edited=True)])
+        self.assertEqual(len(self.mock_inference.call_history), 1)
+        self.assertEqual(self.users()[-1], "move the oil change to 4")
+
+    def test_an_edit_in_another_chat_is_ignored(self):
+        self.bridge.handle_updates([{"update_id": 1, "edited_message": {"message_id": 9, "text": "hi there",
+                                                                         "chat": {"id": 555}}}])
+        self.bridge.client.send_message.assert_not_called()
+
+    def test_reading_resumes_where_it_stopped_after_a_restart(self):
+        self.bridge.client.get_updates.side_effect = [[self.msg(70, 43, "/now")], KeyboardInterrupt()]
+        with patch.object(self.bridge, "handle_updates"):
+            with self.assertRaises(KeyboardInterrupt):
+                self.bridge.poll_forever()
+        self.assertEqual(self.bridge._saved_offset(), 71)
+        self.bridge.client.get_updates.side_effect = [KeyboardInterrupt()]
+        with self.assertRaises(KeyboardInterrupt):
+            self.bridge.poll_forever()  # a fresh start picks up past the saved point
+        self.assertEqual(self.bridge.client.get_updates.call_args.kwargs["offset"], 71)
+
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    def test_replies_not_yet_delivered_survive_a_restart(self, mock_urlopen, _sleep):
+        mock_urlopen.side_effect = [urllib.error.URLError(ConnectionResetError())] * 3  # never went out
+        client = TelegramClient("1:X")
+        client.on_undelivered = self.bridge._save_unsent
+        client.send_message(1001, "Logged the dog walk.")
+        self.bridge.client = TelegramClient("1:X")
+        self.bridge._restore_unsent()
+        self.assertEqual([u[1] for u in self.bridge.client.undelivered], ["Logged the dog walk."])
+        ok = MagicMock()
+        ok.read.return_value = json.dumps({"ok": True, "result": {}}).encode("utf-8")
+        mock_urlopen.side_effect = [MagicMock(__enter__=MagicMock(return_value=ok))]
+        self.bridge.client.on_undelivered = self.bridge._save_unsent
+        self.bridge.client.flush_undelivered()
+        self.assertEqual(json.loads(self.scheduler.state_db.get_setting("telegram_unsent")), [])
 
 
 class TestPlainLists(unittest.TestCase):

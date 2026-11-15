@@ -60,10 +60,14 @@ _ALL = [
     Setting("timeline.free_units", "shared"),  # free time in "blocks" or "hours" (timeline_layout.py)
     Setting("assistant.morning_message_at", "shared"),
     Setting("assistant.morning_message_items", "shared"),
+    Setting("assistant.after_change", "shared"),
+    Setting("assistant.after_change_unmarked", "shared"),
+    Setting("assistant.status_line", "shared"),
     Setting("assistant.sunrise_notice", "shared"),
     Setting("assistant.sunset_notice", "shared"),
     # about this machine
     Setting("assistant.brain", "device"),
+    Setting("assistant.slm_model", "device"),  # the smaller model on a device where the bigger one doesn't fit (fit.py)
     Setting("general.latitude", "device"),
     Setting("general.longitude", "device"),
     Setting("general.timezone", "device"),

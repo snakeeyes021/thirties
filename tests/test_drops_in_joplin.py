@@ -71,7 +71,7 @@ class TestDropsInJoplin(TodayTestCase):
             out = self.t.execute("leftover_action", {"item": "Call the bank", "action": "archive"})
         finally:
             self.t.user_message = None
-        self.assertIn("still on its list", out)
+        self.assertIn('Say "archive it"', out)
         self.assertEqual(self.body("n_errands"), ERRANDS)
         self.assertIsNone(self.dropped_note())
 
@@ -113,9 +113,61 @@ class TestDropsInJoplin(TodayTestCase):
 
     def test_leaving_the_old_drops_filed_ends_the_offer(self):
         self.archive()
-        self.assertIn("Left them", self.t.execute("restore_old_drops", {"put_back": False}))
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": False}), "Left them all off their lists.")
         self.assertNotIn("Call the bank", self.body("n_errands"))
         self.assertEqual(self.t.assistant.before.rows()["restore"], [])
+
+    def test_each_one_can_be_put_back_or_left_off(self):
+        self.pool.add([{"title": "Return the parcel", "task_id": "t_parcel", "horizon": "week",
+                        "pending_drop": True, "proposed_on": DAY.isoformat()}], DAY - timedelta(days=1))
+        self.archive()
+        self.archive("Return the parcel")
+        self.assertEqual(sorted(self.t.assistant.before.rows()["restore"]), ["Call the bank", "Return the parcel"])
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": False, "item": "Return the parcel"}),
+                         "Left Return the parcel off its list.")
+        self.assertEqual(self.t.assistant.before.rows()["restore"], ["Call the bank"])  # still offered
+        self.assertEqual(self.t.execute("restore_old_drops", {"put_back": True, "item": "Call the bank"}),
+                         "Put Call the bank back on its list.")
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        self.assertNotIn("Return the parcel", self.body("n_errands"))
+        self.assertEqual(self.t.assistant.before.rows()["restore"], [])  # all answered: never offered again
+
+    def two_old_drops(self):
+        self.pool.add([{"title": "Return the parcel", "task_id": "t_parcel", "horizon": "week",
+                        "pending_drop": True, "proposed_on": DAY.isoformat()}], DAY - timedelta(days=1))
+        self.archive()
+        self.archive("Return the parcel")
+
+    def test_a_put_back_that_fails_says_so_and_stays_offered(self):
+        from unittest.mock import MagicMock, patch
+        self.two_old_drops()
+        failing = MagicMock()
+        failing.submit.return_value = ("failed", "the note is locked")
+        with patch.object(self.t.assistant, "_writer", return_value=failing):
+            out = self.t.execute("restore_old_drops", {"put_back": True})
+        self.assertIn("Couldn't put back: Call the bank", out)
+        self.assertIn("the note is locked", out)
+        self.assertEqual(sorted(self.t.assistant.before.rows()["restore"]), ["Call the bank", "Return the parcel"])
+        with patch.object(self.t.assistant, "_writer", return_value=None):  # Joplin isn't connected
+            out = self.t.execute("restore_old_drops", {"put_back": True, "item": "Call the bank"})
+        self.assertTrue(out.startswith("NOT_DONE") and "Joplin isn't connected" in out, out)
+        self.assertEqual(sorted(self.t.assistant.before.rows()["restore"]), ["Call the bank", "Return the parcel"])
+
+    def test_leave_off_in_words_leaves_it_off(self):
+        self.two_old_drops()
+        lists = self.body("n_errands")
+        for words in ("leave off", "Leave all off"):
+            self.t.execute("restore_old_drops", {"put_back": words, "item": "Return the parcel"}
+                           if words == "leave off" else {"put_back": words})
+        self.assertEqual(self.body("n_errands"), lists)  # Joplin untouched
+        self.assertEqual(self.t.assistant.before.rows()["restore"], [])
+        self.assertTrue(self.t.execute("restore_old_drops", {"put_back": "maybe"}).startswith("NOT_DONE"))
+
+    def test_part_of_a_title_that_matches_several_is_asked_about(self):
+        self.two_old_drops()
+        out = self.t.execute("restore_old_drops", {"put_back": False, "item": "the"})  # in both titles
+        self.assertIn("matches several", out)
+        self.assertEqual(len(self.t.assistant.before.rows()["restore"]), 2)  # nothing guessed
 
     def test_done_goes_the_normal_done_way(self):
         self.pool.set("Call the bank", pending_drop=False)

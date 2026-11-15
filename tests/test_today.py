@@ -1,7 +1,7 @@
 """The day's list: the Today note, linked to the lists its items came from."""
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from tests.fixtures import DAY, FakeJoplinAPI, at, make_scheduler
 from thirties_core.assistant_tools import Services
@@ -20,6 +20,12 @@ def item(tid, title, note="n_errands"):
                     parent_note_title=TITLES[note], parent_note_id=note)
 
 
+def as_earlier_lines():
+    """Lines put on Today the way an earlier day left them: with no time (before everything added today got one,
+    if_time.py). The morning tests start from such leftovers."""
+    return patch("thirties_core.if_time.on_plan_today", return_value=object())
+
+
 class TodayTestCase(unittest.TestCase):
 
     def setUp(self):
@@ -32,7 +38,7 @@ class TodayTestCase(unittest.TestCase):
         joplin = MagicMock()
         joplin.api_client = self.api
         joplin.fetch_active_notes.side_effect = lambda: [
-            {"id": nid, "title": TITLES[nid], "source_notebook": "1. Tasks", "body": n["body"]}
+            {"id": nid, "title": TITLES.get(nid) or n.get("title", ""), "source_notebook": "1. Tasks", "body": n["body"]}
             for nid, n in self.api.notes.items()]
         catalog = ListCatalog(self.sched.state_db)
         catalog.set_role("n_today", "today", "Today To-Do")
@@ -48,9 +54,26 @@ class TodayTestCase(unittest.TestCase):
 
 class TestAddingToToday(TodayTestCase):
 
+    def test_a_long_marked_up_line_goes_on_today_by_its_short_title(self):
+        long_line = "**Shelf brackets: measured** (see the sketch, https://example.org/plan). Next: buy screws"
+        self.api.notes["n_errands"]["body"] += f"- [ ] {long_line}\n"
+        from thirties_core.models import TaskItem
+        self.services.tasks.append(TaskItem(id="t_shelf", source_notebook="1. Tasks", title=long_line,
+                                            is_checkbox_item=True, parent_note_title="Errands/Admin",
+                                            parent_note_id="n_errands", list_role="list"))
+        self.t.execute("add_to_today", {"items": [long_line]})
+        self.assertIn("- [ ] Shelf brackets: measured\n", self.body("n_today"))
+        self.assertNotIn("**", self.body("n_today"))
+        self.assertNotIn("https://", self.body("n_today"))
+        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Shelf brackets: measured")["home_id"], "t_shelf")
+
+
     def test_list_items_go_on_linked_and_new_things_go_on_as_they_are(self):
         out = self.t.execute("add_to_today", {"items": ["call the bank", "Rinse the tank filter", "Buy stamps for the trip"]})
-        self.assertEqual(out, "Added to today's list: Call the bank, Rinse the tank filter, Buy stamps for the trip.")
+        self.assertTrue(out.startswith("On today's plan: Call the bank at "), out)  # each gets its time at once
+        for title in ("Call the bank", "Rinse the tank filter", "Buy stamps for the trip"):
+            self.assertIn(f"{title} at ", out)
+            self.assertTrue(any(s.title == title for s in self.t.day_plan.spans), title)
         self.assertEqual(self.body("n_today"), "- [ ] Call the bank\n- [ ] Rinse the tank filter\n- [ ] Buy stamps for the trip\n")
         links = TodayLinks(self.sched.state_db)
         self.assertEqual(links.home_of("Call the bank")["home_id"], "t_bank")
@@ -83,7 +106,7 @@ class TestAddingToToday(TodayTestCase):
                                             title="Watch: Dinner at the Glass Orchard (1979)"))
         self.services.tasks.append(item("t_shelf", "Near shelf boxes"))
         out = self.t.execute("add_to_today", {"items": ["Dinner"]})
-        self.assertEqual(out, "Added to today's list: Dinner.")  # 10-22: it added the film
+        self.assertTrue(out.startswith("On today's plan: Dinner at "), out)  # 10-22: it added the film
         self.assertIsNone(TodayLinks(self.sched.state_db).home_of("Dinner"))
         out = self.t.execute("log_outcome", {"event": "Shelf storage boxes", "status": "done"})
         self.assertTrue(out.startswith(NOT_DONE), out)  # 10-18: it ticked a near match in Joplin
@@ -91,7 +114,8 @@ class TestAddingToToday(TodayTestCase):
         self.assertEqual(self.api.updates, [u for u in self.api.updates if u[0] == "n_today"])
 
     def test_by_task_id_too(self):
-        self.assertEqual(self.t.execute("add_to_today", {"items": ["t_bank"]}), "Added to today's list: Call the bank.")
+        self.assertTrue(self.t.execute("add_to_today", {"items": ["t_bank"]}).startswith(
+            "On today's plan: Call the bank at "))
         self.assertEqual(TodayLinks(self.sched.state_db).home_of("Call the bank")["home_id"], "t_bank")
 
     def test_without_a_today_note(self):
@@ -158,7 +182,8 @@ class TestWhatsLeft(TodayTestCase):
     def test_the_slm_answers_from_the_plan_and_todays_list(self):
         from thirties_core.brains.slm import SlmBrain
         from thirties_core.brains.slm.parse import Action
-        self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+        with as_earlier_lines():
+            self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
         self.t.execute("add_event", {"title": "Shower", "start": "9:00 AM", "duration": "30 min"})
         self.t.execute("add_event", {"title": "Call the bank", "start": "2:00 PM", "duration": "30 min",
                                      "task_id": "t_bank"})
@@ -175,8 +200,7 @@ class TestSlmShortcuts(TodayTestCase):
     def test_gemma_puts_things_on_todays_list_and_records_urgency(self):
         from thirties_core.brains.slm import SlmBrain
         brain = SlmBrain(self.t, tasks=self.services.tasks)
-        self.assertEqual(brain.respond("add call the bank and rinse the tank filter to today's list"),
-                         "Added to today's list: Call the bank, Rinse the tank filter.")
+        self.assertIn("Call the bank at ", brain.respond("add call the bank and rinse the tank filter to today's list"))
         self.assertTrue(brain.respond("buy stamps isn't urgent").startswith("Noted: 'Buy stamps' is whenever"))
         self.assertTrue(brain.respond("call the bank has to happen by friday").startswith(
             "Noted: 'Call the bank' is by"))
@@ -308,6 +332,22 @@ class TestRoutinesOnToday(TodayTestCase):
 from datetime import timedelta
 
 
+def morning_today(case) -> None:
+    """A morning's Today: two lines from an earlier day, a daily step done yesterday, a routine with done steps."""
+    with as_earlier_lines():
+        case.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
+    case.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + case.body("n_today")
+    case.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
+    catalog = ListCatalog(case.sched.state_db)
+    catalog.set_role("n_routine", "routine", "Morning Routine")
+    catalog.set_urgency("t_stamps", "now")
+    case.services.tasks = catalog.apply(case.services.tasks)
+    with case.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
+        conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
+    from tests.fixtures import DAY
+    case.sched.state_db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
+
+
 class TestMorning(TodayTestCase):
     """Yesterday's unmarked items (carry.py; 11-05): unmarked means unknown; some things never roll; a
     one-off to-do is asked about once, in one question; not done, it waits on its list for a day it fits; the
@@ -315,23 +355,24 @@ class TestMorning(TodayTestCase):
 
     def setUp(self):
         super().setUp()
-        self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
-        self.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + self.body("n_today")
-        self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
-        catalog = ListCatalog(self.sched.state_db)
-        catalog.set_role("n_routine", "routine", "Morning Routine")
-        catalog.set_urgency("t_stamps", "now")
-        self.services.tasks = catalog.apply(self.services.tasks)
-        with self.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day
-            conn.execute("UPDATE today_links SET updated_at = '2026-01-01T12:00:00+00:00'")
-        from tests.fixtures import DAY
-        self.sched.state_db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
+        morning_today(self)
 
     def yesterday(self, title, start, **extra):
         from datetime import timedelta
         from tests.fixtures import DAY
         args = {"title": title, "start": start, "duration": "30 min", "day": (DAY - timedelta(days=1)).isoformat()}
         self.t.execute("add_event", {**args, **extra})
+
+    def test_the_morning_reset_is_meant_for_this_day_only(self):
+        """If Joplin can't take the morning's changes now, they never run on a later day."""
+        from datetime import datetime
+        from thirties_core.joplin_writeback import WriteLog
+        self.t.assistant.start_the_day()
+        reset = [w["op"] for w in WriteLog(self.sched.state_db).since()
+                 if w["op"]["op"] in ("untick_all", "today_reset", "file_done")]
+        self.assertLessEqual({"untick_all", "today_reset"}, {o["op"] for o in reset})  # Today: one write
+        for o in reset:
+            self.assertEqual(datetime.fromisoformat(o["valid_until"]), self.t.day_plan.day_end)
 
     def test_routines_start_unticked_and_leftovers_leave_today(self):
         self.t.assistant.start_the_day()
@@ -359,10 +400,11 @@ class TestMorning(TodayTestCase):
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
         # 11-06: in effect by itself; today's keep is on today's schedule already, and the morning says so
-        self.assertEqual(out, "Kept 3 from before (1 on today's plan): see Before today.")
+        self.assertEqual(out.split("\n")[0], "Kept 3 from before (1 on today's plan): see Before today.")
+        self.assertIn("Keep: Buy stamps, today.", out)
         rows = {r["title"]: r for r in self.t.assistant.before.rows()["keep"]}
         self.assertIsNotNone(rows["Buy stamps"]["at"])  # placed
-        self.assertEqual(rows["Call the bank"]["when"], "this week")
+        self.assertEqual(rows["Call the bank"]["when"], "tomorrow")  # replanned: the first day with room, not today
         self.assertIn("Buy stamps", [s.title for s in self.t.day_plan.spans])
         self.assertIn("The rest wait where proposed.", self.t.execute("apply_rollover", {}))
         # the next morning, still unmarked: never asked again
@@ -371,12 +413,15 @@ class TestMorning(TodayTestCase):
         self.assertTrue(self.t.execute("rollover_proposal", {}).startswith("Nothing from yesterday"))
 
     def test_not_done_waits_in_the_pool_and_is_offered_only_as_an_option(self):
+        from datetime import timedelta
         from thirties_core.carry import OpenPool
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         self.assertIn("call the bank", OpenPool(self.sched.state_db).all(DAY))
+        self.assertEqual(OpenPool(self.sched.state_db).all(DAY)["call the bank"]["start"],
+                         (DAY + timedelta(days=1)).isoformat())  # replanned for tomorrow: never today by itself
         cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
-        self.assertTrue(cands["Call the bank"].startswith("left open since "), cands)
+        self.assertNotIn("Call the bank", cands)  # never before its day
         self.assertFalse(cands["Buy stamps"].startswith("left open"))  # urgent things still come first
         self.assertNotIn("Call the bank", [s.title for s in self.t.day_plan.spans])
 
@@ -406,9 +451,9 @@ class TestMorning(TodayTestCase):
         from tests.fixtures import DAY
         self.t.assistant.start_the_day()
         out = self.t.execute("rollover_proposal", {})
-        self.assertEqual(out, "Kept 2 from before (0 on today's plan): see Before today.")  # a notice
-        cands = {c["title"]: c["why"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
-        self.assertTrue(cands["Call the bank"].endswith("; this week"), cands)
+        self.assertEqual(out.split("\n")[0], "Kept 2 from before (0 on today's plan): see Before today.")  # a notice
+        cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
+        self.assertNotIn("Call the bank", cands)  # replanned for tomorrow: not drawn today
         self.assertIn("someday", self.t.execute("place_leftover", {"item": "Call the bank", "horizon": "someday"}))
         cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertNotIn("Call the bank", cands)  # someday: not in daily plans unless asked

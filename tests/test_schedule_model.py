@@ -302,6 +302,25 @@ class TestPushBack(ScheduleCase):
         self.assertEqual(times(t, "Make coffee")[0], "3:06 PM")
         self.assertEqual(times(t, "Lunch")[0], "1:30 PM")  # the block before: behind, not pushed
 
+    def test_a_fixed_item_already_done_is_no_wall_for_what_slides(self):
+        t = tools_for([], now="15:32")
+        t.execute("remove_event", {"event": "Work"})
+        t.execute("add_event", {"title": "Courier pickup", "start": "5:00 PM", "duration": "30 min", "fixed": True})
+        t.execute("log_outcome", {"event": "Courier pickup", "status": "done"})  # it came early
+        t.execute("add_event", {"title": "Glazing", "start": "4:00 PM", "duration": "1 hour"})
+        t.execute("push_back", {"by": "1 hour"})
+        self.assertEqual(times(t, "Glazing"), ("5:00 PM", "6:00 PM"))  # not jumped past the pickup's old time
+        t.execute("add_event", {"title": "Sanding", "start": "6:30 PM", "duration": "30 min"})
+        t.execute("add_event", {"title": "Courier pickup", "start": "7:00 PM", "duration": "30 min", "fixed": True,
+                                "again": True})
+        t.execute("log_outcome", {"event": next(s.id for s in t.day_plan.spans if s.title == "Courier pickup"
+                                                and s.start_dt.hour == 19), "status": "done"})
+        t.user_message = "put the kiln check at 6:30 and push the rest back"
+        out = t.execute("add_event", {"title": "Kiln check", "start": "6:30 PM", "duration": "30 min",
+                                      "push_later": True})
+        self.assertFalse(out.startswith(NOT_DONE), out)  # sliding Sanding into the done pickup's time is fine
+        self.assertEqual(times(t, "Sanding"), ("7:00 PM", "7:30 PM"))
+
     def test_push_back_from_a_time_and_bad_amounts(self):
         t = self.day()
         t.execute("push_back", {"by": "1 hour", "since": "6:00 PM"})

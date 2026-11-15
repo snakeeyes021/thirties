@@ -4,11 +4,12 @@ The user shouldn't have to manage the daily items by hand, or work out what has 
 on track (10-30). Each morning, once the routines and anchors are on (routines.py), the assistant offers
 one short, concrete plan for the open time: what's pressing, not the whole backlog. Python gathers the candidates
 (due dates, urgency now / soon, what's on the Today note, a little project time) and the free time; the model picks
-and says why (propose_day); the proposal is remembered and goes on the plan, exactly as offered, on "yes"
-(apply_day_proposal), like the rollover.
+and says why (propose_day); the proposal is the schedule: it goes on the plan at once, exactly as proposed, and
+is said as a notice, which the user can still change, as with the rollover.
 
-Items put off again and again are offered kindly: as a 30-minute start, with a note saying so. When no model can
-pick (the on-device brain, or a failed call), Python makes the obvious proposal itself (default_items).
+An item missed day after day isn't offered again the next morning: it rests a little longer after each miss, and
+after the third gets one question instead (backoff.py). When no model can pick (the on-device brain, or a failed
+call), Python makes the obvious proposal itself (default_items).
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ def _short(title: str, limit: int = 80) -> str:
 
 MAX_CANDIDATES = 8   # what the model chooses from: enough to choose, never the backlog
 MAX_DEFAULT = 3      # Python's own proposal (no model): a few things, not a full day
-DEFERRED_OFTEN = 3   # put off this many times: offered as a 30-minute start
 PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a later "yes"
 MIN_FREE_MINUTES = 60  # less free time than this ahead: nothing to propose
 
@@ -45,7 +45,7 @@ MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
     "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
-    "on, as a list, and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
+    "on, one plain line each (time first, never '- ' bullets), and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
     "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
     "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
@@ -82,7 +82,8 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "apply_day_proposal",
-        "description": "Put the day's proposal on the plan, as proposed (after the user agrees). Items from the "
+        "description": "Put a stored day proposal on the plan, as proposed (propose_day already does this by itself; "
+                       "use this only for one still waiting). Items from the "
                        "lists stay linked.",
         "parameters": {"skip": "Titles or words of items to leave out (optional)."},
         "required": [],
@@ -242,12 +243,10 @@ class DayProposal:
                 rank, why = (5, 0), "a free-time pick"
             else:
                 continue
-            if t.deferred_count >= DEFERRED_OFTEN:
-                why += f"; put off {t.deferred_count} times: offer a 30-minute start or breaking it down, kindly"
             if low not in out or rank < out[low]["rank"]:
                 out[low] = {"rank": rank, "task": t, "title": title, "why": why,
                             "where": t.parent_note_title or t.source_notebook or "",
-                            "minutes": 30 if t.deferred_count >= DEFERRED_OFTEN else usual_minutes(self.a, t, title)}
+                            "minutes": usual_minutes(self.a, t, title)}
         found = sorted(out.values(), key=lambda c: (c["rank"], c["title"].lower()))
         menus = [c for c in found if c["rank"][0] == 5][:2]
         found = [c for c in found if c["rank"][0] < 5][:MAX_CANDIDATES - len(menus)] + menus
@@ -313,7 +312,7 @@ class DayProposal:
     @staticmethod
     def _lines(items: List[Dict[str, Any]]) -> List[str]:
         from thirties_core.assistant_tools import _short  # a list line said in brief (11-05: whole paragraphs)
-        return [f"- {format_clock(datetime.fromisoformat(i['start']))} – {_short(i['title'])}" for i in items]
+        return [f"{format_clock(datetime.fromisoformat(i['start']))} {_short(i['title'])}" for i in items]
 
     def _store(self, items: List[Dict[str, Any]], why: str = "") -> str:
         day = self.pt.day_plan.target_date
@@ -368,6 +367,18 @@ class DayProposal:
                 task = self.a._exact_task(words)
                 ref = words
             title = task.title if task is not None else ref
+            from thirties_core.backoff import MissStreaks, signature
+            from thirties_core.item_facts import mentions
+            said = self.pt.user_message
+            from thirties_core.backoff import stated_cant_wait
+            rest = MissStreaks(self.db).held_until(self.pt.day_plan.target_date, title, task.id if task else "",
+                                                   signature(task), task.due if task else "",
+                                                   urgent=stated_cant_wait(self.db, task, title))
+            if rest is not None and not (said is not None and mentions(said, title)):
+                problems.append(f"{title} was missed lately (skipped or left unmarked), so it rests"
+                                + (f" until {rest.strftime('%A')}" if rest != date.max else "")
+                                + " unless the user brings it up")
+                continue
             try:
                 start = self.pt._start(raw.get("start"))
                 minutes = parse_duration_minutes(raw["duration"]) if raw.get("duration") not in (None, "") else \
@@ -375,6 +386,14 @@ class DayProposal:
             except (ClockError, ValueError) as e:
                 raise ToolError(f"{title}: {e}")
             start, end = self.pt._snap(start, start + timedelta(minutes=minutes))
+            from thirties_core import constraints  # what the user said about its window or order: kept
+            if constraints.problem(self.pt, title, None, start, end) is not None:
+                slot = constraints.nearest(self.pt, title, None, minutes, start)
+                if slot is None:
+                    problems.append(f"{title}: {constraints.problem(self.pt, title, None, start, end)}, and no free "
+                                    "time keeps it")
+                    continue
+                start, end = slot, slot + timedelta(minutes=minutes)
             fits = any(a <= start and end <= b for a, b in free)
             clash = next((t for t in taken if t[0] < end and start < t[1]), None)
             if not fits or clash:
@@ -441,7 +460,7 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
     """The candidates for a day, best first: what the horizon plans bubble down into it (pinned to the day, due,
     the week's unplaced items, ...: horizons.candidates_for_day), then this module's own (urgency, Today, menus,
     time on a project) for what they don't cover. Each is {"rank", "task", "title", "why", "where", "minutes"}."""
-    own = dp.own_candidates(plan)
+    own = _resting_out(dp, plan.target_date, dp.own_candidates(plan))
     try:
         from thirties_core.horizons import candidates_for_day
         bubbled = candidates_for_day(dp.a.pt, plan.target_date, limit=MAX_CANDIDATES)
@@ -456,15 +475,39 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         if c.title.strip().lower() in on_plan or c.task_id in on_plan:
             continue  # already on the day
         why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
-        if c.deferred >= DEFERRED_OFTEN:
-            why += f"; put off {c.deferred} times: offer a 30-minute start or breaking it down, kindly"
-            minutes = 30
+        if c.sessions and c.minutes:
+            minutes = c.minutes  # a session of a budgeted effort: the budget says how long (budgets.py)
         out.append({"rank": (0, i), "task": c.task, "title": c.title, "why": why,
                     "where": c.list or (c.task.parent_note_title if c.task is not None else "") or "",
-                    "minutes": minutes})
+                    "minutes": minutes, "session": bool(c.sessions and c.due)})
         seen.add(c.title.lower())
+    out = _resting_out(dp, plan.target_date, out)
     out += [c for c in own if c["title"].lower() not in seen]
+    try:  # out of season, an item waits for its months: never offered day after day (seasons.py)
+        from thirties_core.horizons import HorizonPlanner
+        from thirties_core.seasons import in_season
+        planner = HorizonPlanner(dp.a.pt)
+        out = [c for c in out if c.get("task") is None or in_season(planner.months_of(c["task"]), plan.target_date)]
+    except Exception as e:
+        logger.warning("Couldn't check the seasons of the day's candidates: %s", e)
     return out[:MAX_CANDIDATES]
+
+
+def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Leave out what's resting after missed days (backoff.py); a due date near, a session of the work planned back
+    from it today, or what the user said can't wait (before its third miss), still comes."""
+    from thirties_core.backoff import MissStreaks, signature, stated_cant_wait
+    if dp.db is None:
+        return cands
+    streaks = MissStreaks(dp.db)
+    out = []
+    for c in cands:
+        t = c.get("task")
+        if streaks.held(day, c["title"], t.id if t is not None else "", signature(t), t.due if t is not None else "",
+                        session=bool(c.get("session")), urgent=stated_cant_wait(dp.db, t, c["title"])):
+            continue
+        out.append(c)
+    return out
 
 
 MORNING_FACTS = (
@@ -474,7 +517,8 @@ MORNING_FACTS = (
     "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
     "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
     "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
-    "morning!\". Don't list the routines or meals: they go on by themselves every day.\n---\n{facts}\n---")
+    "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
+    "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:

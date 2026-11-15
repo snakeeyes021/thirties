@@ -86,7 +86,14 @@ class InferenceConfig:
 class AssistantConfig:
     brain: str = "frontier"  # "frontier" (large model, one rich prompt) or "slm" (on-device Gemma pipeline)
     slm_model_path: str = ""  # empty: look in ~/.local/share/thirties/models
+    slm_model: str = ""       # which on-device model (brains/slm/catalog.py); empty: Gemma 4 E4B. "gemma-4-e2b" on small devices
     slm_voice: bool = True    # SLM: rewrite template replies naturally (facts are verified, else the template is used)
+    # A developer switch: offer the on-device model (Gemma) anywhere a user could pick it. Off until a study shows
+    # it's no worse than the cloud brain; the env var THIRTIES_OFFER_GEMMA=1 turns it on too.
+    offer_gemma: bool = False
+    # The one-prompt turn's bookkeeping (failures per item, every round checked, spent drafts, replies glued onto
+    # calls, an ambiguous "done" asking): off until its study passes; off is the turn as it was before.
+    turn_bookkeeping: bool = False
     checkins: bool = True     # ask "did you get to X?" after planned items end (Telegram)
     checkin_after_minutes: int = 10
     # How often Thirties messages on its own: "off" (only reminders asked for), "light" (a heads-up before
@@ -96,6 +103,11 @@ class AssistantConfig:
     # scheduled wake-up ("wake": when the night's Sleep is planned to end); with or without the day's items.
     morning_message_at: str = "wake"
     morning_message_items: bool = True
+    # After a turn that changed something, the reply ends with: "nothing", "next" (the block you're in and the
+    # next few things: whats_next.py) or "rest" (the rest of today); rendered by Python, never by the model
+    after_change: str = "next"
+    after_change_unmarked: bool = True  # its Not marked yet section
+    status_line: bool = True  # "You're in the 10:00 block: …" in replies (reply_extras.py); again only once it changed
     sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
     sunset_notice: bool = False
 

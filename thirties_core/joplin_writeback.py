@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextvars
 import difflib
+import hashlib
 import json
 import logging
 import os
@@ -21,10 +22,12 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from thirties_core.astronomy import get_current_time
 from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEADING_REGEX, JoplinAPIClient
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,7 @@ def insert_subtasks(body: str, parent_title: Optional[str], steps: List[str], oc
 
 
 DONE_HEADING_RE = re.compile(r"(done|completed?|finished|archived?)\b", re.IGNORECASE)
+IF_TIME_HEADING_RE = re.compile(r"^if there'?s time\s*:?$", re.IGNORECASE)  # if_time.py: new lines go above it
 
 
 def append_task(body: str, title: str, section: Optional[str] = None, more: Optional[List[str]] = None) -> str:
@@ -111,7 +115,9 @@ def append_task(body: str, title: str, section: Optional[str] = None, more: Opti
     lines = body.splitlines()
     start, stop = 0, len(lines)
     done_head = next((i for i, l in enumerate(lines)
-                      if HEADING_REGEX.match(l) and DONE_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip())), None)
+                      if HEADING_REGEX.match(l) and (DONE_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip())
+                                                     or IF_TIME_HEADING_RE.match(HEADING_REGEX.match(l).group(1).strip()))),
+                     None)
     if done_head is not None and not section:  # a Done section is for finished things: add above it
         stop = done_head
     if section:
@@ -146,14 +152,41 @@ def _item_end(lines: List[str], i: int) -> int:
     return end
 
 
-def remove_item(body: str, title: str) -> Optional[str]:
-    """Take an item (open or ticked) and anything nested under it off the list; None if it's gone."""
+def remove_item(body: str, title: str, occurrence: int = 0, state: str = "any") -> Optional[str]:
+    """Take an item and anything nested under it off the list; None if it's gone. ``state`` says which copies
+    count ("open", "ticked" or "any"), and ``occurrence`` which of those (a queued removal of an open line must
+    never take a copy that was ticked meanwhile)."""
     lines = body.splitlines()
+    seen = 0
     for i, line in enumerate(lines):
-        if _open_item(line, title, ticked_too=True):
-            out = lines[:i] + lines[_item_end(lines, i):]
-            return "\n".join(out) + ("\n" if body.endswith("\n") and out else "")
+        if state == "open":
+            m = CHECKBOX_REGEX.match(line)
+        elif state == "ticked":
+            m = DONE_CHECKBOX_REGEX.match(line)
+        else:
+            m = CHECKBOX_REGEX.match(line) or DONE_CHECKBOX_REGEX.match(line)
+        if not (m and m.group(2).strip() == title.strip()):
+            continue
+        if seen < occurrence:
+            seen += 1
+            continue
+        out = lines[:i] + lines[_item_end(lines, i):]
+        return "\n".join(out) + ("\n" if body.endswith("\n") and out else "")
     return None
+
+
+def open_copies(body: str, title: str) -> int:
+    return sum(1 for line in body.splitlines() if _open_item(line, title))
+
+
+def today_reset(body: str, removes: List[Dict[str, Any]], clear_only: List[str]) -> str:
+    """The morning's whole change to Today, worked out on one fresh copy and written once (version-checked): each
+    line to take off (one already gone is skipped), then the ticked lines that are safe to clear."""
+    for r in removes:
+        new = remove_item(body, r["title"], int(r.get("occurrence") or 0), r.get("state") or "any")
+        if new is not None:
+            body = new
+    return clear_ticked(body, clear_only)
 
 
 def untick_all(body: str) -> str:
@@ -161,12 +194,15 @@ def untick_all(body: str) -> str:
     return "".join(re.sub(r"^([ \t]*)-\s*\[[xX]\]", r"\1- [ ]", line) for line in body.splitlines(keepends=True))
 
 
-def clear_ticked(body: str) -> str:
-    """Drop ticked items and what's nested under them (the day's list, once the day is over)."""
+def clear_ticked(body: str, only: Optional[List[str]] = None) -> str:
+    """Drop ticked items and what's nested under them (the day's list, once the day is over). With ``only``, just
+    the ticked items worded so: a ticked line nobody has filed yet stays."""
+    keep_out = {t.strip() for t in only} if only is not None else None
     lines = body.splitlines()
     out, i = [], 0
     while i < len(lines):
-        if DONE_CHECKBOX_REGEX.match(lines[i]):
+        m = DONE_CHECKBOX_REGEX.match(lines[i])
+        if m and (keep_out is None or m.group(2).strip() in keep_out):
             i = _item_end(lines, i)
             continue
         out.append(lines[i])
@@ -292,7 +328,7 @@ class WriteLog:
                 removed += old[i1:i2]
             if tag in ("replace", "insert"):
                 added += new[j1:j2]
-        clean = {k: v for k, v in op.items() if not k.startswith("_")}
+        clean = {k: v for k, v in op.items() if not k.startswith("_") or k == "_id"}
         with self.db._get_connection() as conn:
             conn.execute("INSERT INTO joplin_writes (at, op, note_id, note_title, ok, message, removed, added, turn) "
                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -318,12 +354,22 @@ STRUCTURE_OPS = {"rename", "split", "move", "untick", "file_done", "unfile_done"
                  "file_dropped", "unfile_dropped"}
 
 
+# Changes whose title only finds an item already in a note (its new wording, if any, is in another field): a
+# placeholder there can't reach the list, so it's never a reason to refuse the change
+LOOKUP_ONLY_OPS = ("complete", "untick", "remove", "move", "move_many", "rename", "split", "break_down")
+
+
 class JoplinWriter:
     """Delivers write-back operations now if Joplin is up, else queues them in the outbox."""
 
     MAX_ATTEMPTS = 5  # with Joplin up; a change it refuses that often is parked (one was retried 1,557 times)
     MAX_TRIES = 50    # any change, however it fails (Joplin away included): set aside after this many tries
     MAX_HELD = timedelta(days=3)  # a change waiting on the other copy of Joplin this long is set aside
+    VERSION_TRIES = 3  # a note that keeps changing under a write: start again from a fresh read this many times
+    # A day's housekeeping is meant for that day only (an end-of-day clear queued while Joplin was closed ran
+    # the next morning on the new day's ticks). Callers that know the day's end pass valid_until themselves.
+    DAY_BOUND = {"untick_all": timedelta(hours=12), "clear_ticked": timedelta(hours=12),
+                 "today_reset": timedelta(hours=12)}
 
     def __init__(self, config, state_db, api: Optional[JoplinAPIClient] = None) -> None:
         self.cfg = config.joplin
@@ -348,14 +394,46 @@ class JoplinWriter:
             logger.warning("Couldn't check the Joplin write fence: %s", e)
             return False
 
+    @classmethod
+    def stamp(cls, op: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:
+        """The change with its stable id and, for a day's housekeeping, the end of its validity."""
+        now = now or get_current_time(timezone.utc)
+        out = dict(op)
+        out.setdefault("_id", uuid.uuid4().hex[:12])
+        if not out.get("valid_until") and out.get("op") in cls.DAY_BOUND:
+            out["valid_until"] = (now + cls.DAY_BOUND[out["op"]]).isoformat()
+        return out
+
+    @staticmethod
+    def expired(op: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+        until = op.get("valid_until")
+        if not until:
+            return False
+        try:
+            end = datetime.fromisoformat(str(until))
+        except ValueError:
+            return False
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        return (now or get_current_time(timezone.utc)) > end
+
     def submit(self, op: Dict[str, Any]) -> Tuple[str, str]:
         """("done" | "queued" | "failed" | "not_allowed", message). Never blocks long."""
+        op = self.stamp(op)
         if not self.allowed:
             return "not_allowed", "Thirties isn't allowed to change Joplin (Preferences → Tasks)."
         if any(str(op.get(k) or "").startswith("media:") for k in ("note_id", "to_note_id")):
             # a watchlist item isn't in Joplin: it's done in Thirties' own record, never queued (one such write was
             # retried for two weeks)
             return "failed", "not a Joplin item: it's recorded in Thirties."
+        if current_turn.get():  # written because of a model's turn: no placeholder may reach the user's lists
+            from thirties_core.privacy import leftover_placeholder
+            lookup = ("title", "parent_title") if op.get("op") in LOOKUP_ONLY_OPS else ()  # what it finds, not writes
+            found = leftover_placeholder({k: v for k, v in op.items() if not k.startswith("_")
+                                          and not k.endswith("id") and k not in ("key", "month", "day") + lookup})
+            if found:
+                return "failed", (f"not written: the text still holds a hidden detail ({found}) where the real "
+                                  "wording goes; ask the user how it should read.")
         if current_turn.get() and "_turn" not in op:
             op = {**op, "_turn": current_turn.get()[:500]}
         if self.api.ping() and not self._held(op):
@@ -389,6 +467,9 @@ class JoplinWriter:
         now = datetime.now(timezone.utc)
         for row in pending:
             op = json.loads(row["op"])
+            if self.expired(op):  # meant for a day that's over: never applied late
+                self._set_aside(row, op, "expired: it was meant for a day that's over")
+                continue
             if row.get("attempts", 0) >= self.MAX_TRIES:  # tried too often, however it failed: set aside, once
                 self._set_aside(row, op, f"set aside after {row.get('attempts', 0)} tries")
                 continue
@@ -401,19 +482,23 @@ class JoplinWriter:
                     self._set_aside(row, op, "set aside: the other copy of Joplin never caught up")
                     continue
                 break  # the other copy of Joplin hasn't synced this note yet: wait, keeping the order
-            ok, msg = self._apply(op)
+            try:
+                ok, msg = self._apply(op)
+            except Exception as e:  # one broken change never stops the rest of the outbox (it's retried, then parked)
+                logger.warning("A Joplin change failed: %s", e)
+                ok, msg = False, f"Couldn't apply the change: {e}"
             if ok:
                 self.db.outbox_done(row["id"])
                 delivered += 1
             elif msg.startswith("gone:"):
                 self.db.outbox_fail(row["id"], msg[5:])
             elif not self.api.ping():
-                self.db.outbox_attempt(row["id"], msg)
+                self.db.outbox_attempt(row["id"], msg, json.dumps(op))  # with what was sent, if anything
                 break  # Joplin went away; keep the order
             elif row.get("attempts", 0) + 1 >= self.MAX_ATTEMPTS:  # Joplin is up and keeps refusing this one:
                 self.db.outbox_fail(row["id"], msg)               # park it, so it can't hold up the rest
             else:
-                self.db.outbox_attempt(row["id"], msg)
+                self.db.outbox_attempt(row["id"], msg, json.dumps(op))
         return delivered
 
     def _set_aside(self, row: Dict[str, Any], op: Dict[str, Any], why: str) -> None:
@@ -423,57 +508,152 @@ class JoplinWriter:
 
     # --- the operations ---
 
-    def _edit_body(self, note_id: str, edit) -> Tuple[bool, str]:
-        note = self.api.get_note(note_id, fields="id,title,body")
+    # Every note write is checked against the note's version just before it's made, and read back after,
+    # and recognised if it already landed:
+    # - read the note, work out the change, then re-read its version: if it changed meanwhile (an edit typed in the
+    #   open note, or synced from a phone), start again from the fresh copy rather than write over it;
+    # - after writing, a failed or lost reply is settled by reading the note back: it landed, it didn't, or Joplin
+    #   is gone and nobody knows;
+    # - in that last case the change remembers what it sent (op["_sent"], a digest per note), so a retry that finds
+    #   the note exactly as sent knows it's done, and never applies it twice.
+
+    def _read(self, note_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        note = self.api.get_note(note_id, fields="id,title,body,updated_time")
         if not note or "body" not in note:
             if self.api.ping():  # Joplin is up, so the note is what's missing
-                return False, "gone: the note isn't in Joplin any more."
-            return False, "Couldn't read the note from Joplin."
-        new = edit(note["body"])
-        if new is None:
-            return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
-        if not self.api.update_note(note_id, {"body": new}):
-            return False, "Joplin didn't accept the change."
-        self._edits.append((note_id, note.get("title", ""), note["body"], new))
-        return True, ""
+                return None, "gone: the note isn't in Joplin any more."
+            return None, "Couldn't read the note from Joplin."
+        return note, ""
+
+    def _unchanged(self, note: Dict[str, Any]) -> Optional[bool]:
+        """Whether the note is still as it was read (None: Joplin can't be asked)."""
+        fresh = self.api.get_note(note["id"], fields="id,body,updated_time")
+        if not fresh or "body" not in fresh:
+            return None
+        return fresh["body"] == note["body"] and fresh.get("updated_time") == note.get("updated_time")
+
+    def _put(self, note_id: str, before: str, new: str) -> str:
+        """Write a note's body: "landed", "refused" (Joplin kept the old body), "changed" (someone else changed it,
+        and this write didn't land) or "unknown" (Joplin went away before it could be read back)."""
+        ok = self.api.update_note(note_id, {"body": new})
+        if ok:
+            return "landed"
+        back = self.api.get_note(note_id, fields="id,body,updated_time")  # the reply may have been lost
+        if not back or "body" not in back:
+            return "unknown"
+        if back["body"] == new:
+            return "landed"
+        return "refused" if back["body"] == before else "changed"
+
+    def _sent(self) -> Dict[str, str]:
+        return self._op.setdefault("_sent", {}) if self._op is not None else {}
+
+    def _landed_before(self, note: Dict[str, Any]) -> bool:
+        """This change was sent to this note before, Joplin went away before confirming, and the note is exactly as
+        it was sent: it landed."""
+        sent = (self._op or {}).get("_sent") or {}
+        return sent.get(note["id"]) == _digest(note["body"])
+
+    def _edit_body(self, note_id: str, edit) -> Tuple[bool, str]:
+        for _ in range(self.VERSION_TRIES):
+            note, why = self._read(note_id)
+            if note is None:
+                return False, why
+            if self._landed_before(note):
+                return True, "already in Joplin"
+            new = edit(note["body"])
+            if new is None:
+                return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
+            if new == note["body"]:
+                return True, ""  # already as it should be: nothing to write
+            still = self._unchanged(note)
+            if still is None:
+                return False, "Couldn't read the note from Joplin."
+            if not still:
+                continue  # changed while this change was worked out: start again from the fresh copy
+            result = self._put(note_id, note["body"], new)
+            if result == "landed":
+                self._edits.append((note_id, note.get("title", ""), note["body"], new))
+                return True, ""
+            if result == "unknown":
+                self._sent()[note_id] = _digest(new)
+                return False, "Couldn't confirm the change with Joplin."
+            if result == "refused":
+                return False, "Joplin didn't accept the change."
+        return False, "The note kept changing while Thirties wrote to it; it'll try again."
 
     def _edit_bodies(self, edits: List[Tuple[str, Any]]) -> Tuple[bool, str]:
         """Several note edits as one change (an item moved from one note to another): every edit is worked out
         before anything is written, so an item that's gone changes nothing. They're computed in order and written
         in reverse, the receiving note first, so a failure halfway leaves a copy, never a loss."""
-        notes: Dict[str, Dict[str, Any]] = {}
-        for note_id, _ in edits:
-            if note_id not in notes:
-                note = self.api.get_note(note_id, fields="id,title,body")
-                if not note or "body" not in note:
-                    if self.api.ping():
-                        return False, "gone: the note isn't in Joplin any more."
-                    return False, "Couldn't read the note from Joplin."
-                notes[note_id] = note
-        bodies = {nid: n["body"] for nid, n in notes.items()}
-        for note_id, edit in edits:
-            new = edit(bodies[note_id])
-            if new is None:
-                return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
-            bodies[note_id] = new
-        written: List[str] = []
-        for note_id in dict.fromkeys(nid for nid, _ in reversed(edits)):
-            if bodies[note_id] == notes[note_id]["body"]:
-                continue
-            if not self.api.update_note(note_id, {"body": bodies[note_id]}):
-                # Half done: put back what was written, so a retry can't add the copy twice. If that fails too,
-                # the change is parked (never retried) and the log shows the copy.
-                undone = all(self.api.update_note(nid, {"body": notes[nid]["body"]}) for nid in reversed(written))
-                if undone:
-                    self._edits = [e for e in self._edits if e[0] not in written]
+        for _ in range(self.VERSION_TRIES):
+            notes: Dict[str, Dict[str, Any]] = {}
+            for note_id, _ in edits:
+                if note_id not in notes:
+                    note, why = self._read(note_id)
+                    if note is None:
+                        return False, why
+                    notes[note_id] = note
+            bodies = {nid: n["body"] for nid, n in notes.items()}
+            # sent before Joplin went away, and exactly as sent: those notes are done, and their edits aren't worked
+            # out again (the item they move is already gone from where it was)
+            landed = {nid for nid, n in notes.items() if self._landed_before(n)}
+            # written in reverse, so the first edit's note is written after the others: when it landed, so had
+            # they (even one edited since), so the whole change is done and nothing is worked out again
+            if landed == set(notes) or (landed and edits[0][0] in landed):
+                return True, "already in Joplin"
+            for note_id, edit in edits:
+                if note_id in landed:
+                    continue
+                new = edit(bodies[note_id])
+                if new is None:
+                    return False, "gone: the item isn't in the note any more (it was changed in Joplin)."
+                bodies[note_id] = new
+            order = [nid for nid in dict.fromkeys(nid for nid, _ in reversed(edits))
+                     if bodies[nid] != notes[nid]["body"] and nid not in landed]
+            if not order:
+                return True, "already in Joplin" if landed else ""
+            checks = [self._unchanged(notes[nid]) for nid in order]
+            if None in checks:
+                return False, "Couldn't read the note from Joplin."
+            if not all(checks):
+                continue  # a note changed while this change was worked out: start again from fresh copies
+            written: List[str] = []
+            for note_id in order:
+                result = self._put(note_id, notes[note_id]["body"], bodies[note_id])
+                if result == "landed":
+                    written.append(note_id)
+                    self._edits.append((note_id, notes[note_id].get("title", ""), notes[note_id]["body"],
+                                        bodies[note_id]))
+                    continue
+                if result == "unknown":  # what landed and what may have: recognised on the retry
+                    for nid in written + [note_id]:
+                        self._sent()[nid] = _digest(bodies[nid])
+                    return False, "Couldn't confirm the change with Joplin."
+                # Half done: put back what was written, so a retry can't add the copy twice; but only where the
+                # note still holds exactly what Thirties wrote (an edit made meanwhile is never written over). If
+                # that can't be done, the change is parked (never retried) and the log shows the copy.
+                undone = all(self._revert(nid, bodies[nid], notes[nid]["body"]) for nid in reversed(written))
+                if not undone:
+                    return False, "gone: half done (the copy was written, the original couldn't be taken out)."
+                self._edits = [e for e in self._edits if e[0] not in written]
+                if result == "refused":
                     return False, "Joplin didn't accept the change."
-                return False, "gone: half done (the copy was written, the original couldn't be taken out)."
-            written.append(note_id)
-            self._edits.append((note_id, notes[note_id].get("title", ""), notes[note_id]["body"], bodies[note_id]))
-        return True, ""
+                break  # "changed": start again from fresh copies
+            else:
+                return True, ""
+        return False, "The notes kept changing while Thirties wrote to them; it'll try again."
+
+    def _revert(self, note_id: str, written: str, original: str) -> bool:
+        """Put a note back as it was, only if it still holds exactly what was written to it."""
+        now = self.api.get_note(note_id, fields="id,body,updated_time")
+        if not now or now.get("body") != written:
+            return False
+        return self._put(note_id, written, original) == "landed"
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
         self._edits: List[Tuple[Optional[str], str, str, str]] = []
+        self._op = op  # what it sent, if Joplin goes away mid-write, is kept on the change itself
         ok, msg = self._apply_op(op)
         try:  # one row per note changed (a move changes two)
             log = WriteLog(self.db)
@@ -489,7 +669,15 @@ class JoplinWriter:
             return False, "gone: not a Joplin item."
         if kind == "complete":
             if op.get("is_checkbox_item"):
-                return self._edit_body(op["note_id"], lambda b: check_off(b, op["title"], op.get("occurrence", 0)))
+                def tick(body: str) -> Optional[str]:
+                    # A retry after Joplin went away mid-write: if there's one open copy fewer than when it was
+                    # first worked out, the tick landed; ticking "the first open copy" again would tick another.
+                    now_open = open_copies(body, op["title"])
+                    if "_open_before" in op and op.get("_sent") and now_open < op["_open_before"]:
+                        return body
+                    op.setdefault("_open_before", now_open)
+                    return check_off(body, op["title"], op.get("occurrence", 0))
+                return self._edit_body(op["note_id"], tick)
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
             ok = self.api.update_note(op["note_id"], {"todo_completed": now_ms})
             return ok, "" if ok else "Joplin didn't accept the change."
@@ -505,11 +693,15 @@ class JoplinWriter:
                                                                              place(b)))
             return self._edit_body(op["note_id"], lambda b: append_task(b, op["title"], op.get("section")))
         if kind == "remove":
-            return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"]))
+            return self._edit_body(op["note_id"], lambda b: remove_item(b, op["title"], int(op.get("occurrence") or 0),
+                                                                          op.get("state") or "any"))
         if kind == "untick_all":
             return self._edit_body(op["note_id"], untick_all)
         if kind == "clear_ticked":
-            return self._edit_body(op["note_id"], clear_ticked)
+            return self._edit_body(op["note_id"], lambda b: clear_ticked(b, op.get("only")))
+        if kind == "today_reset":
+            return self._edit_body(op["note_id"], lambda b: today_reset(b, op.get("removes") or [],
+                                                                         op.get("clear_only") or []))
         if kind == "break_down":
             return self._edit_body(op["note_id"], lambda b: insert_subtasks(b, op.get("parent_title"), op["steps"],
                                                                               op.get("occurrence", 0),
@@ -518,6 +710,10 @@ class JoplinWriter:
             from thirties_core import note_ops
             return note_ops.apply(self, op)
         return False, f"gone: unknown operation {kind!r}"
+
+
+def _digest(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:20]
 
 
 def complete_op(task) -> Dict[str, Any]:

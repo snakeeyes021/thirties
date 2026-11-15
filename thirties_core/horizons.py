@@ -58,7 +58,11 @@ HORIZONS = {
 }
 LEVELS = ("day", "week", "month", "year")  # the plannable horizons, finest first
 _RANK = {h: i for i, h in enumerate(LEVELS + ("someday",))}
-PARENT = {"day": "week", "week": "month", "month": "year"}
+PARENT = {"day": "week", "week": "month", "month": "year", "year": "years"}
+# Above the year: a span of years ("2027 to 2029", "the next 3 years"), for efforts that outlast one. It's a plan
+# level only (an item's horizon is at most a year); its rows keep the span's last day in the slot.
+YEARS = "years"
+_NUMBER_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
 # Urgency is the older, coarser axis; each maps onto a horizon and back, so callers that read urgency keep working.
 # "whenever" is "no particular hurry": the year, not the month (most items on a list are "whenever"; a month plan
@@ -195,6 +199,18 @@ def parse_period(text: Any, today: date, week_start: int = 0) -> Period:
         if not m.group(2) and p.end < today:
             p = period_of("quarter", date(year + 1, 3 * q - 2, 1), week_start)
         return p
+    m = re.fullmatch(r"(\d{4}) ?(?:-|–|to|through|thru|until) ?(\d{4})", raw)
+    if m and int(m.group(2)) > int(m.group(1)):
+        return years_period(int(m.group(1)), int(m.group(2)))
+    m = re.fullmatch(r"(?:the )?next (\d+|[a-z]+) years", raw)
+    if m:
+        n = int(m.group(1)) if m.group(1).isdigit() else _NUMBER_WORDS.get(m.group(1), 0)
+        if n >= 2:
+            return years_period(today.year, today.year + n - 1)
+    m = re.fullmatch(r"(?:by|until|through|before) (\d{4})", raw)
+    if m and int(m.group(1)) > today.year:
+        last = int(m.group(1)) - (1 if raw.startswith("before") else 0)
+        return years_period(today.year, last) if last > today.year else period_of("year", today, week_start)
     m = re.fullmatch(r"(\d{4})", raw)
     if m:
         return period_of("year", date(int(m.group(1)), 1, 1), week_start)
@@ -212,6 +228,11 @@ def parse_period(text: Any, today: date, week_start: int = 0) -> Period:
     except ClockError:
         raise ValueError(f"Could not read the period '{text}'. Say e.g. 'this week', 'Thursday', 'next week', "
                          "'November', 'Q1' or 'next year'.") from None
+
+
+def _upper_first(text: str) -> str:
+    """'this month (October)' → 'This month (October)': only the first letter changes."""
+    return text[:1].upper() + text[1:]
 
 
 def period_label(p: Period, today: date, week_start: int = 0) -> str:
@@ -240,6 +261,8 @@ def period_label(p: Period, today: date, week_start: int = 0) -> str:
         return f"Q{(p.start.month - 1) // 3 + 1} {p.start.year}"
     if p.level == "year":
         return "this year" if p.start.year == today.year else str(p.start.year)
+    if p.level == YEARS:
+        return f"{p.start.year}–{p.end.year}"
     return p.key
 
 
@@ -477,6 +500,16 @@ class HorizonPlans:
         self.db = db
         with db._get_connection() as conn:
             conn.executescript(_SCHEMA)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(horizon_plan)").fetchall()}
+            for col in ("sessions", "minutes"):  # an effort budget (budgets.py); 0 means none
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE horizon_plan ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+
+    def set_effort(self, row_id: str, sessions: int, minutes: int) -> None:
+        """How much the item gets in that period: ``sessions`` of ``minutes`` each (0 clears it)."""
+        with self.db._get_connection() as conn:
+            conn.execute("UPDATE horizon_plan SET sessions = ?, minutes = ?, updated_at = ? WHERE id = ?",
+                         (max(0, int(sessions)), max(0, int(minutes)), utc_now_iso(), row_id))
 
     def rows(self, level: Optional[str] = None, item_id: Optional[str] = None, active: bool = True
              ) -> List[Dict[str, str]]:
@@ -511,23 +544,32 @@ class HorizonPlans:
         return self.rows(active=False)
 
     def merge_record(self, record: Dict[str, Any]) -> bool:
-        cols = ["id", "item_id", "title", "note_id", "list_title", "level", "period", "slot", "state", "updated_at"]
+        cols = ["id", "item_id", "title", "note_id", "list_title", "level", "period", "slot", "state", "updated_at",
+                "sessions", "minutes"]
         with self.db._get_connection() as conn:
             row = conn.execute("SELECT updated_at FROM horizon_plan WHERE id = ?", (record["id"],)).fetchone()
             if row and row["updated_at"] >= record["updated_at"]:
                 return False
             conn.execute(f"INSERT OR REPLACE INTO horizon_plan ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                         [record.get(c, "") for c in cols])
+                         [record.get(c, 0 if c in ("sessions", "minutes") else "") for c in cols])
         return True
 
 
+def years_period(first: int, last: int) -> Period:
+    return Period(YEARS, date(first, 1, 1), date(last, 12, 31))
+
+
 def row_period(r: Dict[str, str], week_start: int = 0) -> Period:
+    if r["level"] == YEARS:
+        start = date.fromisoformat(r["period"])
+        last = date.fromisoformat(r["slot"]).year if r.get("slot") else start.year + 2
+        return years_period(start.year, last)
     return period_of(r["level"], date.fromisoformat(r["period"]), week_start)
 
 
 def slot_period(r: Dict[str, str], week_start: int = 0) -> Optional[Period]:
     """A week plan's day, or a year plan's quarter; None when the item is in the period as a whole."""
-    if not r.get("slot"):
+    if not r.get("slot") or r["level"] == YEARS:  # a span of years keeps its last day there, not a slot
         return None
     level = "day" if r["level"] == "week" else "quarter"
     return period_of(level, date.fromisoformat(r["slot"]), week_start)
@@ -548,11 +590,14 @@ class Candidate:
     deferred: int = 0       # times put off on a day (task history)
     carried: int = 0        # earlier periods at this level it was planned for and not done
     slot: str = ""          # for a week: the day it's pinned to (ISO date)
+    sessions: int = 0       # an effort budget's share for this period (budgets.py): sessions of ``minutes``
+    minutes: int = 0
     score: float = 0.0
     task: Optional[TaskItem] = field(default=None, repr=False, compare=False)
 
     def facts(self) -> str:
-        bits = [self.why]
+        bits = [f"{self.sessions} session{'s' if self.sessions != 1 else ''} of {self.minutes} min"
+                if self.sessions else "", self.why]
         if self.due and "due" not in self.why:
             bits.append(f"due {_as_date(self.due).strftime('%a %b %-d')}" if _as_date(self.due) else "")
         if self.deferred:
@@ -570,7 +615,21 @@ class Candidate:
         return {k: v for k, v in self.__dict__.items() if k != "task"}
 
 
-_SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0}
+_SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0,
+                 "someday": 5.0}
+# A month, year or span of years also offers a few someday items, last of all, so they fill room a plan has rather
+# than waiting for a once-a-year look. Which ones turns over each period (a stable shuffle by period), so each gets
+# its turn.
+SOMEDAY_PER_PERIOD = 2
+# How many open items a plan holds before it's full: below this, work is pulled forward into it (adjust). A quarter
+# is the year plan's slot for it.
+ROOM = {"month": 6, "quarter": 4, "year": 8, YEARS: 8}
+# Light reviews between the big ones at each period's start: the month and quarter weekly, the year and a span of
+# years monthly; and at once whenever something that matters changes (review).
+REVIEW_DAYS = {"month": 7, "quarter": 7, "year": 30, YEARS: 30}
+# What a plan is never filled with by itself: work from the level above stays there until it's pulled down a level,
+# and a span of years takes only what's due, left over or someday (everything "belongs" at so long a horizon).
+_NOT_PULLED = {"month": {"upper"}, "quarter": {"upper"}, "year": {"upper"}, YEARS: {"upper", "belongs", "from_plan"}}
 
 
 class HorizonPlanner:
@@ -643,12 +702,15 @@ class HorizonPlanner:
             raise ToolError(f"There is no item '{ref}' on the user's lists.")
         return found
 
-    def pin(self, task: TaskItem, p: Period) -> Tuple[Period, str]:
+    def pin(self, task: TaskItem, p: Period, sessions: Optional[int] = None, minutes: Optional[int] = None
+            ) -> Tuple[Period, str]:
         """Drop an item into a period: a day goes into its week's plan on that day; a quarter into its year's plan;
         a week, month or year into its own plan. Its other placements that this one replaces (another period at
         the same level, or anything that doesn't overlap the new one) are taken out: one place per thing."""
         if p.level == "day":
             plan, slot = period_of("week", p.start, self.week_start), p.start.isoformat()
+        elif p.level == YEARS:
+            plan, slot = p, p.end.isoformat()
         elif p.level == "quarter":
             plan, slot = period_of("year", p.start, self.week_start), p.start.isoformat()
         else:
@@ -661,7 +723,66 @@ class HorizonPlanner:
                 self.plans.take_out(r["id"])
         note_id = task.parent_note_id if task.is_checkbox_item else task.id
         self.plans.put(task.id, task.title, note_id or "", task.parent_note_title or "", plan, slot)
+        if sessions is not None:  # an effort budget for the period (budgets.py)
+            self.plans.set_effort(f"{plan.key}|{task.id}", sessions, minutes or 0)
         return plan, slot
+
+    def months_of(self, t: TaskItem) -> set:
+        """The months an item is in season (seasons.py): what the user said, or its own text's mark; empty for
+        all year."""
+        from thirties_core.item_facts import LastingFacts
+        from thirties_core.seasons import from_text, marked
+        if not hasattr(self, "_months"):
+            self._months: Dict[str, set] = {}
+        if t.id not in self._months:
+            said = from_text(LastingFacts(self.db).for_item(t.title).months)
+            self._months[t.id] = said or marked(t.title, float(self.pt.scheduler.config.general.latitude))
+        return self._months[t.id]
+
+    LOST_KEY = "lost_pins"  # sync meta: [{"title", "where"}] taken out because their item is on no list, to say once
+
+    def tidy_pins(self) -> None:
+        """Pins don't outlive their period: one a period has passed by more than a whole period (a week's, a week
+        after it ended) is taken out; the one just past still offers its items as left over. A pin whose item is on
+        no list any more (and no single item has its wording) is taken out too, and said once (lost_pins_text):
+        it's never found again, so it's let go rather than warned about on every look."""
+        if not self.tasks:
+            return  # the lists aren't read yet: no pin can be judged lost
+        today = self.today()
+        ids = {t.id for t in self.tasks}
+        wording: Dict[str, int] = {}
+        for t in self.tasks:
+            wording[t.title.strip().lower()] = wording.get(t.title.strip().lower(), 0) + 1
+        lost = []
+        for r in self.plans.rows():
+            where = self.where_pinned(r)
+            period = row_period(r, self.week_start)
+            after = next_period(period, self.week_start) if period.level in ("week", "month", "year") else period
+            if after.end < today:
+                self.plans.take_out(r["id"])  # its period and the one after are over: it has expired
+                continue
+            if r["item_id"] not in ids and wording.get((r["title"] or "").strip().lower(), 0) != 1:
+                self.plans.take_out(r["id"])
+                lost.append({"title": r["title"], "where": self.label(where)})
+        if lost:
+            try:
+                had = json.loads(self.db.get_sync_meta(self.LOST_KEY) or "[]")
+            except ValueError:
+                had = []
+            self.db.set_sync_meta(self.LOST_KEY, json.dumps(had + lost))
+
+    def lost_pins_text(self) -> str:
+        """The one mention of pins let go because their item is on no list; cleared once said."""
+        try:
+            lost = json.loads(self.db.get_sync_meta(self.LOST_KEY) or "[]")
+        except ValueError:
+            lost = []
+        if not lost:
+            return ""
+        self.db.set_sync_meta(self.LOST_KEY, "[]")
+        from thirties_core.titles import title_of
+        return "No longer on any list, so taken off its plan: " + "; ".join(
+            f"{title_of(x['title'])} ({x['where']})" for x in lost) + "."
 
     def unpin(self, task_id: str, p: Optional[Period] = None) -> List[Dict[str, str]]:
         """Take an item out of a period's plan (and out of any finer plan inside it), or out of every plan."""
@@ -698,7 +819,7 @@ class HorizonPlanner:
 
     def describe_plan(self, p: Period, with_context: bool = True) -> str:
         items = self.plan_items(p)
-        head = f"{self.label(p).capitalize()} ({_span_text(p)})"
+        head = f"{_upper_first(self.label(p))} ({_span_text(p)})"
         lines = []
         for r in items:
             slot = slot_period(r, self.week_start)
@@ -706,7 +827,29 @@ class HorizonPlanner:
             status = {"done": " (done)", "gone": " (no longer on the lists)",
                       "scheduled": f" (on the plan {r['on'].strftime('%a')})" if r.get("on") else " (on the plan)"
                       }.get(r["status"], "")
-            lines.append(f"- {where}{r['title']}{status}")
+            effort = ""
+            if int(r.get("sessions") or 0):
+                from thirties_core.budgets import budget_of, budget_period, session_days
+                t = next((x for x in self.tasks if x.id == r["item_id"]), None)
+                bp = budget_period(r, self.week_start)
+                b = budget_of(self, t, bp.start, level=bp.level) if t is not None else None
+                if b is not None:
+                    effort = f" ({b.line()}"
+                    days = session_days(self, t, bp) if bp.level == "week" else []
+                    effort += (": " + ", ".join(d.strftime("%a") for d in days) if days else "") + ")"
+            lines.append(f"- {where}{r['title']}{effort}{status}")
+        if p.level != "day":  # each budget reaching this period (its own or one from above), down to the days
+            from thirties_core.budgets import budget_period, trickle_line
+            seen = set()
+            for r in self.plans.rows():
+                t = next((x for x in self.tasks if x.id == r["item_id"]), None)
+                if t is None or t.id in seen or not int(r.get("sessions") or 0) or \
+                        not budget_period(r, self.week_start).overlaps(p):
+                    continue
+                seen.add(t.id)
+                way = trickle_line(self, t, max(p.start, self.today()))
+                if way:
+                    lines.append(f"  {r['title']}: {way}")
         from thirties_core.on_track import track_line
         how = track_line(self, p) if p.level != "day" else ""  # how on track it is (C2), counted by Python
         out = head + ":\n" + (how + "\n" if how else "") + (
@@ -739,8 +882,8 @@ class HorizonPlanner:
             while w.start <= p.end:
                 if w.end >= today:
                     n = len(self.plans.in_period(w))
-                    lines.append(f"{self.label(w).capitalize()}: {_brief(self, w) or f'{n} planned'}" if n else
-                                 f"{self.label(w).capitalize()}: nothing planned yet")
+                    lines.append(f"{_upper_first(self.label(w))}: {_brief(self, w) or f'{n} planned'}" if n else
+                                 f"{_upper_first(self.label(w))}: nothing planned yet")
                 w = next_period(w, self.week_start)
             return lines
         if p.level == "year":
@@ -752,6 +895,13 @@ class HorizonPlanner:
                 n = len(self.plans.in_period(month))
                 if n:
                     lines.append(f"{month.start.strftime('%B')}: {_brief(self, month) or f'{n} planned'}")
+            return lines
+        if p.level == YEARS:
+            lines = []
+            for y in range(max(p.start.year, today.year), p.end.year + 1):
+                year = period_of("year", date(y, 1, 1), self.week_start)
+                n = len(self.plans.in_period(year))
+                lines.append(f"{y}: {_brief(self, year) or f'{n} planned'}" if n else f"{y}: nothing planned yet")
             return lines
         return []
 
@@ -783,6 +933,7 @@ class HorizonPlanner:
         today = self.today()
         level = "week" if p.level == "day" else p.level  # a day is planned out of its week plan
         maps = self._horizon_maps()
+        self.tidy_pins()
         rows = self.plans.rows()
         pinned_ids = {r["item_id"] for r in rows}
         tasks = {t.id: t for t in self.tasks if not t.id.startswith("media:") or t.id in pinned_ids}
@@ -797,7 +948,7 @@ class HorizonPlanner:
                 if len(same) == 1:
                     tasks[r["item_id"]] = same[0]
                 else:
-                    logger.warning("A plan item can't be found on any list: %s (%s %s)", r["title"], r["level"],
+                    logger.debug("A plan item can't be found on any list: %s (%s %s)", r["title"], r["level"],
                                    r["period"])
         # Done lately (since the week before this period, or this week's): an item done long ago and open again
         # in the list is a new round of it (backlog.DONE_HIDES_DAYS hides the recent ones the same way).
@@ -806,14 +957,38 @@ class HorizonPlanner:
         on_today = self._on_today() if p.level == "day" else set()
         out: Dict[str, Candidate] = {}
 
-        def add(t: TaskItem, source: str, why: str, slot: str = "") -> None:
-            if t.id in done or t.id in scheduled or t.id in on_today:
+        from thirties_core.seasons import overlaps as season_overlaps, pulled_due
+
+        def add(t: TaskItem, source: str, why: str, slot: str = "", share: Optional[Tuple[int, int]] = None
+                ) -> None:
+            # an effort with sessions left isn't placed by one session on the schedule, nor done by one
+            if share is None and (t.id in done or t.id in scheduled or t.id in on_today):
                 return
+            if not season_overlaps(self.months_of(t), p.start, p.end):
+                return  # out of season: it waits for its months (not someday, not missed, never offered daily)
             c = out.get(t.id)
             if c is not None and _SOURCE_SCORE[c.source] >= _SOURCE_SCORE[source]:
                 return
             out[t.id] = Candidate(t.id, t.title, t.parent_note_title or "", source, why,
-                                  self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot, task=t)
+                                  self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot,
+                                  sessions=share[0] if share else 0, minutes=share[1] if share else 0, task=t)
+
+        from thirties_core.budgets import (DEFAULT_SESSION_MINUTES, budget_of, budget_period, session_days,
+                                           share_this)
+
+        def share_of(t: TaskItem, r: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+            """(sessions, minutes) the period gets from a budgeted plan row one level up; (0, m) when it's used up;
+            None for an item with no budget there."""
+            if not int(r.get("sessions") or 0):
+                return None
+            minutes = int(r.get("minutes") or 0) or DEFAULT_SESSION_MINUTES
+            where = budget_period(r, self.week_start)
+            up = budget_of(self, t, where.start, level=where.level)
+            if up is not None and up.left <= 0:
+                return 0, minutes  # every session up there is done or already on the schedule
+            if p.level == "day" and where.level == "week":  # the week plan says which days get one
+                return (1 if p.start in session_days(self, t, where) else 0), minutes
+            return share_this(self, t, p) or 0, minutes
 
         placed_elsewhere = set()
         for r in rows:
@@ -832,13 +1007,19 @@ class HorizonPlanner:
                     add(t, "pinned", f"pinned to {self.label(p)}", r["slot"])
             elif r["level"] == p.level and r["period"] == p.start.isoformat():
                 slot = r["slot"]
-                add(t, "pinned", f"pinned to {self.label(where) if slot else self.label(p)}", slot)
+                share = None
+                if int(r.get("sessions") or 0):
+                    b = budget_of(self, t, p.start, level=p.level)
+                    if b is not None and b.left <= 0 and b.done >= b.sessions:
+                        continue  # its budget here is spent
+                    share = (int(r["sessions"]), int(r.get("minutes") or 0) or DEFAULT_SESSION_MINUTES)
+                add(t, "pinned", f"pinned to {self.label(where) if slot else self.label(p)}", slot, share)
 
         # 2. due by the end of the period (or overdue); for a day, within two days (what today_carryover calls
         # pressing): due tomorrow means today is when there's still room for it
         due_by = p.end + timedelta(days=2 if p.level == "day" else 0)
         for t in tasks.values():
-            due = _as_date(t.due)
+            due = pulled_due(self.months_of(t), _as_date(t.due))  # a deadline out of season: its last in-season day
             if due and due <= due_by and t.id not in placed_elsewhere and self._plannable(t):
                 add(t, "due", "overdue" if due < today else f"due {self.label(period_of('day', due))}")
 
@@ -868,6 +1049,16 @@ class HorizonPlanner:
                 if p.level == "day" and slot is not None:
                     continue  # pinned to this very day: step 1
                 where = row_period(r, self.week_start)
+                share = share_of(t, r)
+                if share is not None:
+                    if share[0] <= 0:
+                        continue  # the budget up there is used up (done or already planned)
+                    bp = budget_period(r, self.week_start)
+                    b = budget_of(self, t, bp.start, level=bp.level)
+                    add(t, "from_plan", f"from the plan for {self.label(bp)}"
+                        + (f", {b.left} of {b.sessions} sessions still to place" if b is not None else ""),
+                        share=share)
+                    continue
                 if p.level == "day" and where.end <= p.end + timedelta(days=1):
                     # The plan's period ends today or tomorrow ("this weekend", asked on Friday night): there's
                     # still room only now, so it's pressing, like something due (10-31)
@@ -887,6 +1078,16 @@ class HorizonPlanner:
                 add(t, "belongs", HORIZON_WHY[h])
             elif above and h == above:
                 add(t, "upper", HORIZON_WHY[h])
+
+        # 6. a month, year or span of years: a few someday items, last of all, for room the plan has (which ones
+        # turns over by period)
+        if p.level in ("month", "year", YEARS):
+            import hashlib
+            someday = [t for t in tasks.values() if t.id not in placed_elsewhere and not t.id.startswith("media:")
+                       and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"]
+            someday.sort(key=lambda t: hashlib.sha1(f"{p.key}|{t.id}".encode()).hexdigest())
+            for t in someday[:SOMEDAY_PER_PERIOD]:
+                add(t, "someday", "someday: there's room for it now")
 
         for c in out.values():
             c.carried = carried.get(c.task_id, 0)
@@ -985,12 +1186,13 @@ class HorizonPlanner:
                 ref, when = (entry.get("task") or entry.get("item") or "", entry.get("when")) if isinstance(entry, dict) \
                     else (str(entry), None)
                 t = self.find_task(ref)
-                chosen.append((t, self.period(when) if when else p))
+                n = entry.get("sessions") if isinstance(entry, dict) else None
+                chosen.append((t, self.period(when) if when else p, int(n) if n not in (None, "") else None, None))
         else:
             if not data:
                 raise ToolError(f"There's no proposal for {self.label(p)}; make one with propose_period first.")
             if data.get("state") == "applied":
-                return f"{self.label(p).capitalize()} is already planned like that."
+                return f"{_upper_first(self.label(p))} is already planned like that."
             words = _stem_words(" ".join(map(str, skip)) if isinstance(skip, list) else str(skip or ""))
             by_id = {t.id: t for t in self.tasks}
             chosen = []
@@ -1000,13 +1202,16 @@ class HorizonPlanner:
                 t = by_id.get(c["task_id"]) or TaskItem(id=c["task_id"], source_notebook="", title=c["title"],
                                                           parent_note_title=c.get("list") or None)
                 slot = period_of("day", date.fromisoformat(c["slot"])) if c.get("slot") else p
-                chosen.append((t, slot if p.level == "week" else p))
+                chosen.append((t, slot if p.level == "week" else p, c.get("sessions") or None, c.get("minutes") or None))
         names = []
-        for t, where in chosen:
+        for t, where, sessions, minutes in chosen:
             if not where.overlaps(p):
                 raise ToolError(f"{self.label(where)} isn't within {self.label(p)}.")
-            self.pin(t, where)
-            names.append(t.title + (f" ({self.label(where)})" if where != p else ""))
+            if sessions and where.level == "day":
+                sessions = None  # a day takes no budget: the week's share stays on the week
+            self.pin(t, where, sessions, minutes)
+            names.append(t.title + (f" ({self.label(where)})" if where != p else "")
+                         + (f" ({sessions} session{'s' if sessions != 1 else ''})" if sessions else ""))
         if data:
             self.db.set_sync_meta(self._proposal_key(p), json.dumps({**data, "state": "applied"}))
         if self.db.get_sync_meta("horizon_pending") == p.key:
@@ -1024,6 +1229,94 @@ class HorizonPlanner:
         if raw:
             self.db.set_sync_meta(self._proposal_key(p), json.dumps({**json.loads(raw), "state": "declined"}))
         self.db.set_sync_meta("horizon_pending", "")
+
+    # --- keeping the longer plans current: pulling work forward when there's room ---
+
+    def current(self, level: str) -> Optional[Period]:
+        """This month, quarter or year; for a span of years, the one a plan holds today (None if there's none)."""
+        today = self.today()
+        if level != YEARS:
+            return period_of(level, today, self.week_start)
+        spans = [row_period(r, self.week_start) for r in self.plans.rows(level=YEARS)]
+        return next((sp for sp in spans if sp.contains(today)), None)
+
+    def adjust(self, level: str) -> List[str]:
+        """Fill the current period's plan up to its room with the best of what could go in: candidates chosen
+        afresh, so work is pulled forward (from the year into this month, from later into now) whenever there's
+        room. Returns the titles pulled in. Never before the period's own planning session has been offered."""
+        p = self.current(level)
+        if p is None:
+            return []
+        if level in SESSION_GRACE_DAYS and not self.db.get_sync_meta(f"horizon_session:{p.key}") \
+                and (self.today() - p.start).days <= SESSION_GRACE_DAYS[level]:
+            return []  # its start-of-period session comes first
+        held = [r for r in self.plan_items(p) if r["status"] in ("open", "scheduled")]
+        room = ROOM[level] - len(held)
+        if room <= 0:
+            return []
+        source_p = period_of("year", p.start, self.week_start) if level == "quarter" else p
+        # an item with a budget already reaches each period through the trickle-down (budgets.py): never moved
+        have = {r["item_id"] for r in held} | {r["item_id"] for r in self.plans.rows() if int(r.get("sessions") or 0)}
+        picks = [c for c in self.candidates(source_p, limit=None)
+                 if c.source != "pinned" and c.source not in _NOT_PULLED[level] and c.task_id not in have
+                 and c.task is not None]
+        if level == "quarter":  # what the year plan holds for later in the year comes into this quarter first
+            in_year = {r["item_id"] for r in self.plans.in_period(source_p)}
+            picks = [c for c in self.candidates(source_p, limit=None) if c.source == "pinned" and c.task is not None
+                     and c.task_id in in_year and c.task_id not in have and c.slot != p.start.isoformat()] + picks
+        pulled = []
+        for c in picks[:room]:
+            self.pin(c.task, p)
+            pulled.append(c.title)
+        if pulled:
+            log = json.loads(self.db.get_sync_meta("horizon_pulled") or "[]")
+            log += [{"title": t, "into": self.label(p), "at": self.pt._now().isoformat()} for t in pulled]
+            self.db.set_sync_meta("horizon_pulled", json.dumps(log[-50:]))
+        return pulled
+
+    def fingerprint(self) -> str:
+        """What a change that matters to the longer plans changes: the open items (their deadlines, horizons and
+        someday marks), the plans' rows, and what's been done this year."""
+        import hashlib
+        maps = self._horizon_maps()
+        items = sorted((t.id, t.due or "", self.horizon_of(t, maps), int(t.someday)) for t in self.tasks)
+        rows = sorted((r["id"], r.get("sessions") or "", r["slot"]) for r in self.plans.rows())
+        done = sorted(self._done_since(period_of("year", self.today(), self.week_start).start))
+        return hashlib.sha1(json.dumps([items, rows, done]).encode()).hexdigest()
+
+    def review(self) -> List[str]:
+        """Keep the longer plans current: whenever something that matters changed (an item done or dropped, a
+        deadline new or moved, a budget's session done, a new item), and otherwise lightly each week (month,
+        quarter) or month (year, years), pull work forward where there's room. Returns what was pulled in."""
+        now, today = self.pt._now(), self.today()
+        changed = self.db.get_sync_meta("horizon_fingerprint") != self.fingerprint()
+        pulled = []
+        for level in ("month", "quarter", "year", YEARS):
+            key = f"horizon_reviewed:{level}"
+            last = self.db.get_sync_meta(key)
+            stale = not last or (today - date.fromisoformat(last[:10])).days >= REVIEW_DAYS[level]
+            if not (changed or stale):
+                continue
+            try:
+                pulled += self.adjust(level)
+            except Exception as e:  # one level's trouble never stops the rest
+                logger.warning("Couldn't review the %s plan: %s", level, e)
+            self.db.set_sync_meta(key, today.isoformat())
+        self.db.set_sync_meta("horizon_fingerprint", self.fingerprint())  # after: its own pins are no change
+        return pulled
+
+    def pulled_text(self, since: Optional[datetime] = None) -> str:
+        """For the morning: what was pulled forward since ``since`` (all that's logged, without one)."""
+        log = json.loads(self.db.get_sync_meta("horizon_pulled") or "[]")
+        recent = [e for e in log if since is None or datetime.fromisoformat(e["at"]) >= since]
+        if not recent:
+            return ""
+        from thirties_core.assistant_tools import _short
+        by_period: Dict[str, List[str]] = {}
+        for e in recent:
+            by_period.setdefault(e["into"], []).append(_short(e["title"]))
+        return "\n".join(f"Pulled forward into {into}, where there was room: {', '.join(titles)}."
+                         for into, titles in by_period.items())
 
     # --- sessions at the natural moment ---
 
@@ -1066,7 +1359,7 @@ class HorizonPlanner:
                 continue
             from thirties_core.on_track import summary, track
             how = summary(track(self, p))
-            lines.append(f"{self.label(p).capitalize()}" + (f" ({how})" if how else "") + ":")
+            lines.append(f"{_upper_first(self.label(p))}" + (f" ({how})" if how else "") + ":")
             for r in rows[:15]:
                 slot = slot_period(r, self.week_start)
                 lines.append(f"- {r['title']}" + (f" ({self.label(slot)})" if slot else "")
@@ -1141,7 +1434,8 @@ def day_context(pt: "PlanTools", day: Optional[date] = None) -> List[str]:
 
 # --- tools for the model ---------------------------------------------------------------------------------------------
 
-_PERIOD_HELP = "'this week', 'Thursday', 'next week', 'the week of Nov 9', 'this month', 'November', 'Q1', 'next year'"
+_PERIOD_HELP = ("'this week', 'Thursday', 'next week', 'the week of Nov 9', 'this month', 'November', 'Q1', 'next year', "
+                "or several years for a long effort ('2027 to 2029', 'the next 3 years')")
 
 HORIZON_TOOL_SPECS: List[Dict[str, Any]] = [
     {
@@ -1160,7 +1454,10 @@ HORIZON_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Drop an item from the user's lists into a period's plan: a day (it goes into that week's "
                        "plan on that day), a week, a month, a quarter or a year. It then comes up when that period "
                        "is planned. Moving it to another period takes it out of the old one.",
-        "parameters": {"task": "The item (title or task_id).", "when": f"The period: {_PERIOD_HELP}."},
+        "parameters": {"task": "The item (title or task_id).", "when": f"The period: {_PERIOD_HELP}.",
+                       "sessions": "Optional, for ongoing efforts: how many sessions it gets in that period "
+                                   "(\"3 sessions this month\"). Python counts what's done and what's left.",
+                       "length": "Optional, with sessions: how long each one is (\"1 hour\")."},
         "required": ["task", "when"],
     },
     {
@@ -1238,13 +1535,32 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
         t.horizon, t.urgency, t.someday = h, HORIZON_URGENCY[h], h == "someday"
         return f"Noted: '{t.title}' is {HORIZON_WHY[h]}."
 
-    def pin_to_period(task: str = "", when: Any = "", **_: Any) -> str:
+    def pin_to_period(task: str = "", when: Any = "", sessions: Any = None, length: Any = None, **_: Any) -> str:
         hp = planner()
         t = hp.find_task(task)
         p = hp.period(when)
         if p.end < hp.today():
             raise ToolError(f"{hp.label(p)} is over.")
-        hp.pin(t, p)
+        n = minutes = None
+        if sessions not in (None, ""):
+            try:
+                n = int(str(sessions).strip())
+            except ValueError:
+                raise ToolError(f"sessions is a whole number of sessions, not '{sessions}'.")
+            if p.level == "day":
+                raise ToolError("A budget of sessions is for a week, month, quarter or year, not a day.")
+            if length not in (None, ""):
+                from thirties_core.clock import parse_duration_minutes
+                try:
+                    minutes = parse_duration_minutes(str(length))
+                except (ValueError, TypeError):
+                    minutes = 0
+                if not minutes:
+                    raise ToolError(f"length is how long each session is ('1 hour', '90 min'), not '{length}'.")
+        hp.pin(t, p, n, minutes)
+        if n:
+            each = f" of {minutes} min" if minutes else ""
+            return f"'{t.title}' is planned for {hp.label(p)}: {n} session{'s' if n != 1 else ''}{each}."
         return f"'{t.title}' is planned for {hp.label(p)}."
 
     def unpin_from_period(task: str = "", when: Any = None, **_: Any) -> str:
@@ -1274,7 +1590,7 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
             "apply_period_proposal": apply_period_proposal}
 
 
-__all__ = ["HORIZONS", "LEVELS", "URGENCY_HORIZON", "HORIZON_URGENCY", "Period", "period_of", "parse_period",
+__all__ = ["YEARS", "years_period", "HORIZONS", "LEVELS", "URGENCY_HORIZON", "HORIZON_URGENCY", "Period", "period_of", "parse_period",
            "period_label", "due_horizon", "HorizonCatalog", "HorizonPlans", "HorizonPlanner", "Candidate",
            "sort_horizons", "candidates_for_day", "candidates_for_week", "candidates_for_month",
            "candidates_for_year", "day_context", "HORIZON_TOOL_SPECS", "HORIZON_READ_ONLY", "horizon_handlers"]

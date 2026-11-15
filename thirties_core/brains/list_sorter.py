@@ -223,12 +223,12 @@ class FrontierListSorter:
 
 def list_sorter_for(config, state_db=None, inference_engine=None):
     """The sorter for the user's chosen brain, else whichever model is available here; None if none is."""
-    from thirties_core.brains import brain_choice
+    from thirties_core.brains import brain_choice, gemma_offered
     from thirties_core.brains.slm.runtime import GemmaRuntime, SlmUnavailable, slm_unavailable_reason
     from thirties_core.inference import GeminiSourcesEngine
 
-    def gemma():
-        if slm_unavailable_reason(config) is not None:
+    def gemma():  # the on-device model only while it's offered: never a fallback behind the developer switch
+        if not gemma_offered(config) or slm_unavailable_reason(config) is not None:
             return None
         try:
             return GemmaListSorter(GemmaRuntime.shared(config.assistant.slm_model_path))

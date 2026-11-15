@@ -38,6 +38,7 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     chat_toggle_btn = Gtk.Template.Child()
     split_view = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
+    main_menu_btn = Gtk.Template.Child()
     content_toolbar = Gtk.Template.Child()
     chat_toolbar = Gtk.Template.Child()
     chat_header = Gtk.Template.Child()
@@ -78,6 +79,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
         self.day_view.before.rows_provider = self._before_today  # the same records as the chat (11-06)
+        self.day_view.agenda.paused = lambda: (self.conv_manager.tools.assistant.checkins_paused()
+                                               if self.conv_manager is not None
+                                               and self.conv_manager.tools.assistant is not None else "")
         self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
         self.day_view.agenda.describe = self._describe
         self.content_toolbar.set_content(self.day_view)
@@ -125,6 +129,10 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             GLib.Variant("s", brain_choice(self.config, self.scheduler.state_db)))
         brain.connect("change-state", self._on_brain_change)
         self.add_action(brain)
+        from thirties_core.brains import gemma_offered
+        if not gemma_offered(self.config):  # one brain to use: no Assistant section in the menu
+            from thirties.views.settings_rows import drop_brain_section
+            drop_brain_section(self.main_menu_btn.get_menu_model())
 
         profile = Gio.SimpleAction.new("profile-memory", None)
         profile.connect("activate", lambda *_: self._show_profile_dialog())
@@ -478,18 +486,27 @@ class ThirtiesWindow(Adw.ApplicationWindow):
     # --- profile & memory ---
 
     def _mention_outdated_memory(self) -> bool:
-        """At startup: memory notes that work around since-fixed bugs are listed for the user (never deleted)."""
-        try:
-            from thirties_core.memory_audit import to_review
-            count = len(to_review(self.scheduler.state_db))
-        except Exception as e:
-            logger.warning("Checking memory notes failed: %s", e)
-            return False
-        if count:
-            toast = Adw.Toast(title=f"{count} memory note{'s look' if count > 1 else ' looks'} outdated",
-                              button_label="Review", timeout=8)
-            toast.connect("button-clicked", lambda *_: self._show_profile_dialog(page="memory"))
-            self.toast_overlay.add_toast(toast)
+        """At startup: memory notes that cover something Thirties now does by itself are offered for removal
+        (never removed). After an update, the model looks the notes over once, off the main thread."""
+        def check():
+            try:
+                from thirties_core.build import app_version
+                from thirties_core.memory_audit import review_after_update
+                count = review_after_update(self.scheduler.state_db, app_version(), self.inference_engine)
+            except Exception as e:
+                logger.warning("Checking memory notes failed: %s", e)
+                return
+            if count:
+                GLib.idle_add(self._toast_built_in_memory, count)
+        threading.Thread(target=check, name="memory-review", daemon=True).start()
+        return False
+
+    def _toast_built_in_memory(self, count: int) -> bool:
+        toast = Adw.Toast(title=("Thirties already does what one of your memory notes says" if count == 1 else
+                                 f"Thirties already does what {count} of your memory notes say"),
+                          button_label="Review", timeout=8)
+        toast.connect("button-clicked", lambda *_: self._show_profile_dialog(page="memory"))
+        self.toast_overlay.add_toast(toast)
         return False
 
     def _show_profile_dialog(self, page: str = "") -> None:

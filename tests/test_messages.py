@@ -76,8 +76,8 @@ class TestStatusAndSchedule(MessagesCase):
     def test_schedule_reads_from_now_with_the_missed_right_under_the_status(self):
         text = render_schedule(self.plan, at("10:10"))
         lines = text.splitlines()
-        self.assertEqual(lines[:5], ["You're in the 10:00 AM block: Shower, then Journal.", "Not marked yet:",
-                                     "- Feed the fish", "- Make coffee", "- Make bed"])
+        self.assertEqual(lines[:6], ["You're in the 10:00 AM block: Shower, then Journal.", "", "Not marked yet:",
+                                     "- Feed the fish", "- Make coffee", "- Make bed"])  # its own section
         self.assertNotIn("9:00", text)  # 10-26: only what is from the current block on
         self.assertIn("- 5:00 PM – Dinner + Book", text)  # things at the same time: one entry
         self.assertIn("- 12:00 PM – Lunch", text)  # on top of Work, which the status says runs until 4
@@ -140,7 +140,7 @@ class TestInTheConversation(MessagesCase):
                                       reply("Here you go:\n- 10:00 – Shower\n- 12:00 – Lunch\nAnything else?")])
         manager = self.manager(engine)
         out = manager.send_user_message("what's left?")
-        self.assertIn("You're in the 10:00 block: Shower, then Journal.\nNot marked yet:\n- Feed the fish", out)
+        self.assertIn("You're in the 10:00 block: Shower, then Journal.\n\nNot marked yet:\n- Feed the fish", out)
         self.assertTrue(out.startswith("Here you go:\n") and out.endswith("Anything else?"), out)
         self.assertNotIn("- 10:00 – Shower", out)
         self.assertFalse(MissedTracker(self.sched.state_db).anything_new(at("10:10"), missed_items(self.plan, at("10:10"))))
@@ -188,6 +188,20 @@ class TestItemHistory(MessagesCase):
         out = manager.execute_tool("item_history", {"item": "Lunch"})
         self.assertIn("list write 'complete' to Today (ok), caused by: [telegram] had lunch", out)
         self.assertIn('the user said "lunch was great"', out)
+
+    def test_thirties_own_checks_are_never_what_the_user_said(self):
+        from thirties_core.memory import ConversationStore
+        store = ConversationStore(self.sched.state_db)
+        conv = store.create(DAY)
+        conv.messages = [{"role": "user", "hidden": True, "at": at("09:00").isoformat(),
+                          "content": "[System check, not from the user] Plan the free time; Lunch is at noon."},
+                         {"role": "user", "at": at("09:20").isoformat(),
+                          "content": "[System check, not from the user] Your reply mentions Lunch."},
+                         {"role": "user", "at": at("09:30").isoformat(), "content": "make lunch a long one"}]
+        store.save(conv)
+        out = self.manager().execute_tool("item_history", {"item": "Lunch"})
+        self.assertIn('the user said "make lunch a long one"', out)
+        self.assertNotIn("System check", out)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """First-run model download: resume, cancel and checksum, against a local HTTP server."""
 
+from tests.fixtures import temp_dir
 import hashlib
 import tempfile
 import threading
@@ -35,7 +36,7 @@ class TestModelDownload(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.shutdown)
-        self.dir = Path(tempfile.mkdtemp())
+        self.dir = Path(temp_dir("thirties_tmp_"))
         self.spec = ModelSpec("m.litertlm", f"http://127.0.0.1:{self.server.server_port}/m",
                               len(DATA), hashlib.sha256(DATA).hexdigest())
 

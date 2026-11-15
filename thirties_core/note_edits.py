@@ -23,6 +23,7 @@ from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEA
 
 # A heading under which finished things are kept (never a place for a new or moved open item): "Done", "Completed
 # (October)", "Archive: 2025"; not "Done by Friday".
+IF_TIME_HEADING_RE = re.compile(r"^if there'?s time\s*:?$", re.IGNORECASE)  # if_time.py: untimed today
 DONE_HEADING_RE = re.compile(r"^(done|completed?|finished|archived?)\s*(?:[:(\-–—/].*)?$", re.IGNORECASE)
 # Headings that say "not committed" even when the user's settings don't list them (10-24: a dated item went under
 # Probation). The settings' someday_sections are added to these.
@@ -185,7 +186,7 @@ def insert_lines(body: str, block: List[str], section: Optional[str] = None) -> 
     heads = [(i, HEADING_REGEX.match(l).group(1).strip()) for i, l in enumerate(lines) if HEADING_REGEX.match(l)]
     start, stop = 0, len(lines)
     if section is None:
-        done = next((i for i, name in heads if DONE_HEADING_RE.match(name)), None)
+        done = next((i for i, name in heads if DONE_HEADING_RE.match(name) or IF_TIME_HEADING_RE.match(name)), None)
         if done is not None:
             stop = done
     elif section == "":

@@ -1,5 +1,6 @@
 """Unit tests for the interactive qualitative evaluation harness."""
 
+from tests.fixtures import temp_dir
 import shutil
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from tests.interactive_eval import InteractiveEvaluator, detect_anomalies
 class TestInteractiveEval(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.temp_dir = Path(tempfile.mkdtemp())
+        self.temp_dir = Path(temp_dir("thirties_tmp_"))
         self.session_id = "test_unit_session"
         self.target_date = date(2026, 10, 9)
 
