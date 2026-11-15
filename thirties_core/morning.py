@@ -50,6 +50,8 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
         assistant.start_the_day()
         with manager.turn_lock:
             assistant.routines.set_up_day(manager.day_plan)  # the routines go on by themselves: not news
+            from thirties_core.morning_day import place_pinned
+            place_pinned(assistant)  # what the user asked for today is on it (morning_day.py)
         name = db.get_sync_meta(f"holiday:{day.isoformat()}") if db is not None else None
         holiday = f"It's {name}, so I've left Work off today; say if you're working." if name else ""
     text = manager.execute_tool("rollover_proposal", {})
@@ -62,6 +64,7 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
         ahead = planned_ahead_text(assistant, skip=offered)
     from thirties_core.calendar_engine import unread_text
     unread = unread_text(manager.day_plan.calendar_unread)  # an empty-looking day may not be free
+    invites = invites_text(manager.day_plan)  # the assistant asks about them in its own words
     pulled = ""
     if assistant is not None and db is not None:  # what the longer plans pulled forward since the last morning
         from thirties_core.horizons import HorizonPlanner
@@ -70,9 +73,20 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
             pulled = HorizonPlanner(manager.tools).pulled_text(datetime.fromisoformat(last) if last else None)
         except Exception as e:
             logger.warning("Couldn't say what the plans pulled forward: %s", e)
-    facts = "\n\n".join(t for t in (holiday, unread, ahead if level != "off" or text else "", text, pulled) if t)
+    facts = "\n\n".join(t for t in (holiday, unread, invites, ahead if level != "off" or text else "", text, pulled)
+                         if t)
     brief = assistant.leftover_brief() if assistant is not None else ""
     return facts, brief
+
+
+def invites_text(plan) -> str:
+    """Today's calendar invites not answered yet, for the morning's facts: the user decides, once."""
+    from thirties_core.clock import format_clock
+    pending = sorted((s for s in plan.spans if s.tentative and not s.shown_only), key=lambda s: s.start_dt)
+    if not pending:
+        return ""
+    return ("Calendar invites not answered yet (ask once whether the user is going; resolve_calendar_event "
+            "records it): " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}" for s in pending) + ".")
 
 
 def in_turn_instruction(facts: str, brief: str) -> str:

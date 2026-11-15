@@ -95,9 +95,13 @@ class TestWhatsNext(WhatsNextCase):
     def test_nothing_after_a_turn_that_changed_nothing(self) -> None:
         out = self.turn("You've got dinner at 6.", said="when's dinner?")
         self.assertEqual(out, "You've got dinner at 6.")
+
+    def test_a_change_that_failed_says_so_then_whats_next(self) -> None:
         out = self.turn('CALL update_event {"event": "nonexistent thing", "start": "6:00 PM"}',
                         "I couldn't find that one.", said="move the thing to 6")
-        self.assertNotIn("Next:", out)  # a refused change is no change
+        self.assertTrue(out.startswith("I couldn't find that one.\n\n"))  # what failed, first
+        self.assertIn("Next:", out)  # then the plan as it really stands (10-26: failed moves, then the ask)
+        self.assertIn("6:00 PM – Dinner", self.tail(out))
 
     def test_never_two_schedules_in_one_reply(self) -> None:
         out = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',

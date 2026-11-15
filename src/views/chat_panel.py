@@ -8,7 +8,7 @@ from typing import Callable, Optional
 import threading
 from gi.repository import Gtk, Adw, Pango, GLib, Gdk
 
-from thirties_core.astronomy import get_current_time, get_diurnal_date
+from thirties_core.astronomy import get_current_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.models import DayPlan
 
@@ -36,6 +36,35 @@ def persist_conversation(manager: ConversationManager) -> None:
         logger.exception("Could not save the conversation")
     finally:
         lock.release()
+
+
+def spell_checked_view():
+    """The message box: a text view with spell check (libspelling, as GNOME Text Editor has it: misspelt
+    words underlined, suggestions and the language in the right-click menu), or a plain one where the library
+    isn't installed. Returns (view, adapter or None); keep the adapter alive with the view."""
+    try:
+        import gi
+        gi.require_version("GtkSource", "5")
+        gi.require_version("Spelling", "1")
+        from gi.repository import GtkSource, Spelling
+    except (ImportError, ValueError):
+        return Gtk.TextView(), None
+    try:
+        init = getattr(Spelling, "init", None)
+        if init is not None:
+            init()
+        view = GtkSource.View()
+        buffer = view.get_buffer()
+        buffer.set_highlight_syntax(False)
+        buffer.set_style_scheme(None)  # the theme's own look, like the rest of the window
+        adapter = Spelling.TextBufferAdapter.new(buffer, Spelling.Checker.get_default())
+        view.set_extra_menu(adapter.get_menu_model())
+        view.insert_action_group("spelling", adapter)
+        adapter.set_enabled(True)
+        return view, adapter
+    except Exception:  # never in the way of typing
+        logger.warning("Spell check couldn't start", exc_info=True)
+        return Gtk.TextView(), None
 
 
 APP_QUIET = 1.5  # seconds of quiet before a turn starts: quick messages typed one after another get one reply (A8)
@@ -195,8 +224,8 @@ class ChatPanel(Gtk.Box):
     """Conversation with the planning assistant about the day being shown.
 
     The transcript always comes from the stored conversation (``history()``), so
-    it matches what the Telegram bridge sees. A greeting is shown while the
-    conversation is empty, and stored as its first message once the user replies.
+    it matches what the Telegram bridge sees: one conversation, wherever it was said. An empty conversation
+    shows nothing until the day's first message (the morning's), which is written fresh: better than fixed text.
     """
 
     def __init__(
@@ -218,7 +247,6 @@ class ChatPanel(Gtk.Box):
         self.set_vexpand(True)
         self.chat_history: list[tuple[str, str]] = []
         self._rendered: list[dict] | None = None
-        self._shown_greeting: str | None = None
         # Turns in flight, per manager, and the messages sent that aren't in the stored transcript yet: the user can
         # keep typing while a reply is on its way, and what they send meanwhile is answered together (A8).
         self._in_flight: dict[int, int] = {}
@@ -226,6 +254,7 @@ class ChatPanel(Gtk.Box):
         # Conversations the user explicitly switched to, per day; refresh() would
         # otherwise move back to the day's latest one.
         self._pinned: dict[date, str] = {}
+        self.on_all_conversations: Optional[Callable[[], None]] = None  # the window opens All conversations
 
         self._build_header()
         self._build_stream()
@@ -332,14 +361,21 @@ class ChatPanel(Gtk.Box):
         list_scroller.set_child(self.conversations_list)
 
         self.conversations_popover = Gtk.Popover()
-        self.conversations_popover.set_child(list_scroller)
+        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        popover_box.append(list_scroller)
+        popover_box.append(Gtk.Separator())
+        self.all_conversations_btn = Gtk.Button(label="All Conversations…")
+        self.all_conversations_btn.add_css_class("flat")
+        self.all_conversations_btn.connect("clicked", self._on_all_conversations)
+        popover_box.append(self.all_conversations_btn)
+        self.conversations_popover.set_child(popover_box)
         self.conversations_popover.connect("show", lambda _p: self._populate_conversations())
 
         self.conversations_btn = Gtk.MenuButton()
         self.conversations_btn.set_child(btn_box)
         self.conversations_btn.add_css_class("flat")
         self.conversations_btn.set_hexpand(True)
-        self.conversations_btn.set_tooltip_text("Switch between this day's conversations")
+        self.conversations_btn.set_tooltip_text("This day's conversations, or all of them")
         self.conversations_btn.set_popover(self.conversations_popover)
         header_box.append(self.conversations_btn)
 
@@ -429,6 +465,15 @@ class ChatPanel(Gtk.Box):
             row.set_child(box)
             self.conversations_list.append(row)
 
+    def _on_all_conversations(self, _btn) -> None:
+        self.conversations_popover.popdown()
+        if self.on_all_conversations is not None:
+            self.on_all_conversations()
+
+    def open_conversation(self, conversation_id: str) -> None:
+        """Show a conversation of the day on screen (picked in All conversations); kept across refreshes."""
+        self.switch_conversation(conversation_id)
+
     def _on_conversation_row_activated(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         conv_id = getattr(row, "conversation_id", None)
         self.conversations_popover.popdown()
@@ -506,7 +551,8 @@ class ChatPanel(Gtk.Box):
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.add_css_class("chat-entry-box")
 
-        self.text_view = Gtk.TextView()
+        self.text_view, self.spelling = spell_checked_view()
+        self.text_view.add_css_class("chat-input")
         self.text_view.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.text_view.set_hexpand(True)
         self.text_view.set_top_margin(6)
@@ -557,6 +603,12 @@ class ChatPanel(Gtk.Box):
                 return True
         return False
 
+    def suggest(self, text: str) -> None:
+        """Write a message in the box for the user to send (or change), and put the cursor at its end."""
+        self.text_buffer.set_text(text)
+        self.text_buffer.place_cursor(self.text_buffer.get_end_iter())
+        self.focus_input()
+
     def focus_input(self) -> None:
         if self.text_view.get_sensitive():
             self.text_view.grab_focus()
@@ -566,39 +618,8 @@ class ChatPanel(Gtk.Box):
         self.text_view.set_sensitive(True)
         self.send_btn.set_sensitive(True)
 
-    def _greeting(self) -> str:
-        manager = self.conversation_manager
-        plan = manager.day_plan
-        ambiguous = manager.ambiguous_events
-
-        gen = manager.scheduler.config.general if manager.scheduler else None
-        lat = gen.latitude if gen else 40.7128
-        lon = gen.longitude if gen else -74.0060
-        tz_name = gen.timezone if gen else "UTC"
-        diurnal_today = get_diurnal_date(lat=lat, lon=lon, tz_name=tz_name)
-
-        target_str = plan.target_date.strftime("%A, %B %d")
-        is_today = plan.target_date == diurnal_today
-        day_prefix = f"Today ({target_str})" if is_today else target_str
-
-        now = get_current_time(plan.sunrise.tzinfo)
-        live = plan.day_start.timestamp() <= now.timestamp() < plan.day_end.timestamp()
-        counts = plan.availability(now if live else None)
-        available = "still available" if live else "available"
-        greeting = (
-            f"Good day! You are planning {day_prefix}.\n"
-            f"You have {counts['daylight_open']}/{counts['daylight_total']} Daylight Thirties "
-            f"and {counts['dark_open']}/{counts['dark_total']} Dark Thirties {available}.\n\n"
-        )
-        if ambiguous:
-            ev = ambiguous[0]
-            greeting += f"You have an unconfirmed event: '{ev.summary}'. Are you attending?"
-        else:
-            greeting += "What would you like to focus on today?" if is_today else "What would you like to plan?"
-        return greeting
-
     def render(self, force: bool = False) -> None:
-        """Show the stored transcript of the current conversation (greeting if it is empty)."""
+        """Show the stored transcript of the current conversation (nothing when it's empty)."""
         manager = self.conversation_manager
         if manager is None:
             return
@@ -613,13 +634,10 @@ class ChatPanel(Gtk.Box):
         while child := self.messages_box.get_first_child():
             self.messages_box.remove(child)
 
-        self._shown_greeting = None
-        if not history:
-            self._shown_greeting = self._greeting()
-            self._append_bubble("assistant", self._shown_greeting, offer_actions=True, record=False)
         for i, msg in enumerate(history):
             self._append_bubble(msg["role"], msg["content"], offer_actions=(i == len(history) - 1),
-                                time_text=message_time(msg.get("at", ""), tz))
+                                time_text=message_time(msg.get("at", ""), tz)
+                                + (" · not delivered to your phone" if msg.get("undelivered") else ""))
         for owner, text, at in self._pending:  # sent, not answered yet
             if owner is manager:
                 self._append_bubble("user", text, time_text=message_time(at, tz))
@@ -683,9 +701,6 @@ class ChatPanel(Gtk.Box):
         manager = self.conversation_manager
         if manager is None:
             return
-        greeting = self._shown_greeting if self._shown_greeting and not manager.history() and not any(
-            owner is manager for owner, _, _ in self._pending) else None  # stored once, by the first message
-        self._shown_greeting = None
         entry = (manager, text, get_current_time(self._tz()).isoformat(timespec="seconds"))
         self._pending.append(entry)
         self._in_flight[id(manager)] = self._in_flight.get(id(manager), 0) + 1
@@ -695,8 +710,6 @@ class ChatPanel(Gtk.Box):
         def worker():
             error = None
             try:
-                if greeting:  # what the user is answering stays, for both (off the UI thread: it waits its turn)
-                    manager.add_assistant_message(greeting)
                 manager.send_user_message(text, quiet=APP_QUIET)
             except Exception as e:  # keep the UI alive if the model or a tool fails
                 logger.exception("Assistant turn failed")

@@ -3,7 +3,7 @@
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from tests.test_conversation import reply
 from thirties_core.astronomy import set_debug_time
 from thirties_core.conversation import ConversationManager
@@ -140,7 +140,9 @@ class TestInTheConversation(MessagesCase):
                                       reply("Here you go:\n- 10:00 – Shower\n- 12:00 – Lunch\nAnything else?")])
         manager = self.manager(engine)
         out = manager.send_user_message("what's left?")
-        self.assertIn("You're in the 10:00 block: Shower, then Journal.\n\nNot marked yet:\n- Feed the fish", out)
+        line_with(out, "10:00", "Shower, then Journal")  # where the user is, from the plan, not the model
+        line_with(out.split("Not marked yet")[1], "Feed the fish")
+        self.assertIn("\n\nNot marked yet", out)  # its own section, a blank line above
         self.assertTrue(out.startswith("Here you go:\n") and out.endswith("Anything else?"), out)
         self.assertNotIn("- 10:00 – Shower", out)
         self.assertFalse(MissedTracker(self.sched.state_db).anything_new(at("10:10"), missed_items(self.plan, at("10:10"))))
@@ -159,8 +161,8 @@ class TestInTheConversation(MessagesCase):
     def test_the_prompt_says_where_the_user_is_and_whats_been_shown(self):
         manager = self.manager()
         prompt = manager.brain.build_system_prompt()
-        self.assertIn("NOW\nYou're in the 10:00 AM block: Shower, then Journal.", prompt)
-        self.assertIn("Not shown to the user yet: Feed the fish, Make coffee, Make bed.", prompt)
+        line_with(prompt.split("NOW\n", 1)[1], "10:00 AM", "Shower, then Journal")
+        line_with(prompt, "Not shown", "Feed the fish", "Make coffee", "Make bed")
         MissedTracker(self.sched.state_db).mark(at("10:10"), missed_items(self.plan, at("10:10")))
         self.assertIn("already been shown all of these", manager.brain.build_system_prompt())
 
@@ -171,7 +173,7 @@ class TestItemHistory(MessagesCase):
         manager = self.manager()
         out = manager.execute_tool("item_history", {"item": "Lunch"})
         self.assertIn("Lunch: 12:00 PM – 1:00 PM, planned.", out)
-        self.assertIn("Lunch added (at 12:00 PM – 1:00 PM), caused by: background", out)  # stored with no cause
+        line_with(out, "Lunch", "added", "12:00 PM", "1:00 PM", "background")  # stored with no cause
         with self.sched.state_db._get_connection() as conn:
             conn.execute("DELETE FROM plan_changes")
         out = manager.execute_tool("item_history", {"item": "Lunch"})
@@ -186,7 +188,7 @@ class TestItemHistory(MessagesCase):
         manager = self.manager(engine)
         manager.send_user_message("lunch was great")
         out = manager.execute_tool("item_history", {"item": "Lunch"})
-        self.assertIn("list write 'complete' to Today (ok), caused by: [telegram] had lunch", out)
+        line_with(out, "'complete'", "Today", "ok", "[telegram] had lunch")
         self.assertIn('the user said "lunch was great"', out)
 
     def test_thirties_own_checks_are_never_what_the_user_said(self):

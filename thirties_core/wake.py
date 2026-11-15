@@ -79,7 +79,8 @@ def hello_time(config, plan, history=None) -> Optional[datetime]:
 
 
 def hello_prompt(mode: str, clock: str, recent: List[str], late: bool = False) -> str:
-    """For the model: the first message of the day, fresh each morning (11-05: never the same canned line). Sent
+    """For the model: the first message of the day, written fresh each morning (11-05: fresh beats the same line
+    every day). Sent
     late, it says the time as past: it must never state a current time that's wrong."""
     if late:
         framing = (f"mention that the sun came up at {clock} (in the past: it is NOT {clock} now, so never say "

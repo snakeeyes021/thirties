@@ -225,9 +225,7 @@ class TestThirtiesTelegramBridge(BridgeCase):
             self.bridge.handle_message(chat_id=1001, text="/now")
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
-        self.assertIn("Deep Work Code Review", msg)
-        self.assertIn("Left in this thirty*: 25 minutes", msg)
-        self.assertIn("Until sleep", msg)
+        self.assertEqual(msg, "Now: Deep Work Code Review\n\nNext:\n8:30 AM – Work\nFree 4:00–11:00 PM")  # what's next
 
     def test_day_command(self):
         self.bridge.handle_message(chat_id=1001, text="/day")
@@ -351,7 +349,8 @@ class TestBridgeBursts(BridgeCase):
         with patch.object(self.bridge, "_get_current_time", return_value=at("09:05")):
             with patch("thirties_core.plan_tools.PlanTools._now", return_value=at("09:05")):
                 self.bridge.handle_message(chat_id=1001, text="/now")
-        self.assertIn("\n\nNot marked yet:\n- Shower", self.bridge.client.send_message.call_args[0][1])
+        self.assertEqual(self.bridge.client.send_message.call_args[0][1],
+                         "Now: Work\n\nNothing else is planned today.\nFree 4:00–11:00 PM\n\nNot marked yet:\n8:00 AM – Shower")
 
 
     def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):
@@ -412,7 +411,7 @@ class TestEditsAndRestarts(BridgeCase):
 
     def test_an_edit_before_the_reply_is_what_was_meant(self):
         from tests.test_conversation import reply
-        self.mock_inference.responses = [reply("Moved it.")]
+        self.mock_inference.responses = [reply("Sure, 4 it is.")]
         self.bridge.handle_updates([self.msg(1, 42, "move the oil change to 3"),
                                     self.msg(2, 42, "move the oil change to 4", edited=True)])
         self.assertEqual(len(self.mock_inference.call_history), 1)

@@ -171,9 +171,10 @@ def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only:
     """The plan from ``start`` on (the whole day without one), by blocks: each row a block and what's in it,
     things at the same time joined with +, and an end time only before a gap (clock.agenda_lines). The one row
     formatter: the schedule (render_schedule) and what's next after a change (whats_next) both lay rows out
-    here. ``planned_only``: what's still to come (nothing done, skipped or unanswered)."""
-    items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start)
-             and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]
+    here. Done items are never rows (11-02: done items still on the schedule were noise), not even for the whole
+    day. ``planned_only``: what's still to come (nothing skipped or unanswered either)."""
+    items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start) and s.status != SpanStatus.DONE
+             and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]  # done: never listed
     rows = [(s.start_dt, s.end_dt, s.title, _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
     return agenda_lines(rows)
 
@@ -253,6 +254,107 @@ def now_section(tools) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+# --- where what's carried over went (the morning) ---
+
+def carried_where(plan: DayPlan, item: dict) -> str:
+    """Where an item kept from before went, said plainly for the morning: "today at 3:00 PM" when it's on today's
+    plan, else when it waits for, with "not today" said outright when its window still holds today (11-12: "kept
+    for this week" read as today's, and it wasn't on the schedule). ``item``: a kept leftover ({"title", "when",
+    "task_id"})."""
+    title = str(item.get("title") or "").strip().lower()
+    task_id = item.get("task_id") or ""
+    on = sorted((s for s in plan.active_spans() if s.status == SpanStatus.PLANNED and not s.is_envelope
+                 and ((task_id and s.task_id == task_id) or s.title.strip().lower() == title)),
+                key=lambda s: s.start_dt)
+    if on:
+        return f"today at {format_clock(thirty_of(on[0].start_dt))}"
+    when = str(item.get("when") or "").strip()
+    if not when or when == "today":
+        return "today, no time yet"
+    if when.startswith("this "):
+        return f"not today, later {when}"
+    return when
+
+
+# --- what any message may say: plain lines, names not ids, nothing done listed ---
+
+_BULLET_RE = re.compile(r"^(\s*)[-•*]\s+(?=\S)")
+# An id noted beside a name: "(id 3f9a…)", "[id …]", "(item id …)", "id=…", "[ID: …]"
+_ID_NOTE_RE = re.compile(r"\s*[\[(](?:item |reminder )?id[:=]?\s*[\w:.-]+[\])]|\s*\bid=[\w:.-]+", re.IGNORECASE)
+# A token that is an id: hex of 12 or more (with a digit and a letter), a routine's or a calendar's id
+_ID_TOKEN_RE = re.compile(r"(?<![\w/.#=-])(?:cal:)?(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{12,40}(?![\w/-])"
+                          r"|(?<![\w-])routine-\d{4}-\d{2}-\d{2}-[\w-]+")
+# The user asking what got done: then done rows are the answer, and stay
+DONE_ASKED_RE = re.compile(r"\b(done|did i|finished|completed|accomplish\w*|got through|ticked)\b", re.IGNORECASE)
+_DONE_ROW_RE = re.compile(r"^\s*(?:[-•*]\s*)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*[–—-].*\((?:done|[^)]*, done)\)\s*$")
+
+
+def plain_lines(text: str) -> str:
+    """Lists as one item per line, with no "- " bullets (11-05, the user's firm preference): in the app's chat as
+    on the phone. Code blocks are left as they are; numbered lists keep their numbers."""
+    out, code = [], False
+    for line in str(text or "").split("\n"):
+        if line.lstrip().startswith("```"):
+            code = not code
+        out.append(line if code else _BULLET_RE.sub(r"\1", line))
+    return "\n".join(out)
+
+
+def names_not_ids(text: str, names: Optional[dict] = None) -> str:
+    """Never an id in a message (the user asked what one meant): an id noted beside a name is dropped,
+    and an id standing in for a name is replaced by the name (``names``: id → title), or dropped when unknown."""
+    names = {str(k): str(v) for k, v in (names or {}).items() if k and v}
+
+    def token(m) -> str:
+        found = names.get(m.group(0)) or names.get(m.group(0).removeprefix("cal:"))
+        return found if found and not _ID_TOKEN_RE.fullmatch(found) else ""
+    lines = []
+    for line in str(text or "").split("\n"):
+        out = _ID_TOKEN_RE.sub(token, _ID_NOTE_RE.sub("", line))
+        if out != line:  # tidy only where an id came out
+            out = re.sub(r"\(\s*\)|\[\s*\]", "", out)
+            out = re.sub(r"[ \t]+([,.;:!?)])", r"\1", out)
+            out = re.sub(r"[ \t]{2,}", " ", out).rstrip(" ,;")
+            if not line[:1].isspace():
+                out = out.lstrip(" ,;")
+        lines.append(out)
+    return "\n".join(lines)
+
+
+def without_done_rows(text: str) -> str:
+    """A schedule row for something already done is left out of any message (11-02)."""
+    return "\n".join(line for line in str(text or "").split("\n") if not _DONE_ROW_RE.match(line))
+
+
+def known_names(tools) -> dict:
+    """Every id Thirties could let slip, with its name: today's items, the lists, and what titles.py knows."""
+    names = {}
+    try:
+        from thirties_core.titles import known_titles
+        tasks = list(getattr(getattr(tools, "services", None), "tasks", None) or [])
+        names.update(known_titles(getattr(tools, "_state_db", None), tasks))
+    except Exception:
+        pass
+    try:
+        for s in tools.day_plan.spans:
+            names[s.id] = s.title
+    except Exception:
+        pass
+    return names
+
+
+def clean_message(text: str, tools=None, said: str = "") -> str:
+    """The last step for every message the user reads, from the model or from Python: no done rows (unless
+    ``said``, the user's message, asks what got done), names not ids, plain lines. The same in the app and on the
+    phone."""
+    if not text:
+        return text
+    out = text if DONE_ASKED_RE.search(said or "") else without_done_rows(text)
+    out = names_not_ids(out, known_names(tools) if tools is not None else None)
+    out = plain_lines(out)
+    return re.sub(r"\n{3,}", "\n\n", out).strip() or text
+
+
 # --- placing the schedule in a reply ---
 
 _ROW_RE = re.compile(r"^\s*(?:[-•*]|\d+\.)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*(?:–|-|—)")
@@ -321,6 +423,7 @@ def drop_repeat_checkins(reply: str, missed: Sequence[EventSpan], already: set) 
     return out, asked
 
 
-__all__ = ["MISSED_HEADING", "MissedTracker", "drop_repeat_checkins", "join_sections", "missed_block", "missed_for", "missed_items",
+__all__ = ["MISSED_HEADING", "MissedTracker", "carried_where", "clean_message", "plain_lines", "names_not_ids",
+           "without_done_rows", "known_names", "drop_repeat_checkins", "join_sections", "missed_block", "missed_for", "missed_items",
            "missed_lines", "now_section", "with_missed",
            "place_schedule", "render_schedule", "schedule_rows", "status_line"]

@@ -180,7 +180,9 @@ class ConversationManager:
     def history(self, times: bool = False) -> List[Dict[str, str]]:
         """The visible transcript of the current conversation: user and assistant text only. With ``times``, each
         message also has "at" (when it arrived or was said; "" for old messages) for the app's chat."""
-        return [{"role": m["role"], "content": m.get("content", ""), **({"at": m.get("at", "")} if times else {})}
+        return [{"role": m["role"], "content": m.get("content", ""),
+                 **({"at": m.get("at", ""), **({"undelivered": True} if m.get("undelivered") else {})}
+                    if times else {})}
                 for m in self.brain.messages
                 if m.get("role") in ("user", "assistant") and str(m.get("content", "")).strip()
                 and not m.get("hidden") and not str(m.get("content", "")).startswith("[System check")]
@@ -260,16 +262,42 @@ class ConversationManager:
                 logger.warning("Brain warm-up failed: %s", e)
         threading.Thread(target=run, daemon=True, name="BrainWarmup").start()
 
-    def add_assistant_message(self, text: str, kind: str = "") -> None:
+    def add_assistant_message(self, text: str, kind: str = "", undelivered: bool = False) -> None:
         """Record something the assistant said on its own (e.g. a Telegram check-in, or a start-of-block notice:
-        kind "notice")."""
+        kind "notice"). ``undelivered``: it didn't reach the phone (the app shows a quiet mark)."""
         message = {"role": "assistant", "content": text}
         if kind:
             message["kind"] = kind
+        if undelivered:
+            message["undelivered"] = True
         with self.turn_lock:
             self._catch_up()
             self.brain.messages.append(message)
             self._stamp(via="background")
+            self._save()
+
+    def mark_delivery(self, words: str, undelivered: bool) -> bool:
+        """Set or clear the quiet "not delivered to your phone" mark on the latest message with these words."""
+        from thirties_core.memory import mark_delivery
+        with self.turn_lock:
+            self._catch_up()
+            if not mark_delivery(self.brain.messages, words, undelivered):
+                return False
+            self._save()
+            return True
+
+    def record_exchange(self, said: str, reply: str, via: str = "telegram", undelivered: bool = False) -> None:
+        """Something the user said and its answer that took no turn (a Telegram command, an edit after the
+        reply): both in the conversation, as on the phone. One conversation, wherever it was said."""
+        with self.turn_lock:
+            self._catch_up()
+            self.brain.messages.append({"role": "user", "content": said, "kind": "command"})
+            self._stamp(via=via)
+            answer = {"role": "assistant", "content": reply, "kind": "command"}
+            if undelivered:
+                answer["undelivered"] = True
+            self.brain.messages.append(answer)
+            self._stamp(via=via)
             self._save()
 
     def assistant_turn(self, instruction: str) -> str:
@@ -305,12 +333,19 @@ class ConversationManager:
         self.brain.messages = value
 
     def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Run a schedule tool directly, bypassing the model: the app's own controls, so the user did it."""
+        """Run a schedule tool directly, bypassing the model: the app's own controls, so the user did it. Python's
+        lines for the user (a reminder to export a finished book) come after the result, for the Day page to show."""
         self.tools.by_hand = True
         try:
-            return self.tools.execute(name, arguments)
+            result = self.tools.execute(name, arguments)
         finally:
             self.tools.by_hand = False
+        notes = self._user_notes()
+        return result + "".join(f"\n{n}" for n in notes)
+
+    def _user_notes(self) -> List[str]:
+        assistant = getattr(self.tools, "assistant", None)
+        return assistant.take_user_notes() if assistant is not None and hasattr(assistant, "take_user_notes") else []
 
     def _now_iso(self) -> str:
         return get_current_time(self.day_plan.day_start.tzinfo).isoformat(timespec="seconds")
@@ -346,7 +381,26 @@ class ConversationManager:
             with self.turn_lock:
                 self._catch_up()
                 return self._command(user_text, via)
-        mine = self.enqueue(user_text, via)
+        # a short answer to "Done with work?", when it's the last thing asked: recorded, with what's left of the day
+        from thirties_core import work_end_answer
+        try:
+            ended = work_end_answer.answer(self, user_text, via)
+        except Exception as e:
+            logger.warning("Answering the end-of-work question failed: %s", e)
+            ended = ""
+        if ended:
+            return ended
+        from thirties_core import catch_up  # a yes to the evening's "Move these to tonight?" is acted on here
+        if catch_up.YES_RE.match(user_text):
+            try:
+                moved = catch_up.answer(self, user_text, via)
+            except Exception as e:
+                logger.warning("Answering the evening catch-up failed: %s", e)
+                moved = ""
+            if moved:
+                return moved
+        mine = self.enqueue(user_text, via)  # first: messages keep the order they came in
+        catch_up.let_go(self)  # anything else said lets the offer go
         self.gate.wait_quiet(quiet)
         with self.turn_lock:
             if mine.taken:
@@ -460,6 +514,15 @@ class ConversationManager:
             except Exception as e:
                 logger.warning("Setting up the day failed: %s", e)
         before = len(self.brain.messages)  # first: a turn that fails takes the morning instruction back out too
+        # --- notes to the engineers: kept for review, never acted on (engineer_notes.py) ---
+        from thirties_core import engineer_notes
+        kept, rest = engineer_notes.take(self.scheduler.state_db if self.scheduler else None, merged, via)
+        if kept is not None and engineer_notes.only_a_note(rest):
+            return self._only_for_engineers(batch, via, before), True
+        if kept is not None:
+            self.brain.messages.append({"role": "user", "content": engineer_notes.hidden_instruction(kept),
+                                        "hidden": True})
+        # --- end notes to the engineers ---
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:
@@ -495,7 +558,17 @@ class ConversationManager:
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
         final = self._status_as_wanted(final, merged, before)
+        from thirties_core.extras import after_reply  # a suggestion says where it's from (extras.py)
+        final = after_reply(self.tools, final)
+        from thirties_core import others_events  # what's on other people's calendars, said once (others_events.py)
+        final = others_events.after_reply(self.tools, final)
+        notes = self._user_notes()
+        if notes:  # Python's own lines for the user (a reminder to export a finished book), once, under the reply
+            from thirties_core.messages import join_sections
+            final = join_sections(final.rstrip(), "\n".join(notes))
         final = self._with_whats_next(final, merged, before)
+        from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
+        final = clean_message(final, self.tools, merged)
         if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":
@@ -506,6 +579,19 @@ class ConversationManager:
         self._save()
         mirror_turn(batch, final, via)
         return final, True
+
+    def _only_for_engineers(self, batch: List[Incoming], via: str, before: int) -> str:
+        """A message that's only a note to the engineers: kept, acknowledged, and never shown to the model as
+        something to act on (engineer_notes.py)."""
+        from thirties_core.engineer_notes import ACK
+        for i in batch:
+            self.brain.messages.append({"role": "user", "content": i.text})
+        self.brain.messages.append({"role": "assistant", "content": ACK})
+        self._stamp_arrivals(batch, before)
+        self._stamp(via)
+        self._save()
+        mirror_turn(batch, ACK, via)
+        return ACK
 
     def _stamp_arrivals(self, batch: List[Incoming], before: int) -> None:
         """Each user message is stamped when it arrived, not when the reply was saved (soak friction 2)."""
@@ -560,28 +646,31 @@ class ConversationManager:
         return reply
 
     def _with_whats_next(self, reply: str, said: str, before: int) -> str:
-        """After a turn that changed something, what's next, from the plan as it now stands (whats_next.py), at the
-        end of the reply. Never with a schedule already in the reply, when the user asked for it, or in a turn
+        """After a turn that changed something, tried to, or talked the plan over (whats_next.follows_turn), what's
+        next, from the plan as it now stands (whats_next.py), at the end of the reply, as the person wants it
+        (reply_extras.py). Never with a schedule already in the reply, when the user asked for it, or in a turn
         about what replies show."""
         from thirties_core import whats_next
         from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        db = self._context()[1]
+        if self.tools.shown_schedule and self.tools.is_current(self.day_plan):
+            whats_next.SentSummaries(db).mark(self.day_plan, now, whole_day=True)  # the user has seen the day
         if self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or "") \
                 or any(m.get("name") == "set_reply_extras" for m in self.brain.messages[before:]):
             return reply
-        changed = any(m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
-                      and str(m.get("content") or "").strip() and not str(m.get("content")).startswith(NOT_DONE)
-                      for m in self.brain.messages[before:])
-        if not changed:
+        if not whats_next.follows_turn(self.brain.messages[before:], reply, said, self.day_plan, READ_ONLY_TOOLS,
+                                       NOT_DONE):
             return reply
         from thirties_core.messages import MISSED_HEADING, MissedTracker, missed_for
-        now = get_current_time(self.day_plan.day_start.tzinfo)
         moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
         # A status view: worked out fresh from the plan for every slice, so what's still unmarked shows again in the
         # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
         # never the list twice; muted or not (a mute quiets check-ins, never where things stand)
         unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now, muted_too=True)
-        config, db = self._context()
-        part = whats_next.render(self.day_plan, now, moved, None, said, unmarked, config=config, db=db)
+        part = whats_next.summary(self.tools, now, None, moved, said, unmarked)  # as the person wants it
+        if part and self.tools.is_current(self.day_plan):
+            whats_next.SentSummaries(db).mark(self.day_plan, now)
         if part and unmarked and MISSED_HEADING in part and self.scheduler is not None:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
         from thirties_core.messages import join_sections

@@ -70,20 +70,44 @@ THUMBS_UP = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"}
 YES_TARGETS_KEY = "telegram_yes_targets"  # [[chat_id, message_id], ...]: messages a 👍 answers with "yes"
 OFFSET_KEY = "telegram_offset"  # this device's: the next update to read, per bot ("telegram_offset:<bot id>")
 UNSENT_KEY = "telegram_unsent"  # this device's: replies that never got through, kept across a restart
+# One tap on the phone for where the day stands (/now and /day went unused: they weren't in Telegram's menu, and
+# /now didn't say what's next): a button kept under the chat, and the commands in the menu.
+WHATS_NEXT_BUTTON = "What's next"
+WHATS_NEXT_KEYBOARD = {"keyboard": [[{"text": WHATS_NEXT_BUTTON}]], "resize_keyboard": True, "is_persistent": True}
+MENU_COMMANDS = [
+    {"command": "now", "description": "What's next"},
+    {"command": "day", "description": "Today's schedule"},
+    {"command": "new", "description": "Start a new conversation"},
+    {"command": "sync", "description": "Sync now"},
+    {"command": "status", "description": "How Thirties is set up"},
+    {"command": "help", "description": "What I can do"},
+]
+
+
+def is_button(text: str) -> bool:
+    """The "What's next" button (or its words typed as they are): answered like /now, at once, by Python."""
+    return (text or "").strip().rstrip("?!. ").lower().replace("’", "'") in ("what's next", "whats next")
+
+
+def _answered_at_once(text: str) -> bool:
+    """A command or the button: answered by itself, never waited on as part of a burst."""
+    return text.strip().startswith("/") or is_button(text)
+
+
 # copy-madlibs T3-047
 EDIT_NOTICE = "That edit came after my reply, so I left it alone: send the change as a new message."
 
 
+def plain_text(text: str) -> str:
+    """What a message says, without its formatting: the words Telegram shows, as the app's chat keeps them."""
+    return html.unescape(re.sub(r"<[^>]+>", "", telegram_html(plain_lists(text))))
+
+
 def plain_lists(text: str) -> str:
-    """Lists in Telegram are one item per line, with no "- " bullets (11-05, the user's firm preference). Code
-    blocks are left as they are."""
-    import re as _re
-    out, code = [], False
-    for line in str(text).split("\n"):
-        if line.lstrip().startswith("```"):
-            code = not code
-        out.append(line if code else _re.sub(r"^(\s*)[-•*]\s+(?=\S)", r"\1", line))
-    return "\n".join(out)
+    """Lists in Telegram are one item per line, with no "- " bullets (11-05, the user's firm preference), the same
+    as the app's chat (messages.plain_lines). Code blocks are left as they are."""
+    from thirties_core.messages import plain_lines
+    return plain_lines(str(text))
 
 def _one_slip(x: str, y: str) -> bool:
     """At most one slip of the keyboard between two words: a letter added or dropped, two swapped, or a letter
@@ -135,7 +159,11 @@ class TelegramClient:
         self.sent_ids: List[tuple] = []  # (chat_id, message_id) of what was sent, newest last (reactions)
         self.on_undelivered: Optional[Callable[[List[tuple]], None]] = None  # told whenever `undelivered` changes
         self.recent: Dict[tuple, float] = {}  # (chat_id, text) -> when it last went out (or very likely did)
+        self.on_late: Optional[Callable[[Any, str], None]] = None  # a kept message got through after all
+        self.on_dropped: Optional[Callable[[Any, str], None]] = None  # a kept notice was dropped as stale
         self.hold_until = 0.0  # Telegram asked us to wait (HTTP 429) until then
+        self.reply_markup: Optional[Dict[str, Any]] = None  # sent with every message: the "What's next" button
+        self.markup_chats: Optional[Set[str]] = None  # only to these chats (the paired phone), when set
 
     def _undelivered_changed(self) -> None:
         if self.on_undelivered is not None:
@@ -183,6 +211,15 @@ class TelegramClient:
         except (urllib.error.URLError, TimeoutError) as e:
             logger.debug("getUpdates network or timeout exception: %s", e)
             return []
+
+    def set_my_commands(self, commands: List[Dict[str, str]]) -> bool:
+        """The commands shown in Telegram's menu (setMyCommands)."""
+        try:
+            res = self._request("setMyCommands", {"commands": commands}, timeout=10.0)
+            return bool(res.get("ok"))
+        except Exception as e:
+            logger.warning("Couldn't put the commands in Telegram's menu: %s", e)
+            return False
 
     def send_chat_action(self, chat_id: int | str, action: str = "typing") -> bool:
         """Send chat action (e.g. typing) to indicate work in progress."""
@@ -235,6 +272,8 @@ class TelegramClient:
         if time.time() < self.hold_until:
             return False  # Telegram asked us to wait: kept, and sent once the wait is over
         payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
+        if self.reply_markup is not None and (self.markup_chats is None or str(chat_id) in self.markup_chats):
+            payload["reply_markup"] = self.reply_markup
         if parse_mode == "Markdown":
             payload["text"], payload["parse_mode"] = telegram_html(chunk), "HTML"
         elif parse_mode:
@@ -296,8 +335,12 @@ class TelegramClient:
         late), and anything older than a few hours is dropped too (the app's chat has it)."""
         now = time.time()
         before = len(self.undelivered)
-        self.undelivered = [u for u in self.undelivered if now - u[2] < self.UNDELIVERED_HOURS * 3600
-                            and (len(u) < 4 or u[3] is None or now < u[3])]
+        kept = [u for u in self.undelivered if now - u[2] < self.UNDELIVERED_HOURS * 3600
+                and (len(u) < 4 or u[3] is None or now < u[3])]
+        for u in self.undelivered:
+            if u not in kept and self.on_dropped is not None:
+                self.on_dropped(u[0], u[1])
+        self.undelivered = kept
         if len(self.undelivered) != before:
             self._undelivered_changed()
         while self.undelivered:
@@ -308,6 +351,8 @@ class TelegramClient:
             elif self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode,
                                   key=chunk) is False:
                 return
+            elif self.on_late is not None:
+                self.on_late(chat_id, chunk)
             self.undelivered.pop(0)
             self._undelivered_changed()
 
@@ -382,6 +427,8 @@ class ThirtiesTelegramBridge:
             raise ValueError("No Telegram bot token: set one up in Preferences → Phone.")
 
         self.client = TelegramClient(self.bot_token)
+        self.client.reply_markup = WHATS_NEXT_KEYBOARD  # one tap for what's next, under every message
+        self._menu_set = False
         self.scheduler = scheduler or DeterministicScheduler(self.config)
         self.joplin_engine = joplin_engine or JoplinEngine(self.config)
         self.inference_engine = inference_engine or get_inference_engine(self.config)
@@ -392,11 +439,14 @@ class ThirtiesTelegramBridge:
         )
 
         self.allowed_chat_ids: Set[int] = set(self.config.telegram.allowed_chat_ids)
+        self.client.markup_chats = {str(c) for c in self.allowed_chat_ids}  # never a stranger's chat
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
         self._bot_id = self.bot_token.split(":", 1)[0]
         self._answered: Dict[Tuple[int, int], str] = {}  # (chat, message id) -> its text, for the last few messages
         self._restore_unsent()
         self.client.on_undelivered = self._save_unsent
+        self.client.on_late, self.client.on_dropped = self._delivered_late, self._dropped
+        self._marked: Set[str] = set()  # replies kept as not delivered, still queued for the phone
         self.current_date: date = self._get_active_diurnal_date()
         self._own_manager: Optional[ConversationManager] = None
         self.running = False
@@ -491,30 +541,34 @@ class ThirtiesTelegramBridge:
         self._check_and_refresh_date()
         self.conv_manager.refresh()
 
+        if is_button(text):  # the "What's next" button: like /now, kept as the words tapped
+            reply, _ = self._cmd_now(chat_id)
+            sent = self.client.send_message(chat_id, reply, parse_mode="Markdown")
+            self._record(text, reply, delivered=sent)
+            return
+
         # Command Dispatch
         if text.startswith("/"):
             parts = text.split(maxsplit=1)
             cmd = parts[0].lower().split("@")[0]
-            if cmd in ("/start", "/help"):
-                self._cmd_help(chat_id)
-            elif cmd == "/now":
-                self._cmd_now(chat_id)
-            elif cmd == "/day":
-                self._cmd_day(chat_id)
-            elif cmd == "/sync":
-                self._cmd_sync(chat_id)
-            elif cmd in ("/new", "/clear"):
-                self._cmd_clear(chat_id)
-            elif cmd == "/status":
-                self._cmd_status(chat_id)
-            elif cmd == "/brain":
-                self.client.send_message(chat_id, self.conv_manager.send_user_message(text, via="telegram"))
+            if cmd == "/brain":  # a turn of the conversation: stored by the turn itself
+                self._reply(chat_id, self.conv_manager.send_user_message(text, via="telegram"))
+                return
+            if cmd in ("/new", "/clear"):  # kept at the end of the conversation it closes; the new one starts empty
+                reply = "🆕 Started a new conversation. What's next?"
+                sent = self.client.send_message(chat_id, reply, parse_mode="Markdown")
+                self._record(text, reply, delivered=sent)
+                self.conv_manager.new_conversation()
+                return
+            handlers = {"/start": self._cmd_help, "/help": self._cmd_help, "/now": self._cmd_now,
+                        "/day": self._cmd_day, "/sync": self._cmd_sync, "/status": self._cmd_status}
+            handler = handlers.get(cmd)
+            if handler is None:
+                reply, kept = f"Unknown command `{cmd}`. Send /help to view available commands.", None
             else:
-                self.client.send_message(
-                    chat_id,
-                    f"Unknown command `{cmd}`. Send /help to view available commands.",
-                    parse_mode="Markdown",
-                )
+                reply, kept = handler(chat_id)
+            sent = self.client.send_message(chat_id, reply, parse_mode="Markdown")
+            self._record(text, kept or reply, delivered=sent or kept is not None)  # a short form isn't what's queued
             return
 
         # Natural Conversation with Gemini
@@ -534,7 +588,7 @@ class ThirtiesTelegramBridge:
                 except Exception as e:
                     logger.debug("Post-message sync push failed: %s", e)
 
-            self.client.send_message(chat_id, reply, parse_mode="Markdown")
+            self._reply(chat_id, reply)
         except Exception as e:
             logger.error("Error generating assistant reply: %s", e, exc_info=True)
             self.client.send_message(
@@ -543,12 +597,50 @@ class ThirtiesTelegramBridge:
                 parse_mode="Markdown",
             )
 
-    def _cmd_help(self, chat_id: int) -> None:
+    def _reply(self, chat_id: int, reply: str) -> None:
+        """A turn's reply, already in the conversation: if the phone didn't get it, the app shows a quiet mark."""
+        if not self.client.send_message(chat_id, reply, parse_mode="Markdown"):
+            try:
+                if self.conv_manager.mark_delivery(reply, undelivered=True):
+                    self._marked.add(plain_lists(reply))
+            except Exception as e:
+                logger.warning("Couldn't mark a reply as not delivered: %s", e)
+
+    def _delivered_late(self, chat_id: Any, chunk: str) -> None:
+        """Something queued got to the phone after all."""
+        if self.service is not None and self.service.delivered_late(chunk):
+            return
+        found = next((k for k in self._marked if chunk in k), None)
+        if found is not None:
+            self._marked.discard(found)
+            try:
+                self.conv_manager.mark_delivery(chunk, undelivered=False)
+            except Exception as e:
+                logger.warning("Couldn't take the not-delivered mark off: %s", e)
+
+    def _dropped(self, chat_id: Any, chunk: str) -> None:
+        """A queued message was dropped (stale, or too old): a stored one keeps its mark; a notice is never stored."""
+        if self.service is not None and self.service.dropped_stale(chunk):
+            return
+        found = next((k for k in self._marked if chunk in k), None)
+        if found is not None:
+            self._marked.discard(found)
+
+    def _record(self, said: str, reply: str, delivered: bool = True) -> None:
+        """What was typed on the phone and the answer, in the one conversation the app shows too."""
+        try:
+            self.conv_manager.record_exchange(said, plain_text(reply), via="telegram", undelivered=not delivered)
+            if not delivered:
+                self._marked.add(plain_lists(reply))
+        except Exception as e:
+            logger.warning("Couldn't keep a Telegram command in the conversation: %s", e)
+
+    def _cmd_help(self, chat_id: int) -> tuple:
         msg = (
             "🤖 *Thirties Mobile Planning Assistant*\n\n"
             "Powered by Gemini & your Joplin backlog.\n\n"
             "📋 *Commands*:\n"
-            "• `/now` – What's happening now, and time until sleep\n"
+            "• `/now` – What's next (or tap the What's next button)\n"
             "• `/day` – Today's schedule\n"
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
@@ -561,47 +653,35 @@ class ThirtiesTelegramBridge:
             "• _\"Move my workout to 3:30pm\"_\n"
             "• _\"What do I have remaining in my backlog?\"_\n"
         )
-        self.client.send_message(chat_id, msg, parse_mode="Markdown")
+        return msg, "The list of Telegram commands is on your phone."
 
-    def _cmd_now(self, chat_id: int) -> None:
-        from thirties_core.messages import missed_for, with_missed
+    def _cmd_now(self, chat_id: int) -> tuple:
+        """What's next (whats_next.py): what's on now, the next few things, open stretches, what's on today's list
+        with no time and what's not marked yet, the same slice a reply or a notice shows. The "What's next"
+        button sends this too."""
+        from thirties_core import whats_next
         now = self._get_current_time()
+        tools = self.conv_manager.tools
         plan = self.conv_manager.day_plan
-        curr = self._get_current_block()
+        if not (plan.day_start <= now < plan.day_end):
+            return f"It's {format_clock(now)}, and nothing is planned for now.", None
+        from thirties_core.reply_extras import effective
+        mode = "rest" if effective(self.config, getattr(self.scheduler, "state_db", None),
+                                   plan.target_date)["whats_next"] == "rest" else "next"
+        text = whats_next.summary(tools, now, mode)  # asked for: a mode given, so it's whole, whatever the settings
+        whats_next.SentSummaries(getattr(self.scheduler, "state_db", None)).mark(plan, now, mode)
+        return text or f"It's {format_clock(now)}, and nothing is planned for now.", None
 
-        if not curr:
-            self.client.send_message(
-                chat_id,
-                f"🕒 *Current Time*: {format_clock(now)}\n\nOutside today's diurnal day.",
-                parse_mode="Markdown",
-            )
-            return
-
-        span = plan.display_span(curr)
-        rem_mins = max(0, int((curr.end_dt - now).total_seconds())) // 60
-        doing = f"{span.title} (until {format_clock(span.end_dt)})" if span else "Open time"
-
-        sleep = next((s for s in plan.active_spans()
-                      if s.category == SpanCategory.SLEEP and s.start_dt > now), None)
-        sleep_str = ""
-        if sleep:
-            until = int((sleep.start_dt - now).total_seconds() // 60)
-            sleep_str = f"\n🌙 *Until sleep*: {format_duration(until)} (sleep at {format_clock(sleep.start_dt)})"
-
-        msg = with_missed(
-            f"🕒 *Now*: {format_clock(now)} (thirty #{curr.number:02d}, {format_clock(curr.start_dt)} – {format_clock(curr.end_dt)})\n"
-            f"📝 *Doing*: {doing}\n"
-            f"⏳ *Left in this thirty*: {rem_mins} minutes"
-            f"{sleep_str}", missed_for(self.conv_manager.tools, now, muted_too=True))  # what's not marked yet
-        self.client.send_message(chat_id, msg, parse_mode="Markdown")
-
-    def _cmd_day(self, chat_id: int) -> None:
+    def _cmd_day(self, chat_id: int) -> tuple:
         """The whole day, laid out the same way as the assistant's schedule replies (messages.render_schedule):
         the phone and the app never show the day two different ways (10-24 12:03)."""
         from thirties_core.messages import missed_for, render_schedule
         plan = self.conv_manager.day_plan
         now = self._get_current_time()
         live = plan.day_start <= now < plan.day_end
+        if live:
+            from thirties_core.whats_next import SentSummaries
+            SentSummaries(getattr(self.scheduler, "state_db", None)).mark(plan, now, whole_day=True)
         text = render_schedule(plan, now if live else None, whole_day=True,
                                missed=missed_for(self.conv_manager.tools, now, muted_too=True) if live else [],
                                label="today")
@@ -609,24 +689,19 @@ class ThirtiesTelegramBridge:
             from thirties_core.if_time import text_for
             text += text_for(self.conv_manager.tools.assistant)  # after the day's timed items
         title = f"📅 *Schedule for {plan.target_date.strftime('%A, %b %d')}*\n\n"
-        self.client.send_message(chat_id, title + text, parse_mode="Markdown")
+        return title + text, None
 
-    def _cmd_sync(self, chat_id: int) -> None:
+    def _cmd_sync(self, chat_id: int) -> tuple:
         self.client.send_chat_action(chat_id, "typing")
         try:
             pull_ok, pull_msg = self.sync_engine.pull()
             push_ok, push_msg = self.sync_engine.push()
             status = "✅ Sync Completed" if (pull_ok and push_ok) else "⚠️ Sync Partially Completed"
-            msg = f"*{status}*\n\n📥 *Pull*: {pull_msg}\n📤 *Push*: {push_msg}"
-            self.client.send_message(chat_id, msg, parse_mode="Markdown")
+            return f"*{status}*\n\n📥 *Pull*: {pull_msg}\n📤 *Push*: {push_msg}", None
         except Exception as e:
-            self.client.send_message(chat_id, f"❌ *Sync Error*: `{e}`", parse_mode="Markdown")
+            return f"❌ *Sync Error*: `{e}`", None
 
-    def _cmd_clear(self, chat_id: int) -> None:
-        self.conv_manager.new_conversation()
-        self.client.send_message(chat_id, "🆕 Started a new conversation. What's next?")
-
-    def _cmd_status(self, chat_id: int) -> None:
+    def _cmd_status(self, chat_id: int) -> tuple:
         model_name = getattr(self.inference_engine, "model_name", "N/A")
         services = self.conv_manager.tools.services
         tasks_count = len(services.tasks) if services else 0
@@ -644,7 +719,8 @@ class ThirtiesTelegramBridge:
             f"📒 *Active Notes*: {notes_count}\n"
             f"📱 *Connected Chats*: {len(self.active_chats)}"
         )
-        self.client.send_message(chat_id, msg, parse_mode="Markdown")
+        assistant = BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)
+        return msg, f"Status: {assistant}, model {model_name}, sync {sync_enabled.lower()}, check-ins {notify_enabled}."
 
     def _asks_yes(self, chat_id, message_id) -> bool:
         db = getattr(self.scheduler, "state_db", None)
@@ -655,10 +731,13 @@ class ThirtiesTelegramBridge:
         except ValueError:
             return False
 
-    def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown") -> None:
-        """Send a message to the paired phone(s). A notice that ``expires`` is dropped if it can't go before then."""
+    def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown") -> bool:
+        """Send a message to the paired phone(s). A notice that ``expires`` is dropped if it can't go before then.
+        True when it reached a phone now."""
+        sent = False
         for chat_id in list(self.allowed_chat_ids):
-            self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires)
+            sent = bool(self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires)) or sent
+        return sent
 
     # --- kept on this device across a restart: where reading stopped, and replies not yet delivered ---
 
@@ -698,7 +777,8 @@ class ThirtiesTelegramBridge:
         if before is not None and _typo_fix(before, text):
             return
         logger.info("An edit to an answered message was not acted on")
-        self.client.send_message(chat_id, EDIT_NOTICE, parse_mode=None)
+        sent = self.client.send_message(chat_id, EDIT_NOTICE, parse_mode=None)
+        self._record(f"(edited) {text}", EDIT_NOTICE, delivered=sent)
 
     def _remember(self, chat_id: int, message_id: Any, text: str) -> None:
         if message_id is None:
@@ -751,7 +831,7 @@ class ThirtiesTelegramBridge:
                 else:
                     self._edited(chat_id, message_id, text)
                 continue
-            if text.strip().startswith("/"):
+            if _answered_at_once(text):
                 self._remember(chat_id, message_id, text)
                 self.handle_message(chat_id, text)
             else:
@@ -767,6 +847,7 @@ class ThirtiesTelegramBridge:
         """Answer messages until stopped. Another computer polling the same bot makes Telegram refuse
         one of the two (HTTP 409); then this one backs off, since only one computer should run the bridge."""
         self.running = True
+        self.register_commands()
         offset: Optional[int] = self._saved_offset()
         while self.running:
             try:
@@ -777,7 +858,7 @@ class ThirtiesTelegramBridge:
                     update_id = u.get("update_id")
                     if update_id is not None:
                         offset = update_id + 1
-                if any(not str(((u.get("message") or {}).get("text") or "/")).startswith("/") for u in updates):
+                if any(not _answered_at_once(str(((u.get("message") or {}).get("text") or "/"))) for u in updates):
                     more, offset = self._rest_of_burst(offset)
                     updates += more
                 if updates:
@@ -794,6 +875,12 @@ class ThirtiesTelegramBridge:
                 if self.running:
                     logger.error("Polling error: %s (sleeping 5s)", e)
                     time.sleep(5.0)
+
+    def register_commands(self) -> None:
+        """Once per run: the commands in Telegram's menu, so /now and /day are a tap away."""
+        if self._menu_set:
+            return
+        self._menu_set = self.client.set_my_commands(MENU_COMMANDS)
 
     def start(self) -> None:
         """Run standalone (a developer tool; the app runs the bridge inside its background service)."""

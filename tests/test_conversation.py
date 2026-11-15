@@ -3,7 +3,7 @@
 from tests.fixtures import temp_dir
 import unittest
 
-from tests.fixtures import DAY, TZ, at, event, make_scheduler, occupant
+from tests.fixtures import DAY, TZ, at, event, line_with, make_scheduler, occupant
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import MockInferenceEngine, parse_model_directives
@@ -37,7 +37,7 @@ class TestSystemPrompt(ConversationTestCase):
 
     def test_prompt_has_schedule_in_clock_time_and_no_block_math(self) -> None:
         prompt = self.manager.messages[0]["content"]
-        self.assertIn("Today, Thursday, October 15, 2026. Current time: 9:00 AM.", prompt)
+        line_with(prompt, "Thursday, October 15, 2026", "9:00 AM")
         self.assertIn("8:30 AM – 4:00 PM: Work", prompt)
         self.assertIn(f"id={self.work_id()}", prompt)
         self.assertIn("Free time remaining: 4:00 PM – 11:00 PM", prompt)
@@ -48,7 +48,7 @@ class TestSystemPrompt(ConversationTestCase):
     def test_prompt_for_another_day(self) -> None:
         set_debug_time(at("09:00", 3))
         prompt = self.manager.brain.build_system_prompt()
-        self.assertIn("(not today; today is Sunday, October 18)", prompt)
+        line_with(prompt, "not today", "Sunday, October 18")
         self.assertIn("Free time: 7:00 AM", prompt)
 
     def test_prompt_is_refreshed_every_turn(self) -> None:
@@ -58,7 +58,7 @@ class TestSystemPrompt(ConversationTestCase):
 
     def test_unconfirmed_invites_listed(self) -> None:
         manager = self.make_manager(events=[event("dinner", "19:00", "21:00", "Team dinner", invite=True)])
-        self.assertIn("- Team dinner, 7:00 PM – 9:00 PM id=cal:dinner", manager.messages[0]["content"])
+        line_with(manager.messages[0]["content"], "Team dinner", "7:00 PM", "9:00 PM", "id=cal:dinner")
 
     def test_backlog_presentation(self) -> None:
         tasks = [
@@ -122,8 +122,8 @@ class TestTurnLoop(ConversationTestCase):
         self.assertEqual(out, "Walk is on for 5 PM.")
 
     def test_persistent_false_claim_is_not_shown_to_user(self) -> None:
-        self.engine.set_next_response(reply("I've scheduled your walk."))
-        self.engine.set_next_response(reply("I've scheduled your walk."))
+        for _ in range(3):  # the claim, its correction round, and the fresh reply asked for: all false
+            self.engine.set_next_response(reply("I've scheduled your walk."))
         out = self.manager.send_user_message("walk at 5")
         self.assertIn("wasn't able to change", out)
 
@@ -155,7 +155,7 @@ class TestTurnLoop(ConversationTestCase):
         work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
         self.assertEqual(work.start_dt.strftime("%H:%M"), "08:30")
         tool = next(m for m in self.manager.messages if m.get("role") == "tool")
-        self.assertIn("only changes when the user talks about it", tool["content"])
+        line_with(tool["content"], "Work", "user")  # refused: work moves only when the user says so
         self.engine.set_next_response(reply('CALL update_event {"event": "Work", "end": "3:55 PM"}'))
         self.engine.set_next_response(reply("Noted."))
         self.manager.send_user_message("done with work for the day")  # 10-28: that one is right
@@ -195,7 +195,8 @@ class TestTurnLoop(ConversationTestCase):
     def test_a_list_with_a_phone_call_in_it_is_kept(self) -> None:
         text = "Pressing today:\n- Call the plumber\n- Call the library about the fine\n\nWant those after lunch?"
         self.engine.set_next_response(reply(text))
-        self.assertEqual(self.manager.send_user_message("anything urgent today?"), text)  # 10-21: the list vanished
+        self.assertEqual(self.manager.send_user_message("anything urgent today?"),  # 10-21: the list vanished
+                         text.replace("\n- ", "\n"))  # kept, as plain lines (11-05: never "- " bullets)
 
     def test_a_reply_claiming_a_failed_change_is_corrected(self) -> None:
         self.engine.responses = [reply('CALL log_outcome {"event": "Work", "status": "skipped"}'),

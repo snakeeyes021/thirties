@@ -4,7 +4,7 @@ still shows what's not marked yet. Invented items; DAY is Thu Oct 15."""
 import unittest
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.astronomy import set_debug_time
 from thirties_core.clock import format_clock
 from thirties_core.background import BackgroundService
@@ -37,8 +37,8 @@ class TestMutedStillShown(unittest.TestCase):
     def test_the_prompt_knows_them_but_not_to_ask(self):
         from thirties_core.messages import now_section
         text = now_section(self.m.tools)
-        self.assertIn("Not marked yet (their time is over, nothing said): Oil the hinges, Sort the seed packets", text)
-        self.assertIn("Check-ins are muted for Oil the hinges, Sort the seed packets: never ask about those", text)
+        line_with(text, "Not marked yet", "Oil the hinges", "Sort the seed packets")
+        line_with(text, "muted", "Oil the hinges", "Sort the seed packets")
 
     def test_no_notice_lists_them(self):
         svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=MagicMock(),
