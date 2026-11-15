@@ -414,6 +414,75 @@ class AntigravityInferenceEngine:
         })
 
 
+TEST_BRAIN_ENV = "THIRTIES_TEST_BRAIN"  # set to 1 only in tests and simulations: the Claude brain refuses otherwise
+CLAUDE_CLI_MODEL = "claude-sonnet-5-5"
+# No tools, no settings, MCP servers, slash commands or saved session: a text model and nothing else
+CLAUDE_CLI_FLAGS = ["--tools", "", "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
+                    "--no-session-persistence", "--output-format", "text"]
+
+
+def claude_workspace_dir() -> Path:
+    """An empty directory the Claude CLI runs in, so it never sees real files."""
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    workspace = cache / "thirties" / "claude-workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+class TestBrainRefused(RuntimeError):
+    """The Claude brain is for tests and simulations only."""
+
+
+class ClaudeCliInferenceEngine:
+    """For tests and simulations only (backend "claude_cli"; never offered in Preferences, and refused unless
+    THIRTIES_TEST_BRAIN=1): the brain on Claude through the Claude Code CLI. It sends the same CALL-line prompt as
+    the agy engine (_format_prompt) and reads the reply with the same parser, so the brain behaves the same way;
+    only the model differs. The prompt goes in on stdin, the CLI runs in an empty directory, and the privacy shield
+    filters it on the way out as for agy. Which account it runs on is the caller's environment: nothing here."""
+
+    def __init__(self, config: Optional[ThirtiesConfig] = None, model: Optional[str] = None,
+                 binary: Optional[str] = None) -> None:
+        if os.environ.get(TEST_BRAIN_ENV) != "1":
+            raise TestBrainRefused(f"The Claude brain is for tests and simulations only ({TEST_BRAIN_ENV}=1).")
+        self.config = config or ThirtiesConfig()
+        self.model = model or CLAUDE_CLI_MODEL
+        self.binary = binary or shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude")
+        self.timeout = self.config.inference.timeout_seconds
+        self._format = AntigravityInferenceEngine(self.config)._format_prompt
+
+    def is_available(self) -> bool:
+        return Path(self.binary).is_file() and os.access(self.binary, os.X_OK)
+
+    def _run(self, prompt: str) -> str:
+        """The reply text, or an error sentence starting like the other engines' (TRANSPORT_FAILURE_PREFIXES)."""
+        cmd = [self.binary, "-p", "--model", self.model, *CLAUDE_CLI_FLAGS]
+        try:
+            res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=self.timeout,
+                                 cwd=claude_workspace_dir())
+        except subprocess.TimeoutExpired:
+            logger.error("Claude CLI timed out after %s seconds.", self.timeout)
+            return "The Claude assistant timed out waiting for a response."
+        except OSError as e:
+            return f"Failed invoking Claude CLI: {e}"
+        if res.returncode != 0 or not res.stdout.strip():
+            err = (res.stderr or res.stdout or "no reply").strip()[-1000:]
+            logger.error("Claude CLI returned exit code %s: %s", res.returncode, err)
+            return f"Error contacting model via Claude CLI: {err}"
+        return res.stdout.strip()
+
+    def complete(self, prompt: str) -> str:
+        """One prompt, sent as written: for a simulation's person or judge."""
+        out = self._run(f"{AGY_NO_TOOLS}\n\n{privacy.SHIELD.redact_prompt(prompt)}")  # the exit to the cloud
+        return out if out.startswith(TRANSPORT_FAILURE_PREFIXES) else privacy.SHIELD.restore(out)
+
+    def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        raw = self._run(self._format(privacy.SHIELD.redact_messages(messages)))  # the exit to the cloud: filtered
+        if raw.startswith(TRANSPORT_FAILURE_PREFIXES):
+            return {"role": "assistant", "content": raw, "tool_calls": []}
+        clean_text, tool_calls = parse_model_directives(raw, _split_glued_on(self.config))
+        return privacy.SHIELD.restore_reply({"role": "assistant", "content": clean_text, "tool_calls": tool_calls})
+
+
 class GeminiInferenceEngine:
     """Dispatches conversation turns directly to the Google Gemini REST API."""
 
@@ -830,7 +899,7 @@ class MockInferenceEngine:
 
 
 TRANSPORT_FAILURE_PREFIXES = ("Error contacting model", "Failed invoking", "The Antigravity assistant timed out",
-                              "Encountered an error communicating with Gemini API")
+                              "Encountered an error communicating with Gemini API", "The Claude assistant timed out")
 GEMINI_SOURCES = {"agy": "Subscription (Antigravity CLI)", "api": "Gemini API key"}
 
 
@@ -926,6 +995,15 @@ def get_inference_engine(config: Optional[ThirtiesConfig] = None) -> InferenceEn
 
     elif backend == "mock":
         return MockInferenceEngine()
+
+    elif backend == "claude_cli":  # tests and simulations only: refused anywhere else
+        if os.environ.get(TEST_BRAIN_ENV) != "1":
+            logger.error("The claude_cli brain is for tests only (%s=1); using Gemini instead.", TEST_BRAIN_ENV)
+            import copy
+            fallback = copy.deepcopy(cfg)
+            fallback.inference.backend = "gemini"
+            return get_inference_engine(fallback)
+        return ClaudeCliInferenceEngine(cfg)
 
     else:
         logger.warning("Unknown backend '%s'. Falling back to Mock.", backend)
