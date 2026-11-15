@@ -358,25 +358,33 @@ class TelegramClient:
 
     @staticmethod
     def _chunk_text(text: str, max_len: int = 4000) -> List[str]:
+        """A message too long for one Telegram message, as several: cut where a paragraph ends if one fits, else
+        where a line ends, else between words. Never inside a word (only a single word longer than a whole message
+        is ever split), and nothing is dropped: the pieces joined are the message."""
         if len(text) <= max_len:
             return [text]
 
+        def units(block: str, level: int) -> List[str]:
+            if len(block) <= max_len:
+                return [block]
+            if level >= 3:  # one word longer than a whole message
+                return [block[i:i + max_len] for i in range(0, len(block), max_len)]
+            cut = (r"(?<=\n\n)", r"(?<=\n)", r"(?<=\s)")[level]  # after a paragraph, a line, a word
+            out: List[str] = []
+            for piece in (p for p in re.split(cut, block) if p):
+                out += units(piece, level + 1)
+            return out
+
         chunks: List[str] = []
         current = ""
-        for line in text.splitlines(keepends=True):
-            if len(current) + len(line) > max_len:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                while len(line) > max_len:
-                    chunks.append(line[:max_len])
-                    line = line[max_len:]
-                current = line
-            else:
-                current += line
+        for unit in units(text, 0):
+            if current and len(current) + len(unit) > max_len:
+                chunks.append(current)
+                current = ""
+            current += unit
         if current:
             chunks.append(current)
-        return chunks
+        return [c for c in chunks if c.strip()]
 
 
 def pair_by_code(client: TelegramClient, code: str, timeout: float = 300.0,

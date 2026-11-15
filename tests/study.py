@@ -160,13 +160,20 @@ Be a person, not a tester:
 
 
 def phone_view(text: str) -> str:
-    """A message as a phone shows it: Telegram's formatting applied (no markup left), long ones cut off."""
+    """A message as a phone shows it: Telegram's formatting applied (no markup left), long ones cut off before
+    "Read more", where a line ends (or, in one long line, between words): a preview never ends inside a word, so
+    the person never takes the cut for the app's."""
     from thirties_core.telegram_bridge import telegram_html
     try:
         shown = html.unescape(re.sub(r"<[^>]+>", "", telegram_html(text or "")))
     except Exception:
         shown = text or ""
-    return shown if len(shown) <= PHONE_CUT else shown[:PHONE_CUT].rstrip() + "… [Read more]"
+    if len(shown) <= PHONE_CUT:
+        return shown
+    head = shown[:PHONE_CUT + 1]
+    line = head.rfind("\n")
+    cut = line if line >= PHONE_CUT // 2 else max(head.rfind(" "), head.rfind("\n"))
+    return (shown[:cut] if cut > 0 else head[:PHONE_CUT]).rstrip() + " … [Read more]"
 
 
 @dataclass
