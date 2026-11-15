@@ -337,6 +337,74 @@ class TestRecovery(FallbackCase):
                          .isoformat()[:16])
 
 
+class TestListSorting(FallbackCase):
+    """Sorting the lists waits while the usual model is out: no calls to it, none to the second model, and it
+    starts again once a real turn has had the usual answer."""
+
+    def setUp(self):
+        super().setUp()
+        self.sorted = []
+
+        def chat(engine, messages, tools=None):
+            self.sorted.append(messages)
+            return {"role": "assistant", "content": '{"role": "ignore"}', "tool_calls": []}
+        for patcher in (patch("thirties_core.inference.GeminiSourcesEngine.is_available", return_value=True),
+                        patch("thirties_core.inference.GeminiSourcesEngine.chat", chat)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def sorter(self):
+        from thirties_core.brains.list_sorter import list_sorter_for
+        return list_sorter_for(self.sched.config, self.sched.state_db, self.engine)
+
+    def test_the_sorter_waits_until_a_turn_has_the_usual_answer_again(self):
+        from thirties_core.brains.list_sorter import FrontierListSorter
+        self.assertIsInstance(self.sorter(), FrontierListSorter)
+        self.primary.script = [QUOTA, "Usual reply."]
+        m = self.manager()
+        m.send_user_message("one")  # out from 10:00 until 1:20 PM
+        self.assertIsNone(self.sorter())
+        set_debug_time(at("13:25"))
+        self.assertIsNone(self.sorter())  # past the reset, but nothing has answered yet: sorting never probes
+        self.assertEqual(m.send_user_message("two"), BACK + "\n\nUsual reply.")
+        self.assertIsInstance(self.sorter(), FrontierListSorter)
+
+    def test_the_background_run_makes_no_calls_while_out_and_resumes_after(self):
+        from thirties_core.background import BackgroundService
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value = []
+        joplin.fetch_active_notes.return_value = [
+            {"id": "n_kites", "title": "Kite repairs", "source_notebook": "Lists", "body": "- [ ] Patch the red one\n"}]
+        svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=joplin,
+                                inference_engine=self.engine, sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        svc.sort_lists_enabled = True
+
+        class Now:  # the sort runs in its own thread: here, right away
+            def __init__(self, target=None, **_):
+                self.target = target
+
+            def start(self):
+                self.target()
+        self.primary.script = [QUOTA, "Usual reply."]
+        m = self.manager()
+        m.send_user_message("one")
+        calls = (self.primary.calls, self.second.calls)
+        with patch("thirties_core.background.threading.Thread", Now):
+            for minute in (0, 60, 200):  # through the reset time (1:20 PM), with nothing answered yet
+                set_debug_time((at("10:05") + timedelta(minutes=minute)).isoformat())
+                svc._last_lists = 0.0
+                svc.sort_lists()
+            self.assertEqual(self.sorted, [])
+            self.assertEqual((self.primary.calls, self.second.calls), calls)
+            set_debug_time(at("13:30"))
+            m.send_user_message("two")  # the usual model answers a real turn
+            svc._last_lists = 0.0
+            svc.sort_lists()
+        self.assertTrue(self.sorted)  # sorting again
+        self.assertEqual(self.second.calls, calls[1])  # never on the second model
+
+
 class TestTheLedger(unittest.TestCase):
 
     def setUp(self):

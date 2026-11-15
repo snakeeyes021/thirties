@@ -282,6 +282,13 @@ def device_brain_ready(config) -> bool:
         return False
 
 
+def usual_model_out(state_db) -> bool:
+    """The usual model ran out and no real turn has had an answer from it since. Work that only tidies up (sorting
+    the lists) waits meanwhile: it never calls the usual model (that would be a probe) or the fallback model (its
+    small quota is for the conversation). Past the reset time it still waits, until a turn has its answer."""
+    return state_db is not None and FallbackState(state_db).active()
+
+
 def with_fallback(engine: Any, config, state_db, tz) -> Any:
     """The app's engine with the automatic fallback (``[assistant] quota_fallback``), for the Gemini sources only:
     a mock, the on-device model or a test engine is returned as it is."""
@@ -427,4 +434,4 @@ def with_notice(manager, reply: str) -> str:
 
 __all__ = ["BACK", "EXHAUSTED", "FallbackEngine", "FallbackState", "SIMPLER", "UNAVAILABLE", "after_lost",
            "before_turn", "device_brain_ready", "engine_of", "keep_for_later", "lost_wait", "quota_failure",
-           "reset_after", "unavailable_reply", "when_text", "with_fallback", "with_notice"]
+           "reset_after", "unavailable_reply", "usual_model_out", "when_text", "with_fallback", "with_notice"]
