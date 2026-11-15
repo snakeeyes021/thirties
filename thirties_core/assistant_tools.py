@@ -482,6 +482,7 @@ class AssistantTools(KindTools):
         self._quiet_today = False  # put_routine lists its steps on Today together, as one group
         self._for_good = False  # an ongoing item's home stays open unless it's finished for good (_tick_twin)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
+        self._ticked_off: Dict[str, TaskItem] = {}  # items ticked off this session, by id: a reopen puts them back
         self._routine_tools = None
         self._proposal_tools = None
 
@@ -577,7 +578,7 @@ class AssistantTools(KindTools):
         from thirties_core.joplin_writeback import complete_op
         status, msg = writer.submit(complete_op(task))
         if status in ("done", "queued"):
-            self.s.tasks = [t for t in self.s.tasks if t.id != task.id]
+            self._took_off(lambda t: t.id == task.id)
             self._tick_twin(task, writer)
         return {"done": "and checked it off in Joplin",
                 "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
@@ -622,13 +623,20 @@ class AssistantTools(KindTools):
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
                     # (a wishlist item), or nothing to write (a routine is a template)
                     writer.submit(complete_op(home))
-                self.s.tasks = [t for t in self.s.tasks if t.id != home.id]
+                self._took_off(lambda t: t.id == home.id)
             return
         title = links.today_title_of(task.id)
         exact = next((text for text, ticked in note_items(today) if title and text.lower() == title and not ticked), None)
         if exact:
             writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
-            self.s.tasks = [t for t in self.s.tasks if not (t.parent_note_id == today["id"] and t.title == exact)]
+            self._took_off(lambda t: t.parent_note_id == today["id"] and t.title == exact)
+
+    def _took_off(self, gone) -> None:
+        """Items ticked off leave the session's lists; they're kept aside, so a reopen can put them back."""
+        for t in self.s.tasks:
+            if gone(t):
+                self._ticked_off[t.id] = t
+        self.s.tasks = [t for t in self.s.tasks if not gone(t)]
 
     def set_sun_notices(self, sunrise: Any = None, sunset: Any = None, **_: Any) -> str:
         from thirties_core.settings import settings_for

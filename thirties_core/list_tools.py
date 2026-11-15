@@ -401,16 +401,21 @@ class ListTools:
             parts.append(f"put '{rec['title']}' back on {rec['source_title']}{queued}")
             names.append(rec["title"])
         today = self.a._today_note()
-        ticked = None if rec is not None else self._ticked_line(names)
+        ticked = None
+        if rec is None:  # its own list's line first; Today's copy only if that's all there is
+            ticked = self._ticked_line(names, skip=today["id"] if today is not None else "") \
+                or (self._ticked_line(names, only=today) if today is not None else None)
         if ticked is not None:
             note, text = ticked
             queued = self._submit({"op": "untick", "note_id": note["id"], "title": text})
             clear_completed(self.a._db, line_id(self.a._db, note["id"], text, done=True))
+            self._put_back(note, text)
             parts.append(f"unticked '{text}' in {note['title']}{queued}")
         if today is not None and (rec is not None or (ticked is not None and ticked[0]["id"] != today["id"])):
             on_today = self._ticked_line(names, only=today)  # its copy on today's list, too
             if on_today is not None:
                 self._submit({"op": "untick", "note_id": today["id"], "title": on_today[1]})
+                self._put_back(today, on_today[1])
         if span is not None and span.status != SpanStatus.PLANNED:
             span.status = SpanStatus.PLANNED
             if span.planned_start is not None:
@@ -424,11 +429,30 @@ class ListTools:
             raise ToolError(f"Nothing called '{ref}' is marked done on the plan or in the lists.")
         return "Undone: " + "; ".join(parts) + "."
 
-    def _ticked_line(self, names: List[str], only: Optional[Dict[str, Any]] = None, by_id: str = ""):
-        """A ticked line worded as one of ``names`` (or whose item id is ``by_id``): (note, its text)."""
+    def _put_back(self, note: Dict[str, Any], text: str) -> None:
+        """A line unticked again is an open item of the session's lists again: a done took it off them, and the
+        next done ticks it in Joplin like the first."""
+        from thirties_core.lists import ListCatalog
+        key = text.strip().lower()
+        if any(t.parent_note_id == note["id"] and t.title.strip().lower() == key for t in self.a.s.tasks):
+            return
+        kept = next((t for t in self.a._ticked_off.values()
+                     if t.parent_note_id == note["id"] and t.title.strip().lower() == key), None)
+        if kept is not None:
+            self.a._ticked_off.pop(kept.id, None)
+        else:  # ticked before this session (or by hand): the line as it reads
+            kept = TaskItem(id=line_id(self.a._db, note["id"], text, done=True), source_notebook="", title=text,
+                            is_checkbox_item=True, parent_note_title=note.get("title", ""), parent_note_id=note["id"],
+                            list_role=ListCatalog(self.a._db).role(note["id"]) or "")
+        self.a.s.tasks.append(kept)
+
+    def _ticked_line(self, names: List[str], only: Optional[Dict[str, Any]] = None, by_id: str = "",
+                     skip: str = ""):
+        """A ticked line worded as one of ``names`` (or whose item id is ``by_id``): (note, its text). ``skip``: a
+        note not to look in."""
         from thirties_core.joplin_engine import DONE_CHECKBOX_REGEX
         want = {n.strip().lower() for n in names}
-        for note in [only] if only else self.a._joplin_notes():
+        for note in [only] if only else [n for n in self.a._joplin_notes() if n.get("id") != skip]:
             for line in (note.get("body") or "").splitlines():
                 m = DONE_CHECKBOX_REGEX.match(line)
                 if m and (m.group(2).strip().lower() in want

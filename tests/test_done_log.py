@@ -108,6 +108,99 @@ class TestFiling(ListsTestCase):
         self.assertIn("unticked 'Call the bank' in Errands/Admin", out)
         self.assertIn("- [ ] Call the bank", self.body("n_errands"))
 
+    def test_done_again_after_an_undo_ticks_it_again(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
+        self.t.execute("reopen_item", {"item": "Call the bank"})
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        out = self.t.execute("log_outcome", {"event": "Call the bank", "status": "done"})
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
+    def test_undoing_a_planned_item_unticks_its_own_list_and_todays_copy(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
+                                     "task_id": bank.id})
+        span = next(s for s in self.t.day_plan.spans if s.title == "Call the bank")
+        set_debug_time(at("15:20"))
+        self.t.execute("log_outcome", {"event": span.id, "status": "done"})
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+        out = self.t.execute("reopen_item", {"item": "Call the bank"})
+        self.assertIn("unticked 'Call the bank' in Errands/Admin", out)
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # not only Today's copy
+        self.assertNotIn("- [x] Call the bank", self.body("n_today"))
+        self.assertEqual(span.status.value, "planned")
+        out = self.t.execute("log_outcome", {"event": span.id, "status": "done"})  # sent after all
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
+    def test_reopened_then_skipped_stays_open_on_its_list(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
+        self.t.execute("reopen_item", {"item": "Call the bank"})
+        self.t.execute("log_outcome", {"event": "Call the bank", "status": "skipped"})
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        self.assertTrue(any(t.title == "Call the bank" for t in self.services.tasks))  # still on its list
+
+    def test_reopened_then_reworded_is_ticked_under_its_new_words(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
+        self.t.execute("reopen_item", {"item": "Call the bank"})
+        out = self.t.execute("edit_list_item", {"item": "Call the bank", "rename_to": "Call the bank about the card"})
+        self.assertIn("Reworded", out)
+        self.assertIn("- [ ] Call the bank about the card", self.body("n_errands"))
+        out = self.t.execute("log_outcome", {"event": "Call the bank about the card", "status": "done"})
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank about the card", self.body("n_errands"))
+        self.assertNotIn("- [ ] Call the bank", self.body("n_errands"))
+
+    def tomorrow(self):
+        """The next day, as a new session: the lists read afresh from Joplin."""
+        from thirties_core.assistant_tools import Services
+        from thirties_core.plan_tools import PlanTools
+        set_debug_time(at("10:00", 1))
+        self.services = Services.for_db(self.sched.state_db, self.read_tasks(), self.services.joplin)
+        plan, pending = self.sched.build_day_plan(DAY + timedelta(days=1))
+        self.t = PlanTools(plan, pending, self.sched, services=self.services)
+
+    def test_reopened_the_next_day_before_filing_is_ticked_again_when_done(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
+        self.tomorrow()
+        self.assertFalse(any(t.title == "Call the bank" for t in self.services.tasks))  # ticked: not on the lists
+        out = self.t.execute("reopen_item", {"item": "Call the bank"})
+        self.assertIn("unticked 'Call the bank' in Errands/Admin", out)
+        out = self.t.execute("log_outcome", {"event": "Call the bank", "status": "done"})
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
+    def test_reopened_the_next_day_after_filing_is_ticked_again_when_done(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("log_outcome", {"event": bank.id, "status": "done"})
+        self.sweep(at("14:10"))
+        self.sweep(at("14:45"))
+        self.assertNotIn("Call the bank", self.body("n_errands"))  # filed in the Done note
+        self.tomorrow()
+        out = self.t.execute("reopen_item", {"item": "Call the bank"})
+        self.assertIn("put 'Call the bank' back on Errands/Admin", out)
+        out = self.t.execute("log_outcome", {"event": "Call the bank", "status": "done"})
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
+    def test_done_again_with_the_apps_own_button_after_an_undo_in_chat(self):
+        bank = next(t for t in self.services.tasks if t.title == "Call the bank")
+        self.t.execute("add_event", {"title": "Call the bank", "start": "2:00 PM", "duration": "30 min",
+                                     "task_id": bank.id})
+        span = next(s for s in self.t.day_plan.spans if s.title == "Call the bank")
+        set_debug_time(at("14:10"))
+        self.t.execute("log_outcome", {"event": span.id, "status": "done", "finished": "2:10 PM"})  # the app's tick
+        self.t.execute("reopen_item", {"item": "Call the bank"})  # "not yet", in chat
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))
+        set_debug_time(at("14:25"))
+        out = self.t.execute("log_outcome", {"event": span.id, "status": "done", "finished": "2:25 PM"})
+        self.assertIn("checked it off in Joplin", out)
+        self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
     def test_what_was_nested_under_it_goes_into_the_done_note_too(self):
         self.api.notes["n_errands"]["body"] = ("# Active\n- [ ] Call the bank\n    - [x] Find the number\n    "
                                                "branch on Main St\n- [ ] Buy stamps\n")
