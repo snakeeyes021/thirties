@@ -2,9 +2,10 @@
 
 Pulls public media wishlists without logins or API tokens:
 
-* Goodreads shelves via the public shelf RSS feed
-  ``https://www.goodreads.com/review/list_rss/<user_id>?shelf=<shelf>&page=<n>``
-  (100 items per page; works only when the profile is public).
+* Goodreads: the library export the user saves in a folder they choose (My Books → Import/Export → Export
+  Library, a CSV); the newest one there is read, its to-read shelf. Goodreads stopped serving its public shelf
+  RSS feed (``/review/list_rss/<user_id>``) in late 2026, so a list fetched that way stays as it was last
+  fetched, until an export replaces it.
 * Letterboxd watchlists by parsing the public HTML pages
   ``https://letterboxd.com/<username>/watchlist/page/<n>/`` (28 films per page).
   Letterboxd offers no watchlist RSS, and its JSON endpoints sit behind a
@@ -25,6 +26,8 @@ Pure Python, standard library only, no GUI imports.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import os
@@ -205,6 +208,92 @@ class _BaseSource:
 # --------------------------------------------------------------------------- #
 # Goodreads
 # --------------------------------------------------------------------------- #
+
+# Said to the user once each time they finish a book in Thirties: Goodreads only hears of it from them, and the
+# reading list here only changes with a new export
+BOOK_DONE_NOTE = ("Finished a book: mark it read on Goodreads too, and export your library again "
+                   "(My Books → Import/Export) so the reading list here stays current.")
+EXPORT_COLUMNS = ("Book Id", "Title", "Exclusive Shelf")  # what makes a CSV a Goodreads library export
+
+
+def is_goodreads_export(path: Path) -> bool:
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return False
+    return all(c in header for c in EXPORT_COLUMNS)
+
+
+def newest_goodreads_export(folder: Optional[Path | str]) -> Optional[Path]:
+    """The newest Goodreads library export (a CSV) in ``folder``, by when it was saved; any older ones are
+    ignored. None if there's none, or the folder can't be read."""
+    if not folder:
+        return None
+    try:
+        files = [f for f in Path(folder).expanduser().iterdir() if f.suffix.lower() == ".csv" and f.is_file()]
+    except OSError:
+        return None
+    for f in sorted(files, key=lambda f: f.stat().st_mtime, reverse=True):
+        if is_goodreads_export(f):
+            return f
+    return None
+
+
+def _export_date(text: str) -> Optional[datetime]:
+    try:
+        return datetime.strptime(text.strip(), "%Y/%m/%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def parse_goodreads_export(text: str, shelf: str = "to-read") -> List[MediaItem]:
+    """The books on one exclusive shelf (to-read) of a Goodreads library export, once each."""
+    items: List[MediaItem] = []
+    seen: set[str] = set()
+    for row in csv.DictReader(io.StringIO(text.lstrip("\ufeff"))):
+        if (row.get("Exclusive Shelf") or "").strip() != shelf:
+            continue
+        book_id, title = (row.get("Book Id") or "").strip(), (row.get("Title") or "").strip()
+        if not title or (book_id or title.lower()) in seen:
+            continue
+        seen.add(book_id or title.lower())
+        items.append(MediaItem(
+            source="goodreads", kind="book", title=title, creator=(row.get("Author") or "").strip(),
+            year=_parse_year(row.get("Original Publication Year")) or _parse_year(row.get("Year Published")),
+            url=f"{GOODREADS_BASE}/book/show/{book_id}" if book_id else "", list_name=shelf,
+            added_at=_export_date(row.get("Date Added") or ""), item_id=book_id))
+    return items
+
+
+class GoodreadsExport(_BaseSource):
+    """The to-read shelf of the newest Goodreads library export in a folder the user picked."""
+    source = "goodreads"
+    kind = "book"
+    list_name = "to-read"
+    read_each_refresh = True  # on this computer: read again each refresh
+    cache_key = "goodreads-export"
+
+    def __init__(self, folder: str, fallback_keys: Iterable[str] = ()) -> None:
+        super().__init__(lambda url: b"", max_pages=1, detail_lookups=0)
+        self.folder = folder
+        self.fallback_keys = list(fallback_keys)  # the list fetched before the exports (kept until the first)
+        self.exported_at: Optional[datetime] = None
+
+    def fetch(self) -> List[MediaItem]:
+        path = newest_goodreads_export(self.folder)
+        if path is None:
+            logger.info("goodreads: no library export in %s yet", self.folder)
+            self.ok = False
+            return []
+        try:
+            items = parse_goodreads_export(path.read_text(encoding="utf-8-sig"), self.list_name)
+        except (OSError, UnicodeDecodeError, csv.Error) as exc:
+            logger.warning("goodreads: couldn't read the export %s: %s", path.name, exc)
+            self.ok = False
+            return []
+        self.exported_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        return items
 
 def _parse_year(text: Optional[str]) -> Optional[int]:
     if not text:
@@ -609,8 +698,12 @@ def build_sources(media_config: Any, opener: Optional[Opener] = None) -> List[_B
     """Instantiate the sources enabled in a MediaConfig."""
     lookups = int(getattr(media_config, "detail_lookups_per_refresh", 0) or 0)
     sources: List[_BaseSource] = []
-    if media_config.goodreads_user_id:
-        shelves = list(dict.fromkeys(media_config.goodreads_shelves or ["to-read"]))
+    shelves = list(dict.fromkeys(media_config.goodreads_shelves or ["to-read"]))
+    if getattr(media_config, "goodreads_export_dir", ""):  # the export replaces the public feed, which is gone
+        fallback = [GoodreadsShelf(media_config.goodreads_user_id, shelf).cache_key for shelf in shelves] \
+            if media_config.goodreads_user_id else []
+        sources.append(GoodreadsExport(media_config.goodreads_export_dir, fallback))
+    elif media_config.goodreads_user_id:
         for shelf in shelves:
             sources.append(GoodreadsShelf(media_config.goodreads_user_id, shelf, opener=opener))
     if media_config.letterboxd_username:
@@ -643,9 +736,14 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
     merged: List[MediaItem] = []
     for src in build_sources(media, opener):
         cached = cache.load(src.cache_key)
+        for name in getattr(src, "fallback_keys", []) if cached is None else []:
+            cached = cache.load(name)  # with no export yet: the list as last fetched
+            if cached is not None:
+                break
         if cached is not None:
             fetched_at, cached_items = cached
-            if ttl > timedelta(0) and timedelta(0) <= now - fetched_at < ttl:
+            if ttl > timedelta(0) and timedelta(0) <= now - fetched_at < ttl and not getattr(src, "read_each_refresh",
+                                                                                              False):
                 merged.extend(cached_items)
                 continue
             src.known = {it.url: it for it in cached_items}
@@ -659,7 +757,7 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
                            src.cache_key, len(cached[1]), cached[0])
             merged.extend(cached[1])
         elif src.ok:
-            cache.save(src.cache_key, items, now)
+            cache.save(src.cache_key, items, getattr(src, "exported_at", None) or now)
             merged.extend(items)
         elif cached is not None:
             logger.info("%s: refresh failed, using cached list from %s", src.cache_key, cached[0])
@@ -676,6 +774,30 @@ def fetch_all_media(config: Any, opener: Optional[Opener] = None, now: Optional[
         seen.add(key)
         unique.append(item)
     return unique
+
+
+def reading_list_status(config: Any, cache_dir: Optional[Path | str] = None) -> str:
+    """How old the Goodreads reading list is, in plain words (Preferences); "" when there's none."""
+    media = getattr(config, "media", config)
+    cache = MediaCache(cache_dir)
+    if getattr(media, "goodreads_export_dir", ""):
+        path = newest_goodreads_export(media.goodreads_export_dir)
+        when = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) if path else None
+        if when is None:
+            cached = cache.load(GoodreadsExport.cache_key)
+            when = cached[0] if cached else None
+        if when is not None:
+            return f"Reading list from your Goodreads export of {when.astimezone().strftime('%B %-d, %Y')}."
+    keys = [GoodreadsShelf(media.goodreads_user_id, shelf).cache_key
+            for shelf in (media.goodreads_shelves or ["to-read"])] if media.goodreads_user_id else []
+    for name in keys:
+        cached = cache.load(name)
+        if cached is not None:
+            until = ("an export is saved in the folder" if getattr(media, "goodreads_export_dir", "")
+                     else "you choose a folder with your export")
+            return (f"Reading list from Goodreads as of {cached[0].astimezone().strftime('%B %-d, %Y')}. Goodreads "
+                    f"doesn't share lists, so it stays as it is until {until}.")
+    return ""
 
 
 def media_task_title(item: MediaItem) -> str:

@@ -261,3 +261,91 @@ def create_base_day_plan(
         sunrise=phases["sunrise"],
         sunset=phases["sunset"],
     )
+
+
+# --- the moon: its phase, waxing or waning, and the next new and full moon ---
+# Low-precision positions after Meeus, Astronomical Algorithms ch. 25 and 47 (the Moon's longitude to about 0.3°):
+# the phase follows from how far the Moon is east of the Sun (its elongation), and the next new or full moon is
+# found by stepping forward and halving the step, to within a few minutes of the formula (an hour or two of the
+# almanac's time).
+
+SYNODIC_DAYS = 29.530588853
+_PRINCIPAL = ((0.0, "new moon"), (90.0, "first quarter"), (180.0, "full moon"), (270.0, "last quarter"))
+_PRINCIPAL_WITHIN = 7.0  # degrees either side (about 14 hours) that still count as the named instant
+
+
+def _julian_day(when: datetime) -> float:
+    return when.astimezone(timezone.utc).timestamp() / 86400.0 + 2440587.5
+
+
+def moon_elongation(when: datetime) -> float:
+    """How far the Moon is east of the Sun, in degrees from 0 (new) through 180 (full) to 360."""
+    t = (_julian_day(when) - 2451545.0) / 36525.0
+    rad = math.radians
+    sun_mean = 280.46646 + 36000.76983 * t
+    sun_anom = rad(357.52911 + 35999.05029 * t)
+    sun_long = sun_mean + (1.914602 - 0.004817 * t) * math.sin(sun_anom) + 0.019993 * math.sin(2 * sun_anom) \
+        + 0.000289 * math.sin(3 * sun_anom)
+    moon_mean = 218.3164477 + 481267.88123421 * t
+    d = rad(297.8501921 + 445267.1114034 * t)
+    m_moon = rad(134.9633964 + 477198.8675055 * t)
+    f = rad(93.2720950 + 483202.0175233 * t)
+    moon_long = (moon_mean + 6.288774 * math.sin(m_moon) + 1.274027 * math.sin(2 * d - m_moon)
+                 + 0.658314 * math.sin(2 * d) + 0.213618 * math.sin(2 * m_moon) - 0.185116 * math.sin(sun_anom)
+                 - 0.114332 * math.sin(2 * f) + 0.058793 * math.sin(2 * d - 2 * m_moon)
+                 + 0.057066 * math.sin(2 * d - sun_anom - m_moon) + 0.053322 * math.sin(2 * d + m_moon)
+                 + 0.045758 * math.sin(2 * d - sun_anom) - 0.040923 * math.sin(sun_anom - m_moon)
+                 - 0.034720 * math.sin(d) - 0.030383 * math.sin(sun_anom + m_moon))
+    return (moon_long - sun_long) % 360.0
+
+
+def moon_phase(when: datetime) -> Dict[str, object]:
+    """The Moon's phase at ``when``: its name ("waxing gibbous"), the share of its face lit (0 to 1), and
+    whether it's waxing (growing toward full) or waning."""
+    e = moon_elongation(when)
+    lit = (1.0 - math.cos(math.radians(e))) / 2.0
+    waxing = e < 180.0
+    name = ""
+    for angle, label in _PRINCIPAL:
+        gap = min(abs(e - angle), 360.0 - abs(e - angle))
+        if gap <= _PRINCIPAL_WITHIN:
+            name = label
+    if not name:
+        shape = "crescent" if lit < 0.5 else "gibbous"
+        name = f"{'waxing' if waxing else 'waning'} {shape}"
+    return {"name": name, "lit": lit, "waxing": waxing, "elongation": e}
+
+
+def next_moon(when: datetime, target: float) -> datetime:
+    """The next moment after ``when`` that the Moon is ``target`` degrees east of the Sun (0: new, 180: full)."""
+    def ahead(t: datetime) -> float:  # degrees still to go to the target, 0..360
+        return (target - moon_elongation(t)) % 360.0
+    step = timedelta(hours=6)
+    t = when
+    gone = ahead(t)
+    if gone < 1e-6:
+        t += step
+        gone = ahead(t)
+    for _ in range(4 * 31):
+        nxt = t + step
+        if ahead(nxt) > gone:  # crossed the target between t and nxt
+            lo, hi = t, nxt
+            while hi - lo > timedelta(minutes=1):
+                mid = lo + (hi - lo) / 2
+                if ahead(mid) > ahead(lo):
+                    hi = mid
+                else:
+                    lo = mid
+            return hi
+        t, gone = nxt, ahead(nxt)
+    return when + timedelta(days=SYNODIC_DAYS)  # pragma: no cover - the loop always finds it
+
+
+def next_sun_events(lat: float, lon: float, now: datetime, tz_name: str | ZoneInfo = "UTC") -> Dict[str, datetime]:
+    """The next dawn, sunrise, solar noon, sunset and dusk after ``now`` (each today's if still ahead, else
+    tomorrow's)."""
+    tz = _get_zoneinfo(tz_name)
+    local = now.astimezone(tz)
+    today = get_solar_phases(lat, lon, local.date(), tz)
+    tomorrow = get_solar_phases(lat, lon, local.date() + timedelta(days=1), tz)
+    return {k: (today[k] if today[k] > local else tomorrow[k]) for k in today}

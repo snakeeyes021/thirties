@@ -431,3 +431,128 @@ class TestMediaItemsAsTasks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGoodreadsExport(unittest.TestCase):
+    """Goodreads no longer shares lists: the reading list is the newest library export in a folder the user picked.
+    The export here is invented."""
+
+    def setUp(self) -> None:
+        import os
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = Path(self.tmp.name) / "exports"
+        self.folder.mkdir()
+        self.cache_dir = Path(self.tmp.name) / "cache"
+        self.export = (FIXTURES / "goodreads_library_export.csv").read_text(encoding="utf-8")
+        self.os = os
+
+    def save(self, name: str, text: str, when: datetime) -> Path:
+        path = self.folder / name
+        path.write_text(text, encoding="utf-8")
+        self.os.utime(path, (when.timestamp(), when.timestamp()))
+        return path
+
+    def config(self, folder=True) -> ThirtiesConfig:
+        return ThirtiesConfig(media=MediaConfig(goodreads_user_id="1", goodreads_export_dir=str(self.folder)
+                                                if folder else "", cache_hours=12.0, detail_lookups_per_refresh=0))
+
+    def test_the_to_read_shelf_once_each(self) -> None:
+        from thirties_core.media_sources import parse_goodreads_export
+        items = parse_goodreads_export(self.export)
+        self.assertEqual([i.title for i in items],
+                         ["The Lantern Almanac", "Salt, Wind and Timber", "Small Hours on the Ridge"])
+        lantern = items[0]
+        self.assertEqual((lantern.creator, lantern.year, lantern.item_id, lantern.list_name),
+                         ("Mara Ellingsen", 1934, "9001", "to-read"))  # its first publication, not this edition
+        self.assertEqual(lantern.url, "https://www.goodreads.com/book/show/9001")
+        self.assertEqual(items[2].year, 2023)  # no first-publication year: this edition's
+
+    def test_the_newest_export_wins_and_other_files_are_ignored(self) -> None:
+        from thirties_core.media_sources import newest_goodreads_export
+        old = self.export.replace("Salt, Wind and Timber", "An Older Title")
+        self.save("goodreads_library_export (1).csv", old, datetime(2026, 9, 1, tzinfo=timezone.utc))
+        newest = self.save("goodreads_library_export.csv", self.export, datetime(2026, 11, 2, tzinfo=timezone.utc))
+        self.save("budget.csv", "Month,Amount\nMay,10\n", datetime(2026, 11, 10, tzinfo=timezone.utc))  # not one
+        self.assertEqual(newest_goodreads_export(self.folder), newest)
+        self.assertIsNone(newest_goodreads_export(self.folder / "missing"))
+
+    def test_the_export_replaces_the_list_from_before_and_says_how_old_it_is(self) -> None:
+        from thirties_core.media_sources import MediaCache, reading_list_status
+        frozen = MediaItem(source="goodreads", kind="book", title="A List Item From Before", item_id="77",
+                           list_name="to-read")
+        MediaCache(self.cache_dir).save("goodreads-1-to-read", [frozen],
+                                        datetime(2026, 10, 27, 12, tzinfo=timezone.utc))
+        now = datetime(2026, 11, 14, 12, tzinfo=timezone.utc)
+        # no export saved yet: the list from before, unchanged, without errors
+        items = fetch_all_media(self.config(), now=now, cache_dir=self.cache_dir)
+        self.assertEqual([i.title for i in items], ["A List Item From Before"])
+        self.assertEqual(reading_list_status(self.config(), self.cache_dir),
+                         "Reading list from Goodreads as of October 27, 2026. Goodreads doesn't share lists, so "
+                         "it stays as it is until an export is saved in the folder.")
+        self.save("goodreads_library_export.csv", self.export, datetime(2026, 11, 13, 15, tzinfo=timezone.utc))
+        items = fetch_all_media(self.config(), now=now, cache_dir=self.cache_dir)
+        self.assertEqual([i.title for i in items],
+                         ["The Lantern Almanac", "Salt, Wind and Timber", "Small Hours on the Ridge"])  # replaced
+        self.assertEqual(reading_list_status(self.config(), self.cache_dir),
+                         "Reading list from your Goodreads export of November 13, 2026.")
+        (self.folder / "goodreads_library_export.csv").write_text("not, a, csv\n\x00\x01", encoding="utf-8")
+        items = fetch_all_media(self.config(), now=now, cache_dir=self.cache_dir)  # unreadable: the last good one
+        self.assertEqual(len(items), 3)
+
+    def test_without_a_folder_the_feed_is_still_tried_as_before(self) -> None:
+        from thirties_core.media_sources import GoodreadsExport, build_sources
+        self.assertFalse(any(isinstance(s, GoodreadsExport) for s in build_sources(self.config(folder=False).media)))
+        self.assertTrue(any(isinstance(s, GoodreadsExport) for s in build_sources(self.config().media)))
+
+
+class TestFinishingABookRemindsToExport(unittest.TestCase):
+    """A book finished in Thirties: one short reminder to export again, under the same reply or as the Day page's
+    notice, once per book. Invented books."""
+
+    def setUp(self) -> None:
+        from tests.fixtures import DAY, at, make_scheduler
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        set_debug_time(at("09:00"))
+        self.addCleanup(set_debug_time, None)
+        books = [MediaItem(source="goodreads", kind="book", title="The Lantern Almanac", item_id="9001",
+                           list_name="to-read"),
+                 MediaItem(source="goodreads", kind="book", title="Salt, Wind and Timber", item_id="9002",
+                           list_name="to-read"),
+                 MediaItem(source="letterboxd", kind="film", title="Low Tide", item_id="low-tide",
+                           list_name="watchlist")]
+        self.tasks = media_items_as_tasks(books)
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        self.engine = MockInferenceEngine()
+        self.manager = ConversationManager(plan, list(self.tasks), pending, sched, inference_engine=self.engine,
+                                           active_notes=[])
+        for task, start in zip(self.tasks, ("7:00 PM", "8:00 PM", "9:00 PM")):
+            self.manager.execute_tool("add_event", {"title": task.title, "start": start, "duration": "1 hour",
+                                                    "category": "task", "task_id": task.id})
+
+    def span_of(self, task):
+        return next(s.id for s in self.manager.day_plan.spans if s.task_id == task.id)
+
+    def test_once_under_the_reply_and_once_more_for_the_next_book(self) -> None:
+        from tests.test_conversation import reply
+        from thirties_core.media_sources import BOOK_DONE_NOTE
+        lantern, salt, film = self.tasks
+        self.engine.set_next_response(reply(
+            f'CALL log_outcome {{"event": "{self.span_of(lantern)}", "status": "done", "finished_for_good": true}}'))
+        self.engine.set_next_response(reply("Finished it, well done!"))
+        out = self.manager.send_user_message("finished the lantern book")
+        self.assertEqual(out.count(BOOK_DONE_NOTE), 1)
+        self.assertTrue(out.startswith("Finished it, well done!"))
+        tool = next(m for m in reversed(self.manager.brain.messages) if m.get("role") == "tool")
+        self.assertIn("don't repeat it", tool["content"])  # the model knows Python says it
+        self.engine.set_next_response(reply("Noted."))
+        self.assertNotIn(BOOK_DONE_NOTE, self.manager.send_user_message("thanks"))  # never a separate nag
+        result = self.manager.execute_tool("log_outcome", {"event": self.span_of(salt), "status": "done",
+                                                           "finished_for_good": True})  # from the Day page
+        self.assertEqual(result.count(BOOK_DONE_NOTE), 1)
+        result = self.manager.execute_tool("log_outcome", {"event": self.span_of(film), "status": "done",
+                                                           "finished_for_good": True})
+        self.assertNotIn(BOOK_DONE_NOTE, result)  # a film: no Goodreads involved

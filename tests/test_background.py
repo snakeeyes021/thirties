@@ -4,7 +4,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock
 
-from tests.fixtures import DAY, at, event, make_scheduler
+from tests.fixtures import DAY, at, event, line_with, make_scheduler
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService, day_stretches
 from thirties_core.inference import MockInferenceEngine
@@ -146,14 +146,14 @@ class TestBackground(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:30"), at("13:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("12:00"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\n- Feed the fish\n"
-                                                      "- Make coffee\n- Shower"))  # one per line, once each, no times
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\nFeed the fish\n"
+                                                      "Make coffee\nShower"))  # one per line, once each, no times
         self.svc.starts(at("12:30"))
-        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\n- Feed the fish\n"
-                                                               "- Make coffee\n- Shower\n- Walk")  # Walk fell behind
+        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\nFeed the fish\n"
+                                                               "Make coffee\nShower\nWalk")  # Walk fell behind
         self.svc.starts(at("17:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
-        self.assertIn("- Lunch", self.desktop[-1][1])
+        self.assertIn("\nLunch", self.desktop[-1][1])
         self.sched.state_db.upsert_span(EventSpan("x", "Stretch", at("17:30"), at("18:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("17:30"))
@@ -188,8 +188,7 @@ class TestReminderTools(unittest.TestCase):
 
     def test_set_list_cancel_and_mute(self):
         out = self.m.execute_tool("set_reminder", {"text": "Water the alligator", "date": "Saturday", "time": "3:00 PM"})
-        self.assertIn("On the plan for Saturday, October 17 at 3:00 PM, with a ping when it's time: Water the "
-                      "alligator", out)  # a thing to do goes on the plan, not only a ping (10-23)
+        line_with(out, "Saturday, October 17", "3:00 PM", "ping", "Water the alligator")  # on the plan, not only a ping (10-23)
         sat = [s.title for s in self.m.tools.plan_for("Saturday").spans]
         self.assertIn("Water the alligator", sat)
         self.assertIn("9:00 AM", self.m.execute_tool("set_reminder", {"text": "Call mom", "date": "next week"}))

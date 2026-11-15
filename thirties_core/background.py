@@ -7,6 +7,10 @@ window closed. Every few seconds it:
 - asks about planned items that ended with no outcome (once each, unless muted),
 - delivers reminders the user asked for,
 - says when a planned item starts,
+- ends a start notice or a check-in with what's next, when that says something new (whats_next.SentSummaries),
+- tells the phone what was ticked in the app's day panel, with what's next,
+- offers once an evening to move what's still not marked to tonight (catch_up.py),
+- holds every message while the user asked for quiet, until they say it's over (holds.py),
 - delivers queued changes to Joplin, and syncs if sync is on.
 
 Messages go to the desktop (a callback the app provides; GNOME's per-app
@@ -24,7 +28,7 @@ import re
 import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
@@ -38,11 +42,21 @@ DesktopNotify = Callable[[str, str, str], None]  # (title, body, kind) -> None
 
 
 LEVELS = ("off", "light", "medium", "heavy")
-YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
+def phone_text(text: str, emphasis: Sequence[str] = ()) -> str:
+    """What the phone gets: the same words, with ``emphasis`` in bold (the first time each appears)."""
+    for word in emphasis:
+        if word and word in text:
+            text = text.replace(word, f"*{word}*", 1)
+    return text
+
+
+from thirties_core.holds import PASSES as HOLD_PASSES  # noqa: E402 (what a hold lets through)
+YES_KINDS = ("rollover", "catch_up")  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
 CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
 REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
+PANEL_QUIET = 90  # seconds with no more ticks in the app's day panel before the phone is told (one message a burst)
 
 
 def day_stretches(plan) -> List[tuple]:
@@ -112,6 +126,8 @@ class BackgroundService:
         self.running = False
         self._answering = False
         self._fixed_now = False      # tests pass the time to each duty
+        self._waiting: Dict[str, tuple] = {}  # notices queued for the phone: (text, kind, day) by words
+        self._marked: Dict[str, Optional[date]] = {}  # stored with the mark, still queued: their day
         self.run_in_threads = True   # tests run the background work inline
 
     # --- the day's conversation (shared with the window and Telegram through the database) ---
@@ -151,55 +167,151 @@ class BackgroundService:
 
     # --- delivering a message ---
 
-    def send(self, text: str, kind: str, title: str = "Thirties", telegram_text: Optional[str] = None,
-             to_conversation: bool = True, now: Optional[datetime] = None,
-             expires: Optional[datetime] = None) -> None:
-        """Send a message to the desktop and, if a phone is paired here, to Telegram. A notice about a moment
-        (a block starting, a check-in) ``expires``: if Telegram can't take it before then, it's dropped rather than
-        sent stale (C3, 10-26 10:03: "(Sent late…) 🔔 9:30: Shower, Journal", 33 minutes late)."""
+    def send(self, text: str, kind: str, title: str = "Thirties", emphasis: Sequence[str] = (),
+             to_conversation: bool = True, now: Optional[datetime] = None, expires: Optional[datetime] = None,
+             day: Optional[date] = None, phone: bool = True, desktop: bool = True) -> None:
+        """The one way out for what the assistant says by itself: the desktop, the phone (if one is paired here)
+        and the conversation of the ``day`` it's about (today's by default; the next day's morning goes in the next
+        day's), so the app and Telegram are one conversation. The phone gets the same words, with ``emphasis``
+        (words shown in bold there) as its only difference.
+
+        A notice about a moment ``expires``: if the phone can't take it before then it's dropped rather than sent
+        stale, and it's kept in the conversation only once it really got there. Anything else that doesn't
+        reach the phone is kept with a quiet "not delivered to your phone" mark. ``phone=False``: the phone already
+        has it (a mirrored turn). ``desktop=False``: no desktop notification (what the user just did at the
+        desktop)."""
         from thirties_core.clock import real_times, to_thirties, trim_meridiems
+        if kind not in HOLD_PASSES and self._held(now or self.now()):
+            logger.info("Held (the user asked for quiet): %r", text[:80])
+            return
         if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
             try:
                 from thirties_core.if_time import gap_line
                 assistant = self.manager().tools.assistant
                 line = gap_line(assistant, now or self.now()) if assistant is not None else ""
                 if line:
-                    text += "\n" + line
-                    telegram_text = (telegram_text + "\n" + line) if telegram_text else None
+                    from thirties_core.messages import join_sections
+                    text = join_sections(text, line) if "\n\n" in text else text + "\n" + line
             except Exception as e:
                 logger.warning("Couldn't add the If there's time line: %s", e)
-        try:
+        try:  # what the user reads: no done rows, names not ids, plain lines (a turn's reply is cleaned already)
+            from thirties_core.messages import clean_message
+            text = clean_message(text, self.manager().tools)
+        except Exception as e:
+            logger.warning("Couldn't tidy a message: %s", e)
+        try:  # a message a turn already stored goes out as it was stored: the phone reads what the chat shows
             now = now or self.now()
-            keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41 (S6)
-            text = self.manager().tools.shorten(text)  # items by their short titles (11-07)
-            telegram_text = self.manager().tools.shorten(telegram_text) if telegram_text else None
-            text = trim_meridiems(to_thirties(text, keep), now)
-            telegram_text = trim_meridiems(to_thirties(telegram_text, keep), now) if telegram_text else None
+            if to_conversation:
+                keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41
+                text = trim_meridiems(to_thirties(self.manager().tools.shorten(text), keep), now)  # short titles
         except Exception:
             pass
-        if self.desktop_notify is not None:
+        if self.desktop_notify is not None and desktop:
             try:
                 self.desktop_notify(title, text, kind)
             except Exception as e:
                 logger.warning("Desktop notification failed: %s", e)
-        if self.bridge is not None:
-            before = len(self.bridge.client.sent_ids)
-            if expires is None:
-                self.bridge.broadcast(telegram_text or text)
-            else:
-                self.bridge.broadcast(telegram_text or text, expires=expires)
+        delivered, waiting = True, False
+        if self.bridge is not None and phone:
+            rendered = phone_text(text, emphasis)
+            client = self.bridge.client
+            before = len(client.sent_ids)
+            delivered = self.bridge.broadcast(rendered, expires=expires) if expires is not None \
+                else self.bridge.broadcast(rendered)
+            delivered = delivered is not False  # an older or test bridge that says nothing: as sent
             if kind in YES_KINDS:  # a 👍 on this message is a yes (telegram_bridge.handle_updates)
                 from thirties_core.telegram_bridge import YES_TARGETS_KEY
-                ids = [list(x) for x in self.bridge.client.sent_ids[before:]]
+                ids = [list(x) for x in client.sent_ids[before:]]
                 self.scheduler.state_db.set_sync_meta(YES_TARGETS_KEY, json.dumps(ids))
-        if to_conversation:  # after delivery: this waits for a turn that's under way (Telegram) to finish
-            try:
-                manager = self.manager()
-                with manager.turn_lock:
-                    manager.refresh()
-                    manager.add_assistant_message(text, kind="notice" if kind == "start" else "")
-            except Exception as e:
-                logger.warning("Couldn't add the message to the conversation: %s", e)
+            if not delivered and expires is not None and to_conversation:  # kept for the conversation once it
+                from thirties_core.telegram_bridge import plain_lists        # really reaches the phone
+                with self._lock:
+                    self._waiting[plain_lists(rendered)] = (text, kind, day)
+                waiting = True
+        if to_conversation and not waiting:  # after delivery: this waits for a turn under way (Telegram) to finish
+            self._keep(text, kind, day, undelivered=not delivered)
+            if not delivered:  # its mark comes off if it gets there late
+                from thirties_core.telegram_bridge import plain_lists
+                with self._lock:
+                    self._marked[plain_lists(rendered)] = day
+
+    def _held(self, now: datetime) -> bool:
+        from thirties_core import holds
+        try:
+            return holds.active(self.scheduler.state_db, now) is not None
+        except Exception as e:
+            logger.warning("Couldn't read the hold on messages: %s", e)
+            return False
+
+    def hold_check(self, now: datetime) -> None:
+        """A hold on messages ends once what it waits for has happened (holds.py): the item it waits for has an
+        outcome, the user said the words, or its time came. Then one line says messages are back on, with what's
+        next when that says something new; reminders held meanwhile go out on their own."""
+        from thirties_core import holds
+        if not holds._load(self.scheduler.state_db).get("state") == "on":
+            return
+        manager = self.manager()
+        with manager.turn_lock:
+            manager._catch_up()  # what was said in the app or on the phone since
+        why = holds.check(self.scheduler.state_db, manager.day_plan, manager.messages, now)
+        if why in ("done", "said") or (why == "time" and holds._load(self.scheduler.state_db).get("clock")):
+            self.send(self._with_next("Messages are back on.", now), "hold", now=now)
+
+    def _keep(self, text: str, kind: str, day: Optional[date], undelivered: bool = False) -> None:
+        """Stored under its own day."""
+        try:
+            manager = self.manager()
+            if day is not None and day != manager.day_plan.target_date:  # the coming day's (its morning)
+                from thirties_core import build
+                from thirties_core.memory import ConversationStore
+                message = {"role": "assistant", "content": text, "at": self.now().isoformat(timespec="seconds"),
+                           "build": build.BUILD, "via": "background"}
+                if kind == "start":
+                    message["kind"] = "notice"
+                if undelivered:
+                    message["undelivered"] = True
+                ConversationStore(self.scheduler.state_db).append(day, message)
+                return
+            with manager.turn_lock:
+                manager.refresh()
+                manager.add_assistant_message(text, kind="notice" if kind == "start" else "", undelivered=undelivered)
+        except Exception as e:
+            logger.warning("Couldn't add the message to the conversation: %s", e)
+
+    def delivered_late(self, chunk: str) -> bool:
+        """Something of ours the phone took late (``chunk``: its words, or part of them). A notice that waited is
+        kept in the conversation now; anything else loses its "not delivered" mark. True when it was ours."""
+        with self._lock:
+            waited = next((k for k in self._waiting if chunk in k), None)
+            found = self._waiting.pop(waited) if waited is not None else None
+            marked = next((k for k in self._marked if chunk in k), None)
+            day = self._marked.pop(marked) if marked is not None else None
+        if found is not None:
+            self._keep(*found)
+            return True
+        if marked is None:
+            return False
+        try:
+            manager = self.manager()
+            if day is not None and day != manager.day_plan.target_date:
+                from thirties_core.memory import ConversationStore
+                ConversationStore(self.scheduler.state_db).mark_delivery(day, chunk, undelivered=False)
+            else:
+                manager.mark_delivery(chunk, undelivered=False)
+        except Exception as e:
+            logger.warning("Couldn't take the not-delivered mark off: %s", e)
+        return True
+
+    def dropped_stale(self, chunk: str) -> bool:
+        """A notice that never got through in time: dropped from the phone, so never in the conversation."""
+        with self._lock:
+            waited = next((k for k in self._waiting if chunk in k), None)
+            if waited is not None:
+                self._waiting.pop(waited)
+            marked = next((k for k in self._marked if chunk in k), None)
+            if marked is not None:
+                self._marked.pop(marked)  # it keeps its mark: it never got there
+        return waited is not None or marked is not None
 
     # --- duties ---
 
@@ -217,12 +329,41 @@ class BackgroundService:
         list (in a notice or a reply): being behind is common, silence about it isn't help, and the same list every
         half hour would be nagging (C2)."""
         from thirties_core.messages import MissedTracker, missed_for, with_missed
+        from thirties_core.reply_extras import effective
+        if not effective(self.config, self.scheduler.state_db, self.manager().day_plan.target_date)["not_marked"]:
+            return status  # the person asked for the Not marked yet list to stop (reply_extras.py)
         missed = missed_for(self.manager().tools, now)
         tracker = MissedTracker(self.scheduler.state_db)
         if not missed or not tracker.anything_new(now, missed):
             return status
         tracker.mark(now, missed)
         return with_missed(status, missed)
+
+    def _with_next(self, status: str, now: datetime, with_now: bool = True, asked: Sequence[str] = ()) -> str:
+        """A notice that ends with what's next (whats_next.py), when that says something new since the user was
+        last shown it (whats_next.SentSummaries: nothing shown yet today, the plan changed, the last one ran out,
+        or two hours passed): a bell or a check-in then says where the day stands, so coming back to the phone
+        needs no "what's on now?". Otherwise the notice as before (_with_missed). What's not
+        marked yet is in the slice (not what the check-in itself asks about, or what's muted)."""
+        from thirties_core import whats_next
+        from thirties_core.messages import MISSED_HEADING, MissedTracker, join_sections, missed_for
+        if self._held(now):
+            return status  # it won't go out: nothing counts as shown
+        manager = self.manager()
+        plan = manager.day_plan
+        sent = whats_next.SentSummaries(self.scheduler.state_db)
+        if not (plan.day_start <= now < plan.day_end) or not sent.due(plan, now):
+            return self._with_missed(status, now) if not asked else status
+        skip = {t.strip().lower() for t in asked}
+        unmarked = [s for s in missed_for(manager.tools, now) if s.title.strip().lower() not in skip]
+        # as the person wants it (render with no mode: reply_extras.py): off, no Not marked yet, no "Now" line
+        part = whats_next.summary(manager.tools, now, unmarked=unmarked, with_now=with_now)
+        if not part:
+            return self._with_missed(status, now) if not asked else status
+        sent.mark(plan, now)
+        if unmarked and MISSED_HEADING in part:
+            MissedTracker(self.scheduler.state_db).mark(now, unmarked)
+        return join_sections(status, part)
 
     def _asked(self, now: datetime, titles: List[str]) -> None:
         """A check-in asked about these: a reply needn't ask again (C5)."""
@@ -353,8 +494,8 @@ class BackgroundService:
                 titles = [s.title for s in open_items]
                 listed = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
                 self._asked(now, titles)
-                self.send(f"👋 Since {format_clock(a)}: did you get to {listed}?", "checkin", now=now,
-                          expires=now + timedelta(minutes=30))
+                self.send(self._with_next(f"👋 Since {format_clock(a)}: did you get to {listed}?", now,
+                                          asked=titles), "checkin", now=now, expires=now + timedelta(minutes=30))
 
     def wrap_up(self, now: datetime) -> None:
         """Medium: once a day, 45 minutes before bed, one question about whatever from today still isn't reported,
@@ -422,21 +563,39 @@ class BackgroundService:
             asked[s.id] = now.date().isoformat()
         self._remember("checkins_asked", asked, now)
         titles = [s.title for s in sorted(due, key=lambda s: s.start_dt)]
-        if len(titles) == 1:
+        current = self._on_now(plan, now, {s.id for s in due})
+        if len(titles) == 1 and current:  # asked the way the user wants it: the next one started, or still on this one?
+            question = f"👋 Just checking in: have you started {current} yet, or are you still on {titles[0]}?"
+            bold = [current, titles[0]]
+        elif len(titles) == 1:
             question = f"👋 Just checking in: did you get to {titles[0]}, or are you still on it?"
-            bold = question.replace(titles[0], f"*{titles[0]}*", 1)
+            bold = [titles[0]]  # in bold on the phone: the same words
         else:
             listed = ", ".join(titles[:-1]) + f" and {titles[-1]}"
-            question = f"👋 How did it go? Did you get to {listed}?"
-            bold = question
+            question = f"👋 How did it go? Did you get to {listed}?" + (
+                f" And have you started {current} yet?" if current else "")
+            bold = []
         self._asked(now, titles)
-        self.send(question, "checkin", telegram_text=bold, now=now, expires=now + timedelta(minutes=30))
+        self.send(self._with_next(question, now, with_now=not current, asked=titles), "checkin", emphasis=bold, now=now,
+                  expires=now + timedelta(minutes=30))
+
+    def _on_now(self, plan, now: datetime, skip: set) -> str:
+        """What's planned to be under way now (started in this thirty or before, not over): the next thing a
+        check-in can ask about ("have you started X yet?"). One item, by its title; "" when none or several."""
+        block = thirty_of(now)
+        on = [s for s in plan.active_spans() if self._unreported(s) and s.id not in skip and not s.is_envelope
+              and s.start_dt < block + timedelta(minutes=30) and s.start_dt <= now < s.end_dt]
+        titles = list(dict.fromkeys(s.title for s in sorted(on, key=lambda s: s.start_dt)))
+        return titles[0] if len(titles) == 1 else ""
 
     def reminders(self, now: datetime) -> None:
         from thirties_core.memory import ReminderStore
+        if self._held(now):
+            return  # kept: they go out once the hold ends
         store = ReminderStore(self.scheduler.state_db)
         for rem in store.due(now):
             store.set_state(rem.id, "sent")  # first, so a crash can't repeat it forever
+            span = None
             if rem.span_id:  # about a planned item: not if it's done, gone, or already announced by its start
                 span = next((s for s in self.manager().day_plan.spans if s.id == rem.span_id), None)
                 if span is None or span.status != SpanStatus.PLANNED or self.level() == "heavy":
@@ -446,7 +605,19 @@ class BackgroundService:
                        f"{format_clock(rem.due.astimezone(now.tzinfo))}): {rem.text}"
             else:
                 text = f"⏰ Reminder: {rem.text}"
+            details = self._details(span.title if span is not None else rem.text,
+                                    span.task_id if span is not None else "")
+            if details:  # what the reminder was given to say (its details)
+                text += "\n" + details
             self.send(text, "reminder", now=now, expires=now + REMINDER_STALE)
+
+    def _details(self, title: str, task_id: str = "") -> str:
+        """An item's description (what a reminder was given to say, or the user's note on it)."""
+        try:
+            from thirties_core.titles import ItemNotes
+            return ItemNotes(self.scheduler.state_db).get(task_id or "", title)
+        except Exception:
+            return ""
 
     def starts(self, now: datetime) -> None:
         """Heavy: at the start of a thirty, one message for what's planned to start in it; each item is
@@ -495,11 +666,106 @@ class BackgroundService:
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
             said = [f"{s.title} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s) else s.title
                     for s in rest]
-            self.send(self._with_missed(f"🔔 {format_clock(block)}: " + ", ".join(said), now), "start", now=now,
-                      expires=block + timedelta(minutes=30))  # a fixed thing by its real time; what's behind under it
+            bell = f"🔔 {format_clock(block)}: " + ", ".join(said)
+            from thirties_core.memory import ReminderStore
+            pinged = {r["span_id"] for r in ReminderStore(self.scheduler.state_db).all_records() if r.get("span_id")}
+            details = [(s.title, self._details(s.title, s.task_id or "")) for s in rest if s.id in pinged]
+            details = [(t, d) for t, d in details if d]
+            if details:  # a reminder's details: at heavy the bell is its ping
+                bell += "\n" + "\n".join(d if len(rest) == 1 else f"{t}: {d}" for t, d in details)
+            self.send(self._with_next(bell, now, with_now=False),
+                      "start", now=now, expires=block + timedelta(minutes=30))  # what's next under it, when new
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now,
                       expires=block + timedelta(minutes=30))
+
+    def panel_ticks(self, now: datetime) -> None:
+        """What was ticked done or skipped in the app's day panel reaches the phone, with what's next: one message
+        once the ticking stops for a bit (PANEL_QUIET), never one per tick (10-25: ticks in the app, and the phone
+        went on listing them as not marked). Only with a phone paired: the app shows the tick itself. It goes in
+        the conversation too (one conversation), never as a desktop notification."""
+        if self.bridge is None or self.level() == "off":
+            return
+        from thirties_core import plan_log
+        db = self.scheduler.state_db
+        with db._get_connection() as conn:
+            plan_log._ensure(db, conn)
+            raw = db.get_sync_meta("panel_ticks_seen")
+            if raw is None or not raw.isdigit():  # first look: only what's ticked from now on
+                top = conn.execute("SELECT COALESCE(MAX(id), 0) AS n FROM plan_changes").fetchone()["n"]
+                db.set_sync_meta("panel_ticks_seen", str(top))
+                return
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, at, span_id, change FROM plan_changes WHERE id > ? AND via = 'Day page' ORDER BY id",
+                (int(raw),)).fetchall()]
+        ticks = [r for r in rows if "marked done" in r["change"] or "marked skipped" in r["change"]]
+        if not rows:
+            return
+        try:
+            newest = datetime.fromisoformat(rows[-1]["at"]).timestamp()
+        except ValueError:
+            newest = 0.0
+        if ticks and time.time() - newest < PANEL_QUIET:
+            return  # still ticking
+        db.set_sync_meta("panel_ticks_seen", str(rows[-1]["id"]))
+        if not ticks:
+            return
+        manager = self.manager()
+        with manager.turn_lock:
+            manager.reload_plan()
+        plan = manager.day_plan
+        if not (plan.day_start <= now < plan.day_end):
+            return
+        by_id = {s.id: s for s in plan.spans}
+        done, skipped, seen = [], [], set()
+        for r in ticks:
+            span = by_id.get(r["span_id"])
+            if span is None or span.id in seen:
+                continue
+            seen.add(span.id)
+            if span.status == SpanStatus.DONE:
+                done.append(span.title)
+            elif span.status == SpanStatus.SKIPPED:
+                skipped.append(span.title)
+        if not done and not skipped:
+            return  # ticked and unticked again
+        def listed(titles):
+            return titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
+        said = " ".join(x for x in (f"Marked done in the app: {listed(done)}." if done else "",
+                                    f"Skipped in the app: {listed(skipped)}." if skipped else "") if x)
+        from thirties_core import whats_next
+        from thirties_core.messages import join_sections
+        part = whats_next.summary(manager.tools, now)  # as the person wants it (reply_extras.py)
+        if part:
+            whats_next.SentSummaries(db).mark(plan, now)
+        self.send(join_sections(said, part), "panel", now=now, desktop=False)
+
+    def evening_catch_up(self, now: datetime) -> None:
+        """Once an evening, when two or more of today's things are still not marked and there's room tonight:
+        "Move these 5 to tonight?" (catch_up.py). A yes, in the app or on the phone, or a 👍 there, moves them."""
+        if self.level() in ("off", "light") or self._quiet(now) or self._talking(now) or self._turn_running() \
+                or self._held(now):
+            return
+        from thirties_core import catch_up
+        from thirties_core.messages import missed_for
+        tools = self.manager().tools
+        missed = missed_for(tools, now)
+        if not catch_up.due(tools, now, missed):
+            return
+        self.send(catch_up.offer(tools, now, missed), "catch_up", now=now)
+
+    # --- the people and tickets duties. Each runs inside the tick's own try/except, so one failing
+    # never stops the service. ---
+
+    def people_nudge(self, now: datetime) -> None:
+        from thirties_core import people
+        people.background_duty(self, now)
+
+    def rush_tickets(self, now: datetime) -> None:
+        from thirties_core import tickets
+        tickets.background_duty(self, now)
+
+    # --- end of the extra duties ---
 
     def contextual(self, now: datetime) -> None:
         """"Have you left yet?", "are you on your way?": only for the items that matter (contextual.py), once
@@ -524,12 +790,15 @@ class BackgroundService:
         if not manager.unanswered():
             return
         self._answering = True
+        # messages typed in the app go to the phone with their reply through the mirror (mirror_turn): never twice
+        mirrored = self.bridge is not None and getattr(self.config.telegram, "mirror_desktop", True) and \
+            any(m.get("via") == "app" for m in manager.unanswered())
 
         def run() -> None:
             try:
                 reply = self.manager().answer_unanswered(now if self._fixed_now else None)
                 if reply:
-                    self.send(reply, "reply", to_conversation=False)
+                    self.send(reply, "reply", to_conversation=False, phone=not mirrored)  # the turn stored it
             except Exception as e:
                 logger.warning("Answering a lost turn failed: %s", e)
             finally:
@@ -595,7 +864,7 @@ class BackgroundService:
         engine = self.inference_engine if brain_choice(self.config, db) == "frontier" else None
         line = write_hello(engine, mode, at, recent, now)  # the model writes it fresh each morning (11-05)
         db.set_sync_meta(RECENT_KEY, json.dumps((recent + [line])[-5:]))
-        self.send(hello_text(line, titles), "morning", now=now)
+        self.send(hello_text(line, titles), "morning", now=now, day=plan.target_date)  # in that day's conversation
 
     def _plate(self, plan) -> List[str]:
         """What's on the plate today, without times and without changing anything: what's already on today's plan
@@ -828,10 +1097,12 @@ class BackgroundService:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
         waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
-                 self.day_times, self.dropbox, self.joplin_presence}  # nothing to say before the user is up
-        for duty in (self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
+                 self.day_times, self.dropbox, self.joplin_presence, self.panel_ticks,
+                 self.evening_catch_up, self.people_nudge, self.rush_tickets}  # nothing to say before the user is up
+        for duty in (self.hold_check, self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
                      self.horizon_review, self.reminders, self.heads_up, self.stretches,
-                     self.wrap_up, self.check_ins, self.starts, self.contextual, self.day_times, self.sun, self.today_sync,
+                     self.wrap_up, self.check_ins, self.starts, self.panel_ticks, self.evening_catch_up,
+                     self.contextual, self.day_times, self.sun, self.today_sync, self.people_nudge, self.rush_tickets,
                      self.answer_lost_turns, self.dropbox, self.joplin_presence):
             if not up and duty in waits:
                 continue

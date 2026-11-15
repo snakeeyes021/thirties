@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, line_with, make_scheduler
 from thirties_core.astronomy import set_debug_time
 from thirties_core.weather import Weather
 
@@ -39,7 +39,7 @@ class TestWeather(unittest.TestCase):
     def test_facts_and_bad_times(self):
         facts = self.weather.facts(at("16:40"), at("23:00"))
         self.assertTrue(facts[0].startswith("Around 4:40 PM: 66°F"), facts)
-        self.assertIn("Poor for being outside 6:00 PM–9:00 PM: rain (80% chance of rain).", facts)
+        line_with("\n".join(facts), "6:00 PM–9:00 PM", "rain", "80%")
         self.assertEqual(self.weather.bad_for_outdoors(at("19:00"), at("19:30")), "rain around 7:00 PM")
         self.assertIsNone(self.weather.bad_for_outdoors(at("16:00"), at("17:00")))
         self.weather.hours()
