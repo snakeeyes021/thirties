@@ -146,10 +146,10 @@ class TestBackground(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:30"), at("13:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("12:00"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\nNot marked yet:\n- Feed the fish\n"
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\n- Feed the fish\n"
                                                       "- Make coffee\n- Shower"))  # one per line, once each, no times
         self.svc.starts(at("12:30"))
-        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\nNot marked yet:\n- Feed the fish\n"
+        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\n- Feed the fish\n"
                                                                "- Make coffee\n- Shower\n- Walk")  # Walk fell behind
         self.svc.starts(at("17:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")

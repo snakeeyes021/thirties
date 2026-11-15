@@ -2178,7 +2178,8 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
         parts = [missed_block(behind)] if behind else []  # first: one per line, no times, not the current block
         parts += ["\n".join(lines)] if lines else []
-        return "\n\n".join(parts) or "Nothing left for today: the plan and today's list are clear."
+        from thirties_core.messages import join_sections
+        return join_sections(*parts) or "Nothing left for today: the plan and today's list are clear."
 
     def _schedule_answer(self, day: Optional[str], wording: str) -> str:
         """A clean, line-per-item view of a day (or part of it), without sleep or ids."""

@@ -60,6 +60,7 @@ _ALL = [
     Setting("timeline.free_units", "shared"),  # free time in "blocks" or "hours" (timeline_layout.py)
     Setting("assistant.morning_message_at", "shared"),
     Setting("assistant.morning_message_items", "shared"),
+    Setting("assistant.after_change", "shared"),
     Setting("assistant.sunrise_notice", "shared"),
     Setting("assistant.sunset_notice", "shared"),
     # about this machine

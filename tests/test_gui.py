@@ -723,6 +723,36 @@ class ChatPanelTests(unittest.TestCase):
         panel.set_conversation_manager(self.manager())
         self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
 
+    def test_whats_next_shows_one_line_per_item_in_the_chat_and_after_a_restart(self) -> None:
+        from tests.test_conversation import reply
+        self.sched.config.assistant.after_change = "next"
+        for sid, title, start, end in (("dinner", "Dinner", "20:00", "21:00"), ("glaze", "Glazing", "21:00", "22:00"),
+                                       ("bins", "Bins out", "22:00", "22:30")):
+            self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(end), SpanCategory.ACTIVITY))
+        engine = MockInferenceEngine()
+        plan, pending = self.sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, self.sched, inference_engine=engine, active_notes=[])
+        engine.set_next_response(reply('CALL add_event {"title": "Quilting", "start": "7:30 PM", "duration": "30 min"}'))
+        engine.set_next_response(reply("Quilting's on at 7:30."))
+        out = manager.send_user_message("quilting at 7:30")
+        rows = out.split("\n\n")[-1].splitlines()
+        self.assertIn("7:30 PM – Quilting", rows)
+
+        def shown(panel):  # the agent bubbles' text as the label shows it (plain text: no markup to fold lines)
+            labels = [w for w in _walk(panel.messages_box) if isinstance(w, Gtk.Label)
+                      and w.has_css_class("chat-bubble-agent")]
+            self.assertFalse(labels[-1].get_use_markup())
+            return labels[-1].get_label().splitlines()
+        panel = ChatPanel(manager)
+        for row in rows:
+            self.assertIn(row, shown(panel))  # one line per item, in the chat
+        persist_conversation(manager)
+        plan, pending = self.sched.build_day_plan(DAY)
+        again = ChatPanel(ConversationManager(plan, [], pending, self.sched, inference_engine=MockInferenceEngine(),
+                                              active_notes=[]))  # the app opened again: the stored conversation
+        for row in rows:
+            self.assertIn(row, shown(again))
+
     def test_messages_show_when_they_arrived(self) -> None:
         manager = self.manager()
         manager.send_user_message("first")
@@ -980,6 +1010,16 @@ class SetupAndPreferencesTests(unittest.TestCase):
         self.assertFalse(page.lists.notebook_switches["5. Misc"].get_active())  # nothing to do in it, it seems
         sorter.urgencies.assert_not_called()  # left for the background
         self.assertNotIn(private, " ".join(sent))  # a private note is hidden even on the very first run
+
+    def test_what_a_reply_shows_after_a_change(self):
+        from thirties_core.settings import SETTINGS
+        group = settings_rows.messages_group(settings_rows.SettingsContext(self.core))
+        row = _combo_rows(group)["After a change, show"]
+        self.assertEqual(row.get_selected(), 1)  # "What's next", by default
+        for i, mode in enumerate(("nothing", "next", "rest")):
+            row.set_selected(i)
+            self.assertEqual(self.core.settings.get("assistant.after_change"), mode)
+        self.assertEqual(SETTINGS["assistant.after_change"].scope, "shared")  # the same on every device
 
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)
