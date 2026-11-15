@@ -17,7 +17,7 @@
       <li>Your Joplin lists and GNOME calendars in one plan; it can tick off and add Joplin items for you</li>
       <li>Reminders and check-ins, on the desktop and by Telegram</li>
       <li>Rolling unfinished items into the next day, and learning how long things really take</li>
-      <li>An assistant that runs privately on your computer (Gemma); until it's ready, Gemini runs the assistant, in Google's cloud</li>
+      <li>An assistant that runs privately on your computer (Gemma); it isn't ready yet, so for now Thirties runs in debug mode on Gemini</li>
       <li>Sync between computers through a folder you choose</li>
     </ul>
     <p>This is an early alpha.</p>
@@ -51,6 +51,8 @@
           <li>Items keep who they are when you reword, reorder or move them in Joplin: their plans, Today links and history follow them; a finished copy of a repeated item no longer hides the next copy, and an item written again after it was done is a new item</li>
           <li>Anything you add for today gets a time on the plan at once, in the first free time that fits; only when you say so ("if there's time", "no rush", "don't schedule it") does it go without one, under a new If there's time section at the end of the Agenda, the schedule message and the Today note</li>
           <li>If there's time items can be done, scheduled in the next gap, or put off to tomorrow, later this week, or dropped; a full day puts new things there and says so; when a free gap opens, a notice already being sent may name one of them; and what's left at the day's end comes back the next morning for this week</li>
+          <li>For developers testing Thirties' own on-device assistant (Gemma): under 8 GB of memory, or after the bigger model fails to fit, Preferences offers the smaller model (Gemma 4 E2B); it's downloaded, checked and tested before the bigger one is removed, and Thirties never switches by itself</li>
+          <li>Model downloads come from a fixed release of each file, so a new download is exactly the build that was tested</li>
           <li>The first message of the day, if it goes out late because the computer was asleep, says the wake-up or sunrise time as past, never as the time now</li>
           <li>Windows and order you state for today's items ("before the 4:00 call", "only between 10 and 3") are kept wherever an item is placed, even before it's planned; a time picked for you moves to the nearest one that keeps them, and a time you name that would break one is asked about once</li>
           <li>Nothing is removed or rearranged in your lists, memory or calendars unless you ask outright: archiving an item, rewording, splitting or moving list lines, forgetting something the assistant remembers, rewriting a profile section, or changing a whole calendar. Otherwise Thirties does the gentle version (a drop, an added line, hiding just that event) and says so, or asks first</li>
@@ -85,7 +87,7 @@
           <li>Long or marked-up list lines go on Today by their short title; a done item doesn't leave an earlier copy asking about it; old plan pins expire; a routine never goes on as one opaque item; and done times are only ones you said (or Thirties' estimate)</li>
           <li>Thirties now tells you when one of your memory notes covers something it handles by itself, so you can remove it: after each update it's marked "Thirties already does this by itself. Remove this note?" in Profile, Memory, and nothing is removed without your tap</li>
           <li>An agent's work-log note is planned as time on its project</li>
-          <li>Thirties' own assistant runs privately on your computer (Gemma); it isn't ready yet, and until it is, Thirties uses Gemini in Google's cloud, as before</li>
+          <li>Thirties' own assistant runs privately on your computer (Gemma), and it isn't ready yet, so it's behind a developer switch; until it is, Thirties runs in debug mode on Gemini as a stand-in, which works as before</li>
         </ul>
       </description>
     </release>

@@ -300,7 +300,7 @@ def timeline_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 # --- the assistant ---
 
 NOT_READY = ("Thirties' own assistant runs privately on this computer, but it isn't ready yet. Until it is, "
-             "Thirties uses Gemini, in Google's cloud (set up below).")
+             "Thirties runs in debug mode on Gemini, in Google's cloud (Developer options, below).")
 
 
 def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
@@ -325,7 +325,7 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     gemma.add_suffix(download)
     group.add(gemma)
 
-    gemini = Adw.ActionRow(title="Gemini (cloud)")
+    gemini = Adw.ActionRow(title="Gemini (cloud, debug mode)")
     gemini_check = Gtk.CheckButton(group=gemma_check, active=chosen == "frontier", valign=Gtk.Align.CENTER)
     gemini.add_prefix(gemini_check)
     gemini.set_activatable_widget(gemini_check)
@@ -336,7 +336,7 @@ def brain_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
         gemma.set_subtitle("Ready" if have else "Needs a one-time download (about 3 GB)")
         download.set_visible(not have and not progress.get_visible())
         why = brain_unavailable_reason("frontier", ctx.config())
-        gemini.set_subtitle(why[0].upper() + why[1:] if why else "Ready (set up below)")
+        gemini.set_subtitle(why[0].upper() + why[1:] if why else "Ready (see Developer options below)")
         gemini.set_sensitive(why is None or gemini_check.get_active())
 
     def pick(check, name):
@@ -426,7 +426,7 @@ SMALL_MODEL_BACK = "Switch back"
 
 def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:
     from thirties_core.inference import gemini_sources_status
-    group = Adw.PreferencesGroup(title="Gemini",
+    group = Adw.PreferencesGroup(title="Developer options",
                                  description="Gemini runs in Google's cloud. It needs the Antigravity CLI (installed as "
                                              "`agy` and signed in) and/or a Gemini API key.")
     cfg = ctx.config()

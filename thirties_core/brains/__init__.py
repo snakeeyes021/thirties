@@ -30,8 +30,8 @@ class Brain(Protocol):
         ...
 
 
-BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud)",
-          "pipeline": "Gemini (step by step)"}
+BRAINS = {"slm": "Gemma (on this device)", "frontier": "Gemini (cloud, for developers)",
+          "pipeline": "Gemini on the shared pipeline (being tested)"}
 # Typed with /brain to pick each one ("/brain gemini"); the internal ids stay inside.
 BRAIN_WORDS = {"frontier": "gemini", "slm": "gemma", "pipeline": "gemini-steps"}
 BRAIN_ALIASES = {"frontier": "frontier", "gemini": "frontier", "cloud": "frontier",

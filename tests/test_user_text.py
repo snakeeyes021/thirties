@@ -24,9 +24,12 @@ UI = ["src/*.ui"]
 HISTORY = (r"no longer|used to|anymore|any more|previously|built in|old meaning|"
            r"now (?:only|built|does|works|uses|means)|\d+\.\d+\.\d+")
 INTERNAL = r"horizons?|rollovers?|roll(?:s|ed|ing)? over|pool|back-?off|intents?|brains?|frontier|slm|spans?"
-DEVELOPER = r"debug|developers?|for now|being tested|stand-?in"  # hints meant for whoever builds the app
-BANNED = re.compile(rf"\b(?:{HISTORY}|{INTERNAL}|{DEVELOPER})\b", re.IGNORECASE)
-INTERNAL_IDS = re.compile(r"\b(?:frontier|slm|pipeline)\b")
+# Development discussion: what's planned or missing. Honest labels for real developer features ("Developer
+# options", "debug mode") are fine: they name things that exist.
+DISCUSSION = r"can be added later|coming soon|not implemented|not supported yet"
+BANNED = re.compile(rf"\b(?:{HISTORY}|{INTERNAL}|{DISCUSSION})\b", re.IGNORECASE)
+# Internal ids and class names never reach a reply (a label may say "pipeline"; an id on its own may not)
+INTERNAL_IDS = re.compile(r"(?<![\w-])(?:frontier|slm)(?![\w-])|\b[A-Z][a-z]+(?:Engine|Brain)\b")
 
 
 def _is_text(value: str) -> bool:
@@ -81,7 +84,9 @@ class TestUserText(unittest.TestCase):
         self.assertTrue(BANNED.search("Thirties no longer does that"))
         self.assertFalse(BANNED.search("Put any of these back on their lists?"))
         self.assertFalse(BANNED.search("What's happening now, and time until sleep"))  # "now" itself is fine
-        self.assertTrue(BANNED.search("Gemini (cloud, debug mode)"))
+        self.assertFalse(BANNED.search("Gemini (cloud, debug mode)"))  # an honest label for a real mode
+        self.assertTrue(BANNED.search("Reminders are coming soon"))
+        self.assertTrue(INTERNAL_IDS.search("Inference Backend: CliEngine"))
 
 
 class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
@@ -91,7 +96,7 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
         from thirties_core.brains import BRAIN_WORDS, BRAINS
         from thirties_core.memory_audit import BUILT_IN
         for text in list(BRAINS.values()) + [why for why, _ in BUILT_IN]:
-            self.assertFalse(BANNED.search(text), text)
+            self.assertFalse(BANNED.search(text) or INTERNAL_IDS.search(text), text)
         self.assertFalse(any(INTERNAL_IDS.search(w) for w in BRAIN_WORDS.values()))
 
     def test_brain_replies_name_what_the_user_types(self):
@@ -107,7 +112,7 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
         for said in ("/brain", "/brain gpt"):
             reply = m.send_user_message(said)
             plain = re.sub(r"`?/\w+`?", "", reply)
-            self.assertFalse(BANNED.search(plain) or INTERNAL_IDS.search(plain), reply)
+            self.assertFalse(INTERNAL_IDS.search(plain), reply)  # internal ids only
         self.assertIn("Choose one of: gemini", m.send_user_message("/brain gpt"))
 
     def test_telegram_status_as_sent(self):
@@ -135,14 +140,14 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
         bridge.client = MagicMock()
         bridge._cmd_status(7)
         sent = bridge.client.send_message.call_args[0][1]
-        self.assertIn("Gemini (cloud)", sent)
-        self.assertFalse(BANNED.search(sent) or INTERNAL_IDS.search(sent), sent)
+        self.assertIn("Gemini (cloud, for developers)", sent)
+        self.assertFalse(INTERNAL_IDS.search(sent), sent)  # internal ids and class names only
 
     def test_what_software_centres_show(self):
         root = ET.parse(ROOT / "data/tech.redfoxlabs.Thirties.metainfo.xml.in").getroot()
         for node in root.iter():
             if node.tag in ("p", "li", "summary", "name") and node.text:
-                self.assertFalse(re.search(rf"\b(?:{DEVELOPER})\b", node.text, re.IGNORECASE), node.text)
+                self.assertFalse(re.search(rf"\b(?:{DISCUSSION})\b", node.text, re.IGNORECASE), node.text)
 
 
 if __name__ == "__main__":

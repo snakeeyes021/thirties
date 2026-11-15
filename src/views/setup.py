@@ -66,7 +66,7 @@ def _lists_page(core):
             engine, gen = core.joplin_engine, core.config.general
             notes = engine.fetch_active_notes()
             if not notes:
-                message = "No notes found yet. Connect Joplin on the previous page, or skip this step."
+                message = "No notes found yet. Connect Joplin on the previous page, or skip this for now."
             else:
                 from thirties_core.backlog import remember_private
                 from thirties_core.privacy import SHIELD

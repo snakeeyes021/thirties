@@ -639,8 +639,8 @@ class ThirtiesTelegramBridge:
             f"🧠 *Assistant*: {BRAINS.get(self.conv_manager.brain_name, self.conv_manager.brain_name)}\n"
             f"🤖 *Model*: `{model_name}`\n"
             f"🔄 *Joplin Sync*: {sync_enabled}\n"
-            f"🔔 *Check-ins*: {notify_enabled}\n"
-            f"📋 *List items*: {tasks_count}\n"
+            f"🔔 *Block Buzzes*: {notify_enabled}\n"
+            f"📋 *Backlog Tasks*: {tasks_count}\n"
             f"📒 *Active Notes*: {notes_count}\n"
             f"📱 *Connected Chats*: {len(self.active_chats)}"
         )
