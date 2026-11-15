@@ -311,3 +311,119 @@ class TestUnits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheNightAndThePast(DayCase):
+    """The night (the user's own sleep window) is a folded strip until opened; empty past thirties take a record of
+    what happened; the free time counted is the same as ever."""
+
+    def test_the_night_is_a_folded_strip_until_opened(self):
+        plan = self.plan()
+        folded = day_layout(plan, at("19:10"))
+        self.assertEqual(len(folded.slots), 32)  # the waking day, as before
+        self.assertIsNotNone(folded.night)
+        self.assertFalse(folded.night.open)
+        self.assertEqual(folded.night.start, at("23:00"))
+        opened = day_layout(plan, at("19:10"), night_open=True)
+        self.assertTrue(opened.night.open)
+        night_rows = [s for s in opened.slots if s.start >= at("23:00")]
+        self.assertTrue(night_rows and all(s.sleep for s in night_rows))
+        self.assertEqual(opened.slots[:32], folded.slots)  # the night only adds rows after the day: nothing moves
+        self.assertEqual([(f.row, f.rows) for f in opened.free], [(f.row, f.rows) for f in folded.free])
+        night = [f for f in opened.stretches if f.kind == "night"]
+        self.assertEqual(night[0].start, at("23:00"))  # empty but for Sleep: you can plan in it
+
+    def test_the_sleep_window_is_the_users_own(self):
+        sleep = next(s for s in self.plan().spans if s.title == "Sleep")
+        sleep.start_dt = at("21:30")
+        self.sched.state_db.upsert_span(sleep)
+        d = day_layout(self.plan(), at("12:00"))
+        self.assertEqual(d.night.start, at("21:30"))
+        self.assertEqual(d.end, at("21:30"))
+
+    def test_empty_past_thirties_take_a_record_and_the_future_ones_a_plan(self):
+        d = day_layout(self.plan(), at("19:10"))
+        past = [f for f in d.stretches if f.kind == "past"]
+        self.assertIn((at("16:00"), at("18:00")), [(f.start, f.end) for f in past])  # after work, before dinner
+        self.assertTrue(all(f.kind == "free" for f in d.free))
+        self.assertFalse(any(f.start < at("19:00") for f in d.free))  # nothing past is free time
+
+    def test_a_record_is_the_drawn_times_marked_as_happened(self):
+        from thirties_core.timeline_layout import record_call
+        self.assertEqual(record_call(" Fixed the bike chain ", at("16:00"), 60),
+                         ("add_event", {"title": "Fixed the bike chain", "start": "4:00 PM", "duration": "60 minutes",
+                                        "happened": True}))
+
+
+class TestTheNightsHours(DayCase):
+    def test_the_opened_night_marks_its_hours_on_the_rail(self):
+        from thirties_core.timeline_layout import night_marks
+        plan = self.plan()
+        self.assertEqual(night_marks(day_layout(plan, at("19:10"))), [])  # folded: nothing to mark
+        opened = day_layout(plan, at("19:10"), night_open=True)
+        marks = night_marks(opened)
+        self.assertEqual([t for t, _ in marks[:3]], [at("23:00"), at("00:00", 1), at("01:00", 1)])  # sparse: hours
+        self.assertEqual(marks[0][1], 32.0)  # bedtime: the night's first row
+        self.assertEqual(marks[1][1], 34.0)  # midnight, two rows on
+        self.assertTrue(all(row < len(opened.slots) for _, row in marks))
+
+
+class TestTheViewsLane(DayCase):
+    """Not reported can be ticked, the one switch for other people's events, the
+    hand never covers a mark's words."""
+
+    def test_an_item_gone_by_unreported_can_still_be_ticked(self):
+        from thirties_core.timeline_layout import tickable
+        self.mark("dinner", SpanStatus.UNKNOWN)
+        cards = {c.span.title: c for c in day_layout(self.plan(), at("19:10")).cards}
+        self.assertEqual(cards["Dinner"].status, "Not reported")
+        self.assertTrue(cards["Dinner"].tickable)  # the Agenda can tick it, so the Timeline can
+        self.mark("audio", SpanStatus.DONE)
+        self.mark("movie", SpanStatus.SKIPPED)
+        cards = {c.span.title: c for c in day_layout(self.plan(), at("19:10")).cards}
+        self.assertFalse(cards["Audiobook"].tickable)  # what's said stays said
+        self.assertFalse(cards["Movie"].tickable)
+        theirs = EventSpan("cal-r", "Book group", at("19:00"), at("21:00"), SpanCategory.CALENDAR,
+                           source="calendar", shown_only=True, status=SpanStatus.UNKNOWN)
+        self.assertFalse(tickable(theirs))  # someone else's, never
+
+    def test_other_peoples_events_go_with_the_one_switch_but_invites_stay(self):
+        plan = self.plan()
+        plan.spans.append(EventSpan("cal-r", "Book group", at("19:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", shown_only=True))
+        plan.spans.append(EventSpan("cal-i", "Team drinks", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
+                                    source="calendar", tentative=True))
+        shown = day_layout(plan, at("19:10"))
+        hidden = day_layout(plan, at("19:10"), show_theirs=False)
+        self.assertEqual([n.text for n in shown.notes], ["Book group (not yours)"])
+        self.assertEqual(hidden.notes, [])
+        movie = {c.span.title: c for c in hidden.cards}["Movie"]
+        self.assertEqual(movie.notes, ["Team drinks (invite, not answered), 8:00 PM – 9:00 PM"])  # theirs to answer
+        self.assertEqual([f.start for f in hidden.free], [f.start for f in shown.free])  # never made you busy anyway
+
+    def test_a_marks_words_step_clear_of_the_hand(self):
+        from thirties_core.timeline_layout import mark_label_top
+        self.assertEqual(mark_label_top(100, 30, None, 18), 85)  # no hand: centred on its mark
+        self.assertEqual(mark_label_top(100, 30, 300, 18), 85)  # the hand far away: centred
+        self.assertEqual(mark_label_top(100, 30, 106, 18), 106 - 18 - 30)  # the hand just below: the words above it
+        self.assertEqual(mark_label_top(110, 30, 104, 18), 104 + 18)  # just above: the words below it
+        for mark in range(60, 150, 3):  # wherever the hand is, the words never overlap it
+            top = mark_label_top(mark, 30, 104, 18)
+            self.assertTrue(top + 30 <= 104 - 18 or top >= 104 + 18, mark)
+
+
+class TestPencilledIn(DayCase):
+    """A later day's draft (week draft) on the Day tab: in pencil, placed to the minute, never a card."""
+
+    def test_marks_on_the_waking_day_only(self):
+        from thirties_core.timeline_layout import pencil_marks
+        d = day_layout(self.plan(), at("19:10"))
+        drafts = [{"title": "Call the plumber", "start": at("17:30").isoformat(), "minutes": 30},
+                  {"title": "Shed clear-out", "start": at("14:00").isoformat(), "minutes": 90},
+                  {"title": "At 3 AM", "start": at("03:00", 1).isoformat(), "minutes": 30},  # in the folded night
+                  {"title": "Broken", "start": "not a time"}]
+        marks = pencil_marks(d, drafts)
+        self.assertEqual([m.title for m in marks], ["Shed clear-out", "Call the plumber"])  # earliest first
+        self.assertEqual(marks[0].top, d.row_at(at("14:00")))
+        self.assertEqual(marks[0].bottom - marks[0].top, 3.0)
+        self.assertEqual(d.cards, day_layout(self.plan(), at("19:10")).cards)  # the plan itself is untouched

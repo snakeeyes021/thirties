@@ -16,7 +16,7 @@ import tempfile
 import time
 import unittest
 import unittest.mock
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from tests.fixtures import DAY, at, event, make_scheduler
@@ -209,7 +209,7 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(calls, [("if_there_is_time", {"item": "Water the ferns", "action": "schedule"}),
                                  ("if_there_is_time", {"item": "Water the ferns", "action": "drop"})])
 
-    def test_not_yours_today_has_only_its_own_two_actions(self) -> None:
+    def test_not_yours_today_has_only_its_own_three_actions(self) -> None:
         from thirties.views.agenda import AgendaPage
         plan, _ = self.sched.build_day_plan(DAY)
         plan.spans.append(EventSpan("cal-c", "Band practice", at("20:00"), at("21:00"), SpanCategory.CALENDAR,
@@ -222,11 +222,13 @@ class DayViewTests(unittest.TestCase):
         page.refresh(plan, at("19:20"))
         self.assertEqual([r.get_title() for r in _rows(page.groups["not_yours"])], ["Band practice"])
         self.assertNotIn("Band practice", [r.get_title() for r in _rows(page.groups["next"])])
-        hide, mine = page.not_yours_rows["cal-c"]
+        hide, not_mine, mine = page.not_yours_rows["cal-c"]
         hide.emit("clicked")
-        mine.emit("clicked")
+        not_mine.emit("clicked")
+        mine.emit("clicked")  # yours too: on the plan, the whole series (others_events.py)
         self.assertEqual(calls, [("hide_for_today", {"event": "cal-c"}),
-                                 ("resolve_calendar_event", {"event": "cal-c", "attend": False, "series": True})])
+                                 ("resolve_calendar_event", {"event": "cal-c", "attend": False, "series": True}),
+                                 ("resolve_calendar_event", {"event": "cal-c", "attend": True, "series": True})])
 
     def test_the_day_page_shows_where_the_day_stands(self) -> None:
         from thirties_core.models import SpanStatus
@@ -357,7 +359,8 @@ class DayViewTests(unittest.TestCase):
         self.assertEqual(blocks[0][1], ["Free until 8 PM"])
         self.assertTrue(blocks[0][0])
         self.assertEqual(list(view.agenda.groups)[-1], "not_yours")  # its own section, always last
-        self.assertEqual(self.action_rows(view.agenda.groups["not_yours"]), [("Book group", "7 PM – 9 PM")])
+        self.assertEqual(self.action_rows(view.agenda.groups["not_yours"]), [("Book group", "until 9 PM")])
+        self.assertEqual(_blocks(view.agenda.groups["not_yours"]), [("7 PM", ["Book group"])])  # time on the left
         cards = {w.card.span.title: w for w in view.timeline.canvas.cards}
         self.assertEqual(cards["Garden app dev"].card.status, "Worked on")
         self.assertNotIn("<s>", cards["Garden app dev"].title_label.get_label())  # a session isn't struck through
@@ -514,7 +517,7 @@ class TimelineTests(unittest.TestCase):
         self.assertIsNotNone(self.view.stack.get_child_by_name("timeline"))
         self.assertEqual(len(self.page.layout.slots), 32)  # 7 AM to 11 PM, no clock times anywhere
         height = self.page.canvas.measure(Gtk.Orientation.VERTICAL, -1)[0]
-        self.assertEqual(height, timeline.TOP * 2 + 32 * timeline.PITCH)
+        self.assertEqual(height, timeline.TOP * 2 + 32 * timeline.PITCH + timeline.NIGHT_H)  # and the folded night
         self.assertEqual(set(self.cards()), {"Lunch with Kim", "Research", "Dinner", "Audiobook", "Movie"})
         self.assertIn("8:00 PM – 9:30 PM", self.cards()["Movie"].get_tooltip_text())  # real times on hover
         win = Gtk.Window(child=self.view, default_width=800, default_height=700)
@@ -528,14 +531,73 @@ class TimelineTests(unittest.TestCase):
         win.destroy()
 
     def test_free_stretches_are_from_now_and_never_inside_work(self) -> None:
-        free = [(f.start, f.end) for _b, f in self.page.canvas.frees]
+        free = [(f.start, f.end) for _b, f in self.page.canvas.frees if f.kind == "free"]
         self.assertEqual(free, [(at("19:00"), at("20:00")), (at("21:30"), at("23:00"))])
         set_debug_time(at("06:00"))  # before the day starts: all of it
         view = DayView(self.plan)
-        frees = [f for _b, f in view.timeline.canvas.frees]
+        frees = [f for _b, f in view.timeline.canvas.frees if f.kind == "free"]
         self.assertTrue(frees)
         self.assertFalse(any(f.start < at("16:00") and f.end > at("08:30") for f in frees))
         self.assertTrue(all(s.work for s in view.timeline.layout.slots[3:18]))  # Work is hatched slots
+
+    def test_the_night_is_a_strip_that_opens_and_folds(self) -> None:
+        canvas = self.page.canvas
+        self.assertIn("Night, 11:00 PM", canvas.night_btn.get_label())
+        canvas.night_btn.emit("clicked")  # open it to plan in it
+        self.assertTrue(self.page.night_open)
+        self.assertGreater(len(self.page.layout.slots), 32)
+        night = [f for _b, f in canvas.frees if f.kind == "night"]
+        self.assertEqual(night[0].start, at("23:00"))
+        self.assertIn("Fold the night", canvas.night_btn.get_label())
+        canvas.night_btn.emit("clicked")
+        self.assertFalse(self.page.night_open)
+        self.assertEqual(len(self.page.layout.slots), 32)
+        self.view.refresh_plan(self.plan, force=True)
+        self.assertEqual(len(self.page.layout.slots), 32)  # folded stays folded
+
+    def test_dragging_into_the_folded_night_opens_it_and_lands_there(self) -> None:
+        from thirties.views import timeline
+        canvas = self.page.canvas
+        win = Gtk.Window(child=self.view, default_width=800, default_height=900)
+        self.view.stack.set_visible_child_name("timeline")
+        win.present()
+        self.assertTrue(_iterate_until(lambda: canvas.get_width() > 0))
+        movie = self.cards()["Movie"]
+        x, y, w, h = canvas.lane_rect(canvas.get_width(), movie.card)
+        drag = canvas.begin_gesture(x + w / 2, y + timeline.PITCH + 10)
+        canvas._drag = drag
+        into_night = canvas.y_of(len(self.page.layout.slots)) + 5 - drag["y"]
+        canvas._drag_update(None, 0, into_night)
+        self.assertTrue(self.page.night_open)  # reaching the strip opened it
+        rows_down = into_night + timeline.PITCH  # on into the night: grabbed by its second thirty, it starts at 11
+        call = canvas.gesture_call(drag, rows_down)
+        self.assertEqual(call[0], "update_event")
+        self.assertEqual(call[1]["start"], "11:00 PM")
+        win.destroy()
+
+    def test_planning_in_the_night_works_like_anywhere(self) -> None:
+        self.page.canvas.night_btn.emit("clicked")
+        button, night = next((b, f) for b, f in self.page.canvas.frees if f.kind == "night")
+        pop = self.page._plan_here(button, night)
+        self.assertEqual(pop.get_child().get_first_child().get_label(), "Plan something here")
+        pop.entry.set_text("Watch the meteor shower")
+        pop.add_btn.emit("clicked")
+        name, args = self.calls[-1]
+        self.assertEqual((name, args["title"], args["start"]), ("add_event", "Watch the meteor shower", "11:00 PM"))
+        self.assertNotIn("happened", args)
+
+    def test_a_past_block_takes_a_record_of_what_happened(self) -> None:
+        button, past = next((b, f) for b, f in self.page.canvas.frees if f.kind == "past"
+                            and f.start == at("16:00"))
+        self.assertTrue(button.has_css_class("tl-past"))
+        self.assertEqual(button.get_tooltip_text(), "Add what happened here")
+        pop = self.page._plan_here(button, past)
+        self.assertEqual(pop.get_child().get_first_child().get_label(), "What happened here?")
+        pop.entry.set_text("Fixed the bike chain")
+        pop.blocks.set_value(2)
+        pop.add_btn.emit("clicked")
+        self.assertEqual(self.calls[-1], ("add_event", {"title": "Fixed the bike chain", "start": "4:00 PM",
+                                                         "duration": "60 minutes", "happened": True}))
 
     def test_the_tick_logs_the_outcome_like_the_day_page(self) -> None:
         set_debug_time(at("20:10"))
@@ -571,7 +633,7 @@ class TimelineTests(unittest.TestCase):
         self.page.stretch_options = lambda stretch, minutes: stretch_options(tools, self.plan, stretch, minutes,
                                                                              at("19:10"))
         self.page.suggestions = lambda: [{"task_id": "t1", "title": "Call the bank", "why": "due today"}]
-        button, evening = self.page.canvas.frees[1]
+        button, evening = [(b, f) for b, f in self.page.canvas.frees if f.kind == "free"][1]
         win = Gtk.Window(child=self.view, default_width=800, default_height=700)
         self.view.stack.set_visible_child_name("timeline")
         win.present()
@@ -617,7 +679,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(chip.chip["title"], "Fix the door")
         week.on_pin("door", DAY + timedelta(days=1))  # dropped onto Friday
         self.assertEqual(self.calls[-1], ("pin_to_period", {"task": "door", "when": "2026-10-16"}))
-        self.assertTrue(self.page.units_toggle.get_visible())  # the units toggle is on the Week tab
+        self.assertTrue(self.page.units_toggle.is_ancestor(week.head))  # beside the week's free time
         self.page.units_toggle.set_active_name("hours")
         self.assertEqual(stored["units"], "hours")
         self.assertEqual(week.frees[3].get_text(), "2½ h free")
@@ -630,7 +692,7 @@ class TimelineTests(unittest.TestCase):
         self.assertFalse(week.areas[3].column.now_daylight)  # after sunset: the moon
         self.assertEqual(week.frees[3].get_text(), "2 h free")  # today's free time, from the new now
         self.page.stack.set_visible_child_name("day")
-        self.assertFalse(self.page.units_toggle.get_visible())
+        self.assertEqual(self.page.periods.get_active_name(), "day")
 
     def test_work_is_one_hatched_card_under_the_items(self) -> None:
         work = [(lbl.get_text(), c.row, c.rows) for lbl, c in self.page.canvas.work]
@@ -693,6 +755,108 @@ class TimelineTests(unittest.TestCase):
         self.view.refresh_plan(self.plan)  # nothing changed in the plan: the units are still read
         self.assertEqual(self.page.units_toggle.get_active_name(), "hours")
 
+    # --- the Month and Year tabs ---
+
+    def period_page(self):
+        from thirties_core.period_summary import load_month, load_year
+        self.loaded = []
+        self.opened = []
+        self.page.threaded_week = False
+        self.page.load_month = lambda m: self.loaded.append(m) or load_month(self.sched, m, DAY)
+        self.page.load_year = lambda y: self.loaded.append(y) or load_year(self.sched, y, DAY)
+        self.page.open_day = self.opened.append
+
+    def test_one_centred_switch_for_day_week_month_and_year(self) -> None:
+        self.period_page()
+        self.assertEqual([t.get_name() for t in self.page.periods.get_toggles()], ["day", "week", "month", "year"])
+        self.assertEqual(self.page.periods.get_parent().get_halign(), Gtk.Align.CENTER)
+        self.page.periods.set_active_name("month")
+        self.assertEqual(self.page.stack.get_visible_child_name(), "month")
+        self.page.stack.set_visible_child_name("year")
+        self.assertEqual(self.page.periods.get_active_name(), "year")
+
+    def test_the_month_shows_each_days_names_with_done_ones_ticked_and_opens_a_day(self) -> None:
+        from thirties_core.horizons import HorizonPlans, period_of
+        from thirties_core.models import SpanStatus
+        dinner = self.sched.state_db.get_span("dinner")
+        dinner.status = SpanStatus.DONE
+        self.sched.state_db.upsert_span(dinner)
+        plans = HorizonPlans(self.sched.state_db)
+        plans.put("t_shed", "Shed clear-out", "n1", "Home", period_of("month", DAY))
+        plans.set_effort(f"{period_of('month', DAY).key}|t_shed", 3, 60)
+        plans.put("t_door", "Fix the door", "n1", "Home", period_of("week", DAY), (DAY + timedelta(days=1)).isoformat())
+        self.period_page()
+        self.page.stack.set_visible_child_name("month")
+        month = self.page.month
+        self.assertEqual(self.loaded, [DAY.replace(day=1)])
+        self.assertEqual(month.title.get_text(), "October 2026")
+        cell = month.cells[DAY]
+        names = [lbl.get_label() for lbl in cell.names]
+        self.assertEqual(len(names), 4)  # four names, then "+1 more"
+        self.assertIn("Lunch with Kim", names[0])
+        self.assertIn("✓ <s>Dinner</s>", " ".join(month.rows[DAY].get_subtitle().split("\n")))
+        self.assertIn("Fix the door", month.cells[DAY + timedelta(days=1)].names[0].get_label())  # pinned to Friday
+        self.assertTrue(cell.has_css_class("today"))
+        self.assertEqual([(h, e.title, e.note()) for h, e in month.efforts.lines],
+                         [("This month", "Shed clear-out", "0 of 3 sessions done")])
+        cell.emit("clicked")  # a day opens on the Day tab
+        self.assertEqual(self.opened, [DAY])
+        self.assertEqual(self.page.stack.get_visible_child_name(), "day")
+        self.page.stack.set_visible_child_name("month")
+        month.next.emit("clicked")
+        self.assertEqual(self.loaded[-1], date(2026, 11, 1))
+        self.assertEqual(month.title.get_text(), "November 2026")
+
+    def test_a_narrow_month_is_a_list_of_its_days(self) -> None:
+        from thirties.views.timeline import MonthPage
+        from thirties_core.period_summary import load_month
+        month = MonthPage()  # sized by hand: the headless session's window manager decides a window's size
+        month.show_month(load_month(self.sched, DAY, DAY))
+        for width, shown in ((360, "list"), (1000, "grid"), (360, "list")):
+            month.measure(Gtk.Orientation.HORIZONTAL, -1)
+            month.measure(Gtk.Orientation.VERTICAL, width)
+            month.allocate(width, 700, -1, None)
+            self.assertTrue(_iterate_until(lambda: month.views.get_visible_child_name() == shown), width)
+        self.assertEqual(list(month.rows), [DAY])  # only the days with something (and today)
+        self.assertIn("Dinner", month.rows[DAY].get_subtitle())
+
+    def test_the_year_shows_twelve_months_with_efforts_and_opens_a_month(self) -> None:
+        from thirties_core.horizons import HorizonPlans, period_of
+        plans = HorizonPlans(self.sched.state_db)
+        plans.put("t_shed", "Shed clear-out", "n1", "Home", period_of("year", DAY), "2026-10-01")
+        plans.set_effort(f"{period_of('year', DAY).key}|t_shed", 6, 60)
+        plans.put("t_bulbs", "Plant the bulbs", "n1", "Home", period_of("month", date(2026, 11, 1)))
+        self.period_page()
+        self.page.stack.set_visible_child_name("year")
+        year = self.page.year
+        self.assertEqual(self.loaded, [2026])
+        self.assertEqual(year.title.get_text(), "2026")
+        self.assertEqual(len(year.cards), 12)
+        self.assertEqual(year.cards[10].lines, ["Plant the bulbs"])
+        self.assertEqual([(h, e.title) for h, e in year.efforts.lines], [("October–December", "Shed clear-out")])
+        self.assertTrue(year.cards[9].has_css_class("current"))
+        year.cards[10].emit("clicked")
+        self.assertEqual(self.page.stack.get_visible_child_name(), "month")
+        self.assertEqual(self.loaded[-1], date(2026, 11, 1))
+        self.page.stack.set_visible_child_name("year")
+        year.next.emit("clicked")
+        self.assertEqual(self.loaded[-1], 2027)
+
+    def test_a_week_bar_with_room_shows_its_name(self) -> None:
+        import cairo
+        self.page.threaded_week = False
+        self.page.load_week = lambda anchor, days: ([self.sched.build_day_plan(d)[0] for d in days], [])
+        self.page.stack.set_visible_child_name("week")
+        area = self.page.week.areas[3]
+        drawn = []
+        from thirties.views import timeline
+        real = timeline.WeekColumnArea._draw_name
+        with unittest.mock.patch.object(timeline.WeekColumnArea, "_draw_name",
+                                        lambda *a: drawn.append(a[3].span.title) or real(*a[1:])):
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 120, 320)
+            area._draw(area, cairo.Context(surface), 120, 320)
+        self.assertIn("Movie", drawn)  # every bar is offered; the long enough ones get their name
+
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
 class ChatPanelTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -709,19 +873,15 @@ class ChatPanelTests(unittest.TestCase):
     def bubbles(self, panel):
         return [c.text for c in list(_children(panel.messages_box)) if hasattr(c, "text")]
 
-    def test_greeting_is_kept_once_the_user_replies(self) -> None:
+    def test_an_empty_chat_shows_no_assistant_bubble(self) -> None:
         panel = ChatPanel(self.manager())
-        self.assertEqual(len(self.bubbles(panel)), 1)
-        greeting = self.bubbles(panel)[0]
-        self.assertEqual(panel.conversation_manager.history(), [])  # not stored until the user replies
-
+        self.assertEqual(self.bubbles(panel), [])  # nothing before the morning's message: the input's hint is enough
         panel.send_user_text("Plan my evening")
         self.assertTrue(_iterate_until(lambda: not panel.is_busy))
-        self.assertEqual([r for r, _ in panel.chat_history], ["assistant", "user", "assistant"])
-
-        # Reopening the day shows the stored conversation, greeting included
-        panel.set_conversation_manager(self.manager())
-        self.assertEqual(self.bubbles(panel)[:2], [greeting, "Plan my evening"])
+        self.assertEqual([r for r, _ in panel.chat_history], ["user", "assistant"])
+        self.assertEqual([m["role"] for m in panel.conversation_manager.history()], ["user", "assistant"])
+        panel.set_conversation_manager(self.manager())  # reopened: what was said, nothing added
+        self.assertEqual(self.bubbles(panel)[0], "Plan my evening")
 
     def test_whats_next_shows_one_line_per_item_in_the_chat_and_after_a_restart(self) -> None:
         from tests.test_conversation import reply
@@ -760,6 +920,15 @@ class ChatPanelTests(unittest.TestCase):
         times = [c.time_text for c in _children(panel.messages_box) if hasattr(c, "time_text")]
         self.assertEqual(times, ["7:10 PM", "7:10 PM"])  # soak friction 2
 
+    def test_a_message_the_phone_never_got_says_so_quietly(self) -> None:
+        manager = self.manager()
+        manager.add_assistant_message("📝 Added Oil the bike chain to Chores.", undelivered=True)
+        manager.record_exchange("/day", "Today: Taxes at 5.")
+        panel = ChatPanel(manager)
+        times = [c.time_text for c in _children(panel.messages_box) if hasattr(c, "time_text")]
+        self.assertEqual(times, ["7:10 PM · not delivered to your phone", "7:10 PM", "7:10 PM"])
+        self.assertEqual(self.bubbles(panel), ["📝 Added Oil the bike chain to Chores.", "/day", "Today: Taxes at 5."])
+
     def test_more_can_be_sent_while_a_reply_is_on_its_way(self) -> None:
         panel = ChatPanel(self.manager())
         panel.send_user_text("one")
@@ -768,7 +937,7 @@ class ChatPanelTests(unittest.TestCase):
         self.assertEqual(self.bubbles(panel)[-2:], ["one", "two"])  # shown at once, before the reply
         self.assertTrue(_iterate_until(lambda: not panel.is_busy, timeout=10))
         self.assertEqual([m["role"] for m in panel.conversation_manager.history()],
-                         ["assistant", "user", "user", "assistant"])  # one reply for both (A8)
+                         ["user", "user", "assistant"])  # one reply for both
 
     def test_new_conversation_and_switching_survive_refresh(self) -> None:
         manager = self.manager()
@@ -1033,6 +1202,26 @@ class SetupAndPreferencesTests(unittest.TestCase):
             self.assertIs(self.core.settings.get(key), False)
             self.assertEqual(SETTINGS[key].scope, "shared")  # one choice, read by chat and by each device
 
+    def test_the_goodreads_export_folder_and_how_old_the_list_is(self):
+        from datetime import datetime, timezone
+        from tests.fixtures import temp_dir
+        folder = Path(temp_dir("thirties_gr_exports_"))
+        export = folder / "goodreads_library_export.csv"
+        export.write_text((Path(__file__).parent / "fixtures_media" / "goodreads_library_export.csv")
+                          .read_text(encoding="utf-8"), encoding="utf-8")
+        when = datetime(2026, 11, 13, 15, tzinfo=timezone.utc).timestamp()
+        os.utime(export, (when, when))
+        ctx = settings_rows.SettingsContext(self.core)
+        row = settings_rows.export_folder_row(ctx)
+        self.assertIn("None chosen", row.get_subtitle())
+        self.assertIn("My Books → Import/Export", row.get_subtitle())  # how to get one, until a list exists
+        ctx.set("media.goodreads_export_dir", str(folder))  # what choosing the folder does
+        row.update_status()
+        self.assertEqual(row.status, "Reading list from your Goodreads export of November 13, 2026.")
+        self.assertIn(str(folder), row.get_subtitle())
+        from thirties_core.settings import SETTINGS
+        self.assertEqual(SETTINGS["media.goodreads_export_dir"].scope, "device")  # this computer's own folder
+
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)
         self.assertIsNotNone(dialog)
@@ -1128,8 +1317,11 @@ class SetupAndPreferencesTests(unittest.TestCase):
         rows = {}
         self.assertTrue(_iterate_until(lambda: rows.update(_combo_rows(group)) or len(rows) == 2))
         self.assertEqual(rows["taylor@example.com"].get_subtitle(), "Your commitments: planned around")
-        self.assertEqual(rows["Jamie"].get_subtitle(), "Thirties asks once per event (once per series if it repeats)")
-        rows["Jamie"].set_selected(2)  # Mine, Ask, Show only, Ignore
+        self.assertEqual(rows["Jamie"].get_subtitle(),  # someone else's: left out unless invited
+                         "Shown as someone else's; Thirties asks only when you're invited")
+        rows["Jamie"].set_selected(2)  # Mine, Leave out unless invited, Ask, Show only, Ignore
+        self.assertEqual(self.core.settings.get("calendar.modes"), {"jamie": "ask"})
+        rows["Jamie"].set_selected(3)
         self.assertEqual(self.core.settings.get("calendar.modes"), {"jamie": "show"})
 
 

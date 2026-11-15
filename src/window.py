@@ -79,18 +79,37 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.read_tool = lambda name, args: (self.conv_manager.execute_tool(name, args)
                                                              if self.conv_manager is not None else "")
         self.day_view.before.rows_provider = self._before_today  # the same records as the chat (11-06)
+        try:  # the days ahead pencilled in (week draft), where it's built in
+            from thirties_core import week_draft
+            self.day_view.set_drafts_provider(lambda day: week_draft.draft_for(self.scheduler.state_db, day))
+        except ImportError:
+            pass
+        try:  # breaking an item down, where it's built in: the put-off offers, and first steps from the chat
+            from thirties_core import break_down
+            self.day_view.before.offers_provider = lambda: break_down.open_offers(self.scheduler.state_db)
+            self.day_view.before.on_break = self._ask_first_steps
+        except ImportError:
+            pass
         self.day_view.agenda.paused = lambda: (self.conv_manager.tools.assistant.checkins_paused()
                                                if self.conv_manager is not None
                                                and self.conv_manager.tools.assistant is not None else "")
+        self.day_view.agenda.energy_today = self._energy_today
+        self.day_view.agenda.on_work_times = self._after_work_times
+        self.day_view.agenda.pencil_action = self._pencil_action
         self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
         self.day_view.agenda.describe = self._describe
         self.content_toolbar.set_content(self.day_view)
         self._wire_timeline(self.day_view.timeline)
+        from thirties_core.timeline_layout import THEIRS_SETTING
+        self.day_view.set_theirs_provider(lambda: bool(self.core.settings.get(THEIRS_SETTING, True)),
+                                          lambda on: (self.core.settings.set(THEIRS_SETTING, bool(on)),
+                                                      self._push_sync()))
 
         self.conv_manager = None
         self.chat_panel = ChatPanel(on_plan_updated=self._on_plan_updated, external_header=True)
         self.chat_toolbar.set_content(self.chat_panel)
         self.chat_header.set_title_widget(self.chat_panel.conversations_btn)
+        self.chat_panel.on_all_conversations = self._show_all_conversations
         for button in reversed(self.chat_panel.header_buttons):
             self.chat_header.pack_end(button)
 
@@ -137,6 +156,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         profile = Gio.SimpleAction.new("profile-memory", None)
         profile.connect("activate", lambda *_: self._show_profile_dialog())
         self.add_action(profile)
+        lists = Gio.SimpleAction.new("lists", None)  # Preferences → Each note's use and time scale
+        lists.connect("activate", lambda *_: self._show_profile_dialog(page="lists"))
+        self.add_action(lists)
 
         app = self.get_application()
         if app is not None:
@@ -244,6 +266,66 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         return description_for(tools.scheduler.state_db if tools and tools.scheduler else None, span.title,
                                span.task_id or "")
 
+    def _ask_first_steps(self, title: str) -> None:
+        """After "Break it down": the chat shown, with the ask for first steps written in its box, to send."""
+        from thirties.views.before_today import BREAK_ASK
+        from thirties_core.titles import title_of
+        self.chat_toggle_btn.set_active(True)
+        self.chat_panel.suggest(BREAK_ASK.format(title=title_of(title)))
+
+    def _energy_today(self):
+        """Today's energy entries, for the Agenda's Energy row."""
+        from thirties_core.memory import EnergyLog
+        plan = self.conv_manager.day_plan if self.conv_manager else None
+        if plan is None:
+            return []
+        return EnergyLog(self.scheduler.state_db).entries(since=plan.day_start)
+
+    def _after_work_times(self, result: str) -> None:
+        """A work button was tapped: log_day_times recorded the time on Work and planned the rest of the day
+        from it. What was recorded is a short notice; the rest (what moved, and after work the thirties
+        left and a few things that fit) goes in the chat as Thirties' own message, so the user can pick one there,
+        in the one conversation Telegram shares."""
+        from thirties_core.day_actions import work_reply
+        said, rest = work_reply(result)
+        self._toast(said or "Noted")
+        manager = self.conv_manager
+        if rest and manager is not None:
+            def post():
+                try:
+                    manager.add_assistant_message(rest)
+                except Exception as e:
+                    logger.warning("Couldn't put the after-work message in the chat: %s", e)
+                GLib.idle_add(lambda: (self.chat_panel.render(force=True), False)[1])
+            threading.Thread(target=post, daemon=True).start()
+            self.chat_toggle_btn.set_active(True)
+        self._push_sync()
+
+    def _pencil_action(self, title: str, action: str) -> str:
+        """An action on a later day's pencilled-in item: day_actions.pencil_act on this day's tools, never
+        during an assistant turn; then the day is shown again."""
+        from thirties_core.astronomy import get_current_time
+        from thirties_core.day_actions import pencil_act
+        from thirties_core.timeline_layout import day_layout
+        manager = self.conv_manager
+        assistant = manager.tools.assistant if manager is not None else None
+        if assistant is None:
+            return ""
+        if not manager.turn_lock.acquire(blocking=False):
+            return "Try that again once the reply is in."
+        try:
+            plan = manager.day_plan
+            from thirties_core.plan_log import caused_by
+            with caused_by("Day page"):
+                out = pencil_act(assistant, plan.target_date, title, action,
+                                 day_layout(plan, get_current_time(plan.sunrise.tzinfo)))
+        finally:
+            manager.turn_lock.release()
+        self._local_changes += 1
+        self.day_view.refresh_plan(manager.day_plan, force=True)
+        self._push_sync()
+        return out
+
     def _before_today(self):
         assistant = self.conv_manager.tools.assistant if self.conv_manager else None
         return assistant.before.rows() if assistant is not None else {}
@@ -287,8 +369,20 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             t.connect("button-clicked", lambda *_: undo())
             self.toast_overlay.add_toast(t)
 
+        try:  # the user's own estimates, kept per item where the lists' estimates are built in
+            from thirties_core import efforts
+        except ImportError:
+            efforts = None
+        if efforts is not None:
+            from thirties_core.day_actions import shown_estimate
+            db = self.scheduler.state_db
+            page.estimate_of = lambda task_id: shown_estimate(efforts.estimate_for(db, task_id) if task_id else None,
+                                                              efforts.unit(db))
         page.toast = toast
         page.load_week = self._load_week
+        page.load_month = self._load_month
+        page.load_year = self._load_year
+        page.open_day = self._load_day
         page.stretch_options = options
         page.suggestions = suggestions
         page.get_units = lambda: self.core.settings.get(UNITS_SETTING, DEFAULT_UNITS)
@@ -315,6 +409,30 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         finally:
             manager.turn_lock.release()
         return plans, chips
+
+    def _read_period(self, read):
+        """Run a Timeline read (a month, a year) on its worker thread, never during an assistant turn."""
+        manager = self.conv_manager
+        if manager is None:
+            return None
+        if not manager.turn_lock.acquire(timeout=60):
+            raise TimeoutError("the assistant is busy")
+        try:
+            return read()
+        finally:
+            manager.turn_lock.release()
+
+    def _load_month(self, month: date):
+        """The month's summary (period_summary): what's stored, the calendars and the plans, setting no day up."""
+        from thirties_core.period_summary import load_month
+        timeline = self.day_view.timeline
+        return self._read_period(lambda: load_month(self.scheduler, month, self.active_date, self.backlog_tasks,
+                                                    timeline.week_start, timeline.ongoing))
+
+    def _load_year(self, year: int):
+        from thirties_core.period_summary import load_year
+        return self._read_period(lambda: load_year(self.scheduler, year, self.active_date, self.backlog_tasks,
+                                                   self.day_view.timeline.week_start))
 
     # --- loading days ---
 
@@ -453,6 +571,9 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             result = self.conv_manager.execute_tool(name, args)
         if result.startswith(NOT_DONE):
             self._toast(result.split(":", 1)[1].split(". Ask the user")[0].strip())
+        from thirties_core.media_sources import BOOK_DONE_NOTE
+        if BOOK_DONE_NOTE in result:  # a book finished from the Day page: the reminder, once, as a notice
+            self._toast(BOOK_DONE_NOTE)
         self.day_view.refresh_plan(self.conv_manager.day_plan)
         self._push_sync()
         return result
@@ -525,6 +646,27 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         if page:
             dialog.stack.set_visible_child_name(page)
         dialog.present(self)
+
+    # --- all conversations ---
+
+    def _show_all_conversations(self) -> None:
+        from thirties.views.conversations_dialog import AllConversationsDialog
+        from thirties_core.memory import ConversationStore
+        tz = self.conv_manager.day_plan.sunrise.tzinfo if self.conv_manager else None
+        AllConversationsDialog(ConversationStore(self.scheduler.state_db), self.active_date, tz,
+                               self._open_conversation).present(self)
+
+    def _open_conversation(self, day: date, conversation_id: str) -> None:
+        """A conversation picked in All conversations: its day, with it in the chat (shown if it was hidden)."""
+        if self.chat_panel.is_busy:
+            self._toast("Open it once the reply is in.")
+            return
+        self.chat_panel._pinned[day] = conversation_id
+        if day != self.current_date:
+            self._load_day(day)
+        else:
+            self.chat_panel.open_conversation(conversation_id)
+        self.chat_toggle_btn.set_active(True)
 
     # --- navigation ---
 

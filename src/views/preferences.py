@@ -17,13 +17,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
             ("Tasks", "checkbox-checked-symbolic", [rows.joplin_group, rows.joplin_peer_group, rows.notebooks_group,
                                                     rows.wishlists_group]),
             ("Sync", "emblem-synchronizing-symbolic", [rows.sync_group]),
-            ("Phone & Messages", "phone-symbolic", [rows.phone_group, rows.messages_group]),
+            ("Phone & Messages", "phone-symbolic", [rows.phone_group, rows.messages_group, rows.reminders_group]),
         ]
         for title, icon, groups in pages:
             page = Adw.PreferencesPage(title=title, icon_name=icon)
             for build in groups:
                 page.add(build(ctx))
             if title == "Assistant":
+                page.add(rows.engineer_notes_group(ctx))
                 page.add(rows.gemini_group(ctx))
             self.add(page)
         self.connect("closed", lambda *_: ctx.flush())

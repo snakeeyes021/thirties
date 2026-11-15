@@ -93,6 +93,8 @@ class DayView(Gtk.Box):
         self.timeline = TimelinePage()
         self.timeline.run_tool = lambda name, args: self.run_tool(name, args) if self.run_tool else ""
         self.timeline.ongoing = self._ongoing
+        self.timeline.untimed = self._untimed
+        self.timeline.untimed_act = self._untimed_act
         # the Agenda: Today and, beside it, Before today (11-06), like the Timeline's Day and Week tabs
         from thirties.views.before_today import BeforeTodayPage
         self.before = BeforeTodayPage()
@@ -156,7 +158,7 @@ class DayView(Gtk.Box):
         self.solar_arc.set_day_plan(day_plan)
         self._update_title()
         self._update_tallies()
-        signature = (self._plan_signature(day_plan), self._paused_text())
+        signature = (self._plan_signature(day_plan), self._paused_text(), self._theirs_shown())
         if not force and signature == self._signature:
             self.timeline.sync_units()
             self.tick()
@@ -168,6 +170,49 @@ class DayView(Gtk.Box):
         self.agenda.refresh(day_plan, now)
         self.before.refresh()
         self.timeline.refresh(day_plan, self.today)
+
+    def set_drafts_provider(self, draft_for) -> None:
+        """The days ahead, pencilled in (week_draft.draft_for: day -> its draft): shown for a later day on
+        the Agenda and the Timeline, in pencil, never as planned items."""
+        def for_plan(plan):
+            today = self.today or date.today()
+            return draft_for(plan.target_date) if plan.target_date > today else []
+        self.agenda.drafts = for_plan
+        self.timeline.drafts = draft_for
+
+    def _untimed(self) -> tuple:
+        """The day's things with no time, for the Timeline: today's If there's time, or a later day's
+        pencilled-in list; read like the Agenda reads them."""
+        read = self.agenda.read_tool
+        if read is None or self.day_plan is None:
+            return "", []
+        if self.live_now() is not None:
+            kind, out = "if_time", read("if_there_is_time_items", {}) or ""
+        else:
+            kind, out = "pencilled", read("pencilled_in", {"day": self.day_plan.target_date.isoformat()}) or ""
+        return kind, [line[2:] for line in out.splitlines() if line.startswith("- ")]
+
+    def _untimed_act(self, kind: str, title: str, action: str) -> None:
+        if kind == "if_time":
+            self.agenda._if_time(title, action)
+        else:
+            self.agenda._pencil(title, action)
+
+    def _theirs_shown(self) -> bool:
+        try:
+            return bool(self.agenda.show_theirs())
+        except Exception:
+            return True
+
+    def set_theirs_provider(self, get, put) -> None:
+        """The one switch for other people's events: ``get()`` reads it, ``put(on)`` saves it; both pages
+        follow it, redrawn at once."""
+        def changed(on: bool) -> None:
+            put(on)
+            if self.day_plan is not None:
+                self.refresh_plan(self.day_plan, force=True)
+        self.agenda.show_theirs = self.timeline.show_theirs = get
+        self.agenda.set_show_theirs = changed
 
     def _paused_text(self) -> str:
         try:

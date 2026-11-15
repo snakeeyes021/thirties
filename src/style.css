@@ -145,7 +145,7 @@
 .tl-tick.checked { background-color: var(--tl-edge); color: white; }
 .tl-tick.crossed { border-style: solid; color: var(--tl-edge); }
 .tl-tick:disabled { filter: none; opacity: 1; }
-.tl-card.moot .tl-tick { border-style: dashed; }
+.tl-card.moot .tl-tick:disabled { border-style: dashed; }  /* dashed only when it can't be ticked: Not reported can */
 
 .tl-free {
     border: 1.5px dashed color-mix(in srgb, var(--success-color) 70%, transparent);
@@ -156,6 +156,28 @@
     min-height: 0;
 }
 .tl-free:hover { background-color: color-mix(in srgb, var(--success-color) 8%, transparent); }
+
+/* an empty thirty that's over: room to record what happened (quiet: it's no free time) */
+.tl-past {
+    border: 1.5px dashed color-mix(in srgb, currentColor 22%, transparent);
+    border-radius: 9px;
+    background: none;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
+}
+.tl-past:hover { background-color: color-mix(in srgb, currentColor 6%, transparent); }
+
+/* the night, folded to a strip under the day (and, opened, the strip that folds it again) */
+.tl-night-strip {
+    border-radius: 9px;
+    min-height: 0;
+    padding: 0 12px;
+    font-size: 0.85em;
+    background-color: color-mix(in srgb, #3b4a8c 22%, transparent);
+    box-shadow: none;
+}
+.tl-night-strip:hover { background-color: color-mix(in srgb, #3b4a8c 32%, transparent); }
 
 .tl-note { opacity: 0.6; font-style: italic; }
 
@@ -172,3 +194,32 @@
 .tl-card:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .tl-card.fixed .tl-title { font-weight: 600; }
 .tl-work-label { font-weight: 600; opacity: 0.55; }
+
+/* The Timeline's Month and Year tabs: a day of the month (a button that opens the day), a month of the year */
+.tl-month-day {
+    padding: 4px 6px;
+    border-radius: 8px;
+    min-height: 92px;
+    background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+.tl-month-day:hover { background-color: color-mix(in srgb, currentColor 10%, transparent); }
+.tl-month-day.other { opacity: 0.45; }
+.tl-month-day.past { background-color: color-mix(in srgb, currentColor 3%, transparent); }
+.tl-month-day.today { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.tl-month-day .tl-day-number { font-weight: 700; font-size: 0.9em; }
+.tl-month-day.today .tl-day-number { color: var(--accent-color); }
+.tl-month-item { font-size: 0.8em; font-weight: normal; }
+.tl-period-card { padding: 10px 12px; }
+.tl-year-month {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+.tl-year-month:hover { background-color: color-mix(in srgb, currentColor 10%, transparent); }
+.tl-year-month.current { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.tl-year-month.past { opacity: 0.7; }
+.tl-year-month.current .tl-month-name { color: var(--accent-color); }
+
+/* A later day's draft, pencilled in (week draft): lighter than the plan, never a planned item */
+.agenda-block.pencilled { opacity: 0.6; }
+.agenda-block.pencilled row { border-style: dashed; }

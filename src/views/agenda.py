@@ -33,10 +33,20 @@ IF_TIME_NOT_TODAY = "Not today"
 IF_TIME_TOMORROW = "Tomorrow"
 IF_TIME_WEEK = "Later this week"
 IF_TIME_DROP = "Drop"
+# Pencilled in on a later day's list (day_actions.py)
+PENCIL_NOT_THAT_DAY = "Not that day"
+PENCIL_DAY_AFTER = "The day after"
+# The days ahead, pencilled in (week_draft.py): a draft, not the plan
+DRAFT_TITLE = "Pencilled in"
+DRAFT_TEXT = "A draft for this day. It firms up that morning, and takes no time until then."
 # Not yours today (not_yours.py)
 NOT_YOURS_TITLE = "Not yours today"
 NOT_YOURS_HIDE = "Hide for today"
-NOT_YOURS_NOT_MINE = "Not mine"
+NOT_YOURS_NOT_MINE = "Not mine, every time"
+NOT_YOURS_MINE = "Mine too, every time"  # the user's too: on their plan, the whole series (others_events.py)
+NOT_YOURS_MENU = "Whose is this?"
+NOT_YOURS_SWITCH = "Show other people's events"
+NOT_YOURS_SHOW = "Show"
 
 
 def _flexible(span: EventSpan) -> bool:
@@ -77,11 +87,62 @@ def _block_end(span: EventSpan) -> datetime:
     return thirty_ceil(span.end_dt)
 
 
+# What each untimed list offers: (Done, Schedule it, the "not now" menu's label and its choices)
+IF_TIME_CHOICES = (IF_TIME_NOT_TODAY, (("tomorrow", IF_TIME_TOMORROW), ("week", IF_TIME_WEEK), ("drop", IF_TIME_DROP)))
+PENCIL_CHOICES = (PENCIL_NOT_THAT_DAY, (("next_day", PENCIL_DAY_AFTER), ("drop", IF_TIME_DROP)))
+
+
+def untimed_actions(title: str, choices: tuple, act: Callable[[str, str], None]) -> tuple:
+    """An untimed item's actions, the same on the Agenda and the Timeline: Done (a tick), Schedule it, and a
+    menu to put it off. Returns (done, schedule, later, the menu's box); each calls ``act(title, action)``."""
+    later_label, later_choices = choices
+    done = Gtk.Button(icon_name="object-select-symbolic", valign=Gtk.Align.CENTER, tooltip_text=IF_TIME_DONE)
+    done.add_css_class("flat")
+    done.set_cursor_from_name("pointer")
+    done.update_property([Gtk.AccessibleProperty.LABEL], [f"{IF_TIME_DONE}: {title}"])
+    done.connect("clicked", lambda _b: act(title, "done"))
+    schedule = Gtk.Button(label=IF_TIME_SCHEDULE, valign=Gtk.Align.CENTER)
+    schedule.add_css_class("flat")
+    schedule.connect("clicked", lambda _b: act(title, "schedule"))
+    later = Gtk.MenuButton(label=later_label, valign=Gtk.Align.CENTER)
+    later.add_css_class("flat")
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6, margin_bottom=6,
+                  margin_start=6, margin_end=6)
+    pop = Gtk.Popover(child=box)
+    for action, label in later_choices:
+        b = Gtk.Button(label=label)
+        b.add_css_class("flat")
+        b.connect("clicked", lambda _b, a=action: (pop.popdown(), act(title, a)))
+        box.append(b)
+    later.set_popover(pop)
+    return done, schedule, later, box
+
+
+def _draft_span(d: Dict[str, Any], start: datetime) -> EventSpan:
+    """A drafted item as a span, only so it's titled like every other row (short title, never a raw id)."""
+    return EventSpan(f"draft:{d.get('task_id') or d.get('title')}", str(d.get("title") or ""), start,
+                     start + timedelta(minutes=int(d.get("minutes") or 30)), SpanCategory.TASK,
+                     task_id=d.get("task_id") or None)
+
+
+def _children(widget: Gtk.Widget) -> List[Gtk.Widget]:
+    """Every widget under one, in order."""
+    out, child = [], widget.get_first_child()
+    while child is not None:
+        out.append(child)
+        out += _children(child)
+        child = child.get_next_sibling()
+    return out
+
+
 class AgendaPage(Gtk.ScrolledWindow):
 
     def __init__(self, run_tool: Optional[Tool] = None, on_replan: Optional[Callable[[str], None]] = None) -> None:
         super().__init__(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.run_tool, self.on_replan = run_tool, on_replan
+        self._tz = None
+        self._work_step = None
+        self.work_btn = None
         self.on_notice: Optional[Callable[[str], None]] = None
         # plan -> [{"title", "state", "choices": [{"how", "label", "back"}]}] (RoutineTools.day_routines)
         self.routines: Optional[Callable[[DayPlan], List[Dict[str, Any]]]] = None
@@ -91,6 +152,17 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.skip_menus: Dict[str, Gtk.MenuButton] = {}  # routine title -> its Skip menu (tests reach it here)
         self.read_tool: Optional[Tool] = None  # a read-only tool, run without refreshing (set by the window)
         self.paused: Callable[[], str] = lambda: ""  # "Check-ins paused until 6:30 AM" while they are (the window)
+        # the one switch for other people's events: read, and changed (the window saves it and redraws)
+        self.show_theirs: Callable[[], bool] = lambda: True
+        # today's energy entries ([{"at", "level", "note"}], EnergyLog.entries) for the Energy row
+        self.energy_today: Optional[Callable[[], List[Dict[str, Any]]]] = None
+        # after a work button's log_day_times: the window's hook (the rest of the day is replanned from it)
+        self.on_work_times: Callable[[str], None] = lambda result: None
+        # (title, action) -> what's said: an action on a later day's pencilled-in item (day_actions.pencil_act)
+        self.pencil_action: Optional[Callable[[str, str], str]] = None
+        # plan -> the day's draft [{"title", "start", "minutes"}] for a later day (week draft); [] otherwise
+        self.drafts: Optional[Callable[[DayPlan], List[Dict[str, Any]]]] = None
+        self.set_show_theirs: Callable[[bool], None] = lambda on: None
         # an item's short title and its description (11-06: no raw lines, markdown or ids on screen); the window
         # sets these to read the user's own notes and known ids too
         from thirties_core.titles import split_title
@@ -118,6 +190,10 @@ class AgendaPage(Gtk.ScrolledWindow):
         return group
 
     def refresh(self, plan: DayPlan, now: Optional[datetime]) -> None:
+        self._tz = plan.sunrise.tzinfo
+        from thirties_core.day_actions import work_step
+        self._work_step = work_step(plan, now) if self.run_tool is not None else None  # on Work's own row
+        self.work_btn = None
         for group in self.groups.values():
             if group is self.groups.get("now"):
                 group.set_header_suffix(None)
@@ -146,6 +222,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         unreported = [s for s in spans if _markable(s) and s.status == SpanStatus.UNKNOWN]
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
+            self._fill_drafts(plan)
             self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
             if unreported:  # still to sort out, there too
@@ -181,6 +258,8 @@ class AgendaPage(Gtk.ScrolledWindow):
             if current:  # someone else's event, or an invite, happening now: shown under "Free", dimmed
                 self._fill(group, current, now)
         upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
+        listed = {s.id for s in (current if any(_takes_time(x) for x in current) else []) + upcoming}
+        self._fill_today_rows(now, listed)  # work started or finished, and energy: a tap each
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
         self._fill_if_time()  # after the day's timed items
@@ -189,6 +268,78 @@ class AgendaPage(Gtk.ScrolledWindow):
         self._fill_routines(plan, now)
         self._fill_done(spans)
         self._fill_not_yours(theirs, today=True)
+
+    def _work_button(self, row: Adw.ActionRow) -> None:
+        """Work's row gets its button: Started work, then Finished work (the time of the tap, log_day_times)."""
+        from thirties_core.day_actions import WORK_LABELS, work_line
+        kind, work = self._work_step
+        row.set_subtitle(work_line(work))
+        button = Gtk.Button(label=WORK_LABELS[kind], valign=Gtk.Align.CENTER, tooltip_text=f"{WORK_LABELS[kind]} now")
+        button.add_css_class("flat")
+        button.connect("clicked", lambda _b, k=kind: self._work(k))
+        row.add_suffix(button)
+        self.work_btn = button
+
+    def _fill_today_rows(self, now: datetime, listed: set) -> None:
+        """Today only: Work's button on a row of its own when Work isn't listed under Now or Next (it's on Work's
+        own row there), and Energy (five levels, through log_energy). No time in the gutter: they're about now."""
+        from thirties_core.day_actions import ENERGY_LEVELS, energy_line
+        rows = []
+        if self._work_step is not None and self._work_step[1].id not in listed:
+            work = self._work_step[1]
+            row = Adw.ActionRow(title=GLib.markup_escape_text(self.title_for(work)))
+            self._work_button(row)
+            rows.append((None, row))
+        self.energy_buttons = []
+        if self.energy_today is not None and self.run_tool is not None:
+            try:
+                entries = self.energy_today() or []
+            except Exception:
+                entries = []
+            row = Adw.ActionRow(title="Energy", subtitle=energy_line(entries, now.tzinfo))
+            box = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
+            box.add_css_class("energy-levels")
+            last = int(entries[-1]["level"]) if entries else None
+            for level, name in ENERGY_LEVELS:
+                b = Gtk.ToggleButton(label=str(level), active=level == last, tooltip_text=f"{name} ({level} of 5)")
+                b.add_css_class("flat")
+                b.add_css_class("circular")
+                b.update_property([Gtk.AccessibleProperty.LABEL], [f"Energy: {name}"])
+                b.connect("clicked", lambda _b, lv=level, r=row: self._energy(lv, r))
+                box.append(b)
+                self.energy_buttons.append(b)
+            row.add_suffix(box)
+            self.energy_row = row
+            rows.append((None, row))
+        if rows:
+            self._add_blocks(self._group("today_rows", ""), rows)
+
+    def _work(self, kind: str) -> None:
+        from thirties_core.astronomy import get_current_time
+        from thirties_core.day_actions import work_call
+        if self.run_tool is None:
+            return
+        now = get_current_time(self._tz)
+        result = self.run_tool(*work_call(kind, now)) or ""
+        if not result.startswith(NOT_DONE):
+            self.on_work_times(result)
+
+    def _energy(self, level: int, row: Adw.ActionRow) -> None:
+        from thirties_core.day_actions import energy_call, energy_line
+        if self.read_tool is None and self.run_tool is None:
+            return
+        # logging energy changes no plan: through the read path, so the page isn't rebuilt under the tap
+        result = (self.read_tool or self.run_tool)(*energy_call(level)) or ""
+        if result.startswith(NOT_DONE):
+            return
+        for b in self.energy_buttons:
+            if b.get_label() != str(level) and b.get_active():
+                b.set_active(False)
+        try:
+            entries = self.energy_today() or []
+        except Exception:
+            entries = []
+        row.set_subtitle(energy_line(entries, self._tz))
 
     def _fill_not_yours(self, theirs: List[EventSpan], today: bool) -> None:
         """Someone else's events (not_yours.py), always last: each can be hidden for today, or marked not mine for
@@ -203,26 +354,64 @@ class AgendaPage(Gtk.ScrolledWindow):
         if not theirs:
             return
         group = self._group("not_yours", NOT_YOURS_TITLE)
-        for s in sorted(theirs, key=lambda s: s.start_dt):
-            row = Adw.ActionRow(title=GLib.markup_escape_text(self.title_for(s)),
-                                subtitle=f"{short_clock(s.start_dt)} – {short_clock(s.end_dt)}")
+        try:
+            shown = bool(self.show_theirs())
+        except Exception:
+            shown = True
+        switch = Gtk.Switch(active=shown, valign=Gtk.Align.CENTER, tooltip_text=NOT_YOURS_SWITCH)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [NOT_YOURS_SWITCH])
+        switch.connect("notify::active", lambda sw, _p: self._show_theirs(sw.get_active()))
+        group.set_header_suffix(switch)
+        self.not_yours_switch = switch
+        if not shown:  # one quiet line, and the way back
+            count = len(theirs)
+            row = Adw.ActionRow(title=f"{count} hidden" if count != 1 else "1 hidden")
             row.add_css_class("dim-label")
-            buttons = []
-            if today:
-                hide = Gtk.Button(label=NOT_YOURS_HIDE, valign=Gtk.Align.CENTER)
-                hide.add_css_class("flat")
-                hide.connect("clicked", lambda _b, i=s.id: self._not_yours("hide_for_today", {"event": i}))
-                buttons.append(hide)
-            mine = Gtk.Button(label=NOT_YOURS_NOT_MINE, valign=Gtk.Align.CENTER,
-                              tooltip_text="Not shown again, every time it comes up")
-            mine.add_css_class("flat")
-            mine.connect("clicked", lambda _b, i=s.id: self._not_yours(
-                "resolve_calendar_event", {"event": i, "attend": False, "series": True}))
-            buttons.append(mine)
-            for b in buttons:
-                row.add_suffix(b)
+            show = Gtk.Button(label=NOT_YOURS_SHOW, valign=Gtk.Align.CENTER)
+            show.add_css_class("flat")
+            show.connect("clicked", lambda _b: self._show_theirs(True))
+            row.add_suffix(show)
             group.add(row)
+            self.not_yours_hidden_row = row
+            return
+        entries = []
+        for s in sorted(theirs, key=lambda s: s.start_dt):
+            # the Agenda's row pattern: the time in the left column; whose and until when, quietly, under the title;
+            # the three choices in one menu, so the title keeps its room at phone width
+            row = Adw.ActionRow(title=GLib.markup_escape_text(self.title_for(s)),
+                                subtitle=GLib.markup_escape_text(", ".join(
+                                    x for x in (s.whose, f"until {short_clock(s.end_dt)}") if x)))
+            row.add_css_class("dim-label")
+            menu = Gtk.MenuButton(icon_name="view-more-symbolic", valign=Gtk.Align.CENTER,
+                                  tooltip_text=NOT_YOURS_MENU)
+            menu.add_css_class("flat")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6, margin_bottom=6,
+                          margin_start=6, margin_end=6)
+            pop = Gtk.Popover(child=box)
+            choices = ([(NOT_YOURS_HIDE, "hide_for_today", {"event": s.id})] if today else []) + [
+                (NOT_YOURS_NOT_MINE, "resolve_calendar_event", {"event": s.id, "attend": False, "series": True}),
+                (NOT_YOURS_MINE, "resolve_calendar_event", {"event": s.id, "attend": True, "series": True})]
+            buttons = []
+            for label, tool, args in choices:
+                b = Gtk.Button(label=label)
+                b.add_css_class("flat")
+                b.get_child().set_xalign(0)
+                b.connect("clicked", lambda _b, t=tool, a=args, p=pop: (p.popdown(), self._not_yours(t, a)))
+                box.append(b)
+                buttons.append(b)
+            menu.set_popover(pop)
+            row.add_suffix(menu)
+            entries.append((s.start_dt, row))
             self.not_yours_rows[s.id] = buttons
+        self._add_blocks(group, entries)
+
+    def _show_theirs(self, on: bool) -> None:
+        try:
+            if bool(self.show_theirs()) == on:
+                return
+        except Exception:
+            pass
+        GLib.idle_add(lambda: self.set_show_theirs(on) and False)  # it redraws this page: not inside the handler
 
     def _not_yours(self, tool: str, args: Dict[str, Any]) -> None:
         if self.run_tool is not None:
@@ -244,23 +433,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.if_time_rows = {}
         for title in items:
             row = Adw.ActionRow(title=GLib.markup_escape_text(title))
-            done = Gtk.Button(icon_name="object-select-symbolic", valign=Gtk.Align.CENTER, tooltip_text=IF_TIME_DONE)
-            done.add_css_class("flat")
-            done.connect("clicked", lambda _b, t=title: self._if_time(t, "done"))
-            schedule = Gtk.Button(label=IF_TIME_SCHEDULE, valign=Gtk.Align.CENTER)
-            schedule.add_css_class("flat")
-            schedule.connect("clicked", lambda _b, t=title: self._if_time(t, "schedule"))
-            later = Gtk.MenuButton(label=IF_TIME_NOT_TODAY, valign=Gtk.Align.CENTER)
-            later.add_css_class("flat")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=6, margin_bottom=6,
-                          margin_start=6, margin_end=6)
-            pop = Gtk.Popover(child=box)
-            for action, label in (("tomorrow", IF_TIME_TOMORROW), ("week", IF_TIME_WEEK), ("drop", IF_TIME_DROP)):
-                b = Gtk.Button(label=label)
-                b.add_css_class("flat")
-                b.connect("clicked", lambda _b, t=title, a=action, p=pop: (p.popdown(), self._if_time(t, a)))
-                box.append(b)
-            later.set_popover(pop)
+            done, schedule, later, box = untimed_actions(title, IF_TIME_CHOICES, self._if_time)
             for w in (done, schedule, later):
                 row.add_suffix(w)
             group.add(row)
@@ -271,6 +444,33 @@ class AgendaPage(Gtk.ScrolledWindow):
             out = self.run_tool("if_there_is_time", {"item": title, "action": action})
             if out and self.on_notice is not None and action == "schedule":
                 self.on_notice(out)
+
+    def _fill_drafts(self, plan: DayPlan) -> None:
+        """A later day's draft, pencilled in: light and slanted, at its drafted times, with nothing to tick. It's
+        not the plan: it firms up that morning."""
+        if self.drafts is None:
+            return
+        try:
+            drafts = self.drafts(plan) or []
+        except Exception:
+            return
+        entries = []
+        from thirties_core.clock import format_duration
+        for d in drafts:
+            try:
+                start = datetime.fromisoformat(str(d["start"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            row = Adw.ActionRow(title=f"<i>{GLib.markup_escape_text(self.title_for(_draft_span(d, start)))}</i>",
+                                subtitle=format_duration(int(d.get("minutes") or 30)))
+            row.add_css_class("pencilled")
+            entries.append((start, row))
+        if entries:
+            group = self._group("drafts", DRAFT_TITLE, DRAFT_TEXT)
+            self._add_blocks(group, entries)
+            for box in _children(group):
+                if hasattr(box, "when_text"):
+                    box.add_css_class("pencilled")
 
     def _fill_pencilled(self, day: Optional[str]) -> None:
         """On the day's list with no time yet (pencilled in, O3): shown as such, to be given a time or not. Read
@@ -285,8 +485,22 @@ class AgendaPage(Gtk.ScrolledWindow):
         if not items:
             return
         group = self._group("pencilled", "On the list, no time yet", "Pencilled in: give one a time, or leave it.")
+        self.pencil_rows = {}
         for title in items:
-            group.add(Adw.ActionRow(title=title))
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title))
+            if self.pencil_action is not None:
+                buttons = untimed_actions(title, PENCIL_CHOICES, self._pencil)
+                for w in buttons[:3]:  # Done, Schedule it, Not that day (the last is that menu's own box)
+                    row.add_suffix(w)
+                self.pencil_rows[title] = buttons
+            group.add(row)
+
+    def _pencil(self, title: str, action: str) -> None:
+        if self.pencil_action is None:
+            return
+        out = self.pencil_action(title, action)
+        if out and self.on_notice is not None:
+            self.on_notice(out)
 
     def _fill(self, group: Adw.PreferencesGroup, spans: List[EventSpan], now: Optional[datetime],
               current: bool = False, behind: bool = False, ahead: bool = False) -> None:
@@ -296,11 +510,17 @@ class AgendaPage(Gtk.ScrolledWindow):
         entries = []
         for s in sorted(spans, key=lambda s: (self._when(s), s.start_dt)):
             row = self._item_row(s)
+            from thirties_core.others_events import marker  # whose calendar it's on (others_events.py)
             if s.tentative:
-                row.set_subtitle("invite, not answered yet")
+                row.set_subtitle("invite, not answered yet" + (f", on {s.whose}" if s.whose else ""))
             elif s.shown_only:
-                row.set_subtitle("not yours (shown only)")
+                row.set_subtitle(marker(s) or "not yours (shown only)")
                 row.add_css_class("dim-label")
+            elif s.shared and s.whose:
+                row.set_subtitle(marker(s))
+            if (current or ahead) and self._work_step is not None and s.id == self._work_step[1].id \
+                    and self.work_btn is None:
+                self._work_button(row)
             if markable and _markable(s):
                 # done now: it finished at the click; done early (ahead): Thirties picks the times, on blocks (soak 3);
                 # a calendar event happened at its calendar time

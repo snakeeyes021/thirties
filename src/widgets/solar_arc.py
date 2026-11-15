@@ -39,6 +39,19 @@ def get_moon_phase(dt: datetime) -> tuple[str, str]:
         return ("🌑", "New Moon")
 
 
+MARKER_CLEAR = 18  # the sun's (or moon's) glow, and a little room: the apex label stays this far from its centre
+
+
+def apex_label_place(center_x: float, text_w: float, marker_x):
+    """Where the apex label ("Solar Midday 12:54 PM") goes, as (x, align): centred over the apex, unless the sun or
+    moon near the top of its arc would cover it; then beside the marker, on the side away from it."""
+    if marker_x is None or abs(marker_x - center_x) >= text_w / 2 + MARKER_CLEAR:
+        return center_x, 0.5
+    if marker_x >= center_x:
+        return marker_x - MARKER_CLEAR, 1.0  # its right edge just left of the marker
+    return marker_x + MARKER_CLEAR, 0.0
+
+
 class SolarArcWidget(Gtk.DrawingArea):
     """Visualizes the daily sun / nocturnal moon trajectory across the horizon."""
 
@@ -102,6 +115,7 @@ class SolarArcWidget(Gtk.DrawingArea):
         cr.stroke()
 
         # 3. Sun / Moon Marker at current time
+        marker_x = None  # where it's drawn: the apex label steps aside from it
         if is_today:
             if not is_night and (sunrise <= now <= sunset):
                 # Sun marker
@@ -112,6 +126,7 @@ class SolarArcWidget(Gtk.DrawingArea):
                 sun_x = margin_x + progress * arc_width
                 norm_x = (progress - 0.5) * 2.0
                 sun_y = peak_y + (1.0 - (1.0 - norm_x * norm_x)) * (horizon_y - peak_y)
+                marker_x = sun_x
 
                 # Outer sun glow
                 cr.set_source_rgba(0.98, 0.82, 0.25, 0.35)
@@ -137,6 +152,7 @@ class SolarArcWidget(Gtk.DrawingArea):
                 moon_x = margin_x + progress * arc_width
                 norm_x = (progress - 0.5) * 2.0
                 moon_y = peak_y + (1.0 - (1.0 - norm_x * norm_x)) * (horizon_y - peak_y)
+                marker_x = moon_x
 
                 # Outer cool lunar glow
                 cr.set_source_rgba(0.40, 0.65, 1.0, 0.35)
@@ -175,7 +191,8 @@ class SolarArcWidget(Gtk.DrawingArea):
         # Left label, right label (right-aligned) and apex label (centered at top)
         self._draw_text(cr, left_text, margin_x, horizon_y + 18, 0.0)
         self._draw_text(cr, right_text, width - margin_x, horizon_y + 18, 1.0)
-        self._draw_text(cr, center_text, center_x, peak_y - 8, 0.5)
+        x, align = apex_label_place(center_x, self._layout(cr, center_text, 11.0).get_pixel_size()[0], marker_x)
+        self._draw_text(cr, center_text, x, peak_y - 8, align)
 
     def _layout(self, cr, text: str, size_px: float) -> Pango.Layout:
         # Pango (unlike Cairo's toy text API) falls back to fonts that have the ☼ ☾ and moon glyphs.

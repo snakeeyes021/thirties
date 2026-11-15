@@ -792,7 +792,79 @@ def notebooks_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     save_as_you_type(someday, lambda text: ctx.set("joplin.someday_sections",
                                                    [x.strip() for x in text.split(",") if x.strip()]))
     group.add(someday)
+    list_structure_rows(ctx, group, cfg)
     return group
+
+
+# The list structure: notes to read beyond the notebooks, what a note that's one thing to do is, where done
+# items are filed, and the way to each note's use and time scale. The data is list_settings.py.
+ONE_OFF_LABELS = {"item": "One thing to do", "someday": "Someday: kept, never pushed", "ignore": "Skip it"}
+DONE_MONTHLY = "Monthly Done notes"
+DONE_ROLES_OK = ("ignore", "reference", "")  # a list can't hold done items: only a note of its own
+
+
+def done_note_row(ctx: SettingsContext, list_settings) -> Adw.ComboRow:
+    """Where done items are filed: Thirties' own monthly Done notes, or a note the user picks (one that isn't a
+    list: a list's items are things to do)."""
+    from thirties_core.lists import ListCatalog
+    try:
+        notes = ctx.core.joplin_engine.fetch_active_notes() or []
+    except Exception:
+        notes = []
+    roles = ListCatalog(ctx.core.scheduler.state_db).roles() if getattr(ctx.core, "scheduler", None) else {}
+    choices = [None] + sorted(({"id": n["id"], "title": n["title"]} for n in notes
+                               if (roles.get(n["id"]) or {}).get("role", "") in DONE_ROLES_OK),
+                              key=lambda n: n["title"].lower())
+    current = ctx.get(list_settings.DONE_NOTE_KEY)
+    if isinstance(current, dict) and current.get("id") and not any(c and c["id"] == current["id"] for c in choices):
+        choices.append({"id": current["id"], "title": current.get("title") or "(a note)"})  # chosen, gone from view
+    row = Adw.ComboRow(title="Where done items are filed",
+                       model=Gtk.StringList.new([DONE_MONTHLY] + [c["title"] for c in choices[1:]]))
+    index = next((i for i, c in enumerate(choices) if c and isinstance(current, dict) and c["id"] == current.get("id")),
+                 0)
+    row.set_selected(index)
+    row.connect("notify::selected", lambda r, _p: ctx.set(list_settings.DONE_NOTE_KEY, choices[r.get_selected()]))
+    row.choices = choices  # for tests
+    return row
+
+
+def list_structure_rows(ctx: SettingsContext, group: Adw.PreferencesGroup, cfg) -> None:
+    also = Adw.EntryRow(title="Also read these notes (titles, comma-separated)")
+    also.set_text(", ".join(cfg.joplin.whitelist_notes))
+    save_as_you_type(also, lambda text: ctx.set("joplin.whitelist_notes",
+                                                [x.strip() for x in text.split(",") if x.strip()]))
+    group.add(also)
+    group.one_off_row = group.done_row = None
+    try:
+        from thirties_core import list_settings
+    except ImportError:  # not in this build
+        list_settings = None
+    if list_settings is not None:
+        modes = list(list_settings.ONE_OFF_CHOICES)
+        one_off = Adw.ComboRow(title="A note that's a single thing, not a list", subtitle="How Thirties treats it",
+                               model=Gtk.StringList.new([ONE_OFF_LABELS.get(m, m) for m in modes]))
+        current = ctx.get(list_settings.ONE_OFF_KEY, "item") or "item"
+        one_off.set_selected(modes.index(current) if current in modes else 0)
+        one_off.connect("notify::selected", lambda r, _p: ctx.set(list_settings.ONE_OFF_KEY, modes[r.get_selected()]))
+        group.add(one_off)
+        group.one_off_row = one_off
+        group.done_row = done_note_row(ctx, list_settings)
+        group.add(group.done_row)
+    each = Adw.ActionRow(title="Each note's use and time scale", subtitle="What it's for, and when its items belong",
+                         activatable=True)
+    each.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+
+    def open_lists(_row):
+        window = ctx.parent
+        if window is None:
+            return
+        dialog = each.get_ancestor(Adw.Dialog)
+        if dialog is not None:
+            dialog.close()
+        window.activate_action("win.lists", None)
+    each.connect("activated", open_lists)
+    group.add(each)
+    group.also_row, group.each_row = also, each  # for tests
 
 
 def wishlists_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
@@ -800,15 +872,52 @@ def wishlists_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                  description="Optional. Thirties can suggest from your public want-to-read and "
                                              "watchlists. Your profile must be public; no passwords needed.")
     media = ctx.config().media
-    for key, title, value in (("media.goodreads_user_id", "Goodreads user ID (the number in your profile link)",
-                               media.goodreads_user_id),
-                              ("media.letterboxd_username", "Letterboxd username", media.letterboxd_username),
+    group.add(export_folder_row(ctx))
+    for key, title, value in (("media.letterboxd_username", "Letterboxd username", media.letterboxd_username),
                               ("media.serializd_username", "Serializd username", media.serializd_username)):
         row = Adw.EntryRow(title=title)
         row.set_text(value or "")
         save_as_you_type(row, lambda text, key=key: ctx.set(key, text) if text != (ctx.get(key, "") or "") else None)
         group.add(row)
     return group
+
+
+GOODREADS_HOW = ("On Goodreads: My Books → Import/Export → Export Library, then save the file in this folder. "
+                 "Thirties reads the newest one.")
+
+
+def export_folder_row(ctx: SettingsContext) -> Adw.ActionRow:
+    """The folder with Goodreads library exports (this computer's own), and how old the reading list is."""
+    from thirties_core.media_sources import reading_list_status
+    folder = ctx.config().media.goodreads_export_dir
+    row = Adw.ActionRow(title="Goodreads export folder")
+    if hasattr(row, "set_subtitle_lines"):
+        row.set_subtitle_lines(0)  # the folder, then how old the list is: both in full
+    choose = Gtk.Button(label="Choose…", valign=Gtk.Align.CENTER)
+    row.add_suffix(choose)
+
+    def show() -> None:
+        status = reading_list_status(ctx.config())
+        row.set_subtitle("\n".join(x for x in ((ctx.config().media.goodreads_export_dir or "None chosen"),
+                                                 status or GOODREADS_HOW) if x))
+        row.status = status  # read by the tests
+
+    def on_choose(_btn):
+        dialog = Gtk.FileDialog(title="Choose the folder with your Goodreads export")
+
+        def chosen(d, result):
+            try:
+                f = d.select_folder_finish(result)
+            except GLib.Error:
+                return
+            if f is not None and f.get_path():
+                ctx.set("media.goodreads_export_dir", f.get_path())
+                show()
+        dialog.select_folder(row.get_root() if row.get_root() else None, None, chosen)
+    choose.connect("clicked", on_choose)
+    row.choose, row.update_status = choose, show  # what the tests call after setting a folder
+    show()
+    return row
 
 
 # --- sync ---
@@ -933,6 +1042,61 @@ def phone_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     return group
 
 
+# --- reminders Thirties can send on its own: rush tickets (tickets.py), keeping in touch (people.py) ---
+
+RUSH_TITLE = "Rush tickets"
+RUSH_TEXT = ("A message on days your theatre has a show that isn't sold out. Tell Thirties which theatre in the "
+             "chat. Checked once a day, by this computer only")
+NUDGES_TITLE = "Nudges to keep in touch"
+NUDGES_TEXT = "A message when it's been a while since you were in touch with someone"
+
+
+def reminders_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """Two switches: the daily rush-ticket check (off unless turned on; this computer only) and the keep-in-touch
+    nudges (on unless turned off). Each shows only where its part of Thirties is built in."""
+    group = Adw.PreferencesGroup(title="Reminders")
+    group.rows = {}
+    for module, title, text, default in (("tickets", RUSH_TITLE, RUSH_TEXT, False),
+                                         ("people", NUDGES_TITLE, NUDGES_TEXT, True)):
+        try:
+            key = __import__(f"thirties_core.{module}", fromlist=["SETTING"]).SETTING
+        except (ImportError, AttributeError):
+            continue
+        row = Adw.SwitchRow(title=title, subtitle=text, active=bool(ctx.get(key, default)))
+        row.connect("notify::active", lambda r, _p, k=key: ctx.set(k, r.get_active()))
+        group.add(row)
+        group.rows[key] = row
+    group.set_visible(bool(group.rows))
+    return group
+
+
+def engineer_notes_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
+    """The notes the user left for the engineers: how many, and a read-only view of them."""
+    group = Adw.PreferencesGroup()
+    try:
+        from thirties_core.engineer_notes import EngineerNotes
+        store = EngineerNotes(ctx.core.scheduler.state_db)
+        notes = store.notes()
+    except Exception:  # not in this build, or nothing to read
+        group.set_visible(False)
+        return group
+    count = len(notes)
+    row = Adw.ActionRow(title="Notes to the engineers", activatable=True,
+                        subtitle="None waiting" if not count else f"{count} waiting to be read"
+                        if count != 1 else "1 waiting to be read")
+    row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+
+    def show(_row) -> None:
+        from thirties.views.engineer_notes_dialog import EngineerNotesDialog
+        dialog = EngineerNotesDialog(store.notes())
+        dialog.present(ctx.parent if ctx.parent is not None else row.get_root())
+        group.dialog = dialog
+    row.connect("activated", show)
+    group.add(row)
+    group.row = row
+    return group
+
+
 def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     group = Adw.PreferencesGroup(title="Messages",
                                  description="Sent to your desktop and, if paired, your phone, never while you're "
@@ -1030,7 +1194,8 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
 # --- calendars ---
 
 CALENDAR_CHOICES = [("mine", "Mine", "Your commitments: planned around"),
-                    ("", "Ask about its events", "Thirties asks once per event (once per series if it repeats)"),
+                    ("", "Leave out unless invited", "Shown as someone else's; Thirties asks only when you're invited"),
+                    ("ask", "Ask about its events", "Thirties asks once per event (once per series if it repeats)"),
                     ("show", "Show only", "On the Agenda as someone else's; takes no time, never asked about"),
                     ("ignore", "Ignore", "Never read"),
                     ("holidays", "Holidays", "Shown only; on a work day, Work comes off (you can put it back)")]
@@ -1060,7 +1225,7 @@ def calendars_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                                     subtitle="Add one in GNOME Settings → Online Accounts."))
             return
         for cal in calendars:
-            choices = CALENDAR_CHOICES if not cal["mine"] else [c for c in CALENDAR_CHOICES if c[0] != ""]
+            choices = CALENDAR_CHOICES if not cal["mine"] else [c for c in CALENDAR_CHOICES if c[0] not in ("", "ask")]
             row = Adw.ComboRow(title=cal["name"], model=Gtk.StringList.new([label for _, label, _ in choices]))
             current = cal["mode"] or ("mine" if cal["mine"] else "")
             index = next((i for i, (k, _, _) in enumerate(choices) if k == current), 0)

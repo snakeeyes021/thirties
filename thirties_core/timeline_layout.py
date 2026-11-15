@@ -37,6 +37,9 @@ THIRTY = timedelta(minutes=30)
 UNITS_SETTING = "timeline.free_units"
 UNITS = ("blocks", "hours")
 DEFAULT_UNITS = "blocks"
+# Other people's events (show-only calendars) shown or hidden: one switch for the Agenda and the Timeline.
+# A device setting until settings.py registers it as shared (about the person).
+THEIRS_SETTING = "calendar.show_theirs"
 
 Ongoing = Callable[[EventSpan], bool]
 
@@ -95,6 +98,15 @@ class FreeStretch:
     rows: int             # how many blocks free
     start: datetime
     end: datetime
+    kind: str = "free"    # free: to plan; night: in the sleep window, to plan; past: over, to record what happened
+
+
+@dataclass
+class NightStrip:
+    """The user's own sleep window after the waking day: folded to a thin strip unless opened."""
+    start: datetime
+    end: datetime
+    open: bool = False
 
 
 @dataclass
@@ -144,6 +156,9 @@ class DayLayout:
     notes: List[SlotNote]
     now_row: Optional[float] = None   # where now is, in rows; None when now isn't on the waking day shown
     now_daylight: bool = True
+    stretches: List[FreeStretch] = field(default_factory=list)  # every empty run you can create in, by kind
+    night: Optional[NightStrip] = None  # the sleep window after the day, if there is one
+    pencil: List["PencilMark"] = field(default_factory=list)  # a later day's draft, in pencil (pencil_marks)
 
     @property
     def free_blocks(self) -> int:
@@ -187,6 +202,67 @@ def sun_marks(layout: "DayLayout") -> List[Tuple[str, datetime, float]]:
     lo, hi = slots[0].start.timestamp(), slots[-1].end.timestamp()
     return [(name, t, _row_at(slots, t)) for name, t in (("sunrise", plan.sunrise), ("solar midday", noon),
                                                           ("sunset", plan.sunset)) if lo <= t.timestamp() < hi]
+
+
+@dataclass
+class PencilMark:
+    """Something pencilled in for a later day (week draft, week_draft.draft_for): not on the plan, takes
+    no time, firms up that morning. Drawn as an outline in pencil, never a card."""
+    title: str
+    start: datetime
+    minutes: int
+    top: float      # rows, to the minute
+    bottom: float
+
+
+def pencil_marks(layout: "DayLayout", drafts: Sequence[Dict[str, Any]]) -> List[PencilMark]:
+    """The draft's items ({"title", "start" (ISO), "minutes"}) placed on the day's rows; any outside the waking day
+    shown are left out. Earliest first."""
+    out: List[PencilMark] = []
+    if not layout.slots:
+        return out
+    lo, hi = layout.start.timestamp(), layout.end.timestamp()
+    for d in drafts or []:
+        try:
+            start = datetime.fromisoformat(str(d["start"]))
+            minutes = max(1, int(d.get("minutes") or 30))
+        except (KeyError, TypeError, ValueError):
+            continue
+        end = start + timedelta(minutes=minutes)
+        if start.tzinfo is None:
+            start, end = start.replace(tzinfo=layout.start.tzinfo), end.replace(tzinfo=layout.start.tzinfo)
+        if end.timestamp() <= lo or start.timestamp() >= hi:
+            continue
+        out.append(PencilMark(str(d.get("title") or ""), start, minutes, _row_at(layout.slots, start),
+                              _row_at(layout.slots, end)))
+    out.sort(key=lambda m: m.start.timestamp())
+    return out
+
+
+def mark_label_top(mark_y: float, label_h: float, hand_y: Optional[float], hand_half: float) -> float:
+    """Where a rail mark's words go (their top, in px): centred on the mark, unless the hour hand (``hand_y``, its
+    axis; ``hand_half``, half its height plus a margin) would cover them; then just clear of it, on the mark's own
+    side, so the hand never hides solar midday or sunset."""
+    top = mark_y - label_h / 2
+    if hand_y is None or top >= hand_y + hand_half or top + label_h <= hand_y - hand_half:
+        return top
+    if mark_y < hand_y:
+        return hand_y - hand_half - label_h  # the mark is above now: its words go above the hand
+    return hand_y + hand_half
+
+
+def night_marks(layout: "DayLayout") -> List[Tuple[datetime, float]]:
+    """The opened night's hours on the rail, sparsely (its start, then each hour on the hour), so it's clear
+    which thirty you're in at night; the rows themselves stay unlabelled. (time, row) pairs; none when folded."""
+    night, slots = layout.night, layout.slots
+    if night is None or not night.open or not slots:
+        return []
+    marks = [night.start]
+    t = night.start.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    while t < night.end:
+        marks.append(t)
+        t += timedelta(hours=1)
+    return [(t, _row_at(slots, t)) for t in marks if t.timestamp() < slots[-1].end.timestamp()]
 
 
 def _shown_as_note(span: EventSpan) -> bool:
@@ -272,8 +348,10 @@ def look_of(span: EventSpan, ongoing: Optional[Ongoing] = None) -> str:
 
 def tickable(span: EventSpan) -> bool:
     """What the Agenda lets you mark done (agenda._markable): planned activities and tasks, and the user's own
-    calendar events (soak 1: the outcome is kept in Thirties, the calendar untouched)."""
-    if span.status != SpanStatus.PLANNED or span.tentative or span.shown_only or span.is_envelope:
+    calendar events (soak 1: the outcome is kept in Thirties, the calendar untouched). One gone by with nothing said
+    ("Not reported") too: it isn't done, so it can still be ticked (as on the Agenda)."""
+    if span.status not in (SpanStatus.PLANNED, SpanStatus.UNKNOWN) or span.tentative or span.shown_only \
+            or span.is_envelope:
         return False
     return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR)
 
@@ -284,14 +362,28 @@ def _status(span: EventSpan, ongoing: Ongoing) -> str:
     return _STATUS.get(span.status, "")
 
 
-def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[Ongoing] = None) -> DayLayout:
+def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[Ongoing] = None,
+               night_open: bool = False, show_theirs: bool = True) -> DayLayout:
     """Lay a day out. ``now`` is the real time (always pass it): free time starts at the current thirty, so a past
     day has none and a later day all of it. ``ongoing`` says which items are ongoing (the assistant's reading of
-    kinds); by default, the wording."""
+    kinds); by default, the wording. The user's own sleep window after the waking day is a strip (``night``),
+    folded unless ``night_open``: then its thirties are rows like the rest, to drag into and plan in. With
+    ``show_theirs`` off (the user's one switch for other people's events), their notes aren't shown; unanswered
+    invites still are (they're the user's to answer)."""
     ongoing = ongoing or _default_ongoing
     in_view = [s for s in plan.spans_in_view() if not s.is_envelope]
     items = [s for s in in_view if not _shown_as_note(s)]
     lo, hi = _awake_range(plan, items)
+    sleeps = [s for s in plan.active_spans() if s.category == SpanCategory.SLEEP and s.status != SpanStatus.SKIPPED]
+    night_last = hi
+    while night_last + 1 < len(plan.blocks) and any(
+            s.start_dt.timestamp() <= plan.blocks[night_last + 1].start_dt.timestamp()
+            and plan.blocks[night_last + 1].end_dt.timestamp() <= s.end_dt.timestamp() for s in sleeps):
+        night_last += 1
+    night = NightStrip(plan.blocks[hi + 1].start_dt, plan.blocks[night_last].end_dt, night_open) \
+        if night_last > hi else None
+    if night is not None and night_open:
+        hi = night_last
     blocks = plan.blocks[lo:hi + 1]
     busy = [s for s in plan.active_spans() if s.status != SpanStatus.SKIPPED]
     now_ts = now.timestamp() if now is not None else None
@@ -306,16 +398,21 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
                           work=any(s.category == SpanCategory.WORK for s in there), sleep=sleep,
                           free=not there and not past, past=past))
 
-    # free stretches: runs of free slots
-    free: List[FreeStretch] = []
+    # stretches: runs of empty slots, by kind. Free (to plan; what the free time counts), the night (empty but for
+    # Sleep: to plan too), and the past (over: to record what happened)
+    stretches: List[FreeStretch] = []
     for s in slots:
-        if not s.free:
+        there = [x for x in busy if x.overlaps(s.start, s.end) and x.category != SpanCategory.SLEEP]
+        if there:
             continue
-        if free and free[-1].row + free[-1].rows == s.row:
-            free[-1].rows += 1
-            free[-1].end = s.end
+        kind = "past" if s.past else "free" if s.free else "night"
+        last = stretches[-1] if stretches else None
+        if last is not None and last.kind == kind and last.row + last.rows == s.row:
+            last.rows += 1
+            last.end = s.end
         else:
-            free.append(FreeStretch(s.row, 1, s.start, s.end))
+            stretches.append(FreeStretch(s.row, 1, s.start, s.end, kind))
+    free = [f for f in stretches if f.kind == "free"]
 
     start, end = slots[0].start, slots[-1].end
 
@@ -365,9 +462,10 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
     # someone else's events and invites: a note on the card where they start, else on the slot
     notes: List[SlotNote] = []
     for s in in_view:
-        if not _shown_as_note(s):
+        if not _shown_as_note(s) or (s.shown_only and not show_theirs):
             continue
-        text = f"{s.title} ({'not yours' if s.shown_only else 'invite, not answered'})"
+        from thirties_core.others_events import short_whose  # whose calendar, faintly (others_events.py)
+        text = f"{s.title} ({(short_whose(s.whose) if s.whose else 'not yours') if s.shown_only else 'invite, not answered'})"
         at = plan.block_at(max(s.start_dt, start, key=lambda t: t.timestamp()))
         if at is None or at.index not in by_index:
             continue
@@ -382,7 +480,7 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
     if now is not None and start.timestamp() <= now.timestamp() < end.timestamp():
         now_row = _row_at(slots, now)
         now_daylight = plan.sunrise.timestamp() <= now.timestamp() < plan.sunset.timestamp()
-    return DayLayout(plan, slots, sky, work, cards, free, notes, now_row, now_daylight)
+    return DayLayout(plan, slots, sky, work, cards, free, notes, now_row, now_daylight, stretches, night)
 
 
 # --- the week -------------------------------------------------------------------------------------------------------
@@ -570,6 +668,12 @@ def resize_call(layout: DayLayout, card: Card, edge: str, rows: float) -> Option
                             "alongside": True}
 
 
+def record_call(title: str, start: datetime, minutes: int) -> Tuple[str, Dict[str, Any]]:
+    """Filled in afterwards: a record of what happened in that stretch (done, at exactly those times)."""
+    return "add_event", {"title": title.strip(), "start": format_clock(start), "duration": f"{int(minutes)} minutes",
+                         "happened": True}
+
+
 def delete_call(span: EventSpan) -> Optional[Tuple[str, Dict[str, Any]]]:
     return ("remove_event", {"event": span.id}) if movable(span) else None
 
@@ -584,8 +688,8 @@ def restore_call(span: EventSpan) -> Tuple[str, Dict[str, Any]]:
 
 
 __all__ = ["movable", "snap_row", "snap_boundary", "move_target", "move_call", "resize_extent", "resize_call",
-           "delete_call", "restore_call",
-           "UNITS", "UNITS_SETTING", "DEFAULT_UNITS", "amount_text", "free_text", "normalise_units", "Slot", "Band",
-           "FreeStretch", "Card", "SlotNote", "DayLayout", "day_layout", "look_of", "tickable", "WeekBar",
+           "delete_call", "restore_call", "record_call",
+           "UNITS", "UNITS_SETTING", "DEFAULT_UNITS", "THEIRS_SETTING", "amount_text", "free_text", "normalise_units", "Slot", "Band",
+           "FreeStretch", "NightStrip", "night_marks", "mark_label_top", "PencilMark", "pencil_marks", "Card", "SlotNote", "DayLayout", "day_layout", "look_of", "tickable", "WeekBar",
            "WeekColumn", "WeekLayout", "week_days", "week_layout", "unplaced_in_week", "stretch_options",
            "what_to_plan"]
