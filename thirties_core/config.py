@@ -111,6 +111,12 @@ class AssistantConfig:
     after_change: str = "next"
     after_change_unmarked: bool = True  # its Not marked yet section
     status_line: bool = True  # "You're in the 10:00 block: …" in replies (reply_extras.py); again only once it changed
+    # When the chosen model's usage limit is reached, a simpler assistant answers until it resets (fallback.py):
+    # a second model through the same subscription, capped per 5 hours; then the on-device one if it's offered
+    # and installed; else chat waits, and everything else keeps working
+    quota_fallback: bool = True
+    fallback_model: str = "gemini-4-argon-low"
+    fallback_calls_per_5h: int = 20
     sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
     sunset_notice: bool = False
 

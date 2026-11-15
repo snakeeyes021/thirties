@@ -410,6 +410,12 @@ class ConversationManager:
             return reply
 
     def _turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
+        # --- the usage limit: a simpler assistant answers, or the messages wait until it resets (fallback.py) ---
+        from thirties_core import fallback
+        held = fallback.before_turn(self, batch, via)
+        if held is not None:
+            return held, False
+        # --- end usage limit ---
         from thirties_core.joplin_writeback import current_turn
         token = current_turn.set(f"[{via}] " + " / ".join(i.text for i in batch))  # each Joplin write's cause
         try:
@@ -534,6 +540,11 @@ class ConversationManager:
                 reply = self.brain.respond(batch[-1].text)
         except BrainUnavailable as e:
             logger.warning("The model couldn't be reached: %s", e)
+            # --- the usage limit, mid-turn: the on-device brain takes the turn if it can (fallback.py) ---
+            from thirties_core import fallback
+            if self.tools.successful_changes == changes_before and fallback.after_lost(self, e):
+                return self._run_turn(batch, via, attempts)
+            # --- end usage limit ---
             return self._lost(batch, before, changes_before, e, via, attempts), False
         if morning_now and getattr(self, "_morning_facts", "") and isinstance(reply, str) \
                 and not reply.startswith(("Error contacting model", "Sorry, I couldn't reach")):
@@ -569,6 +580,8 @@ class ConversationManager:
         final = self._with_whats_next(final, merged, before)
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
         final = clean_message(final, self.tools, merged)
+        from thirties_core import fallback  # said once: a simpler assistant is answering, or the usual one is back
+        final = fallback.with_notice(self, final)
         if final != reply:
             for m in reversed(self.brain.messages):
                 if m.get("role") == "assistant":
@@ -700,10 +713,12 @@ class ConversationManager:
         attempts += 1
         wait = LOST_RETRY_MINUTES[min(attempts - 1, len(LOST_RETRY_MINUTES) - 1)]
         retry_after = (get_current_time(self.day_plan.day_start.tzinfo) + timedelta(minutes=wait)).isoformat()
+        note = LOST_TURN_REPLY.format(why=error.why)
+        from thirties_core import fallback  # no assistant has quota left: wait for its reset time, and say until when
+        retry_after, note = fallback.lost_wait(self, error, retry_after, note)
         for i in batch:
             self.brain.messages.append({"role": "user", "content": i.text, "at": i.at, "via": i.via,
                                         "unanswered": True, "attempts": attempts, "retry_after": retry_after})
-        note = LOST_TURN_REPLY.format(why=error.why)
         if attempts == 1:  # said once; a retry that fails again stays quiet
             self.brain.messages.append({"role": "assistant", "content": note, "display_only": True,
                                         "kind": "status"})
