@@ -1021,6 +1021,18 @@ class SetupAndPreferencesTests(unittest.TestCase):
             self.assertEqual(self.core.settings.get("assistant.after_change"), mode)
         self.assertEqual(SETTINGS["assistant.after_change"].scope, "shared")  # the same on every device
 
+    def test_the_switches_chat_can_turn_off_are_here_too(self):
+        from thirties_core.settings import SETTINGS
+        group = settings_rows.messages_group(settings_rows.SettingsContext(self.core))
+        switches = {r.get_title(): r for r in _rows_of_type(group, Adw.SwitchRow)}
+        for title, key in (("With what's not marked yet", "assistant.after_change_unmarked"),
+                           ("Say which block I'm in", "assistant.status_line")):
+            row = switches[title]
+            self.assertTrue(row.get_active())  # on by default
+            row.set_active(False)
+            self.assertIs(self.core.settings.get(key), False)
+            self.assertEqual(SETTINGS[key].scope, "shared")  # one choice, read by chat and by each device
+
     def test_preferences_has_every_page(self):
         dialog = PreferencesDialog(self.core, app=None)
         self.assertIsNotNone(dialog)

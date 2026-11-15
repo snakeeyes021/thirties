@@ -72,15 +72,24 @@ def _moved_line(moved: List[EventSpan], plan: DayPlan, said: str) -> str:
         for when, items in groups.items())
 
 
-def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: str = DEFAULT_MODE,
-           said: str = "", unmarked: Optional[List[EventSpan]] = None) -> str:
+def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: Optional[str] = None,
+           said: str = "", unmarked: Optional[List[EventSpan]] = None, config=None, db=None) -> str:
     """The slice, its sections a blank line apart (messages.join_sections): "Now:" and what's in the current block
     (none when nothing is), the next few rows (or the rest of today) laid out by the schedule's own row formatter,
     any moved item not among them, "Not marked yet:" (none when nothing is), and someone else's events in that
     stretch on a "Not yours" line. "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
     keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
-    what the user asked not to be asked about); worked out from the plan when not given."""
+    what the user asked not to be asked about); worked out from the plan when not given.
+
+    ``mode`` given: that, whole (asked for outright). Left out: as the person wants it (reply_extras.py, from
+    ``config`` and ``db``): nothing at all, or without its Not marked yet list, when they said so."""
     from thirties_core.messages import plain_rows, schedule_rows
+    if mode is None:
+        from thirties_core.reply_extras import effective
+        wanted = effective(config, db, plan.target_date)
+        mode = wanted["whats_next"] if wanted["whats_next"] in MODES else DEFAULT_MODE
+        if not wanted["not_marked"]:
+            unmarked = []
     if mode not in MODES or mode == "nothing" or not (plan.day_start <= now < plan.day_end):
         return ""
     block = thirty_of(now)

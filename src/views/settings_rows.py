@@ -996,7 +996,23 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
                          model=Gtk.StringList.new([name for _, name in afters]))
     after_now = getattr(cfg.assistant, "after_change", "next")
     after.set_selected(next((i for i, (k, _) in enumerate(afters) if k == after_now), 1))
-    after.connect("notify::selected", lambda r, _p: ctx.set("assistant.after_change", afters[r.get_selected()][0]))
+    def choose(key, part, value):
+        ctx.set(key, value)
+        try:  # the choice here replaces one made in chat for today only
+            from thirties_core.reply_extras import clear_today
+            clear_today(ctx.core.scheduler.state_db, part)
+        except Exception:
+            pass
+    after.connect("notify::selected",
+                  lambda r, _p: choose("assistant.after_change", "whats_next", afters[r.get_selected()][0]))
+    unmarked = Adw.SwitchRow(title="With what's not marked yet", subtitle="Under what's next after a change",
+                             active=bool(getattr(cfg.assistant, "after_change_unmarked", True)))
+    unmarked.connect("notify::active",
+                     lambda r, _p: choose("assistant.after_change_unmarked", "not_marked", r.get_active()))
+    status = Adw.SwitchRow(title="Say which block I'm in",
+                           subtitle="“You're in the 10:00 block”, once each time the block changes",
+                           active=bool(getattr(cfg.assistant, "status_line", True)))
+    status.connect("notify::active", lambda r, _p: choose("assistant.status_line", "status_line", r.get_active()))
     sunrise = Adw.SwitchRow(title="Tell me at sunrise", subtitle="Every day, at the real time: handy for the lights",
                             active=bool(ctx.get("assistant.sunrise_notice", False)))
     sunset = Adw.SwitchRow(title="Tell me at sunset", subtitle="Every day, at the real time",
@@ -1006,7 +1022,7 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     login.connect("notify::active", on_login)
     sunrise.connect("notify::active", lambda r, _p: ctx.set("assistant.sunrise_notice", r.get_active()))
     sunset.connect("notify::active", lambda r, _p: ctx.set("assistant.sunset_notice", r.get_active()))
-    for row in (level, first, items, after, delay, sunrise, sunset, background, login):
+    for row in (level, first, items, after, unmarked, status, delay, sunrise, sunset, background, login):
         group.add(row)
     return group
 

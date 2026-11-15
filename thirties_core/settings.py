@@ -61,6 +61,8 @@ _ALL = [
     Setting("assistant.morning_message_at", "shared"),
     Setting("assistant.morning_message_items", "shared"),
     Setting("assistant.after_change", "shared"),
+    Setting("assistant.after_change_unmarked", "shared"),
+    Setting("assistant.status_line", "shared"),
     Setting("assistant.sunrise_notice", "shared"),
     Setting("assistant.sunset_notice", "shared"),
     # about this machine

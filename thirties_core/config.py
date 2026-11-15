@@ -106,6 +106,8 @@ class AssistantConfig:
     # After a turn that changed something, the reply ends with: "nothing", "next" (the block you're in and the
     # next few things: whats_next.py) or "rest" (the rest of today); rendered by Python, never by the model
     after_change: str = "next"
+    after_change_unmarked: bool = True  # its Not marked yet section
+    status_line: bool = True  # "You're in the 10:00 block: …" in replies (reply_extras.py); again only once it changed
     sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
     sunset_notice: bool = False
 

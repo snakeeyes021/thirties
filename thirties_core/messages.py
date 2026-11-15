@@ -121,10 +121,29 @@ def _row_items(plan: DayPlan) -> List[EventSpan]:
             and s.status not in (SpanStatus.SKIPPED,) and s.end_dt > s.start_dt]
 
 
-def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = None) -> str:
+# The person asking where they are now: the status line is the answer, whatever they set and however recently
+# it was shown
+WHERE_ASKED_RE = re.compile(r"\b(where am i|what(?:'s| is) (?:on )?(?:right )?now|which block|what block|"
+                            r"what am i (?:on|doing))\b", re.IGNORECASE)
+
+
+def status_wanted(config, db, day, said: str = "") -> bool:
+    """Whether replies say which block the person is in: on unless they turned it off (reply_extras.py), and
+    always when they ask where they are."""
+    if WHERE_ASKED_RE.search(said or ""):
+        return True
+    from thirties_core.reply_extras import effective
+    return bool(effective(config, db, day)["status_line"])
+
+
+def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = None, config=None, db=None,
+                said: str = "") -> str:
     """Where the user is: the block, and what's in it. An end time only when what's on now runs past the block
     and isn't followed straight on by the next thing listed (10-29: an "(until 8:30)" right before the
-    next item added nothing)."""
+    next item added nothing). With ``config`` or ``db`` (a reply to the person): "" when they turned it off and
+    didn't ask where they are (``said``)."""
+    if (config is not None or db is not None) and not status_wanted(config, db, plan.target_date, said):
+        return ""
     block = thirty_of(now)
     here = [s for s in _row_items(plan) if not s.tentative and s.status == SpanStatus.PLANNED
             and s.start_dt < block + HALF and s.end_dt > block]
@@ -179,7 +198,8 @@ def plain_rows(rows: List[str]) -> List[str]:
 
 
 def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = False,
-                    missed: Optional[Sequence[EventSpan]] = None, label: str = "") -> str:
+                    missed: Optional[Sequence[EventSpan]] = None, label: str = "", config=None, db=None,
+                    said: str = "") -> str:
     """The schedule as the user reads it. For the day being lived (``now`` given): the status line, what's not
     marked yet right after it, then the rest of the day (or, asked for, the whole day). For another day: the
     day."""
@@ -192,7 +212,7 @@ def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = Fa
     upcoming = [s for s in _row_items(plan) if s.start_dt >= block + HALF]
     next_start = min((thirty_of(s.start_dt) for s in upcoming), default=None)
     missed = list(missed if missed is not None else missed_items(plan, now))
-    return join_sections(with_missed(status_line(plan, now, next_start), missed),
+    return join_sections(with_missed(status_line(plan, now, next_start, config, db, said), missed),
                          ("The whole day:\n" if whole_day else "") + "\n".join(rows) if rows
                          else "Nothing else is planned today.")
 

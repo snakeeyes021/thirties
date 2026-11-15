@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.clock import EXACT_ASKED_RE, real_times, to_thirties, trim_meridiems
+from thirties_core.clock import EXACT_ASKED_RE, real_times, thirty_of, to_thirties, trim_meridiems
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
@@ -494,6 +494,7 @@ class ConversationManager:
                                if self.day_plan.target_date == self.tools.today() else None)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
+        final = self._status_as_wanted(final, merged, before)
         final = self._with_whats_next(final, merged, before)
         if final != reply:
             for m in reversed(self.brain.messages):
@@ -536,14 +537,36 @@ class ConversationManager:
         tracker.mark(now, listed, asked)
         return out
 
+    def _context(self) -> tuple:
+        """(config, state db) for what's laid out as the person wants it (reply_extras.py)."""
+        if self.scheduler is None:
+            return None, None
+        return getattr(self.scheduler, "config", None), self.scheduler.state_db
+
+    def _status_as_wanted(self, reply: str, said: str, before: int) -> str:
+        """The "You're in the … block" line once per block: left out when the block hasn't changed since a reply
+        last said it, unless the person asks where they are. Whether it's wanted at all is messages.status_wanted;
+        this also catches the line when the model wrote it itself."""
+        from thirties_core import reply_extras
+        from thirties_core.messages import WHERE_ASKED_RE, status_wanted
+        if not reply_extras.status_shown_in(reply) or WHERE_ASKED_RE.search(said or ""):
+            return reply
+        if not status_wanted(*self._context(), self.day_plan.target_date, said):
+            return reply_extras.without_status(reply)
+        now = get_current_time(self.day_plan.day_start.tzinfo)
+        last = reply_extras.status_block_last_shown(self.brain.messages[:before])  # the replies before this turn
+        if last is not None and last == thirty_of(now):
+            return reply_extras.without_status(reply)
+        return reply
+
     def _with_whats_next(self, reply: str, said: str, before: int) -> str:
         """After a turn that changed something, what's next, from the plan as it now stands (whats_next.py), at the
-        end of the reply. Never with a schedule already in the reply, or when the user asked for it."""
+        end of the reply. Never with a schedule already in the reply, when the user asked for it, or in a turn
+        about what replies show."""
         from thirties_core import whats_next
         from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
-        cfg = getattr(self.scheduler, "config", None) if self.scheduler is not None else None
-        mode = getattr(getattr(cfg, "assistant", None), "after_change", whats_next.DEFAULT_MODE)
-        if mode == "nothing" or self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or ""):
+        if self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or "") \
+                or any(m.get("name") == "set_reply_extras" for m in self.brain.messages[before:]):
             return reply
         changed = any(m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
                       and str(m.get("content") or "").strip() and not str(m.get("content")).startswith(NOT_DONE)
@@ -557,8 +580,9 @@ class ConversationManager:
         # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
         # never the list twice; muted or not (a mute quiets check-ins, never where things stand)
         unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now, muted_too=True)
-        part = whats_next.render(self.day_plan, now, moved, mode, said, unmarked)
-        if part and unmarked and self.scheduler is not None:
+        config, db = self._context()
+        part = whats_next.render(self.day_plan, now, moved, None, said, unmarked, config=config, db=db)
+        if part and unmarked and MISSED_HEADING in part and self.scheduler is not None:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # the "+N more earlier" ones too
         from thirties_core.messages import join_sections
         return join_sections(reply, part) if part else reply

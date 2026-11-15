@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 3
 
+# A promise that what's next or the block line will stop ("no block talk") holds only after set_reply_extras;
+# Python adds them to replies, so writing less never removes them
+_PART = r"(?:block(?: talk| mention| line)?s?|lists?|next (?:section|lines?|list)|what'?s next|not marked yet|status line)"
+EXTRAS_CLAIM_RE = re.compile(
+    rf"\bno (?:more )?{_PART}"
+    rf"|\b(?:won'?t|will not|i'?ll stop|stop(?:ped)?|not going to|no longer) (?:\w+ ){{0,2}}(?:show|send|includ|add|mention|list|say|print)\w*(?: \w+){{0,4}} {_PART}"
+    rf"|\b(?:dropped|removed|deleted|cut|took out|turned off|switched off) (?:\w+ ){{0,2}}{_PART}",
+    re.IGNORECASE)
+
 ACTION_CLAIM_PATTERN = re.compile(
     r"\b(?:i\s+have|i\'ve|i\s+did|i)\s+(?:(?:\w+ly|now|already|just)\s+)?(?:cleared|scheduled|allocated|updated|set|assigned|removed|reverted|corrected|locked|finalized|put|placed|moved|added|shifted|extended|blocked)\b"
     r"|\b(?:plan|schedule|work\s+shift|blocks?)\s+(?:has\s+been\s+)?(?:updated|cleared|scheduled|finalized|locked|set)\b"
@@ -208,6 +217,7 @@ RULES
 28. Act, don't ask. When what the user wants is clear, do it and say in a few words what you did. Choose the obvious details yourself (a time, a length, which list) and say what you chose; they can change it. "Anywhere is fine" or "you decide" means you pick. Ask only when there are two real readings and guessing wrong would cost them something, and then ask one short question.
 29. Never invent. Say only what the schedule, your tools and the conversation show. If you don't know why something happened (an item marked skipped, a copy, a change), say you don't know, check with item_history, and tell them what it shows; never make up a cause. Say you can do something only if one of your tools does it; if none does, say plainly that you can't yet. What you keep for yourself (memory notes) isn't something the user can open: say "I'll make a note of that", not that it's on a list they can see.
 30. The user's notes: change their structure only when asked (edit_list_item: reword, split a line, add sub-items, move to another section or list). Done items move out of their lists into the month's Done note by themselves; if the user says something isn't done after all, reopen_item. When the user agrees to empty the drop box, dropbox_review shows each item with likely homes: propose one per line with a reason, and move each one they agree to. A list marked as sorted by time: offer once, when it fits, to split it by area (triage_list, then apply_triage_group per agreed group).
+31. Python adds lines to some replies: what's next after a change (Now, Next, Not marked yet) and the "You're in the … block" line. You can't leave them out by writing less. When the user asks to stop, trim or bring back any of them ("stop sending the list", "stop saying block", "show me what's next again"), call set_reply_extras, and only say it's done once that call went through.
 """
 
     def _day_list_section(self) -> str:
@@ -412,6 +422,16 @@ RULES
     def _claims_change(self, text: str) -> bool:
         return bool(ACTION_CLAIM_PATTERN.search(text or ""))
 
+    def _promises_extras(self, text: str, turn_start: int) -> bool:
+        """The reply promises a change to what replies show, and no set_reply_extras went through this turn."""
+        return bool(EXTRAS_CLAIM_RE.search(text or "")) and not any(
+            m.get("role") == "tool" and m.get("name") == "set_reply_extras"
+            and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
+
+    EXTRAS_CHECK = ("Your reply says something Python adds to replies (what's next, Not marked yet, or the block "
+                    "line) will stop or change, but set_reply_extras wasn't called this turn, so it won't. Call "
+                    "set_reply_extras now, or correct your reply.")
+
     RECENT_TURNS = 8
 
     def _for_model(self) -> List[Dict[str, Any]]:
@@ -444,6 +464,7 @@ RULES
         turn_start = len(self.messages)
 
         self._reflected = False
+        self._turn_start = turn_start
         reply = self._rounds(MAX_ROUNDS, changes_before, outcomes_before)
 
         for attempt in range(2):  # a reply that's empty, or that narrates the conversation, gets one more try
@@ -527,6 +548,11 @@ RULES
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
                     self._check("Your reply says the schedule changed, but you made no CALLs, so nothing changed. "
                                 "Make the CALLs now, or correct your reply.")
+                    continue
+                if self._promises_extras(content, self._turn_start) and not self._reflected:
+                    self._reflected = True
+                    logger.warning("[FrontierBrain] Model promised what replies show without set_reply_extras.")
+                    self._check(self.EXTRAS_CHECK)
                     continue
                 break
             needs_follow_up = (any(c.get("name") in READ_ONLY_TOOLS for c in calls)
@@ -654,6 +680,12 @@ RULES
                         "[System check, not from the user] Your reply says the schedule changed, but you made no "
                         "CALLs, so nothing changed. Make the CALLs now, or correct your reply."
                     )})
+                    continue
+                if self._promises_extras(content, turn_start) and not reflected:
+                    reflected = True
+                    logger.warning("[FrontierBrain] Model promised what replies show without set_reply_extras.")
+                    self.messages.append({"role": "user", "content": "[System check, not from the user] "
+                                          + self.EXTRAS_CHECK})
                     continue
                 break
             needs_follow_up = (

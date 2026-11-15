@@ -386,6 +386,8 @@ ASSISTANT_READ_ONLY = {"review_day", "search_history", "list_conversations", "re
 ASSISTANT_TOOL_SPECS += HORIZON_TOOL_SPECS  # planning across horizons: thirties_core/horizons.py
 from thirties_core.sun_notices import SUN_TOOL_SPECS  # noqa: E402
 ASSISTANT_TOOL_SPECS += SUN_TOOL_SPECS  # a message at sunrise / sunset: thirties_core/sun_notices.py
+from thirties_core.reply_extras import REPLY_EXTRAS_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += REPLY_EXTRAS_TOOL_SPECS  # what Python adds to replies, on or off: reply_extras.py
 from thirties_core.calendar_modes import CALENDAR_MODE_TOOL_SPECS  # noqa: E402
 ASSISTANT_TOOL_SPECS += CALENDAR_MODE_TOOL_SPECS  # mine / ask / show / ignore per calendar: calendar_modes.py
 ASSISTANT_READ_ONLY |= HORIZON_READ_ONLY
@@ -644,6 +646,17 @@ class AssistantTools(KindTools):
         if self.pt.scheduler is None:
             raise ToolError("There are no settings to change here.")
         return set_sun_notices(self.pt.scheduler.config, settings_for(self._db) if self._db else None, sunrise, sunset)
+
+    def set_reply_extras(self, part: Any = "", show: Any = "", for_today: Any = False, **_: Any) -> str:
+        from thirties_core.reply_extras import set_extras
+        from thirties_core.settings import settings_for
+        if self.pt.scheduler is None:
+            raise ToolError("There are no settings to change here.")
+        try:
+            return set_extras(self.pt.scheduler.config, settings_for(self._db) if self._db else None, self._db,
+                              self._today(), str(part), str(show), for_today)
+        except ValueError as e:
+            raise ToolError(str(e))
 
     def set_calendar_mode(self, calendar: Any = None, mode: Any = None, **_: Any) -> str:
         from thirties_core.calendar_modes import CalendarModeError, refresh_calendar_spans, set_calendar_mode
@@ -2498,6 +2511,7 @@ class AssistantTools(KindTools):
             **self.proposals.handlers(),
             **horizon_handlers(self),
             "set_sun_notices": self.set_sun_notices,
+            "set_reply_extras": self.set_reply_extras,
             "set_calendar_mode": self.set_calendar_mode,
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
         }
