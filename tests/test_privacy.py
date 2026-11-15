@@ -359,7 +359,10 @@ class ExitTest(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 0, stdout=body + "\n", stderr="")
 
         shield = Shield()
-        with patch.object(privacy, "SHIELD", shield), \
+        from pathlib import Path
+        from tests.fixtures import temp_dir
+        ledger = Path(temp_dir("thirties_test_")) / "agy_calls.log"  # never the user's own
+        with patch.object(privacy, "SHIELD", shield), patch("thirties_core.inference.AGY_LEDGER", ledger), \
                 patch("thirties_core.inference.find_agy_binary", return_value="/mock/bin/agy"), \
                 patch("thirties_core.inference.subprocess.run", side_effect=fake_run):
             reply = AntigravityInferenceEngine(ThirtiesConfig()).chat(

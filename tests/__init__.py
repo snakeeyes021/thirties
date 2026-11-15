@@ -1,12 +1,12 @@
-
 import os
 import sys
 
 # Unit tests never reach a real model: the agy CLI is never found (unless a test patches it in, mocked), and there's
 # no Gemini API key. A test that builds the real app core used to run the user's signed-in agy. The live evals in this
 # package (run as their own modules, not under unittest) are unaffected; THIRTIES_LIVE_MODELS=1 lifts this.
-if getattr(sys.modules.get("__main__"), "__package__", None) == "unittest" \
-        and os.environ.get("THIRTIES_LIVE_MODELS") != "1":
+_UNIT_RUN = (getattr(sys.modules.get("__main__"), "__package__", None) == "unittest" or "pytest" in sys.modules) \
+    and os.environ.get("THIRTIES_LIVE_MODELS") != "1"
+if _UNIT_RUN:
     from unittest import mock as _mock
     import thirties_core.inference as _inference
     os.environ.pop("GEMINI_API_KEY", None)
@@ -23,3 +23,10 @@ if "THIRTIES_TEST_STATE" not in os.environ:
     import tempfile
     os.environ["THIRTIES_TEST_STATE"] = os.environ["XDG_STATE_HOME"] = tempfile.mkdtemp(prefix="thirties_state_")
     atexit.register(shutil.rmtree, os.environ["THIRTIES_TEST_STATE"], True)
+
+# And their own agy ledger: a test's mocked agy call (a fake "ok") was written into the user's real
+# ~/.local/share/thirties/agy_calls.log whenever tests ran outside tests/headless.py, and the evals pace their
+# calls by that file (11-15: a stray default-model "ok" every few minutes, with no agy run behind it).
+if _UNIT_RUN:
+    from pathlib import Path as _Path
+    _mock.patch.object(_inference, "AGY_LEDGER", _Path(os.environ["THIRTIES_TEST_STATE"]) / "agy_calls.log").start()
