@@ -116,7 +116,11 @@ class TestTheUsersSayOverIt(ServiceCase):
     too; /now and the What's next button always show everything."""
 
     def extras(self, part, show, for_today=True):
-        self.svc.manager().execute_tool("set_reply_extras", {"part": part, "show": show, "for_today": for_today})
+        what = {"whats_next": "what's next", "not_marked": "what's not marked yet",
+                "status_line": "which block i'm in", "all": "the extra lines at the end"}[part]
+        manager = self.svc.manager()
+        manager.tools.user_message = f"stop {what}" if show == "off" else f"bring back {what} again"  # as asked
+        manager.execute_tool("set_reply_extras", {"part": part, "show": show, "for_today": for_today})
 
     def test_whats_next_off_leaves_the_bell_alone(self):
         self.extras("whats_next", "off")
