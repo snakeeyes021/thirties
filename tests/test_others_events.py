@@ -187,6 +187,17 @@ class AskOnceTest(Designed):
                       "on Jamie's calendar. Are either of those yours too?", out)
         self.assertTrue(out.endswith("3 PM – Work"))
 
+    def test_listing_it_as_someone_elses_isnt_asking(self):
+        t = self.day([ev("plumber", "Plumber visit", "09:00", "11:00", calendar="Robin")])
+        said = "Here's today.\n\nNot yours today:\n9:00 AM – Plumber visit, on Robin's calendar"
+        out = others_events.after_reply(t, said)
+        self.assertIn("Plumber visit (9:00 AM – 11:00 AM) is on Robin's calendar. Is that yours too?", out)
+
+    def test_a_list_then_a_question_about_it_counts(self):
+        t = self.day([ev("plumber", "Plumber visit", "09:00", "11:00", calendar="Robin")])
+        said = "On Robin's calendar today:\nPlumber visit, 9:00 AM\n\nIs that yours too?"
+        self.assertEqual(others_events.after_reply(t, said), said)
+
     def test_a_decided_series_is_never_asked(self):
         first = ev("choir", "Choir practice", "19:00", "22:00")
         sched = make_scheduler([first])

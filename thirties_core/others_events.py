@@ -247,6 +247,23 @@ def _mentioned(reply: str, title: str) -> bool:
     return bool(words) and sum(w in low for w in words) >= max(1, (len(words) + 1) // 2)
 
 
+_ASKS_RE = re.compile(r"\byours\b|\byou\b[^?]*\b(going|go|taking|doing|there|in)\b|\bmine\b", re.I)
+
+
+def _asked_about(reply: str, title: str) -> bool:
+    """Whether the reply itself asks about this event: its title in a paragraph with a question in it, or in a list
+    right before a question about whose they are. Listing it as someone else's isn't asking."""
+    parts = [p for p in reply.split("\n\n") if p.strip()]
+    for i, p in enumerate(parts):
+        if not _mentioned(p, title):
+            continue
+        if "?" in p and _ASKS_RE.search(p):
+            return True
+        if i + 1 < len(parts) and "?" in parts[i + 1] and _ASKS_RE.search(parts[i + 1]):
+            return True
+    return False
+
+
 def questions(plan, now=None) -> List[Any]:
     """The spans to ask about (someone else's, a new series, not yet over), in time order."""
     return sorted((s for s in plan.spans_in_view() if getattr(s, "ask", False)
@@ -313,7 +330,7 @@ def _after_reply(tools, reply: str) -> str:
     asks = questions(plan, now)
     out = reply
     if asks:
-        missing = [s for s in asks if not _mentioned(reply, s.title)]
+        missing = [s for s in asks if not _asked_about(reply, s.title)]
         if missing:
             asked_itself = len(missing) < len(asks) or bool(re.search(r"calendar[^?\n]*\?", reply, re.I))
             out = _merged(out, question_text(missing, also=asked_itself))
