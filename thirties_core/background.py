@@ -106,7 +106,11 @@ class BackgroundService:
         self.joplin_engine = joplin_engine or JoplinEngine(config)
         if hasattr(self.joplin_engine, "use_ids"):
             self.joplin_engine.use_ids(self.scheduler.state_db)  # item ids that follow edits and moves
-        self.inference_engine = inference_engine or get_inference_engine(config)
+        if inference_engine is None:  # the headless service builds its own: with the fallback, as the app's has
+            from thirties_core.fallback import with_fallback
+            inference_engine = with_fallback(get_inference_engine(config), config, self.scheduler.state_db,
+                                             self.scheduler.tz)
+        self.inference_engine = inference_engine
         self.sync_engine = sync_engine or SyncEngine(config=config, state_db=self.scheduler.state_db,
                                                      joplin_engine=self.joplin_engine)
         self.bridge = None

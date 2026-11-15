@@ -235,11 +235,19 @@ def list_sorter_for(config, state_db=None, inference_engine=None):
         except SlmUnavailable:
             return None
 
+    from thirties_core.fallback import usual_model_out
+    out = usual_model_out(state_db)  # its usage limit is reached: no sorting until a turn has its answer again
+
     def gemini():
+        if out:
+            return None
         engine = inference_engine if isinstance(inference_engine, GeminiSourcesEngine) else GeminiSourcesEngine(config)
         return FrontierListSorter(engine) if engine.is_available() else None
 
-    order = (gemini, gemma) if brain_choice(config, state_db) == "frontier" else (gemma, gemini)
+    frontier = brain_choice(config, state_db) == "frontier"
+    if out and frontier:
+        return None  # the run is skipped: no calls to it, and none to the fallback model
+    order = (gemini, gemma) if frontier else (gemma, gemini)
     for make in order:
         sorter = make()
         if sorter is not None:

@@ -26,7 +26,7 @@ CORE_USER_TEXT = ["thirties_core/messages.py", "thirties_core/background.py", "t
                   "thirties_core/tickets.py", "thirties_core/task_style.py",
                   "thirties_core/break_down.py", "thirties_core/backlog_tickets.py",
                   "thirties_core/day_actions.py", "thirties_core/conversation_index.py",
-                  "thirties_core/work_end_answer.py"]
+                  "thirties_core/work_end_answer.py", "thirties_core/fallback.py"]
 UI = ["src/*.ui"]
 
 HISTORY = (r"no longer|used to|anymore|any more|previously|built in|old meaning|"
