@@ -891,7 +891,24 @@ RULES
             still = [s for s in named if s.id in before and before[s.id] == (s.start_dt, s.end_dt)]
             if len(still) == len(named):  # none of what it names moved
                 out += [f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}" for s in still[:3]]
+            # --- a claim about several items, checked part by part (claim_parts.py) ---
+            elif still:
+                for s in self._claimed_unchanged(sentence, self._MOVED_RE,
+                                                 lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)):
+                    out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
+            # --- end part by part ---
         return list(dict.fromkeys(out))
+
+    def _claimed_unchanged(self, sentence: str, claim_re, unchanged) -> List[Any]:
+        """The items in the parts of a sentence its claim covers, where every item a part names is unchanged
+        (claim_parts.py): "I moved the bench to 11 and the van to 6" with only the van moved gives the bench."""
+        from thirties_core.claim_parts import claimed_parts
+        out: List[Any] = []
+        for part in claimed_parts(sentence, claim_re, lambda p: [self.tools._title(s) for s in self._named(p)]):
+            named = [s for s in self._named(part) if not s.is_envelope]
+            if named and all(unchanged(s) for s in named):
+                out += [s for s in named if s not in out]
+        return out[:3]
 
     # "Laundry is done", "the dishes are finished": a done said of a named item (beside "marked ... done")
     _SAID_DONE_RE = re.compile(r"\b(?:is|are|was|were|'s)\s+(?:now\s+|all\s+)?(?:marked\s+|logged\s+(?:as\s+)?)?"
@@ -921,6 +938,15 @@ RULES
             if named and all(s.status == SpanStatus.PLANNED and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED
                              for s in named):
                 out += [f"{self.tools._title(s)} isn't recorded as done" for s in named[:3]]
+            # --- a claim about several items, checked part by part (claim_parts.py) ---
+            elif len(named) > 1:
+                claim = re.compile(f"(?:{self._OUTCOME_CLAIM_RE.pattern})|(?:{self._SAID_DONE_RE.pattern})",
+                                   re.IGNORECASE)
+                unmarked = [s for s in self._claimed_unchanged(
+                    sentence, claim, lambda s: s.status == SpanStatus.PLANNED
+                    and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED) if s.source != "calendar"]
+                out += [f"{self.tools._title(s)} isn't recorded as done" for s in unmarked]
+            # --- end part by part ---
         return list(dict.fromkeys(out))
 
     # a clock time said in a reply: "3:30", "3:30 PM", "4pm", "noon"
@@ -954,8 +980,9 @@ RULES
         set for 3:30" with meal prep at 4:00): "Meal prep is at 4:00 PM" per item. A part of a sentence is checked
         only when none of its times is a time of what it names (start or end, as given or by its block, or when it
         really happened); one about another day, a reminder or a delivery is left alone."""
-        from thirties_core.clock import thirty_ceil, thirty_of
+        from thirties_core.clock import thirty_of
         from thirties_core.item_facts import mentions
+        from thirties_core.shown_times import shown_end
         plan = getattr(self.tools, "day_plan", None)
         if plan is None:
             return []
@@ -978,7 +1005,9 @@ RULES
             for s in named:
                 st = {self._clock_key(dt) for dt in (s.start_dt, thirty_of(s.start_dt), s.actual_start, s.planned_start)
                       if dt is not None}
-                en = {self._clock_key(dt) for dt in (s.end_dt, thirty_ceil(s.end_dt), s.actual_end, s.planned_end)
+                # an end as the schedule shows it: a calendar's or the user's to the minute, else its block's end
+                # (shown_times.py), never the block's end of a time that is shown as it is
+                en = {self._clock_key(dt) for dt in (s.end_dt, shown_end(s), s.actual_end, s.planned_end)
                       if dt is not None}
                 starts[s.id], ends[s.id] = st, en
                 known |= st | en
@@ -1012,6 +1041,17 @@ RULES
             if named and all(s.status == SpanStatus.PLANNED and status.get(s.id) == SpanStatus.PLANNED
                              and before.get(s.id) == (s.start_dt, s.end_dt) for s in named):
                 out += [f"{self.tools._title(s)} is still on the plan at {format_clock(s.start_dt)}" for s in named[:3]]
+        # --- said to be off today's list, while it's still on it with no time (off_today.py) ---
+        from thirties_core.off_today import LIST_GONE_RE, listed_still
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
+            m = LIST_GONE_RE.search(sentence)
+            if m is None or sentence.rstrip().endswith("?") or self._ADMITS_RE.search(sentence):
+                continue
+            lead = sentence[:m.start()]
+            if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
+                continue
+            out += [f"{t} is still on today's list" for t in listed_still(self.tools, sentence)[:3]]
+        # --- end off today's list ---
         return list(dict.fromkeys(out))
 
     def _moves_made(self, turn_start: int, reply: str, retry) -> str:

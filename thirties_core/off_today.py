@@ -168,6 +168,12 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     return f"Took {line} off today's list (it had no time on the schedule)."
 
 
+# a reply saying something is off today's list ("moved the towels off today's list", "cleared it from the list")
+LIST_GONE_RE = re.compile(r"\b(?:(?:took|taken|moved|removed|deleted|cleared|dropped|gotten rid|got rid)\b[^.!?\n]{0,60}?"
+                          r"\b(?:off|from)\b[^.!?\n]{0,20}?\blist|(?:is|are|'s|now)\s+(?:now\s+)?off\s+(?:the|your|"
+                          r"today'?s)\s+list|no longer on (?:the|your|today'?s) list)\b", re.IGNORECASE)
+
+
 def listed_still(pt: "PlanTools", sentence: str) -> List[str]:
     """Items on today's list with no time that a sentence names: what a claim of taking them off is checked
     against."""
