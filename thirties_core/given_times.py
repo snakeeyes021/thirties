@@ -6,10 +6,11 @@ units"). When the user names a time for one of their own items as they place it 
 they named), it's stored and synced with the item, and every view shows it as said.
 
 Whether the user said it is read from their message this turn, as the done check reads it (done_reference.py):
-one clause of the message is about the item and gives that very time (facts.gave_time, or the current minute when
-they say they're starting it now). A clause is about the item when it names it (item_facts.mentions; "the parcel
-and the letters at 4:45" names both), or points back to it alone ("put it at 4:45" right after a message that
-named only that item). A shift the user asks for ("an hour later") moves a stated time with the item: they
+one clause of the message is about the item and gives that very time (facts.gave_time). A clause is about the item
+when it names it (item_facts.mentions; "the parcel and the letters at 4:45" names both), or points back to it alone
+("put it at 4:45" right after a message that named only that item). "Right now" names no time: the item starts at
+the current minute under the hood, and shows in its block like any time Thirties worked out; the time now is said
+apart ("It's 12:37"). A shift the user asks for ("an hour later") moves a stated time with the item: they
 anchored it. Everything else is a time Thirties chose and is never kept:
 
 - a step put after another one, a routine's parts, a day proposal, a carried-over item, an estimate: any placing
@@ -89,11 +90,8 @@ def stated(pt: "PlanTools", title: str, dt: Optional[datetime]) -> bool:
     if message is None or dt is None:
         return False
     from thirties_core.facts import gave_time
-    from thirties_core.plan_tools import _NOW_SAID_RE
-    now = pt._now().replace(second=0, microsecond=0)
     for clause in _clauses(message):
-        said = gave_time(clause, dt) or (dt.replace(second=0, microsecond=0) == now and _NOW_SAID_RE.search(clause))
-        if said and _about(pt, clause, title):
+        if gave_time(clause, dt) and _about(pt, clause, title):
             return True
     return False
 

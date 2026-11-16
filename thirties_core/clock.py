@@ -279,12 +279,17 @@ _UNTIL_RE = re.compile(r"\b((?:until|till|til|by)\s+)(" + _CLOCK_MINUTES_RE.patt
 _AT_RE = re.compile(r"\b(at|around|about)\s+" + _CLOCK_MINUTES_RE.pattern + r"(?!\s*(?:\(|,)?\s*(?:in the|block|chunk))")
 
 
-def to_thirties(text: str, keep: frozenset = frozenset()) -> str:
+def to_thirties(text: str, keep: frozenset = frozenset(), now: frozenset = frozenset()) -> str:
     """Only :00 and :30 are said, unless the minute time is real (`keep`: an item's real time, or the user's).
     "at 10:45" becomes "in the 10:30 block", never a different clock time ("at 10:30" would be false); a range
-    becomes the blocks it covers; any other stray time becomes the block it falls in (never the next one)."""
-    def odd(h: str, mm: str) -> bool:
-        return int(mm) not in (0, 30) and (int(h), int(mm)) not in keep
+    becomes the blocks it covers; any other stray time becomes the block it falls in (never the next one).
+    `now`: the time it is, said as itself in a sentence ("It's 12:37"), but never as a row's start or in a range: a
+    row starts on its block's edge, whatever minute it is."""
+    def odd(h: str, mm: str, as_now: bool = False) -> bool:
+        return int(mm) not in (0, 30) and (int(h), int(mm)) not in keep and not (as_now and (int(h), int(mm)) in now)
+
+    def row_start(m: re.Match) -> bool:  # a time opening a line ("12:37 PM Hot bath") is a row's start
+        return not m.string[m.string.rfind("\n", 0, m.start()) + 1:m.start()].strip(" \t-•*")
 
     def span(m: re.Match) -> str:
         whole = m.group(0)
@@ -309,17 +314,18 @@ def to_thirties(text: str, keep: frozenset = frozenset()) -> str:
         return f"{h % 12 + 1}:00{suffix}"
 
     def until(m: re.Match) -> str:
-        return m.group(1) + (ceil(_CLOCK_MINUTES_RE.match(m.group(2))) if odd(m.group(3), m.group(4)) else m.group(2))
+        return m.group(1) + (ceil(_CLOCK_MINUTES_RE.match(m.group(2))) if odd(m.group(3), m.group(4), True)
+                             else m.group(2))
 
     def at(m: re.Match) -> str:
         word, h, mm, suffix = m.group(1), m.group(2), m.group(3), m.group(4) or ""
-        if not odd(h, mm):
+        if not odd(h, mm, True):
             return m.group(0)
         return f"in the {int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix} block"
 
     def floor(m: re.Match) -> str:
         h, mm, suffix = m.group(1), m.group(2), m.group(3) or ""
-        return f"{int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix}" if odd(h, mm) else m.group(0)
+        return f"{int(h)}:{0 if int(mm) < 30 else 30:02d}{suffix}" if odd(h, mm, not row_start(m)) else m.group(0)
 
     text = _RANGE_RE.sub(span, text)
     text = _AT_RE.sub(at, text)

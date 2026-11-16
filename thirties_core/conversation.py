@@ -566,11 +566,12 @@ class ConversationManager:
         if self.tools.shown_schedule:
             from thirties_core.messages import place_schedule
             final = place_schedule(final, self.tools.shown_schedule)  # Python's layout, whatever the model made
-        said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
-        keep = real_times(*said, merged, spans=self.day_plan.spans,  # real item times, the user's, and now
-                          now=get_current_time(self.day_plan.day_start.tzinfo))
+        said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"  # all day, the user's
+                and not m.get("hidden") and not str(m.get("content") or "").startswith("[System check")]  # not Python's
+        keep = real_times(*said, merged, spans=self.day_plan.spans)  # real item times and the user's
+        now_times = real_times(now=get_current_time(self.day_plan.day_start.tzinfo))  # said as itself, never a row's
         # else blocks; every time keeps its AM/PM (a schedule with some times trimmed and some not was hard to read)
-        final = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep)
+        final = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep, now=now_times)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
         final = self._status_as_wanted(final, merged, before)
