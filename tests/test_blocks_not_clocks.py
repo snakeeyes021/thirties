@@ -119,7 +119,7 @@ class TestTheConversationAndMessages(GuardCase):
         from thirties_core.whats_next import render, summary
         plan = self.manager.day_plan
         for now in (at("07:40"), at("12:10"), at("16:50"), at("18:20")):
-            for mode in ("next", "rest"):
+            for mode in ("rest", "few"):
                 self.assertBlocks(render(plan, now, mode=mode), f"what's next at {now}, {mode}")
             self.assertBlocks(summary(self.manager.tools, now, mode="rest"), f"summary at {now}")
         for whole in ("true", "false"):

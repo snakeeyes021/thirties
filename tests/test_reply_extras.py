@@ -30,10 +30,10 @@ class TestStoppingWhatsNext(WhatsNextCase):
 
     def test_asked_to_delete_the_next_section_it_stops_and_stays_stopped(self) -> None:
         out = self.turn(ADD, "The fern's at 5:30.", said="repot the fern at 5:30")
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
         out = self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off"}', "Done: no more Next list.",
                         said="delete the whole Next section under it, from now on")
-        self.assertNotIn("Next:", out)
+        self.assertNotIn("The rest of today:", out)
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         self.assertEqual(out, "Noted.")  # a change, and nothing under the reply
         self.assertEqual(settings_for(self.sched.state_db).get("assistant.after_change"), "nothing")  # Preferences
@@ -47,11 +47,11 @@ class TestStoppingWhatsNext(WhatsNextCase):
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off"}', "Okay, I'll leave the list off.",
                   said="no need to resend the list pls")
         out = self.turn(ADD, "The fern's at 5:30.", said="repot the fern at 5:30")
-        self.assertNotIn("Next:", out)
+        self.assertNotIn("The rest of today:", out)
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "on"}', "It's back.",
                   said="show me what's next again")
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
 
     def test_asking_whats_next_always_works_even_when_its_off(self) -> None:
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off"}', "Okay.", said="stop the list")
@@ -62,9 +62,9 @@ class TestStoppingWhatsNext(WhatsNextCase):
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off", "for_today": true}', "Not today.",
                   said="no lists today please")
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "nothing")
-        self.assertEqual(self.sched.config.assistant.after_change, "next")  # the lasting choice is untouched
+        self.assertEqual(self.sched.config.assistant.after_change, "rest")  # the lasting choice is untouched
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY + timedelta(days=1))["whats_next"],
-                         "next")  # tomorrow, as before
+                         "rest")  # tomorrow, as before
 
     def test_a_choice_in_preferences_replaces_todays(self) -> None:
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off", "for_today": true}', "Not today.",
@@ -81,7 +81,7 @@ class TestStoppingWhatsNext(WhatsNextCase):
         self.turn('CALL set_reply_extras {"part": "not_marked", "show": "off"}', "Okay.",
                   said="stop listing what's not marked")
         out = self.turn('CALL log_outcome {"event": "glaze", "status": "done"}', "Noted.", said="glazing's done")
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
         self.assertNotIn("Not marked yet:", out)
 
 
@@ -100,7 +100,7 @@ class TestWhereTheChoiceIsKept(WhatsNextCase):
         self.manager.tools.user_message = "stop sending what's next from now on"
         self.manager.tools.execute("set_reply_extras", {"part": "whats_next", "show": "off"})
         self.assertEqual(render(plan, at("19:40"), config=cfg, db=db), "")
-        self.assertIn("Not marked yet:", render(plan, at("19:40"), mode="next"))  # asked for outright: whole
+        self.assertIn("Not marked yet:", render(plan, at("19:40"), mode="rest"))  # asked for outright: whole
 
     def test_the_block_line_follows_it_where_its_built(self) -> None:
         from thirties_core.messages import render_schedule, status_line
@@ -129,7 +129,7 @@ class TestOnlyWhenAsked(WhatsNextCase):
             out = self.call(said)
             self.assertTrue(out.startswith("NOT_DONE"), out)
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY),
-                         {"whats_next": "next", "not_marked": True, "status_line": True})
+                         {"whats_next": "rest", "not_marked": True, "status_line": True})
         self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))
 
     def test_nothing_without_a_message_from_the_user(self) -> None:
@@ -142,7 +142,7 @@ class TestOnlyWhenAsked(WhatsNextCase):
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "nothing")
         self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))  # not the lasting one
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY + timedelta(days=1))["whats_next"],
-                         "next")  # tomorrow, as before
+                         "rest")  # tomorrow, as before
         self.call("stop saying which block i'm in, from now on", part="status_line")
         self.assertIs(settings_for(self.sched.state_db).get("assistant.status_line"), False)  # said for good
 
@@ -150,7 +150,7 @@ class TestOnlyWhenAsked(WhatsNextCase):
         self.call("stop sending what's next from now on", part="whats_next")
         self.assertTrue(self.call("fern at 5:30", part="whats_next", show="on").startswith("NOT_DONE"))
         self.call("show me what's next again", part="whats_next", show="on")
-        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "next")
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "rest")
 
 
 class TestTheBlockLine(WhatsNextCase):

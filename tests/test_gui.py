@@ -905,7 +905,7 @@ class ChatPanelTests(unittest.TestCase):
 
     def test_whats_next_shows_one_line_per_item_in_the_chat_and_after_a_restart(self) -> None:
         from tests.test_conversation import reply
-        self.sched.config.assistant.after_change = "next"
+        self.sched.config.assistant.after_change = "rest"
         from tests.fixtures import morning_sent
         morning_sent(self.sched.state_db)  # a reply later in the day, not the morning's
         for sid, title, start, end in (("dinner", "Dinner", "20:00", "21:00"), ("glaze", "Glazing", "21:00", "22:00"),
@@ -1206,8 +1206,8 @@ class SetupAndPreferencesTests(unittest.TestCase):
         from thirties_core.settings import SETTINGS
         group = settings_rows.messages_group(settings_rows.SettingsContext(self.core))
         row = _combo_rows(group)["After a change, show"]
-        self.assertEqual(row.get_selected(), 1)  # "What's next", by default
-        for i, mode in enumerate(("nothing", "next", "rest")):
+        self.assertEqual(row.get_selected(), 1)  # "The rest of today", by default
+        for i, mode in enumerate(("nothing", "rest", "few")):
             row.set_selected(i)
             self.assertEqual(self.core.settings.get("assistant.after_change"), mode)
         self.assertEqual(SETTINGS["assistant.after_change"].scope, "shared")  # the same on every device

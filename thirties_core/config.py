@@ -106,9 +106,10 @@ class AssistantConfig:
     # scheduled wake-up ("wake": when the night's Sleep is planned to end); with or without the day's items.
     morning_message_at: str = "wake"
     morning_message_items: bool = True
-    # After a turn that changed something, the reply ends with: "nothing", "next" (the block you're in and the
-    # next few things: whats_next.py) or "rest" (the rest of today); rendered by Python, never by the model
-    after_change: str = "next"
+    # After a turn that changed something, the reply ends with: "nothing", "rest" (the block you're in and every
+    # row to the end of today: whats_next.py) or "few" (only the next few rows); rendered by Python, never by the
+    # model. "next" (kept by earlier versions) reads as "rest" (whats_next.mode_of).
+    after_change: str = "rest"
     after_change_unmarked: bool = True  # its Not marked yet section
     status_line: bool = True  # "You're in the 10:00 block: …" in replies (reply_extras.py); again only once it changed
     # When the chosen model's usage limit is reached, a simpler assistant answers until it resets (fallback.py):

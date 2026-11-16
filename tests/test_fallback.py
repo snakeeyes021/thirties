@@ -244,7 +244,7 @@ class TestNoModel(FallbackCase):
         plan, _ = self.sched.build_day_plan(DAY)
         self.assertEqual(next(s for s in plan.spans if s.title == "Repot the fern").status, "done")
         self.assertIn("Tune the banjo", render_schedule(self.m.day_plan, at("10:00"), whole_day=True))
-        self.assertIn("Tune the banjo", whats_next.summary(self.m.tools, at("10:00"), "next"))
+        self.assertIn("Tune the banjo", whats_next.summary(self.m.tools, at("10:00"), "rest"))
         self.assertEqual((self.primary.calls, self.second.calls), self.calls)  # none of it called a model
 
     def test_more_messages_wait_together_and_are_answered_after_the_reset(self):

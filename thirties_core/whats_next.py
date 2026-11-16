@@ -1,20 +1,20 @@
-"""What's next, after a change: a compact slice of the day, rendered by Python from the plan as it now stands and
+"""What's next, after a change: the rest of today in blocks, rendered by Python from the plan as it now stands and
 put at the end of the reply to a turn that changed something (an add, a done or skip, a move, a drop or undrop).
 
-Asking to see the plan right after changing it was common, so the reply carries it: the
-block they're in ("Now"), the next few things, anything the change moved that falls outside those, and at the
-bottom what's past its time with nothing said ("Not marked yet": unknown, never assumed done or rolled). The model
-never writes it and is never asked to. A reply that already shows the schedule (show_schedule), or a turn where
-the user asked for it, gets none: never two schedules in one reply.
+Asking to see the plan right after changing it was common, so the reply carries it: the block they're in ("Now"),
+every row from there to the end of the day, anything the change moved that falls outside those, and at the bottom
+what's past its time with nothing said ("Not marked yet": unknown, never assumed done or rolled). The model never
+writes it and is never asked to. A reply that already shows the schedule (show_schedule), or a turn where the user
+asked for it, gets none: never two schedules in one reply.
 
-The same slice reaches the user wherever the schedule otherwise wouldn't: under a start notice or a check-in (when
-it says something new: ``SentSummaries``), as Telegram's /now and its "What's next" button, after a change made by a
-tick in the app's day panel, after a change that couldn't be made, and after a reply that talked the plan over
-(``follows_turn``). Besides the rows it shows open stretches of an hour or more ("Free 12:30–3:00 PM") and what's on
-today's list with no time.
+The same rest of today reaches the user wherever the schedule otherwise wouldn't: under a start notice or a
+check-in (when it says something new: ``SentSummaries``), as Telegram's /now and its "What's next" button, after a
+change made by a tick in the app's day panel, after a change that couldn't be made, and after a reply that talked
+the plan over (``follows_turn``). Besides the rows it shows open stretches of an hour or more ("Free 12:30–3:00 PM")
+and what's on today's list with no time.
 
-The setting (shared, every device): "nothing", "next" (this slice) or "rest" (the rest of today, the same way).
-"""
+The setting (shared, every device): "nothing", "rest" (the rest of today, every row) or "few" (only the next few
+rows, for someone who asks for less)."""
 
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ from thirties_core.clock import format_clock, slice_lines, thirty_ceil, thirty_o
 from thirties_core.messages import missed_items
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
 
-MODES = ("nothing", "next", "rest")
-DEFAULT_MODE = "next"
-NEXT_ROWS = 3  # the next few rows after the current block
+MODES = ("nothing", "rest", "few")
+DEFAULT_MODE = "rest"
+NEXT_ROWS = 3  # "few": the next few rows after the current block
 FREE_MIN = timedelta(hours=1)  # an open stretch this long or longer gets its own "Free" line
 HALF = timedelta(minutes=30)
 NO_TIME_HEADING = "On today's list, no time yet:"
@@ -42,6 +42,21 @@ SCHEDULE_ASKED_RE = re.compile(
     r"rest of (?:the|my|to)day|(?:my|the) day look|plan for (?:today|tonight|the day))\b", re.IGNORECASE)
 
 Snapshot = Dict[str, Tuple[float, float, str]]
+
+
+def mode_of(value) -> str:
+    """A stored or given setting as one of MODES. "next" is what earlier versions kept for their default, which
+    showed only the next few rows: it now means the default, the rest of today (a short form the user asks for is
+    kept as "few"). Anything unknown: the default."""
+    value = str(value or "").strip().lower()
+    return value if value in MODES else DEFAULT_MODE
+
+
+def asked_mode(config, db, day) -> str:
+    """The form a view the user asks for outright takes (/now, the "What's next" button): the rest of today, or
+    the next few rows when that's what they chose; whole even when replies leave it out."""
+    from thirties_core.reply_extras import effective
+    return "few" if mode_of(effective(config, db, day)["whats_next"]) == "few" else "rest"
 
 
 def snapshot(plan: DayPlan) -> Snapshot:
@@ -86,7 +101,8 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
            said: str = "", unmarked: Optional[List[EventSpan]] = None, config=None, db=None,
            untimed: Sequence[Tuple[str, Sequence[str]]] = (), with_now: bool = True, free: bool = True) -> str:
     """The slice, its sections a blank line apart (messages.join_sections): "Now:" and what's in the current block
-    (none when nothing is), the next few rows (or the rest of today) laid out by the schedule's own row formatter,
+    (none when nothing is), every row from there to the end of today (or only the next few, with the mode "few")
+    laid out by the schedule's own row formatter,
     any moved item not among them, "Not marked yet:" (none when nothing is), and someone else's events in that
     stretch on a "Not yours" line. "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
     keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
@@ -101,12 +117,13 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     if mode is None:
         from thirties_core.reply_extras import effective
         wanted = effective(config, db, plan.target_date)
-        mode = wanted["whats_next"] if wanted["whats_next"] in MODES else DEFAULT_MODE
+        mode = mode_of(wanted["whats_next"])
         if not wanted["not_marked"]:
             unmarked = []
         from thirties_core.messages import status_wanted
         with_now = with_now and status_wanted(config, db, plan.target_date, said)
-    if mode not in MODES or mode == "nothing" or not (plan.day_start <= now < plan.day_end):
+    mode = mode_of(mode)
+    if mode == "nothing" or not (plan.day_start <= now < plan.day_end):
         return ""
     block = thirty_of(now)
     mine = _mine(plan)
@@ -117,13 +134,13 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
         if here else ""
     upcoming = sorted((s for s in mine if s.start_dt >= block + HALF), key=lambda s: s.start_dt.timestamp())
     rows = plain_rows(schedule_rows(plan, block + HALF, planned_only=True))  # the whole rest: "(until" as shown
-    shown_rows = rows if mode == "rest" else rows[:NEXT_ROWS]
+    shown_rows = rows[:NEXT_ROWS] if mode == "few" else rows  # every row to the end of the day, none cut
     listed = _with_free(plan, now, rows, len(shown_rows)) if free else shown_rows
-    next_block = "\n".join(["Next:" if mode == "next" else "The rest of today:"] + listed) if shown_rows \
+    next_block = "\n".join(["Next:" if mode == "few" else "The rest of today:"] + listed) if shown_rows \
         else "\n".join(["Nothing else is planned today."] + listed)
     shown_until = block + HALF
     if shown_rows:
-        cut = upcoming if mode == "rest" else _items_in_rows(upcoming, len(shown_rows))
+        cut = _items_in_rows(upcoming, len(shown_rows)) if mode == "few" else upcoming
         shown_until = max((s.end_dt for s in cut), default=block + HALF)
     shown_ids = {s.id for s in here} | {s.id for s in upcoming if s.start_dt < shown_until}
     elsewhere = [s for s in moved if s.id not in shown_ids]
@@ -243,7 +260,7 @@ def _items_in_rows(upcoming: List[EventSpan], n_rows: int) -> List[EventSpan]:
 
 def summary(tools, now: datetime, mode: Optional[str] = None, moved: Iterable[EventSpan] = (), said: str = "",
             unmarked: Optional[List[EventSpan]] = None, with_now: bool = True) -> str:
-    """The slice for a PlanTools' day as it stands, with today's list items that have no time: what a reply, a
+    """What's next for a PlanTools' day as it stands, with today's list items that have no time: what a reply, a
     notice, /now and the "What's next" button all show. ``mode`` left out: as the person wants it (render with
     the settings); given: asked for outright, whole (/now, the button). ``unmarked`` defaults to everything past
     its time with nothing said, muted or not (a mute quiets check-ins, never where things stand)."""
@@ -280,7 +297,7 @@ def covered_until(plan: DayPlan, now: datetime, mode: str = DEFAULT_MODE) -> Opt
     starts = sorted({thirty_of(s.start_dt) for s in _mine(plan) if s.start_dt >= block + HALF})
     if not starts:
         return None
-    return starts[-1] if mode == "rest" else starts[min(NEXT_ROWS, len(starts)) - 1]
+    return starts[min(NEXT_ROWS, len(starts)) - 1] if mode_of(mode) == "few" else starts[-1]
 
 
 class SentSummaries:
@@ -369,6 +386,6 @@ def follows_turn(tool_messages: Sequence[dict], reply: str, said: str, plan: Day
     return bool(_APOLOGY_RE.search(text)) or (bool(_DISPUTE_RE.search(said or "")) and _names_an_item(text, plan))
 
 
-__all__ = ["MODES", "DEFAULT_MODE", "SCHEDULE_ASKED_RE", "SentSummaries", "snapshot", "moved_since", "render",
-           "summary", "unmarked_lines", "untimed_for", "untimed_lines", "free_stretches", "free_line",
+__all__ = ["MODES", "DEFAULT_MODE", "SCHEDULE_ASKED_RE", "mode_of", "asked_mode", "SentSummaries", "snapshot",
+           "moved_since", "render", "summary", "unmarked_lines", "untimed_for", "untimed_lines", "free_stretches", "free_line",
            "follows_turn", "plan_signature", "covered_until"]
