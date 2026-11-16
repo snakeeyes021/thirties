@@ -14,6 +14,7 @@ looks an item up (ticking it done, moving it) still goes by its id or its own li
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 SEP = " › "
@@ -22,6 +23,18 @@ MAX_PARENTS = 2
 # Today note's headings sort the day ("If there's time"), they don't say what an item is about.
 NO_HEADING_ROLES = ("today", "routine")
 NO_PATH_ROLES = ("routine",)
+# Headings that only sort a list by where things stand, besides the states list_reading reads off a heading
+# ("Active", "On hold", "Done", "Moot"): they say nothing about what an item is.
+_SORTING_HEADINGS = re.compile(r"^(someday|some day|later|soon|backlog|inbox|to ?do|todo|tasks?|misc\w*|other|"
+                               r"general|items?|open|new|not started|started|up next)$", re.IGNORECASE)
+
+
+def is_state_heading(name: Any) -> bool:
+    """A heading that says where its items stand (Active, Probation, Done, Someday, Running, Moot), not what
+    they're about: never part of an item's path."""
+    from thirties_core.list_reading import section_state
+    text = re.sub(r"[*_#`]", "", str(name or "")).strip().rstrip(":").strip()
+    return bool(text) and (section_state(text) != ("", "") or bool(_SORTING_HEADINGS.match(text)))
 
 
 def _short(text: Any) -> str:
@@ -57,8 +70,8 @@ def parents(task: Any, tasks: Optional[Iterable[Any]]) -> List[str]:
     if len(path) > len(chain):  # a parent that isn't an item (ticked, or a condition): the line's own path says it
         chain = path
     section = str(getattr(cur, "section", "") or getattr(task, "section", "") or "").strip()
-    if section and getattr(task, "list_role", "") not in NO_HEADING_ROLES:
-        chain.insert(0, _short(section))
+    if section and getattr(task, "list_role", "") not in NO_HEADING_ROLES and not is_state_heading(section):
+        chain.insert(0, _short(section))  # a heading that only says where things stand isn't a parent
     chain = [c for c in chain if c]
     return chain[-MAX_PARENTS:]
 
@@ -174,5 +187,5 @@ def resolve(ref: Any, tasks: Optional[Iterable[Any]]) -> Optional[Any]:
     return found[0] if len(found) == 1 else None
 
 
-__all__ = ["SEP", "MAX_PARENTS", "parents", "label", "span_label", "labelled", "labelled_plan", "named", "tasks_of",
+__all__ = ["SEP", "MAX_PARENTS", "is_state_heading", "parents", "label", "span_label", "labelled", "labelled_plan", "named", "tasks_of",
            "leaf", "resolve"]
