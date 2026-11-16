@@ -21,7 +21,7 @@ from typing import Callable, Iterable, List, Optional, Sequence
 
 from thirties_core.clock import agenda_lines, format_clock, slice_lines, thirty_ceil, thirty_of
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
-from thirties_core.shown_times import exact, exact_ends, shown_end
+from thirties_core.shown_times import exact_ends, shown_end, start_exact
 
 HALF = timedelta(minutes=30)
 MISSED_HEADING = "Not marked yet:"
@@ -174,7 +174,7 @@ def _titled(s: EventSpan, block_start: Optional[datetime] = None) -> str:
     """The item's title in a block's row, with its real start when the user or a calendar gave one inside the block
     ("Orthodontist at 2:45 PM" in the 2:30 PM row); Thirties' own minutes are never said (shown_times)."""
     start = thirty_of(s.start_dt) if block_start is None else block_start
-    return f"{s.title} at {format_clock(s.start_dt)}" if exact(s) and s.start_dt != start else s.title
+    return f"{s.title} at {format_clock(s.start_dt)}" if start_exact(s) and s.start_dt != start else s.title
 
 
 def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only: bool = False) -> List[str]:
@@ -229,8 +229,8 @@ def whole_day_lines(plan: DayPlan) -> List[str]:
     for group in groups:
         block = thirty_of(group[0].start_dt)
         end = max(shown_end(s) for s in group)
-        # a line of facts only (a calendar event, what the user said they did) keeps its real start
-        first = group[0].start_dt if all(exact(s) and s.start_dt == group[0].start_dt for s in group) else block
+        # a line of facts only (a calendar event, what the user said they did, a time they stated) keeps its real start
+        first = group[0].start_dt if all(start_exact(s) and s.start_dt == group[0].start_dt for s in group) else block
         notes = [_note(s) for s in group]
         one_note = notes[0] if len(group) > 1 and notes[0] and len(set(notes)) == 1 else ""
 

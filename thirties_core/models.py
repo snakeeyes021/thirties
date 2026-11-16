@@ -126,6 +126,11 @@ class EventSpan:
     # The original plan, kept when an outcome moves the span to when it really happened.
     planned_start: Optional[datetime] = None
     planned_end: Optional[datetime] = None
+    # A start or end the user stated for this item when they placed it ("put the parcel drop at 4:45"), kept as
+    # the time itself: shown to the minute while the item is still there (given_times.py). A time Thirties
+    # picks is never kept here, and once the item moves the kept time no longer matches and stops counting.
+    given_start: Optional[datetime] = None
+    given_end: Optional[datetime] = None
 
     def __post_init__(self) -> None:
         if self.start_dt.timestamp() >= self.end_dt.timestamp():
@@ -173,6 +178,8 @@ class EventSpan:
             "time_source": self.time_source,
             "planned_start": self.planned_start.isoformat() if self.planned_start else None,
             "planned_end": self.planned_end.isoformat() if self.planned_end else None,
+            "given_start": self.given_start.isoformat() if self.given_start else None,
+            "given_end": self.given_end.isoformat() if self.given_end else None,
         }
 
     @classmethod
@@ -198,6 +205,8 @@ class EventSpan:
             time_source=data.get("time_source", ""),
             planned_start=datetime.fromisoformat(data["planned_start"]) if data.get("planned_start") else None,
             planned_end=datetime.fromisoformat(data["planned_end"]) if data.get("planned_end") else None,
+            given_start=datetime.fromisoformat(data["given_start"]) if data.get("given_start") else None,
+            given_end=datetime.fromisoformat(data["given_end"]) if data.get("given_end") else None,
         )
 
 

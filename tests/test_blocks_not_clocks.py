@@ -57,8 +57,9 @@ def invented_day(db) -> None:
     spans.append(EventSpan("seed", "Order seeds", at("17:15"), at("17:22"), SpanCategory.TASK))
     # an item that runs past its blocks with an odd end
     spans.append(EventSpan("quilt", "Quilt binding", at("18:00"), at("20:10"), SpanCategory.ACTIVITY))
-    # asked for by the user at a time of their own
-    spans.append(EventSpan("clean", "Pick up the dry cleaning", at("16:45"), at("17:00"), SpanCategory.TASK))
+    # asked for by the user at a time of their own: the item keeps the time they stated (given_times.py)
+    spans.append(EventSpan("clean", "Pick up the dry cleaning", at("16:45"), at("17:00"), SpanCategory.TASK,
+                           given_start=at("16:45")))
     # a calendar event at an odd time
     spans.append(EventSpan("ortho", "Orthodontist", at("14:45"), at("15:20"), SpanCategory.CALENDAR,
                            source="calendar", is_firm=True))
@@ -111,6 +112,7 @@ class TestTheConversationAndMessages(GuardCase):
         self.assertIn("6:00 PM – 8:30 PM Quilt binding", lines)  # a long item: its blocks
         rest = render_schedule(plan, at("12:10")).splitlines()
         self.assertIn("2:30 PM – Orthodontist at 2:45 PM (until 3:20 PM)", rest)  # its block, and its real time
+        self.assertIn("Pick up the dry cleaning at 4:45 PM", "\n".join(rest))  # the time the user stated
         self.assertIn("5:00 PM – Repot the basil, then Order seeds (until 5:30 PM)", rest)  # packed: one block
 
     def test_whats_next_and_the_show_schedule_reply(self) -> None:

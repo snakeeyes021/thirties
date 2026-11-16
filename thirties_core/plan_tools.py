@@ -1048,6 +1048,10 @@ class PlanTools:
             notes = self._place(span, _as_bool(replace_overlaps), alongside=_as_bool(alongside))
         self.day_plan.spans.append(span)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        # --- a time the user stated for it is kept, to be shown as said (given_times.py) ---
+        from thirties_core.given_times import keep as keep_given
+        keep_given(self, span, True, end not in (None, ""))
+        # --- end a time the user stated ---
         self._persist(span)
         from thirties_core.turn_guards import after_add
         after_add(self, span)  # rest is never checked in on
@@ -1202,6 +1206,10 @@ class PlanTools:
         if span.source == "routine":
             span.source = "user"
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        # --- a new time the user stated for it is kept, to be shown as said (given_times.py) ---
+        from thirties_core.given_times import keep as keep_given
+        keep_given(self, span, start not in (None, "") or shift not in (None, ""), end not in (None, ""))
+        # --- end a time the user stated ---
         self._persist(span)
         notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
