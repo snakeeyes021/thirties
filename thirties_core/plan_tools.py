@@ -1085,21 +1085,25 @@ class PlanTools:
             raise ToolError(f"Unknown category '{category}'. Use activity or task.")
         if cat not in (SpanCategory.ACTIVITY, SpanCategory.TASK):
             raise ToolError("Only an activity or a task can be recorded after the fact.")
+        # --- a record after the fact is a done like any other (past_records.py) ---
+        from thirties_core.past_records import resolve, settle_lists
+        task_id, task, status = resolve(self, title, task_id)
+        # --- end a done like any other ---
         span = EventSpan(new_span_id(), title, start_dt, end_dt, SpanCategory.TASK if task_id else cat,
-                         task_id=task_id, status=SpanStatus.DONE)
+                         task_id=task_id, status=status)
         span.actual_start, span.actual_end, span.time_source = start_dt, end_dt, "reported"
         before_the_day = end_dt <= self.day_plan.day_start  # kept and counted, but not on this day's plan
         if not before_the_day:
             self.day_plan.spans.append(span)
             self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
-        if task_id and self._state_db is not None:
-            self._state_db.record_task_completed(task_id, self.day_plan.target_date)
+        lists = settle_lists(self, span, task)
         self._save_plan_after_change()
+        how = "as done" if status == SpanStatus.DONE else "as partly done"
         if before_the_day:
-            return (f"Recorded {self.describe(span)} this morning [id {span.id}] as done (it already happened; it "
-                    "was before today's plan begins, so it isn't shown on it).")
-        return f"Recorded {self.describe(span)} [id {span.id}] as done (it already happened)."
+            return (f"Recorded {self.describe(span)} this morning [id {span.id}] {how} (it already happened; it "
+                    f"was before today's plan begins, so it isn't shown on it){lists}.")
+        return f"Recorded {self.describe(span)} [id {span.id}] {how} (it already happened){lists}."
 
     def update_event(
         self,

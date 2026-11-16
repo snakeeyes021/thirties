@@ -26,19 +26,20 @@ def _candidates(assistant) -> List[Any]:
             and not getattr(t, "someday", False) and (t.title or "").strip()]
 
 
-def matches(assistant, event: str, message: Optional[str]) -> List[Any]:
+def matches(assistant, event: str, message: Optional[str], skip: tuple = ()) -> List[Any]:
     """The open list items this done can be: the name the model gave shares a word with the item, and the user's
     words and that name together have at least half of the item's own words ("finished the quilt binding" for
     Sew the quilt binding; "descaled the kettle" is not Buy a new kettle). When several can, the one the user's
     words name by its distinctive words (item_facts.referenced), if exactly one; else all of them, to ask about. A
-    Today line and the home item it's a copy of count once, as the home item."""
+    Today line and the home item it's a copy of count once, as the home item. Items whose ids are in skip aren't
+    candidates."""
     if not message or not str(event or "").strip():
         return []
     from thirties_core.item_facts import item_name, match_words, referenced
     named, said = match_words(event), match_words(message)
     if not named:
         return []
-    tasks = _candidates(assistant)
+    tasks = [t for t in _candidates(assistant) if t.id not in skip]
     found = []
     for t in tasks:
         mine = match_words(t.title)
@@ -68,4 +69,35 @@ def on_the_lists(assistant, event: str) -> Optional[Any]:
     return None
 
 
-__all__ = ["matches", "on_the_lists"]
+def instead_of_settled(assistant, event: str, span: Any) -> Optional[Any]:
+    """The open list item a done is about when its name only matches an item settled earlier today ("finished the
+    quilt binding after all", with a Quilt binding skipped this afternoon and Sew the quilt binding open on a list):
+    that settled item isn't what got done now, the list item is. None (the settled item is corrected, as before)
+    when the item is linked to a list item already (its own line on the Today note isn't one), was named by its
+    id, or no single open item matches."""
+    from thirties_core.models import SpanStatus
+    pt = assistant.pt
+    if getattr(pt, "user_message", None) is None or getattr(pt, "by_hand", False):
+        return None
+    if span.status == SpanStatus.PLANNED or str(event or "").strip() == span.id:
+        return None
+    if span.source == "calendar" or span.is_envelope:
+        return None
+    if span.task_id and not _own_today_line(assistant, span.task_id):
+        return None
+    if not span.task_id and assistant._exact_task(span.title) is not None:
+        return None
+    found = matches(assistant, str(event), pt.user_message, skip=(span.task_id,) if span.task_id else ())
+    return found[0] if len(found) == 1 else None
+
+
+def _own_today_line(assistant, task_id: str) -> bool:
+    """The item is a line on the Today note that copies no item on another list (an activity put on Today)."""
+    line = next((t for t in assistant.s.tasks if t.id == task_id), None)
+    if line is None or line.list_role != "today" or assistant._db is None:
+        return False
+    from thirties_core.today import TodayLinks
+    return TodayLinks(assistant._db).home_of(line.title) is None
+
+
+__all__ = ["matches", "on_the_lists", "instead_of_settled"]
