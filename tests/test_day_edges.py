@@ -63,7 +63,10 @@ class TestThisMorningBeforeThePlan(EdgeCase):
         stored = [s for s in self.sched.state_db.get_spans_between(at("06:00"), at("07:00")) if s.title == "Feed the cat"]
         self.assertEqual(len(stored), 1)
         self.assertEqual((stored[0].start_dt, stored[0].status), (at("06:30"), SpanStatus.DONE))
-        self.assertEqual(self.spans(self.t, "Feed the cat"), [])  # not left half on this day's plan
+        from thirties_core.messages import whole_day_lines  # on the day's record, in its block; the plan starts at 7
+        self.assertTrue(any(l.startswith("6:30 AM") and "Feed the cat" in l for l in whole_day_lines(self.t.day_plan)))
+        self.assertNotIn("Feed the cat", [s.title for s in self.t.day_plan.spans_in_view()])  # not half on the plan
+        self.assertEqual(self.t.day_plan.day_start, at("07:00"))
 
 
 class TestNothingLeavesTheDayUnseen(EdgeCase):
