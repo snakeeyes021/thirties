@@ -12,6 +12,11 @@ Now:
   is before the plan begins, and on the plan it would be tomorrow; unless the user's words say tomorrow;
 - a change that would leave the day's plan altogether is refused;
 - a result that does land on the next morning says so ("tomorrow morning, Thursday").
+
+Something under way at this moment is never refused for being early. Up at 5:50 and out feeding the hens while the
+plan starts at 7:00, it's recorded on today in the block it's happening in (the 5:30 AM block), started now; the
+plan's first block stays where it is. Such a record of this morning, before the plan begins, is part of the day:
+it's loaded with the day's plan and listed first in its record by blocks (``this_mornings``).
 """
 
 from __future__ import annotations
@@ -80,6 +85,76 @@ def refuse_off_the_day(pt: "PlanTools", title: str, start: datetime, end: dateti
     return None
 
 
+# --- what's happening now, before the plan begins ---
+
+# a clause saying the user is at it right now: "out on a run now", "I'm feeding the hens right now"
+_NOW_RE = re.compile(r"\b(?:right now|now|currently|at the moment|as we speak)\b", re.IGNORECASE)
+_AT_IT_RE = re.compile(r"\b(?:i'?m|i am|im|we'?re|we are|currently|just)\s+(?:\w+\s+){0,2}?\w+ing\b|"
+                       r"\b\w{2,}ing\s+(?:\w+\s+){0,3}?(?:right now|now)\b|"
+                       r"^\W*(?:out|off|busy|in the middle of)\b", re.IGNORECASE)
+_CLAUSES_RE = re.compile(r"[.;!?\n,]+|\b(?:and|but|so|then|while)\b", re.IGNORECASE)
+
+
+def says_doing_now(message: Optional[str]) -> bool:
+    """The user's words say they're doing something right now ("out on a run now", "I'm sorting the mail right now")."""
+    from thirties_core.started import STARTED_RE, _asks
+    for clause in _CLAUSES_RE.split(message or ""):
+        if clause.strip() and not _asks(clause) and _NOW_RE.search(clause) and (
+                _AT_IT_RE.search(clause) or STARTED_RE.search(clause)):
+            return True
+    return False
+
+
+def before_the_plan(pt: "PlanTools") -> bool:
+    """It's this morning, before the day's plan begins, and the plan is the day being lived."""
+    plan = pt.day_plan
+    try:
+        now = pt._now()
+        return pt.is_current(plan) and plan.day_start - NEAR_NOW <= now < plan.day_start
+    except Exception:
+        return False
+
+
+def now_this_morning(pt: "PlanTools", dt: datetime) -> bool:
+    """dt, read as this morning, is in the block it is now, before the plan begins, and the user's words say they're
+    at it now: what they're doing right now, to be recorded as happening now (doing_now), never refused."""
+    if not before_the_plan(pt) or not says_doing_now(getattr(pt, "user_message", None)):
+        return False
+    from thirties_core.clock import thirty_of
+    now = pt._now()
+    when = this_morning_meant(pt, dt) or dt
+    return thirty_of(now) <= when <= now + timedelta(minutes=5)
+
+
+def _morning_from(plan) -> datetime:
+    start = plan.day_start
+    return start.replace(hour=MORNING_FROM, minute=0, second=0, microsecond=0)
+
+
+def is_this_mornings(plan, span: "EventSpan") -> bool:
+    """A record of this morning before the plan begins: something the user did, or is doing, between MORNING_FROM
+    and the plan's first block, on the plan's own date (never sleep, work or a calendar event)."""
+    from thirties_core.models import SpanCategory
+    return (span.actual_start is not None and span.source != "calendar"
+            and span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+            and _morning_from(plan) <= span.start_dt < plan.day_start
+            and span.end_dt.timestamp() <= plan.day_start.timestamp())
+
+
+def this_mornings(plan) -> list:
+    """This morning's records before the plan begins that the plan holds (``is_this_mornings``), in order."""
+    return sorted((s for s in plan.spans if is_this_mornings(plan, s)), key=lambda s: s.start_dt.timestamp())
+
+
+def load_this_mornings(db, plan) -> None:
+    """Load this morning's records from before the plan begins into the day (build_day_plan): they belong to it."""
+    if db is None or _morning_from(plan) >= plan.day_start:
+        return
+    held = {s.id for s in plan.spans}
+    plan.spans.extend(s for s in db.get_spans_between(_morning_from(plan), plan.day_start)
+                      if s.id not in held and is_this_mornings(plan, s))
+
+
 def day_note(pt: "PlanTools", span: "EventSpan") -> str:
     """" (tomorrow morning, Thursday)" for an item that lands on the next morning, so the result says the real day."""
     try:
@@ -90,4 +165,5 @@ def day_note(pt: "PlanTools", span: "EventSpan") -> str:
     return ""
 
 
-__all__ = ["this_morning_meant", "refuse_early", "refuse_off_the_day", "day_note", "next_morning"]
+__all__ = ["this_morning_meant", "refuse_early", "refuse_off_the_day", "day_note", "next_morning", "says_doing_now",
+           "before_the_plan", "now_this_morning", "is_this_mornings", "this_mornings", "load_this_mornings"]

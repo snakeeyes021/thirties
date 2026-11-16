@@ -35,10 +35,43 @@ UNTIMED_RE = re.compile(
     r"|\bpencil in\b|\bpencil(?:led|ed)?(?: \w+){1,3} in\b",
     re.IGNORECASE)
 
+# Other plain ways of saying the item gets no time today ("no clock time on the gutters at all", "don't give it a
+# time", "whenever", "unscheduled is fine", "it doesn't need a time"). Each says it outright; a time of day ("sometime
+# this afternoon") is a time, and so is "whenever you think fits" (Thirties picks one).
+_KIND = r"(?:clock |set |specific |particular |fixed |exact |real )?"
+NO_TIME_RE = re.compile(
+    rf"\bno {_KIND}(?:clock )?time on\b|\bno (?:clock|set|specific|particular|fixed|exact) times?\b"
+    r"|\bno (?:time ?slot|slot)\b"
+    r"|\b(?:don'?t|dont|do not|no need to|doesn'?t|does not|needn'?t|won'?t need|shouldn'?t)\s+(?:need to\s+)?"
+    r"(?:give|put|set|assign|attach|add|pick|have|need|get|want)\b(?:\s+[\w'&-]+){0,4}?\s+(?:a|any)\s+"
+    rf"{_KIND}(?:time|time ?slot|slot)\b"
+    r"|\bwhenever\b(?!\s+(?:you (?:think|want|like|see fit|decide|pick|choose|prefer)\b|it (?:fits|suits)\b|"
+    r"that (?:fits|suits)\b|there'?s a gap\b))"
+    r"|\b(?:some ?time|any ?time|at some point|at any point)(?:\s+(?:today|is fine|works|is good|is ok|is okay))\b"
+    r"|\bat some point\b|\bun-?scheduled\b|\buntimed\b"
+    rf"|\bwithout (?:a |any )?{_KIND}(?:time|time ?slot|slot)\b|\bnot at (?:a|any) {_KIND}time\b"
+    r"|\b(?:leave|keep) (?:it|that|them|this|those|[\w'&-]+) (?:off the (?:clock|timeline)|floating)\b"
+    r"|\b(?:the )?(?:time|when) (?:doesn'?t|does not|don'?t) matter\b|\bdoesn'?t matter when\b"
+    r"|\b(?:i )?don'?t (?:care|mind) when\b",
+    re.IGNORECASE)
+# a "not" in front of it turns it round: "it can't be whenever", "don't leave it unscheduled"
+_TURNED_RE = re.compile(r"\b(?:not|never|can'?t|cannot|shouldn'?t|won'?t|don'?t|dont|do not|isn'?t)\b[^.;!?\n,]*$",
+                        re.IGNORECASE)
+_STARTS_NEGATIVE_RE = re.compile(r"^(?:no\b|don'?t|dont|do not|doesn'?t|does not|needn'?t|won'?t|shouldn'?t|"
+                                 r"without|not at|(?:i )?don'?t)", re.IGNORECASE)
+
 
 def asked_untimed(message: Optional[str]) -> bool:
     """The user's own words ask for something to have no time today. Only their message counts: never the model's."""
-    return bool(message and UNTIMED_RE.search(message))
+    if not message:
+        return False
+    if UNTIMED_RE.search(message):
+        return True
+    for m in NO_TIME_RE.finditer(message):
+        before = message[:m.start()]
+        if _STARTS_NEGATIVE_RE.match(m.group(0)) or not _TURNED_RE.search(before):
+            return True
+    return False
 
 
 def _is_heading(line: str) -> bool:

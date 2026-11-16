@@ -576,7 +576,8 @@ class PlanTools:
         ref_str = str(ref or "").strip()
         if not ref_str:
             raise ToolError("Say which item (its id or title).")
-        in_view = self.day_plan.spans_in_view()
+        from thirties_core.day_edges import this_mornings  # this morning's records before the plan are the day's too
+        in_view = this_mornings(self.day_plan) + self.day_plan.spans_in_view()
         for span in in_view:
             if span.id == ref_str or span.id == f"cal:{ref_str}" or span.source_event_id == ref_str:
                 return span
@@ -848,9 +849,14 @@ class PlanTools:
 
     def doing_now(self, item: Any, until: Any = None, duration: Any = None, by_itself: Any = False, **_: Any) -> str:
         """What the user is doing now (started.py): in the current block, started now, and what was planned in its
-        time moves after it. Never a done."""
+        time moves after it. Never a done. Up before the day's plan begins, it's still recorded now, on today
+        (day_edges.py)."""
         plan, now = self.day_plan, self._now()
-        if not (self.is_current(plan) and plan.day_start <= now < plan.day_end):
+        # --- up before the plan begins: recorded this morning, in its block (day_edges.py) ---
+        from thirties_core.day_edges import before_the_plan
+        early = before_the_plan(self)
+        # --- end up before the plan begins ---
+        if not early and not (self.is_current(plan) and plan.day_start <= now < plan.day_end):
             raise ToolError("doing_now is for what's happening now, today.")
         start = thirty_of(now)
         span = None
@@ -901,6 +907,8 @@ class PlanTools:
             notes += [listed.strip("()")] if listed else []
         said = (f"{self._title(span)} started at {format_clock(now)}" + ("" if _as_bool(by_itself) else
                 f", on the plan {format_clock(start)} – {format_clock(end)}"))
+        if early:  # this morning, before the plan begins: on today's record, the plan's start unchanged
+            said += f" (this morning, before today's plan begins at {format_clock(plan.day_start)}; on today's record)"
         return (f"{said}; not done yet." + (f" ({'; '.join(notes)})" if notes else "")
                 + " Mark it done when they say it's finished.")
 
@@ -1005,7 +1013,9 @@ class PlanTools:
         start_dt = self._start(start)
         # --- an early-morning time never lands on tomorrow unsaid (day_edges.py) ---
         if not self.by_hand and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
-            from thirties_core.day_edges import refuse_early
+            from thirties_core.day_edges import now_this_morning, refuse_early
+            if now_this_morning(self, start_dt):  # what they're doing right now: recorded now, never refused
+                return self.doing_now(str(title).strip(), until=end, duration=duration)
             why = refuse_early(self, str(title).strip(), start_dt)
             if why:
                 raise ToolError(why)
@@ -1109,14 +1119,18 @@ class PlanTools:
         span = EventSpan(new_span_id(), title, start_dt, end_dt, SpanCategory.TASK if task_id else cat,
                          task_id=task_id, status=status)
         span.actual_start, span.actual_end, span.time_source = start_dt, end_dt, "reported"
-        before_the_day = end_dt <= self.day_plan.day_start  # kept and counted, but not on this day's plan
-        if not before_the_day:
+        before_the_day = end_dt <= self.day_plan.day_start  # kept and counted, not in the plan's blocks
+        from thirties_core.day_edges import is_this_mornings  # this morning's: on the day's record (day_edges.py)
+        if not before_the_day or is_this_mornings(self.day_plan, span):
             self.day_plan.spans.append(span)
             self.day_plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
         lists = settle_lists(self, span, task)
         self._save_plan_after_change()
         how = "as done" if status == SpanStatus.DONE else "as partly done"
+        if before_the_day and is_this_mornings(self.day_plan, span):
+            return (f"Recorded {self.describe(span)} this morning [id {span.id}] {how} (it already happened, before "
+                    f"today's plan begins; it's on today's record){lists}.")
         if before_the_day:
             return (f"Recorded {self.describe(span)} this morning [id {span.id}] {how} (it already happened; it "
                     f"was before today's plan begins, so it isn't shown on it){lists}.")
@@ -1179,6 +1193,9 @@ class PlanTools:
         # --- an early-morning time never lands on tomorrow unsaid, and nothing leaves the day (day_edges.py) ---
         if not span.is_envelope and not self.by_hand and (new_start, new_end) != (span.start_dt, span.end_dt):
             from thirties_core import day_edges
+            if (span.status == SpanStatus.PLANNED and not title and to_day in (None, "")
+                    and day_edges.now_this_morning(self, new_start)):  # doing it right now: recorded now, not refused
+                return self.doing_now(span.id, until=end, duration=duration)
             why = ((day_edges.refuse_early(self, span.title, new_start) if start not in (None, "") else None)
                    or day_edges.refuse_off_the_day(self, span.title, new_start, new_end))
             if why:

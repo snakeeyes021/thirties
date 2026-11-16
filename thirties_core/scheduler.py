@@ -667,6 +667,8 @@ class DeterministicScheduler:
         self.ensure_routines(target_date - timedelta(days=1))
         self.ensure_routines(target_date)
         plan.spans = self.state_db.get_spans_between(plan.day_start, plan.day_end)
+        from thirties_core.day_edges import load_this_mornings  # what the user did or is doing before the plan begins
+        load_this_mornings(self.state_db, plan)
 
         if events is None:
             events, plan.calendar_unread = self.read_calendars(plan)

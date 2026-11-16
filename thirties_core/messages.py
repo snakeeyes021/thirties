@@ -120,8 +120,9 @@ class MissedTracker:
 def _row_items(plan: DayPlan) -> List[EventSpan]:
     """What the user's schedule lists: their own things. Someone else's events (show-only calendars) are for the
     Agenda's quiet "not yours" note, never the text schedule sent in chat or Telegram."""
-    return [s for s in plan.spans_in_view() if s.category != SpanCategory.SLEEP and not s.shown_only
-            and s.status not in (SpanStatus.SKIPPED,) and s.end_dt > s.start_dt]
+    from thirties_core.day_edges import this_mornings  # done or begun this morning, before the plan begins
+    return [s for s in this_mornings(plan) + plan.spans_in_view() if s.category != SpanCategory.SLEEP
+            and not s.shown_only and s.status not in (SpanStatus.SKIPPED,) and s.end_dt > s.start_dt]
 
 
 # The person asking where they are now: the status line is the answer, whatever they set and however recently
