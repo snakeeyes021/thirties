@@ -30,7 +30,7 @@ import re
 import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
 from thirties_core.backlog import load_backlog
@@ -175,7 +175,8 @@ class BackgroundService:
 
     def send(self, text: str, kind: str, title: str = "Thirties", emphasis: Sequence[str] = (),
              to_conversation: bool = True, now: Optional[datetime] = None, expires: Optional[datetime] = None,
-             day: Optional[date] = None, phone: bool = True, desktop: bool = True) -> None:
+             day: Optional[date] = None, phone: bool = True, desktop: bool = True,
+             phone_chats: Optional[Sequence[Any]] = None, reply_markup: Optional[Dict[str, Any]] = None) -> None:
         """The one way out for what the assistant says by itself: the desktop, the phone (if one is paired here)
         and the conversation of the ``day`` it's about (today's by default; the next day's morning goes in the next
         day's), so the app and Telegram are one conversation. The phone gets the same words, with ``emphasis``
@@ -185,7 +186,8 @@ class BackgroundService:
         stale, and it's kept in the conversation only once it really got there. Anything else that doesn't
         reach the phone is kept with a quiet "not delivered to your phone" mark. ``phone=False``: the phone already
         has it (a mirrored turn). ``desktop=False``: no desktop notification (what the user just did at the
-        desktop)."""
+        desktop). ``phone_chats``: only these chats get it (with ``reply_markup``, which only the one-time removal
+        of an old keyboard uses)."""
         from thirties_core.clock import real_times, to_thirties
         if kind not in HOLD_PASSES and self._held(now or self.now()):
             logger.info("Held (the user asked for quiet): %r", text[:80])
@@ -235,8 +237,9 @@ class BackgroundService:
             rendered = phone_text(text, emphasis)
             client = self.bridge.client
             before = len(client.sent_ids)
-            delivered = self.bridge.broadcast(rendered, expires=expires) if expires is not None \
-                else self.bridge.broadcast(rendered)
+            extra = {k: v for k, v in (("chats", phone_chats), ("reply_markup", reply_markup)) if v}
+            delivered = self.bridge.broadcast(rendered, expires=expires, **extra) if expires is not None \
+                else self.bridge.broadcast(rendered, **extra)
             delivered = delivered is not False  # an older or test bridge that says nothing: as sent
             if kind in YES_KINDS:  # a 👍 on this message is a yes (telegram_bridge.handle_updates)
                 from thirties_core.telegram_bridge import YES_TARGETS_KEY

@@ -1,5 +1,5 @@
 """How the schedule reaches the user without being asked for: what's next under a bell or a check-in (when it says
-something new), one tap on the phone, the slice after a failed change, a reply that talked the plan over, a tick in
+something new), the menu on the phone, the slice after a failed change, a reply that talked the plan over, a tick in
 the app's day panel, today's list items with no time, open stretches, where the morning's carried items went, and
 the evening offer to move what's behind to tonight. Invented items; DAY is Thu Oct 15 (Work 8:30 AM - 4 PM, Sleep
 from 11 PM)."""
@@ -114,7 +114,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
 
 class TestTheUsersSayOverIt(ServiceCase):
     """Asked to stop what's next, its Not marked yet list or the block line (reply_extras.py), notices stop them
-    too; /now and the What's next button always show everything."""
+    too; /now and the words "what's next" always show everything."""
 
     def extras(self, part, show, for_today=True):
         what = {"whats_next": "what's next", "not_marked": "what's not marked yet",
@@ -282,14 +282,6 @@ class TestOneTapOnThePhone(OneConversationCase):
         self.assertEqual(len(menus), 1)
         self.assertEqual([c["command"] for c in menus[0]["commands"]][:2], ["now", "day"])
         self.assertEqual(menus[0]["commands"][0]["description"], "What's next")
-
-    def test_every_message_carries_the_whats_next_button(self):
-        self.svc.send("🔔 5:00: Taxes", "start")
-        markup = [p for m, p in self.calls if m == "sendMessage"][-1]["reply_markup"]
-        self.assertEqual(markup["keyboard"], [[{"text": "What's next"}]])
-        self.assertTrue(markup["is_persistent"])
-        self.svc.bridge.handle_message(9999, "hello")  # a chat that isn't the paired phone: no button
-        self.assertNotIn("reply_markup", [p for m, p in self.calls if m == "sendMessage"][-1])
 
     def test_the_button_and_now_answer_with_whats_next_and_no_model_turn(self):
         with patch.object(self.svc.bridge, "_get_current_time", return_value=at("17:10")):

@@ -70,10 +70,10 @@ THUMBS_UP = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿"}
 YES_TARGETS_KEY = "telegram_yes_targets"  # [[chat_id, message_id], ...]: messages a 👍 answers with "yes"
 OFFSET_KEY = "telegram_offset"  # this device's: the next update to read, per bot ("telegram_offset:<bot id>")
 UNSENT_KEY = "telegram_unsent"  # this device's: replies that never got through, kept across a restart
-# One tap on the phone for where the day stands (/now and /day went unused: they weren't in Telegram's menu, and
-# /now didn't say what's next): a button kept under the chat, and the commands in the menu.
-WHATS_NEXT_BUTTON = "What's next"
-WHATS_NEXT_KEYBOARD = {"keyboard": [[{"text": WHATS_NEXT_BUTTON}]], "resize_keyboard": True, "is_persistent": True}
+# Where the day stands is one tap away in Telegram's menu. No keyboard is ever kept under the chat: a phone that
+# still shows one from an earlier version has it taken away once (remove_old_keyboard).
+KEYBOARD_REMOVED_KEY = "telegram_keyboard_removed"  # per bot: the chat ids whose keyboard was taken away
+REMOVE_KEYBOARD = {"remove_keyboard": True}
 MENU_COMMANDS = [
     {"command": "now", "description": "What's next"},
     {"command": "day", "description": "Today's schedule"},
@@ -85,7 +85,8 @@ MENU_COMMANDS = [
 
 
 def is_button(text: str) -> bool:
-    """The "What's next" button (or its words typed as they are): answered like /now, at once, by Python."""
+    """The words "What's next" typed as they are (or sent by an old keyboard button): answered like /now, at once,
+    by Python."""
     return (text or "").strip().rstrip("?!. ").lower().replace("’", "'") in ("what's next", "whats next")
 
 
@@ -162,8 +163,6 @@ class TelegramClient:
         self.on_late: Optional[Callable[[Any, str], None]] = None  # a kept message got through after all
         self.on_dropped: Optional[Callable[[Any, str], None]] = None  # a kept notice was dropped as stale
         self.hold_until = 0.0  # Telegram asked us to wait (HTTP 429) until then
-        self.reply_markup: Optional[Dict[str, Any]] = None  # sent with every message: the "What's next" button
-        self.markup_chats: Optional[Set[str]] = None  # only to these chats (the paired phone), when set
 
     def _undelivered_changed(self) -> None:
         if self.on_undelivered is not None:
@@ -241,25 +240,27 @@ class TelegramClient:
         text: str,
         parse_mode: Optional[str] = "Markdown",
         expires: Optional[datetime] = None,
+        reply_markup: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Send a text message, splitting into <= 4000 char chunks. "Markdown" means our light markdown, sent as
         Telegram HTML (telegram_html); if Telegram can't read that, the text goes plain. A send the network drops is
         tried again; one that still fails is kept in `undelivered`, and the bridge sends it once Telegram answers
-        again (a reply reached the app but not the phone, 10-24 9:18), unless it ``expires`` first."""
+        again (a reply reached the app but not the phone, 10-24 9:18), unless it ``expires`` first. ``reply_markup``
+        goes with the message only when given (the one-time removal of an old keyboard); nothing else carries one."""
         success = True
         text = plain_lists(text)
         for chunk in self._chunk_text(text, max_len=4000):
-            sent = self._send_chunk(chat_id, chunk, parse_mode)
+            sent = self._send_chunk(chat_id, chunk, parse_mode, reply_markup=reply_markup)
             if sent is False:
                 logger.error("Telegram never got a message (kept to send later): %r", chunk[:120])
-                self.undelivered.append((chat_id, chunk, time.time(),
-                                         expires.timestamp() if expires is not None else None, parse_mode))
+                kept = (chat_id, chunk, time.time(), expires.timestamp() if expires is not None else None, parse_mode)
+                self.undelivered.append(kept + (reply_markup,) if reply_markup else kept)
                 self._undelivered_changed()
             success = success and bool(sent)
         return success
 
     def _send_chunk(self, chat_id: int | str, chunk: str, parse_mode: Optional[str],
-                    key: Optional[str] = None) -> Optional[bool]:
+                    key: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None) -> Optional[bool]:
         """True when sent (or very likely sent); False when it provably never reached Telegram (worth sending
         later); None when refused. ``key``: the text it's remembered by (the queue's own words, without its
         "sent late" note).
@@ -272,8 +273,8 @@ class TelegramClient:
         if time.time() < self.hold_until:
             return False  # Telegram asked us to wait: kept, and sent once the wait is over
         payload: Dict[str, Any] = {"chat_id": chat_id, "text": chunk}
-        if self.reply_markup is not None and (self.markup_chats is None or str(chat_id) in self.markup_chats):
-            payload["reply_markup"] = self.reply_markup
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         if parse_mode == "Markdown":
             payload["text"], payload["parse_mode"] = telegram_html(chunk), "HTML"
         elif parse_mode:
@@ -346,10 +347,11 @@ class TelegramClient:
         while self.undelivered:
             chat_id, chunk = self.undelivered[0][:2]
             mode = self.undelivered[0][4] if len(self.undelivered[0]) > 4 else None
+            markup = self.undelivered[0][5] if len(self.undelivered[0]) > 5 else None
             if self._just_sent(chat_id, chunk):  # the same words went out minutes ago: never twice
                 logger.info("Dropped a queued message to Telegram that already went out: %r", chunk[:80])
             elif self._send_chunk(chat_id, "(Sent late: the first try didn't get through.)\n\n" + chunk, mode,
-                                  key=chunk) is False:
+                                  key=chunk, reply_markup=markup) is False:
                 return
             elif self.on_late is not None:
                 self.on_late(chat_id, chunk)
@@ -435,7 +437,6 @@ class ThirtiesTelegramBridge:
             raise ValueError("No Telegram bot token: set one up in Preferences → Phone.")
 
         self.client = TelegramClient(self.bot_token)
-        self.client.reply_markup = WHATS_NEXT_KEYBOARD  # one tap for what's next, under every message
         self._menu_set = False
         self.scheduler = scheduler or DeterministicScheduler(self.config)
         self.joplin_engine = joplin_engine or JoplinEngine(self.config)
@@ -447,7 +448,6 @@ class ThirtiesTelegramBridge:
         )
 
         self.allowed_chat_ids: Set[int] = set(self.config.telegram.allowed_chat_ids)
-        self.client.markup_chats = {str(c) for c in self.allowed_chat_ids}  # never a stranger's chat
         self.active_chats: Set[int] = set(self.allowed_chat_ids)
         self._bot_id = self.bot_token.split(":", 1)[0]
         self._answered: Dict[Tuple[int, int], str] = {}  # (chat, message id) -> its text, for the last few messages
@@ -648,7 +648,7 @@ class ThirtiesTelegramBridge:
             "🤖 *Thirties Mobile Planning Assistant*\n\n"
             "Powered by Gemini & your Joplin backlog.\n\n"
             "📋 *Commands*:\n"
-            "• `/now` – What's next (or tap the What's next button)\n"
+            "• `/now` – What's next\n"
             "• `/day` – Today's schedule\n"
             "• `/sync` – Push/pull sync with Joplin cross-device state\n"
             "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
@@ -742,12 +742,50 @@ class ThirtiesTelegramBridge:
         except ValueError:
             return False
 
-    def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown") -> bool:
-        """Send a message to the paired phone(s). A notice that ``expires`` is dropped if it can't go before then.
-        True when it reached a phone now."""
+    def _keyboard_removed(self) -> Set[str]:
+        db = self._db()
+        try:
+            return {str(c) for c in json.loads(db.get_sync_meta(f"{KEYBOARD_REMOVED_KEY}:{self._bot_id}") or "[]")} \
+                if db is not None else set()
+        except ValueError:
+            return set()
+
+    def _mark_keyboard_removed(self, chat_id: Any) -> None:
+        db = self._db()
+        if db is not None:
+            done = sorted(self._keyboard_removed() | {str(chat_id)})
+            db.set_sync_meta(f"{KEYBOARD_REMOVED_KEY}:{self._bot_id}", json.dumps(done))
+
+    def remove_old_keyboard(self) -> None:
+        """Once per chat, ever: an earlier version kept a "What's next" button under the chat, and Telegram keeps a
+        keyboard until the bot sends a message that removes it. That message says where the day stands (what /now
+        says) and nothing else, goes out the way every message does (so the app's chat has it once too), and is
+        never repeated for a chat it reached. With no phone paired, nothing is sent and nothing is remembered."""
+        pending = [c for c in self.allowed_chat_ids if str(c) not in self._keyboard_removed()]
+        if not pending:
+            return
+        text, _ = self._cmd_now(pending[0])
+        if self.service is not None:
+            self.service.send(text, "notice", desktop=False, phone_chats=pending, reply_markup=REMOVE_KEYBOARD)
+        else:
+            sent = self.broadcast(text, chats=pending, reply_markup=REMOVE_KEYBOARD)
+            try:
+                self.conv_manager.add_assistant_message(plain_text(text), undelivered=not sent)
+            except Exception as e:
+                logger.warning("Couldn't keep a Telegram message in the conversation: %s", e)
+
+    def broadcast(self, text: str, expires: Optional[datetime] = None, parse_mode: Optional[str] = "Markdown",
+                  chats: Optional[Sequence[Any]] = None, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
+        """Send a message to the paired phone(s), or to the ``chats`` given. A notice that ``expires`` is dropped if
+        it can't go before then. True when it reached a phone now. A message that removes the old keyboard
+        (``reply_markup``) is remembered per chat once it got there."""
         sent = False
-        for chat_id in list(self.allowed_chat_ids):
-            sent = bool(self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires)) or sent
+        for chat_id in list(self.allowed_chat_ids if chats is None else chats):
+            extra = {"reply_markup": reply_markup} if reply_markup else {}
+            ok = bool(self.client.send_message(chat_id, text, parse_mode=parse_mode, expires=expires, **extra))
+            if ok and reply_markup == REMOVE_KEYBOARD:
+                self._mark_keyboard_removed(chat_id)
+            sent = ok or sent
         return sent
 
     # --- kept on this device across a restart: where reading stopped, and replies not yet delivered ---
@@ -859,6 +897,10 @@ class ThirtiesTelegramBridge:
         one of the two (HTTP 409); then this one backs off, since only one computer should run the bridge."""
         self.running = True
         self.register_commands()
+        try:
+            self.remove_old_keyboard()
+        except Exception as e:
+            logger.warning("Couldn't take the old keyboard away: %s", e)
         offset: Optional[int] = self._saved_offset()
         while self.running:
             try:
