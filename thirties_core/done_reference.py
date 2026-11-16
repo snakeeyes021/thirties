@@ -66,7 +66,41 @@ def _titles(pt: "PlanTools") -> List[str]:
 def _named(text: str, title: str, others: Iterable[str]) -> bool:
     from thirties_core.item_facts import referenced
     from thirties_core.started import _names
-    return bool(text) and (referenced(text, title, others) or _names(text, title, list(others)))
+    return bool(text) and (referenced(text, title, others) or _names(text, title, list(others))
+                           or _by_initials(text, title, others))
+
+
+# --- a short form of an item's name: the first letters of its leading capitalised words ("HS" for Hardware Store:
+# hinges) ---
+_INITIALS_HEAD_RE = re.compile(r"\s*(?::|\s[-–—]\s|\(|,)")
+_NOT_INITIALS = {"it", "is", "in", "on", "at", "to", "me", "my", "up", "ok", "so", "no", "do", "go", "be", "an", "as",
+                 "or", "if", "of", "we", "us", "hi", "am", "pm", "id", "by", "oh", "ah"}
+
+
+def initials(title: str) -> str:
+    """The first letters of the capitalised words that open an item's name, before any ':' or ' - ' ("hs" for
+    Hardware Store: hinges and glue); "" when fewer than two words open it so."""
+    head = _INITIALS_HEAD_RE.split(title or "", maxsplit=1)[0]
+    letters = []
+    for word in head.split():
+        if not word[:1].isupper():
+            break
+        letters.append(word[0].lower())
+    return "".join(letters) if 2 <= len(letters) <= 4 else ""
+
+
+def _by_initials(text: str, title: str, others: Iterable[str]) -> bool:
+    """The message names the item by its initials, written as a word of its own, and no other item has them. In
+    lower case only when they can't be an everyday word."""
+    mine = initials(title)
+    if not mine or any(initials(o) == mine for o in others if o != title):
+        return False
+    for m in re.finditer(r"(?<![\w'])([A-Za-z]{2,4})(?![\w'])", text or ""):
+        word = m.group(1)
+        if word.lower() == mine and (word.isupper() or word.lower() not in _NOT_INITIALS):
+            return True
+    return False
+# --- end a short form ---
 
 
 def _still_to_do(pt: "PlanTools") -> list:
@@ -99,6 +133,25 @@ def _the_one_whose_time_came(pt: "PlanTools", message: str, title: str, titles: 
     latest = max(s.start_dt for s in begun)
     last = [s for s in begun if s.start_dt == latest]
     return all(s.title == title for s in last)
+
+
+def _picked_by_time(pt: "PlanTools", message: str, title: str, titles: List[str]) -> Optional[bool]:
+    """When the message's words fit this item and others equally, a time it gives picks the one that starts then:
+    True for this item, False for another, None when no time it gives tells them apart."""
+    from thirties_core.facts import gave_time
+    from thirties_core.item_facts import tied_with
+    tied = set(tied_with(message, title, [t for t in titles if t != title]))
+    if not tied:
+        return None
+
+    def starts(names: set) -> list:
+        spans = [s for s in pt.day_plan.spans if not getattr(s, "shown_only", False) and s.title in names]
+        return [dt for s in spans for dt in (s.start_dt, getattr(s, "planned_start", None)) if dt is not None]
+    mine = any(gave_time(message, dt) for dt in starts({title}))
+    theirs = any(gave_time(message, dt) for dt in starts(tied))
+    if mine != theirs:
+        return mine
+    return None
 
 
 def _copies(pt: "PlanTools", ids: Iterable[str]) -> Tuple[Optional[Any], list]:
@@ -202,11 +255,23 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
                     "isn't marked done. Mark the one whose time has come, or ask which one they did.")
     if _named(message, title, titles):
         return (None, message) if _the_copy_meant(pt, [message], ids) else (copy_refusal, message)
+    # --- a time the user gives picks one of several items their words fit equally ("the 11am one") ---
+    by_time = _picked_by_time(pt, message, title, titles)
+    if by_time is not None:
+        return (None, message) if by_time else (refusal, message)
+    # --- end picked by its time ---
     if _the_one_whose_time_came(pt, message, title, titles):
         return None, message
     if any(_named(message, t, titles) for t in others):
         return refusal, message  # they're talking about other items
     pointed = pointed_back(pt, titles)
+    # --- "that" after a list of several (not a question asking which): the one the user had just named ---
+    if len(set(pointed)) > 1 and POINTER_RE.search(message) and "?" not in shown and not (
+            BOTH_RE.search(message) or PLURAL_RE.search(message) or ORDINAL_RE.search(message)):
+        narrowed = [t for t in pointed if _named(said, t, titles)]
+        if len(set(narrowed)) == 1:
+            pointed = narrowed
+    # --- end narrowed ---
     if title not in pointed:
         return refusal, message
     many = len(set(pointed))

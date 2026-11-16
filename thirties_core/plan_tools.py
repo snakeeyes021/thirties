@@ -1350,7 +1350,16 @@ class PlanTools:
                             "rest around it (items can sit alongside work).")
 
     def remove_event(self, event: Any, **_: Any) -> str:
-        span = self._find_span(event)
+        # --- an item on today's list with no time comes off the list (off_today.py) ---
+        try:
+            span = self._find_span(event)
+        except ToolError:
+            from thirties_core.off_today import remove_listed
+            listed = remove_listed(self, event)
+            if listed is None:
+                raise
+            return listed
+        # --- end on today's list with no time ---
         self._envelope_ok(span)
         if span.source == "calendar":
             if span.tentative:
@@ -1377,7 +1386,13 @@ class PlanTools:
         # --- end a removal needs the user's words ---
         self._drop(span)
         self._save_plan_after_change()
-        return f"Removed {self.describe(span)}."
+        # --- asked to take it off, it leaves today's list too (off_today.py) ---
+        also = ""
+        if outer_tool() == "remove_event":
+            from thirties_core.off_today import after_removal
+            also = after_removal(self, span)
+        # --- end off today's list ---
+        return f"Removed {self.describe(span)}.{also}"
 
     def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False, **_: Any) -> str:
         start_dt = self._start(start)
