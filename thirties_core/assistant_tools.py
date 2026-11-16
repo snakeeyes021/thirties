@@ -1349,6 +1349,16 @@ class AssistantTools(KindTools):
             started = finished = duration = None
         if st != SpanStatus.SKIPPED:
             self._not_in_future(start_dt, end_dt)
+        # --- working on it isn't finishing it (work_sessions.py) ---
+        session = ""
+        if st == SpanStatus.DONE and not (span is not None and (span.source == "calendar" or span.is_envelope)):
+            from thirties_core.work_sessions import is_session
+            if is_session(self, span, task, started not in (None, "") and finished not in (None, "") and not guessed):
+                for_good = False  # finished only when the user says so
+                if self.kind_of(span if span is not None else task) != ONGOING:
+                    st = SpanStatus.PARTIAL  # the time is on the record; the item stays open, nothing is ticked
+                    session = " (a session on it: it stays open on its list)"
+        # --- end working on it ---
         if span is not None and span.source == "calendar" and not span.tentative:
             # An event is something you'd mark done (soak 1): the outcome is Thirties', the calendar is untouched.
             from thirties_core.calendar_outcomes import log_calendar_outcome
@@ -1388,7 +1398,7 @@ class AssistantTools(KindTools):
                 self.pt._persist(logged)
                 self._capture_context(logged)
                 result += f"; logged it {format_clock(start_dt)} – {format_clock(end_dt)}"
-            return result + "."
+            return result + session + "."
 
         if span.source == "calendar" or span.is_envelope:
             raise ToolError(f"Outcomes are tracked for planned activities, not for {span.title}.")
@@ -1461,7 +1471,7 @@ class AssistantTools(KindTools):
         if st != SpanStatus.SKIPPED and meal_word(span.title) and self.pt.is_current(self.pt.day_plan):
             spaced = respace(self.pt)
             result += ("; " + "; ".join(spaced)) if spaced else ""
-        return result + "." + (f" {credited}" if credited else "")
+        return result + session + "." + (f" {credited}" if credited else "")
 
     def _said_times_only(self, start_dt, end_dt, duration):
         """In a turn with the user's words, an outcome keeps only times the user said (or now): a time the model
