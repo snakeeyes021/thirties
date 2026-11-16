@@ -302,7 +302,10 @@ def _dropped(writer, op: Dict[str, Any], occ: int) -> Tuple[bool, str]:
 
     def take(body: str) -> Optional[str]:
         held["anchor"] = _anchor(body, op["title"], occ)
-        taken = ne.take_item(body, op["title"], occ, ticked_too=False, open_only=True)
+        if op.get("ticked"):  # ticked by the user with a drop word on it (list_reading.py): the ticked line moves
+            taken = ne.take_item(body, op["title"], occ, ticked_only=True)
+        else:
+            taken = ne.take_item(body, op["title"], occ, ticked_too=False, open_only=True)
         if taken is None:
             return None
         held["block"], held["section"] = taken[1], taken[2]

@@ -125,13 +125,18 @@ def piece_title(tasks: Iterable[Any], task) -> str:
     if task is None:
         return ""
     parent = next((t for t in tasks if task.parent_task_id and t.id == task.parent_task_id), None)
-    return f"{parent.title}: {task.title}" if parent is not None else task.title
+    if parent is None:
+        return task.title
+    from thirties_core.list_reading import name_of
+    return f"{name_of(parent).rstrip(':').strip()}: {task.title}"  # a label line's colon isn't doubled
 
 
 def open_children(tasks: List[Any], task, done: Iterable[str] = ()) -> List[Any]:
-    """The open lines indented under ``task``, in the note's order."""
+    """The open lines indented under ``task`` that are still to do (list_reading.live: not dropped, on hold, an
+    option...), in the note's order."""
+    from thirties_core.list_reading import live
     done = set(done)
-    return [t for t in tasks if t.parent_task_id == task.id and t.id not in done]
+    return [t for t in tasks if t.parent_task_id == task.id and t.id not in done and live(t)]
 
 
 def first_piece(tasks: List[Any], task, done: Iterable[str] = (), taken: Iterable[str] = ()) -> Optional[Any]:
@@ -292,12 +297,13 @@ def steady_pieces(assistant, plan, have: Iterable[Dict[str, Any]] = ()) -> List[
         seasonal = lambda t: True  # noqa: E731
     streaks = MissStreaks(db) if db is not None else None
     hot = momentum(assistant, day)
+    from thirties_core.list_reading import live
     out = []
     for note_id in notes:
         if note_id in covered:
             continue
         items = [t for t in tasks if t.parent_note_id == note_id and not t.parent_task_id and not t.someday
-                 and t.id not in done and seasonal(t)]
+                 and t.id not in done and seasonal(t) and live(t)]
         items.sort(key=lambda t: 0 if t.id in hot else 1)  # momentum's part first, then the note's order
         for t in items:
             piece = first_piece(tasks, t, done, on_plan)

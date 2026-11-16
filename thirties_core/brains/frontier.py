@@ -366,7 +366,11 @@ RULES
                         # a nested item: how it's named to the user (item_path.py)
                         named = label(t, by_task) if parents(t, by_task) else ""
                         named = f" (named: {named})" if named else ""
-                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{named}{def_str}{maybe}{pressing}")
+                        # --- how the line reads (list_reading.py): kind, state, container, blocker, notes ---
+                        from thirties_core.list_reading import prompt_tag
+                        reading = prompt_tag(t, note_tasks)
+                        # --- end how the line reads ---
+                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{named}{def_str}{maybe}{pressing}{reading}")
                 elif is_todo and todo_comp == 0:
                     nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
                     if body.strip() and is_private_note(note):
@@ -388,6 +392,24 @@ RULES
 
         if backlog_sections:
             sections.append("ACTIVE JOPLIN NOTEBOOK HIERARCHY & TASK BACKLOG:\n" + "\n\n".join(backlog_sections))
+        # --- how the lists read (list_reading.py) ---
+        if backlog_sections:
+            sections.append(
+            "HOW THE LISTS READ: an item's bracket says what Python read from its line. Only plain entries are "
+            "offered or planned. A container's items are planned, never the container itself (name it with its "
+            "progress, as given). Something dropped, closed, on hold, kept for reference or left open under a "
+            "finished item is never offered; an undecided item or an option is offered as a decision; 'later, as a "
+            "conversation' is something to talk about, not to schedule; an item waiting on something isn't for now "
+            "(when only its last step waits, the rest can be done now). What the note's text shows about progress "
+            "is evidence only: never tick anything because of it.")
+        if self.tools.scheduler is not None:
+            from thirties_core.list_reading import once_lines
+            once = once_lines(self.tools.scheduler.state_db, self.tasks, self.active_notes,
+                              someday_sections=getattr(self.tools.scheduler.config.joplin, "someday_sections", []))
+            if once:
+                sections.append("RAISE ONCE (in passing, at a natural moment; each is shown this one time):\n"
+                                + "\n".join(once))
+        # --- end how the lists read ---
         if media:
             by_list: Dict[str, List[TaskItem]] = {}
             for t in media:

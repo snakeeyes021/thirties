@@ -22,8 +22,10 @@ _NOT_DONE_HERE = ("routine", "reference", "ignore")
 
 
 def _candidates(assistant) -> List[Any]:
+    from thirties_core.list_reading import ENTRY
     return [t for t in assistant.s.tasks if not t.id.startswith("media:") and t.list_role not in _NOT_DONE_HERE
-            and not getattr(t, "someday", False) and (t.title or "").strip()]
+            and not getattr(t, "someday", False) and (t.title or "").strip()
+            and (getattr(t, "line_kind", "") or ENTRY) == ENTRY]  # a label, a link or an option is never "done"
 
 
 def matches(assistant, event: str, message: Optional[str], skip: tuple = ()) -> List[Any]:
@@ -36,20 +38,22 @@ def matches(assistant, event: str, message: Optional[str], skip: tuple = ()) -> 
     if not message or not str(event or "").strip():
         return []
     from thirties_core.item_facts import item_name, match_words, referenced
+    from thirties_core.list_reading import match_text, name_of
     named, said = match_words(event), match_words(message)
     if not named:
         return []
     tasks = [t for t in _candidates(assistant) if t.id not in skip]
     found = []
     for t in tasks:
-        mine = match_words(t.title)
+        mine = match_words(name_of(t))  # its name, without the notes on its line ("- 45", "- waiting on keys")
         if mine and named & mine and 2 * len(mine & (named | said)) >= len(mine):
             found.append(t)
     homes = {item_name(t.title) for t in found if t.list_role != "today"}
     found = [t for t in found if t.list_role != "today" or item_name(t.title) not in homes]
     if len(found) > 1:
-        titles = [t.title for t in tasks]
-        pointed = [t for t in found if referenced(message, t.title, [o for o in titles if o != t.title])]
+        # two items named alike under different parents: the one whose parents the user's words name
+        titles = [match_text(t) for t in tasks]
+        pointed = [t for t in found if referenced(message, match_text(t), [o for o in titles if o != match_text(t)])]
         if len(pointed) == 1:
             return pointed
     return found

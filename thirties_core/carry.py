@@ -502,7 +502,9 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
             minutes = assistant.lasting_facts(task.title if task is not None else title).minutes
         except Exception:
             minutes = None
-    if task is not None and (task.someday or task.list_role in ("menu", "backlog")) or horizon == "someday":
+    from thirties_core.list_reading import live
+    if task is not None and (task.someday or task.list_role in ("menu", "backlog") or not live(task)) \
+            or horizon == "someday":
         return SOMEDAY
     if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
             or ASAP_RE.search(title or "") \

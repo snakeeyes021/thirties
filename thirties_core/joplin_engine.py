@@ -39,43 +39,37 @@ def item_id(note_id: str, text: str, occurrence: int = 0) -> str:
 
 def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
                     someday_sections: List[str], ids: Optional[List[str]] = None) -> List[TaskItem]:
-    """Open checklist items in a note body, with heading, nesting and someday context.
+    """Open checklist items in a note body, with heading, nesting and someday context, each read by
+    list_reading.py (what kind of line it is, its name and notes, its state, its parents).
+
+    Only lines that can stand for something are items: entries, group labels, questions and links (the last three
+    are never offered; see list_reading.offerable). An empty checkbox and a condition or fact written as a checkbox
+    under another line aren't items: a condition is a note on its parent.
 
     ``ids``: the id of each checklist line, open and ticked, in order, as Thirties' id table follows them
     (item_ids.py: they follow rewording and moves). Without it (a bare read, tests), an item's id is the old hash
     of its note, text and open-copy number.
     """
-    line_no = -1
+    from thirties_core.list_reading import CONDITION, PLACEHOLDER, apply_line, read_note
+    reading = read_note(body, someday_sections)
     tasks: List[TaskItem] = []
     someday = {s.strip().lower() for s in someday_sections}
-    section = ""
     seen: Dict[str, int] = {}
-    stack: List[Tuple[int, Optional[str], bool]] = []  # (indent, task id or None if done, someday)
-    for line in body.splitlines():
-        heading = HEADING_REGEX.match(line)
-        if heading:
-            section = heading.group(1).strip()
-            stack = []
+    line_ids: Dict[int, str] = {}   # checklist line -> its item's id, for the open lines kept as items
+    line_someday: Dict[int, bool] = {}
+    for ln in reading.lines:
+        par = ln.parent
+        is_someday = ln.heading.lower() in someday or (par is not None and line_someday.get(par, False))
+        line_someday[ln.index] = is_someday
+        if ln.ticked:
             continue
-        open_match = CHECKBOX_REGEX.match(line)
-        done_match = None if open_match else DONE_CHECKBOX_REGEX.match(line)
-        match = open_match or done_match
-        if not match:
-            continue
-        line_no += 1
-        indent = _indent_width(match.group(1))
-        while stack and stack[-1][0] >= indent:
-            stack.pop()
-        parent_id = stack[-1][1] if stack else None
-        is_someday = section.lower() in someday or (bool(stack) and stack[-1][2])
-        if done_match:
-            stack.append((indent, None, is_someday))
-            continue
-        text = open_match.group(2).strip()
+        text = ln.text
         n = seen.get(text, 0)
         seen[text] = n + 1
-        task_id = ids[line_no] if ids is not None and line_no < len(ids) else item_id(note_id, text, n)
-        tasks.append(TaskItem(
+        task_id = ids[ln.index] if ids is not None and ln.index < len(ids) else item_id(note_id, text, n)
+        if ln.kind in (PLACEHOLDER, CONDITION):
+            continue
+        task = TaskItem(
             id=task_id,
             occurrence=n,
             source_notebook=notebook,
@@ -83,11 +77,13 @@ def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
             is_checkbox_item=True,
             parent_note_title=note_title,
             parent_note_id=note_id,
-            section=section,
-            parent_task_id=parent_id,
+            section=ln.heading,
+            parent_task_id=line_ids.get(par) if par is not None else None,
             someday=is_someday,
-        ))
-        stack.append((indent, task_id, is_someday))
+        )
+        apply_line(task, ln, reading)
+        tasks.append(task)
+        line_ids[ln.index] = task_id
     return tasks
 
 JOPLIN_EXTRACTION_QUERY = """

@@ -437,6 +437,7 @@ class HorizonCatalog:
         """Items the model should judge, by note: in planned roles, with no horizon yet, and nothing Python can
         default from (a due date, the user's urgency, a Someday heading, an urgency guess of now or someday)."""
         known, urgencies = self.items(), _urgencies(self.db)
+        from thirties_core.list_reading import offerable
         out: Dict[str, List[TaskItem]] = {}
         for t in tasks:
             note = t.parent_note_id if t.is_checkbox_item else t.id
@@ -444,7 +445,7 @@ class HorizonCatalog:
                 continue
             u = urgencies.get(t.id) or {}
             if t.id.startswith("media:") or t.someday or t.due or u.get("due") or u.get("source") == "user" \
-                    or u.get("urgency") in ("now", "someday"):
+                    or u.get("urgency") in ("now", "someday") or not offerable(t):
                 continue
             out.setdefault(note, []).append(t)
         return out
@@ -977,6 +978,7 @@ class HorizonPlanner:
         out: Dict[str, Candidate] = {}
 
         from thirties_core.seasons import overlaps as season_overlaps, pulled_due
+        from thirties_core.list_reading import do_now
 
         def add(t: TaskItem, source: str, why: str, slot: str = "", share: Optional[Tuple[int, int]] = None
                 ) -> None:
@@ -985,6 +987,8 @@ class HorizonPlanner:
                 return
             if not season_overlaps(self.months_of(t), p.start, p.end):
                 return  # out of season: it waits for its months (not someday, not missed, never offered daily)
+            if p.level == "day" and source != "pinned" and not do_now(t):
+                return  # waiting on something (list_reading.py): not for today, unless the user put it there
             c = out.get(t.id)
             if c is not None and _SOURCE_SCORE[c.source] >= _SOURCE_SCORE[source]:
                 return
@@ -1102,8 +1106,10 @@ class HorizonPlanner:
         # turns over by period)
         if p.level in ("month", "year", YEARS):
             import hashlib
+            from thirties_core.list_reading import offerable
             someday = [t for t in tasks.values() if t.id not in placed_elsewhere and not t.id.startswith("media:")
-                       and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"]
+                       and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"
+                       and offerable(t)]
             someday.sort(key=lambda t: hashlib.sha1(f"{p.key}|{t.id}".encode()).hexdigest())
             for t in someday[:SOMEDAY_PER_PERIOD]:
                 add(t, "someday", "someday: there's room for it now")
@@ -1119,6 +1125,9 @@ class HorizonPlanner:
         """Not pinned: only items from lists and projects (and, when due, menus), never someday."""
         if t.someday or t.id.startswith("media:"):
             return False
+        from thirties_core.list_reading import offerable
+        if not offerable(t):
+            return False  # a label, a link, an option, a container, or held (dropped, on hold...): list_reading.py
         from thirties_core.backlog_tickets import reads_like_ticket
         if reads_like_ticket(t.title):
             return False  # an agent's ticket in an ordinary list: never offered on its own (backlog_tickets.py)

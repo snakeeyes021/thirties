@@ -284,6 +284,7 @@ class BeforeToday:
                 if d:
                     ticked.add(d.group(2).strip().lower())
         pool = OpenPool(self.db)
+        from thirties_core.list_reading import live
         tasks = {t.title.strip().lower(): t for t in self.a.s.tasks if t.list_role != "today"}
         for rec in pool.all().values():
             if rec.get("horizon") in (DROPPED, "gone"):
@@ -293,7 +294,7 @@ class BeforeToday:
                 task = tasks.get(low)
                 if task is not None and task.id != rec.get("task_id"):
                     pool.set(rec["title"], task_id=task.id)  # moved in Joplin: the same item, its new place
-                if task is not None and task.someday and rec.get("horizon") != SOMEDAY:
+                if task is not None and (task.someday or not live(task)) and rec.get("horizon") != SOMEDAY:
                     pool.set(rec["title"], horizon=SOMEDAY, when="someday", start="", end="")
             elif low in ticked:
                 pool.drop([rec["title"]])  # ticked by hand: done

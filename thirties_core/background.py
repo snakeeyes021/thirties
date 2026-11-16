@@ -947,8 +947,9 @@ class BackgroundService:
                and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
         if assistant is not None:
             day = plan.target_date.isoformat()
+            from thirties_core.list_reading import offerable
             out += [label(t, tasks) for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
-                    and t.title.strip().lower() not in daily]
+                    and t.title.strip().lower() not in daily and offerable(t)]
         return out
 
     def rollover(self, now: datetime) -> None:

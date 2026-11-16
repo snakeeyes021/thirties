@@ -293,10 +293,26 @@ def file_done_op(note_id: str, title: str, list_title: str, day: date, occurrenc
 
 
 def file_dropped_op(note_id: str, title: str, list_title: str, day: date, occurrence: int = 0,
-                    why: str = "") -> Dict[str, Any]:
-    return {"op": "file_dropped", "note_id": note_id, "title": title, "occurrence": occurrence,
-            "list_title": list_title, "day": day.isoformat(), "month": day.strftime("%Y-%m"), "why": why,
-            "key": filed_key(note_id, title, day.isoformat() + "|dropped")}
+                    why: str = "", ticked: bool = False) -> Dict[str, Any]:
+    """``ticked``: the line is already ticked in its list (closed by the user, with a drop word or under a dropped
+    heading), and ``occurrence`` counts ticked copies."""
+    op = {"op": "file_dropped", "note_id": note_id, "title": title, "occurrence": occurrence,
+          "list_title": list_title, "day": day.isoformat(), "month": day.strftime("%Y-%m"), "why": why,
+          "key": filed_key(note_id, title, day.isoformat() + "|dropped")}
+    if ticked:
+        op["ticked"] = True
+    return op
+
+
+def dropped_ticks(body: str) -> Dict[str, str]:
+    """Ticked lines that say they were dropped, not done (a drop word on the line, or a dropped heading above it;
+    list_reading.py): their text, lowered, and why ("" when only the heading says so)."""
+    from thirties_core.list_reading import DROPPED, read_note
+    out: Dict[str, str] = {}
+    for ln in read_note(body).lines:
+        if ln.ticked and ln.state == DROPPED:
+            out[ln.text.strip().lower()] = ln.reading.dropped
+    return out
 
 
 def worked_on_op(title: str, list_title: str, day: date) -> Dict[str, Any]:
@@ -331,6 +347,13 @@ def ticked_to_file(body: str) -> List[tuple]:
             continue
         found.append((text, n))
     return [(text, n) for text, n in found if counts[text.lower()] == 1]
+
+
+def _named_in(text: str, lines: set) -> bool:
+    """A line's name (its words without the notes on it) is one of these lines, or theirs."""
+    from thirties_core.list_reading import read_text
+    name = read_text(text, ticked=True).name.strip().lower()
+    return bool(name) and any(name in (x, read_text(x).name.strip().lower()) for x in lines)
 
 
 class DoneLog:
@@ -463,20 +486,27 @@ class DoneLog:
             open_now = {m.group(2).strip().lower() for m in map(CHECKBOX_REGEX.match, body.splitlines()) if m}
             before = self.snapshot(note["id"])
             pending = self.seen_ticked(note["id"])
+            dropped = dropped_ticks(body)  # ticked, but closed as dropped: filed in Dropped, not Done
             for text in pending & open_now:  # unticked again before it was filed
                 self.forget_seen(note["id"], text)
             for text, n in ticked_to_file(body):
                 low = text.lower()
                 ours = bool(line_ids(self.db, note["id"], text) & completed) or any(
                     item_id(note["id"], text, k) in completed for k in range(3))
-                if not (low in pending or ours or (before is not None and low in before)):
+                # a drop word typed onto the line as it was ticked ("- cancelled"): it was open under its name
+                was_open = before is not None and (low in before or (low in dropped and _named_in(text, before)))
+                if not (low in pending or ours or was_open):
                     continue  # ticked before Thirties ever saw it open: history, not news
                 if self._daily(assistant, text):
                     continue  # done means done today: it stays on its list for tomorrow (B2)
                 seen, day = self.first_seen(note["id"], text, now, today)
                 if now - seen < FILE_AFTER:
                     continue
-                status, msg = writer.submit(file_done_op(note["id"], text, note.get("title", ""), day, n))
+                if low in dropped:
+                    op = file_dropped_op(note["id"], text, note.get("title", ""), day, n, why=dropped[low], ticked=True)
+                else:
+                    op = file_done_op(note["id"], text, note.get("title", ""), day, n)
+                status, msg = writer.submit(op)
                 if status in ("done", "queued"):
                     self.forget_seen(note["id"], text)
                     moved.append(f"filed {text} from {note.get('title', '')}")
@@ -555,4 +585,4 @@ def clear_completed(db, task_id: str) -> None:
 __all__ = ["DoneLog", "MERGED_SUFFIX", "merge_done_bodies", "DONE_NOTEBOOK", "DONE_NOTE_TITLE", "FILED_ROLES",
            "FILE_AFTER", "done_note_id", "done_note_ids", "chosen_done_note", "done_line",
            "file_done_op", "worked_on_op", "ticked_to_file", "clear_completed", "filed_key", "file_dropped_op",
-           "dropped_line", "DROPPED_NOTE_TITLE"]
+           "dropped_line", "DROPPED_NOTE_TITLE", "dropped_ticks"]

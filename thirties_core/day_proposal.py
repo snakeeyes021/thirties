@@ -219,6 +219,7 @@ class DayProposal:
         Never routines, anchors, someday or reference items, anything done, or what's already on the plan."""
         from thirties_core.backlog import DONE_HIDES_DAYS
         from thirties_core.lists import urgency_label
+        from thirties_core.list_reading import do_now
         day = plan.target_date
         daily = self.a.routines.daily_titles()
         on_plan = {s.title.strip().lower() for s in plan.spans if s.status != SpanStatus.SKIPPED}
@@ -237,6 +238,7 @@ class DayProposal:
             title = t.title.strip()
             low = title.lower()
             if (t.id.startswith("media:") or t.someday or t.list_role in ("routine", "reference", "backlog")
+                    or not do_now(t)  # list_reading.py: entries only, live, not a container, nothing holding it up
                     or low in daily or low in on_plan or t.id in on_plan_ids or t.id in done or not title):
                 continue
             if t.list_role != "today" and low in today_titles:

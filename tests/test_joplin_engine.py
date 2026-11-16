@@ -279,7 +279,7 @@ class TestChecklistStructure(unittest.TestCase):
 
     BODY = """## Active
 - [ ] Help Robin set up the new printer
-\t- [ ] Needs the paint to dry first
+\t- [ ] Pick up a longer cable first
 - [x] Already done thing
 \t- [ ] Child of a done item
 - [ ] Hardware store help desk
@@ -292,9 +292,9 @@ class TestChecklistStructure(unittest.TestCase):
         from thirties_core.joplin_engine import checklist_tasks
         tasks = checklist_tasks("n1", "Errands/Admin", "1. Tasks", self.BODY, ["Probation"])
         by_title = {t.title: t for t in tasks}
-        self.assertEqual(list(by_title), ["Help Robin set up the new printer", "Needs the paint to dry first",
+        self.assertEqual(list(by_title), ["Help Robin set up the new printer", "Pick up a longer cable first",
                                           "Child of a done item", "Hardware store help desk", "Message Riley about the book club"])
-        self.assertEqual(by_title["Needs the paint to dry first"].parent_task_id,
+        self.assertEqual(by_title["Pick up a longer cable first"].parent_task_id,
                          by_title["Help Robin set up the new printer"].id)
         self.assertIsNone(by_title["Child of a done item"].parent_task_id)
         self.assertEqual(by_title["Hardware store help desk"].section, "Active")
@@ -318,8 +318,8 @@ class TestChecklistStructure(unittest.TestCase):
         engine.api_client = MagicMock()
         engine.api_client.get_note.return_value = {"id": "n1", "body": self.BODY}
         engine.api_client.update_note.return_value = True
-        child = next(t for t in checklist_tasks("n1", "N", "nb", self.BODY, []) if t.title.startswith("Needs"))
+        child = next(t for t in checklist_tasks("n1", "N", "nb", self.BODY, []) if t.title.startswith("Pick up"))
         ok, _ = engine.complete_task(child)
         self.assertTrue(ok)
         new_body = engine.api_client.update_note.call_args[0][1]["body"]
-        self.assertIn("\t- [x] Needs the paint to dry first", new_body)
+        self.assertIn("\t- [x] Pick up a longer cable first", new_body)

@@ -222,6 +222,18 @@ class TaskItem:
     due: str = ""                         # ISO date it's due by, if the user gave one
     horizon: str = ""                     # day / week / month / year / someday (horizons.HORIZONS), once known
     occurrence: int = 0                   # which copy of the same text in its note (0 = the first open one)
+    # How its line reads (list_reading.py). ``title`` stays the whole line: it's the item's link to its note.
+    line_kind: str = ""                   # entry / group / question / link ("" for items not from a checklist)
+    name: str = ""                        # the line without its notes ("" when that's the whole line)
+    notes: List[Dict[str, str]] = field(default_factory=list)  # split off the line: estimate, blocker, when...
+    state: str = ""                       # dropped / on_hold / leftover / option... ("" for a plain open entry)
+    blocker: str = ""                     # what it's waiting for, if anything
+    blocker_last_step: bool = False       # ...and that only holds up its last step (sending), not the rest
+    path: List[str] = field(default_factory=list)  # the names of the lines it's nested under, top first
+    children_done: int = 0                # entries nested directly under it: ticked,
+    children_total: int = 0               # and in all (a container while some are open)
+    progress: str = ""                    # what the note's body shows: not_started / started / drafting / ready
+    estimate_minutes: int = 0             # a time estimate written on the line
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

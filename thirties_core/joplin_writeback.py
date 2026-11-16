@@ -420,6 +420,9 @@ class JoplinWriter:
     def submit(self, op: Dict[str, Any]) -> Tuple[str, str]:
         """("done" | "queued" | "failed" | "not_allowed", message). Never blocks long."""
         op = self.stamp(op)
+        refused = self._refuse_id_text(op)
+        if refused:
+            return "failed", refused
         if not self.allowed:
             return "not_allowed", "Thirties isn't allowed to change Joplin (Preferences → Tasks)."
         if any(str(op.get(k) or "").startswith("media:") for k in ("note_id", "to_note_id")):
@@ -444,6 +447,21 @@ class JoplinWriter:
         if self.cfg.peer_enabled:
             return "queued", "Joplin isn't reachable right now; the change goes through as soon as it is."
         return "queued", "Joplin isn't running; it'll be updated as soon as Joplin is open."
+
+    def _refuse_id_text(self, op: Dict[str, Any]) -> str:
+        """A change that would write an item id (or another id-like token) into a note as if it were words:
+        refused and logged, never written (list_reading.refused_text). "" when the change is fine."""
+        from thirties_core.list_reading import refused_text
+        bad = refused_text(op)
+        if bad is None:
+            return ""
+        why = "not written: that text is an id, not the item's words; name the item by its words instead."
+        logger.warning("Refused a Joplin change that would write an id as text: %s", op.get("op"))
+        try:
+            WriteLog(self.db).record(op, str(op.get("title") or ""), False, why, "", "")
+        except Exception as e:  # the log must never stop the refusal
+            logger.warning("Couldn't log the refused change: %s", e)
+        return why
 
     def flush(self, launch: bool = True, wait_seconds: float = 45.0) -> int:
         """Deliver queued operations; returns how many were delivered. Call from a background thread."""
@@ -667,6 +685,10 @@ class JoplinWriter:
         kind = op.get("op")
         if str(op.get("note_id", "")).startswith("media:"):  # a wishlist item, not a Joplin note
             return False, "gone: not a Joplin item."
+        from thirties_core.list_reading import refused_text
+        if refused_text(op) is not None:  # queued before the check on submit: never written, never retried
+            logger.warning("Refused a queued Joplin change that would write an id as text: %s", kind)
+            return False, "gone: not written: that text is an id, not the item's words."
         if kind == "complete":
             if op.get("is_checkbox_item"):
                 def tick(body: str) -> Optional[str]:

@@ -136,11 +136,12 @@ class ListCatalog:
     def items_without_urgency(self, tasks: Iterable[TaskItem]) -> Dict[str, List[TaskItem]]:
         """Checklist items in sorted lists (list, project, menu) with no urgency yet, by note."""
         roles, known = self.roles(), self.urgencies()
+        from thirties_core.list_reading import offerable
         out: Dict[str, List[TaskItem]] = {}
         for t in tasks:
             note = t.parent_note_id if t.is_checkbox_item else t.id
             role = roles.get(note or "", {}).get("role")
-            if role in SORTED_ROLES and t.id not in known and not t.id.startswith("media:"):
+            if role in SORTED_ROLES and t.id not in known and not t.id.startswith("media:") and offerable(t):
                 out.setdefault(note, []).append(t)
         return out
 

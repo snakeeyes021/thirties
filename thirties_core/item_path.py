@@ -1,14 +1,14 @@
-"""A nested list item named with where it sits: "Thank-you notes › Rivera family".
+"""A nested list item named with where it sits: "Utility accounts › Harbor Water".
 
 A list note can hold headings and lines indented under other lines. An item deep in such a list means little
-by its own line ("Rivera family", "address missing"), so wherever Thirties names one to the user (the schedule,
+by its own line ("Harbor Water", "final reading"), so wherever Thirties names one to the user (the schedule,
 what's next, check-ins and start notices, reminders, the morning's list, the plans for a week, month or year,
 Before today, and the item lists the model reads), it's named with its parents: its heading or parent line, then
 the item, at most two levels of parents (the nearest ones).
 
 Display only. The item's stored title, its plan entry and its line in the list never change, and anything that
 looks an item up (ticking it done, moving it) still goes by its id or its own line; a label said back
-("Invitations › Lee household › address missing") finds the same item (``resolve``).
+("Moving out › Gas account › final reading") finds the same item (``resolve``).
 """
 
 from __future__ import annotations
@@ -29,6 +29,11 @@ def _short(text: Any) -> str:
     return title_of(str(text or "").strip())
 
 
+def _own(task: Any) -> str:
+    """An item's own name as the user reads it: its line without the notes split off it (list_reading.py)."""
+    return _short(getattr(task, "name", "") or getattr(task, "title", ""))
+
+
 def _by_id(tasks: Optional[Iterable[Any]]) -> Dict[str, Any]:
     if isinstance(tasks, dict):
         return tasks
@@ -47,7 +52,10 @@ def parents(task: Any, tasks: Optional[Iterable[Any]]) -> List[str]:
     while getattr(cur, "parent_task_id", None) and cur.parent_task_id in by_id and cur.parent_task_id not in seen:
         cur = by_id[cur.parent_task_id]
         seen.add(cur.id)
-        chain.insert(0, _short(cur.title))
+        chain.insert(0, _own(cur))
+    path = [_short(p) for p in (getattr(task, "path", None) or [])]
+    if len(path) > len(chain):  # a parent that isn't an item (ticked, or a condition): the line's own path says it
+        chain = path
     section = str(getattr(cur, "section", "") or getattr(task, "section", "") or "").strip()
     if section and getattr(task, "list_role", "") not in NO_HEADING_ROLES:
         chain.insert(0, _short(section))
@@ -57,7 +65,7 @@ def parents(task: Any, tasks: Optional[Iterable[Any]]) -> List[str]:
 
 def label(task: Any, tasks: Optional[Iterable[Any]], leaf: Optional[str] = None) -> str:
     """"Heading › Parent › Item" for a nested item; the item's short title (or ``leaf``) for any other."""
-    own = str(leaf).strip() if leaf else _short(getattr(task, "title", ""))
+    own = str(leaf).strip() if leaf else _own(task)
     if task is None or SEP.strip() in own:
         return own
     return SEP.join(parents(task, tasks) + [own])
@@ -70,7 +78,8 @@ def _stands_for(title: str, task: Any) -> bool:
         return False
     own = str(task.title or "").strip().lower()
     short = _short(task.title).lower()
-    return said in (own, short) or said.endswith(": " + own) or said.endswith(": " + short)
+    name = _own(task).lower()
+    return said in (own, short, name) or any(said.endswith(": " + x) for x in (own, short, name) if x)
 
 
 def span_label(span: Any, tasks: Optional[Iterable[Any]]) -> str:
@@ -83,7 +92,7 @@ def span_label(span: Any, tasks: Optional[Iterable[Any]]) -> str:
     up = parents(task, tasks)
     if not up:
         return title
-    return SEP.join(up + [_short(task.title)])
+    return SEP.join(up + [_own(task)])
 
 
 def labelled(spans: Sequence[Any], tasks: Optional[Iterable[Any]]) -> List[Any]:
@@ -129,6 +138,8 @@ def named(tasks: Optional[Iterable[Any]], title: Any, task_id: Any = "", limit: 
         task = same[0] if len(same) == 1 else None
     if task is not None and parents(task, by_id):
         return label(task, by_id)
+    if task is not None and getattr(task, "name", ""):
+        return title_of(task.name, limit)
     return title_of(str(title or "").strip(), limit)
 
 
@@ -143,7 +154,7 @@ def tasks_of(tools: Any) -> List[Any]:
 
 
 def leaf(text: Any) -> str:
-    """The item's own words in a label said back ("Invitations › Lee household › address missing" → "address
+    """The item's own words in a label said back ("Moving out › Gas account › final reading" → "address
     missing"); the text itself when it isn't one."""
     raw = str(text or "")
     return raw.rsplit(SEP.strip(), 1)[-1].strip() if SEP.strip() in raw else raw.strip()
