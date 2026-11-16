@@ -1297,7 +1297,14 @@ class AssistantTools(KindTools):
                 raise ToolError(f"{span.title} is on this day's plan ({self.pt.describe(span)} [id {span.id}]) and still "
                                 f"open on the day before ({self.pt.describe(older[0])} [id {older[0].id}, day "
                                 f"{yesterday.target_date.strftime('%b %d')}]). Which one? Use the id (and that day).")
-        task = None if span else self._exact_task(str(event))
+        task, passed_over = None, ()
+        # --- a name matching only an item settled earlier: the open list item it names (done_on_lists.py) ---
+        if span is not None and st == SpanStatus.DONE:
+            from thirties_core.done_on_lists import instead_of_settled
+            task = instead_of_settled(self, str(event), span)
+            span, passed_over = (None, (span.title,)) if task is not None else (span, ())
+        # --- end settled earlier ---
+        task = task or (None if span else self._exact_task(str(event)))
         if span is None and task is not None:  # named by its list wording: it may be planned (10-30 sim: an
             # email item, named with quotes the plan's lookup missed, was ticked in Joplin but nagged for hours as unmarked)
             span = next((s for s in self.pt.day_plan.spans if s.task_id == task.id
@@ -1314,7 +1321,7 @@ class AssistantTools(KindTools):
             # --- done only for what the user's words point to (done_reference.py) ---
             if span is not None or task is not None:
                 from thirties_core.done_reference import check as pointed_to
-                held, words = pointed_to(self.pt, name, [x.id for x in (span, task) if x is not None])
+                held, words = pointed_to(self.pt, name, [x.id for x in (span, task) if x is not None], passed_over)
                 if held:
                     raise ToolError(held)
             # --- end done only for what the user's words point to ---
