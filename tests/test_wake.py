@@ -77,8 +77,10 @@ class TestHello(unittest.TestCase):
         self.assertIn("has passed", engine.call_history[0][0]["content"])  # the prompt says it's past
         self.assertTrue(check_line("Morning! Your 7:00 wake-up time has passed; ready when you are.", "wake",
                                    at("07:00"), late=True))
-        self.assertIsNone(check_line("It is 7:00, your wake-up time!", "wake", at("07:00"), late=True))
-        self.assertTrue(check_line("It is 7:00, your wake-up time!", "wake", at("07:00"), late=False))  # on time
+        self.assertIsNone(check_line("It is 7:00, your wake-up time! Tell me when you're up.", "wake", at("07:00"),
+                                     late=True))
+        self.assertTrue(check_line("It is 7:00, your wake-up time! Tell me when you're up.", "wake", at("07:00"),
+                                   late=False))  # on time
 
     def test_a_few_minutes_late_is_still_on_time(self):
         from thirties_core.wake import FALLBACK, write_hello
@@ -89,5 +91,77 @@ class TestHello(unittest.TestCase):
 
     def test_seven_oclock_can_be_said_as_7am(self):
         from thirties_core.wake import check_line
-        self.assertTrue(check_line("7am means the alarm is ringing! Want me to plan the day?", "wake", at("07:00")))
+        self.assertTrue(check_line("7am, the wake-up time you set. Let me know when you're up.", "wake", at("07:00")))
         self.assertIsNone(check_line("Rise and shine! Want me to plan the day?", "wake", at("07:00")))
+
+
+class TestNotAnAlarmClock(unittest.TestCase):
+    """The one message at the wake time never says or suggests the user is up: Thirties can't know that. It asks to
+    hear when they are, and nothing else goes out until they reply."""
+
+    def test_wording_that_says_theyre_up_is_refused(self):
+        from thirties_core.wake import check_line
+        for line in ("Good morning! It's 7:00, just as you planned for your wake-up time. Let me know when you're "
+                     "ready.",
+                     "It's 7:00 and you're up! Tell me when you're ready to plan.",
+                     "Rise and shine, it's 7:00! Tell me when you're up.",
+                     "Morning, it's 7:00. Hope you slept well! Let me know when you're up.",
+                     "It's 7:00, time to get up! Let me know when you're up.",
+                     "It's 7:00, right on schedule. Let me know when you're ready.",
+                     "7am: the alarm went off! Let me know when you're up.",
+                     "It’s 7:00 and you’re awake, let’s get started once you’re ready."):
+            self.assertIsNone(check_line(line, "wake", at("07:00")), line)
+
+    def test_asking_to_hear_when_theyre_up_is_fine(self):
+        from thirties_core.wake import check_line
+        for line in ("Hello! 7:00 is the wake-up time you chose. Tell me when you're up and I'll lay out the hours.",
+                     "Hi, 7:00, your wake up time. Once you are awake, drop me a line and the schedule follows.",
+                     "Hey, 7:00 is your set wake-up time. As soon as you are out and about, send a word."):
+            self.assertTrue(check_line(line, "wake", at("07:00")), line)
+
+    def test_it_must_ask_to_hear_when_theyre_up(self):
+        from thirties_core.wake import check_line
+        self.assertIsNone(check_line("Good morning, it's 7:00, your wake-up time.", "wake", at("07:00")))
+
+    def test_the_prompt_says_so_and_a_refused_line_gives_the_plain_one(self):
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.wake import FALLBACK, claims_awake, write_hello
+        engine = MockInferenceEngine()
+        engine.responses = [{"role": "assistant", "content": "Good morning! It's 7:00, just as you planned. Let me "
+                                                             "know when you're ready.", "tool_calls": []}]
+        line = write_hello(engine, "wake", at("07:00"), [])
+        self.assertEqual(line, FALLBACK["wake"].format(clock="7:00 AM"))
+        self.assertIn("when you're up", line)
+        self.assertFalse(claims_awake(line))
+        prompt = engine.call_history[0][0]["content"]
+        self.assertIn("not an alarm clock", prompt)
+        self.assertIn("never say or suggest they're up", prompt)
+
+    def test_every_plain_line_passes_its_own_check(self):
+        from thirties_core.wake import FALLBACK, FALLBACK_LATE, check_line
+        for late, lines in ((False, FALLBACK), (True, FALLBACK_LATE)):
+            for mode, text in lines.items():
+                self.assertTrue(check_line(text.format(clock="7:00 AM"), mode, at("07:00"), late), (mode, late))
+
+    def test_one_message_then_nothing_until_they_reply(self):
+        from unittest.mock import MagicMock
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.background import BackgroundService
+        from thirties_core.inference import MockInferenceEngine
+        sched = make_scheduler()
+        sent = []
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        svc = BackgroundService(sched.config, lambda t, b, k: sent.append((k, b)), scheduler=sched,
+                                joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        plan = svc.manager().day_plan
+        from thirties_core.wake import hello_time
+        when = hello_time(sched.config, plan, sched.state_db.get_spans_between(plan.day_start - timedelta(hours=18),
+                                                                                plan.day_start))
+        self.addCleanup(set_debug_time, None)
+        for minutes in (0, 5, 30, 90):
+            set_debug_time(when + timedelta(minutes=minutes))
+            svc.morning_hello(when + timedelta(minutes=minutes))
+        self.assertEqual([k for k, _ in sent], ["morning"])
+        self.assertIn("when you're up", sent[0][1])

@@ -12,6 +12,7 @@ the user calls it.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -89,22 +90,47 @@ def hello_prompt(mode: str, clock: str, recent: List[str], late: bool = False) -
     else:
         framing = (f"say it's {clock} and frame that as today's sunrise (the sun is just coming up), and include the "
                    "☀️ emoji" if mode == "sunrise" else
-                   f"say it's {clock} and frame that as the wake-up time the user set; no emoji needed")
+                   f"say it's {clock}, the wake-up time the user set; no emoji needed")
     avoid = ("\nDon't reuse the wording of these earlier ones:\n" + "\n".join(recent)) if recent else ""
     return ("Write the first message of the user's day for Thirties, their planning assistant: one or two short "
-            f"sentences, warm and plain. In it: greet them; {framing}; and offer to put their schedule together once "
-            "they're up or ready (you'll plan the day after they reply). The greeting and the time can be one "
-            "phrase. No list, no questions about tasks, no quotation marks. Write it fresh, in your own words."
-            f"{avoid}\nReply with only the message.")
+            f"sentences, warm and plain. In it: greet them; {framing}; and ask them to tell you when they're up, "
+            "so you can put their schedule together then (you'll plan the day after they reply). Thirties is not "
+            "an alarm clock and can't know whether they're awake: never say or suggest they're up, awake, out of "
+            "bed or starting their day, that they woke as planned or on time, or that it's time to get up (no "
+            "\"you're up\", \"rise and shine\", \"hope you slept well\", \"just as you planned\"). The greeting "
+            "and the time can be one phrase. No list, no questions about tasks, no quotation marks. Write it fresh, "
+            f"in your own words.{avoid}\nReply with only the message.")
 
 
 _NOW_CLAIM = r"\b(it'?s|it is|now)\b[^.!?]{{0,20}}?\b{clock}\b|\b{clock}\b[^.!?]{{0,10}}?\b(now|right now)\b"
 
+# Thirties isn't an alarm clock: the first message never says or suggests the user is up. Wording that does
+# (unless it's conditional: "when you're up", "once you wake up").
+_AWAKE_CLAIM = re.compile(
+    r"\byou(?:'re| are|'ve| have)?\s+(?:now\s+)?(?:up|awake|up and about|out of bed|woken|woke|got up|gotten up)\b"
+    r"|\b(?:wake|get|getting|waking) up\b(?![- ]time)|\brise and shine\b|\bwakey\b|\bup and at\b|\bsleepy ?head\b"
+    r"|\b(?:good|nice|glad|great) to (?:see|have|hear from) you\b|\bglad you(?:'re| are)\b|\bhope you slept\b"
+    r"|\bslept (?:well|ok|okay|alright)\b|\byou made it\b|\bnow that you\b|\bas (?:you )?(?:planned|scheduled)\b"
+    r"|\bright on (?:time|schedule|cue)\b|\bon schedule\b|\bright on the dot\b|\btime to (?:rise|get going|"
+    r"get moving|start|begin)\b|\blet'?s (?:get (?:started|going|moving)|start|begin|kick off|dive in)\b"
+    r"|\bstart(?:ing)? (?:your|the) day\b|\bwelcome to (?:your|the|a new) day\b|\bup early\b|\bearly bird\b"
+    r"|\balarm\b|\bready to (?:start|go|begin|tackle)\b", re.IGNORECASE)
+_CONDITIONAL = re.compile(r"\b(?:when|once|if|whenever|until|till|as soon as|after|before)\s+(?:you\s+)?$",
+                          re.IGNORECASE)
+# The one thing it asks: to hear when they're up (a when / once / whenever clause about the user)
+_INVITES = re.compile(r"\b(?:when|once|whenever|as soon as)\s+you(?:'re| are)?\b", re.IGNORECASE)
+
+
+def claims_awake(text: str) -> bool:
+    """The line says or suggests the user is up (not just "when you're up")."""
+    line = str(text or "").replace("’", "'").replace("‘", "'")
+    return any(not _CONDITIONAL.search(line[max(0, m.start() - 25):m.start()]) for m in _AWAKE_CLAIM.finditer(line))
+
 
 def check_line(text: str, mode: str, at: datetime, late: bool = False) -> Optional[str]:
-    """The model's line, if it has what it must (the time; in sunrise mode the ☀️) and is short; else None. Sent
-    late, a line that says it's that time now is refused."""
-    import re
+    """The model's line, if it has what it must (the time, the ask to hear when they're up; in sunrise mode the
+    ☀️) and is short; else None. A line that says or suggests the user is up is refused (claims_awake), and so,
+    sent late, is one that says it's that time now."""
     line = " ".join(str(text or "").strip().strip('"').split())
     if not line or len(line) > 320 or line.lower().startswith(("error", "the antigravity", "i cannot", "i can't")):
         return None
@@ -113,6 +139,8 @@ def check_line(text: str, mode: str, at: datetime, late: bool = False) -> Option
     pattern = rf"\b{hour}:{minute}\b" if at.minute else rf"\b{hour}(?::00)?\s*(?:a\.?m\.?|o'?clock)|\b{hour}:00\b"
     if not re.search(pattern, line, re.I):
         return None
+    if claims_awake(line) or not _INVITES.search(line.replace("’", "'")):
+        return None  # Thirties can't know they're up: it asks to hear when they are
     if late and re.search(_NOW_CLAIM.format(clock=rf"{hour}(?::{minute})?"), line, re.I):
         return None  # sent late: never "it's 7:00" at 8:30
     if mode == "sunrise" and "☀" not in line:
