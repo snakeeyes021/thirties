@@ -269,6 +269,7 @@ class SyncEngine:
 
     def _stores(self) -> Dict[str, Any]:
         from thirties_core.calendar_outcomes import CalendarOutcomes
+        from thirties_core.calendar_times import CalendarOwnTimes
         from thirties_core.sharing import SharingRules
         from thirties_core.contextual import ContextualFlags
         from thirties_core.facts import SpanFacts
@@ -302,6 +303,7 @@ class SyncEngine:
             "day_list_ahead": AheadLists(self.state_db),
             "item_facts": LastingFacts(self.state_db),
             "calendar_outcomes": CalendarOutcomes(self.state_db),
+            "calendar_own_times": CalendarOwnTimes(self.state_db),  # a calendar event's time the user gave
             "sharing_rules": SharingRules(self.state_db),
             "routines": RoutineBook(self.state_db),
             "outcome_context": OutcomeContextStore(self.state_db),

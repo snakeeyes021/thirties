@@ -1338,6 +1338,12 @@ class AssistantTools(KindTools):
                 if held:
                     raise ToolError(held)
             # --- end done only for what the user's words point to ---
+            # --- clearing isn't finishing: "clear X from the list" is no done (off_today.py) ---
+            from thirties_core.off_today import clear_not_done
+            cleared = clear_not_done(self.pt, name)
+            if cleared:
+                raise ToolError(cleared)
+            # --- end clearing isn't finishing ---
             said = not_finished(words, name, others)
             if said == "begun":
                 raise ToolError(f"The user said {name} has started, not that it's finished, so it isn't done yet. "

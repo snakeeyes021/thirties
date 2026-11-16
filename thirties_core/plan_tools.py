@@ -80,7 +80,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "update_event",
-        "description": "Change an existing item: new start and/or end, new duration, a shift, or a new title.",
+        "description": "Change an existing item: new start and/or end, new duration, a shift, or a new title. A "
+                       "calendar event takes only a start or end the user gives for it (kept on their plan; the "
+                       "calendar itself isn't changed).",
         "parameters": {
             "event": "The item's id (or its exact title).",
             "start": "New start clock time. Without an end or duration, an activity keeps its length (it moves); work and sleep keep their end.",
@@ -1140,7 +1142,15 @@ class PlanTools:
         if fixed not in (None, ""):
             self._set_fixed(span, _as_bool(fixed))
         if span.source == "calendar":
-            raise ToolError(f"{span.title} comes from the user's calendar; change it there.")
+            # --- the user's own start or end for a calendar event, kept on the plan (calendar_times.py) ---
+            from thirties_core.calendar_times import own_times
+            kept = own_times(self, span, start, end, duration) if shift in (None, "") and not title else None
+            if kept:
+                self._save_plan_after_change()
+                return kept
+            # --- end the user's own times ---
+            raise ToolError(f"{span.title} comes from the user's calendar, so its times change only to a start or "
+                            "end the user gives for it (kept on their plan; the calendar itself isn't changed).")
         if title:
             title, _ = self._words_for(title, span.task_id)
             self._separate_things(str(title))
@@ -1350,7 +1360,16 @@ class PlanTools:
                             "rest around it (items can sit alongside work).")
 
     def remove_event(self, event: Any, **_: Any) -> str:
-        span = self._find_span(event)
+        # --- an item on today's list with no time comes off the list (off_today.py) ---
+        try:
+            span = self._find_span(event)
+        except ToolError:
+            from thirties_core.off_today import remove_listed
+            listed = remove_listed(self, event)
+            if listed is None:
+                raise
+            return listed
+        # --- end on today's list with no time ---
         self._envelope_ok(span)
         if span.source == "calendar":
             if span.tentative:
@@ -1377,7 +1396,13 @@ class PlanTools:
         # --- end a removal needs the user's words ---
         self._drop(span)
         self._save_plan_after_change()
-        return f"Removed {self.describe(span)}."
+        # --- asked to take it off, it leaves today's list too (off_today.py) ---
+        also = ""
+        if outer_tool() == "remove_event":
+            from thirties_core.off_today import after_removal
+            also = after_removal(self, span)
+        # --- end off today's list ---
+        return f"Removed {self.describe(span)}.{also}"
 
     def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False, **_: Any) -> str:
         start_dt = self._start(start)
