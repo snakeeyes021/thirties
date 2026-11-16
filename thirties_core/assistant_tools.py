@@ -2265,9 +2265,17 @@ class AssistantTools(KindTools):
 
     # --- memory & profile ---
 
+    def _asked_to_keep(self) -> None:
+        """Only what the user asked to keep, or said is how things are for them (profile_guard.py)."""
+        from thirties_core.profile_guard import refusal
+        refused = refusal(getattr(self.pt, "user_message", None))
+        if refused:
+            raise ToolError(refused)
+
     def remember(self, note: str, **_: Any) -> str:
         if not str(note or "").strip():
             raise ToolError("The note is empty.")
+        self._asked_to_keep()
         saved = self.s.memory.add(str(note))
         return f"Remembered: {saved.text} (note id {saved.id})."
 
@@ -2277,6 +2285,7 @@ class AssistantTools(KindTools):
         return f"Forgot note {note_id}."
 
     def update_profile(self, section: str, text: str, replace: Any = False, **_: Any) -> str:
+        self._asked_to_keep()
         name = next((s for s in self.s.profile.sections() if s.lower() == str(section).strip().lower()), None)
         if name is None:
             name = next((s for s in PROFILE_SECTIONS if str(section).strip().lower() in s.lower()), None)
