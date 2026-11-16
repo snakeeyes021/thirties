@@ -549,6 +549,11 @@ class AssistantTools(KindTools):
             from thirties_core.item_path import resolve
             found = resolve(ref, self.s.tasks)
             exact = [found] if found is not None else []
+        if not exact:  # by its name, the line without its notes ("Weed the bed" for "Weed the bed - 45"), if only one
+            named = [t for t in self.s.tasks if getattr(t, "name", "") and _same_words(t.name, ref)]
+            if len(named) > 1:
+                named = [t for t in named if t.list_role != "today"]
+            exact = named if len(named) == 1 else []
         if exact and exact[0].list_role == "today" and self._db is not None:  # a Today line twinned with its home
             from thirties_core.titles import title_of                        # item (by its short title): the home
             from thirties_core.today import TodayLinks
@@ -619,8 +624,8 @@ class AssistantTools(KindTools):
         if status in ("done", "queued"):
             self._took_off(lambda t: t.id == task.id)
             self._tick_twin(task, writer)
-            from thirties_core.project_pieces import tick_parent_if_last  # the last open piece: the item too
-            parent = tick_parent_if_last(self, task)
+            from thirties_core.project_pieces import last_piece_note  # the last open piece: the item stays open
+            parent = last_piece_note(self, task)
             said += f". {parent}" if parent else ""
         return said
 
@@ -838,7 +843,8 @@ class AssistantTools(KindTools):
             # a long or marked-up list line goes on Today by its short title (no raw markdown or links on screen);
             # the link keeps it tied to the full line on its list
             from thirties_core.titles import title_of
-            title = title_of(task.title) if task is not None else str(name).strip()
+            from thirties_core.project_pieces import piece_title  # a nested item keeps its parent: "Item: piece"
+            title = title_of(piece_title(self.s.tasks, task)) if task is not None else str(name).strip()
             homes[title.lower()] = task
             if title.lower() in on_today:
                 if untimed and not if_time.is_listed(note, title):  # on Today with a line already: under the heading

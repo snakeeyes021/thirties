@@ -161,7 +161,7 @@ class TestPieces(ProjectCase):
         cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertIn("Paint the shed: Top coat", cands)
 
-    def test_the_last_piece_ticked_ticks_the_item(self):
+    def test_the_last_piece_ticked_leaves_the_item_open(self):
         primer = self.put("Paint the shed: Primer coat", "10:00 AM", 30, "t_primer")
         top = self.put("Paint the shed: Top coat", "10:30 AM", 30, "t_top")
         set_debug_time(at("11:05"))
@@ -169,8 +169,9 @@ class TestPieces(ProjectCase):
         self.assertIn("    - [x] Primer coat", self.body("n_shed"))
         self.assertIn("- [ ] Paint the shed", self.body("n_shed"))  # its other piece is open
         out = self.t.execute("log_outcome", {"event": top.id, "status": "done"})
-        self.assertIn("- [x] Paint the shed", self.body("n_shed"))
-        self.assertIn("the last of Paint the shed, so it's ticked too", out)
+        self.assertIn("    - [x] Top coat", self.body("n_shed"))
+        self.assertIn("- [ ] Paint the shed", self.body("n_shed"))  # done only when the user ticks it
+        self.assertIn("Paint the shed itself stays open", out)
 
 
 class SteadyCase(ProjectCase):

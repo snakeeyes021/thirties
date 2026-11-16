@@ -58,6 +58,34 @@ NOW_CUE = re.compile(r"\b(today|tonight|tomorrow|asap|urgent|now|this week|deadl
                      r"renew\w*|refill)\b", re.I)
 
 
+def _shown(text: str) -> str:
+    """A line as the model sees it: a time estimate written after it ("- 1/6", a sixth of an hour) said in
+    minutes, so it's never read as a date."""
+    from thirties_core.list_reading import read_text
+    reading = read_text(text)
+    est, minutes = reading.first("estimate"), reading.estimate_minutes
+    if not est or not minutes:
+        return text
+    found = list(re.finditer(r"\s+-{1,2}\s+" + re.escape(est) + r"(?=\s|$)", text))
+    if not found:
+        return text
+    m = found[-1]
+    return f"{text[:m.start()]} (about {minutes} min){text[m.end():]}"
+
+
+def _estimate_as_date(title: str, due: Optional[date]) -> bool:
+    """A due date the model read off a written estimate ("- 1/6" as January 6 or June 1)."""
+    if due is None:
+        return False
+    from thirties_core.list_reading import read_text
+    est = read_text(title).first("estimate")
+    nums = re.findall(r"\d+", est) if "/" in est else []
+    if len(nums) < 2:
+        return False
+    a, b = int(nums[0]), int(nums[1])
+    return (due.month, due.day) in ((a, b), (b, a))
+
+
 def note_outline(body: str, mark: Optional[str] = None, numbered: Optional[List[str]] = None,
                  max_lines: int = 70) -> str:
     """A note as its owner sees it, compactly: headings, checklist items (ticked ones marked), blank-line
@@ -87,7 +115,7 @@ def note_outline(body: str, mark: Optional[str] = None, numbered: Optional[List[
                 prefix = f"{n}. "
             if mark is not None and mark_at is None and text == mark:
                 prefix, mark_at = "→ ", len(out)
-            out.append(f"{indent}- {prefix}{text[:100]}{ticked}")
+            out.append(f"{indent}- {prefix}{_shown(text)[:100]}{ticked}")
         else:
             out.append(line.strip()[:100])
     if len(out) > max_lines:
@@ -194,7 +222,10 @@ class FrontierListSorter:
             except (TypeError, ValueError):
                 continue
             if 1 <= n <= len(items) and row.get("urgency") in URGENCIES:
-                out[items[n - 1].id] = (row["urgency"], _due(row.get("due")))
+                due = _due(row.get("due"))
+                if _estimate_as_date(items[n - 1].title, due):
+                    due = None  # "- 1/6" is a sixth of an hour, never a date
+                out[items[n - 1].id] = (row["urgency"], due)
         return out
 
     def note_horizon(self, note: Dict[str, Any], role: str) -> Optional[str]:
