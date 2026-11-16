@@ -395,7 +395,7 @@ class TestProposalsAndOutcomes(SlmTestCase):
         self.say("dinner at 7", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
         out = self.say("can you show me the whole day as a clean list now?", {"type": "chat"})
         self.assertTrue(out.startswith("Here's today:"), out)
-        self.assertTrue(out.endswith("- 7:00 PM – Dinner"), out)
+        self.assertTrue(out.endswith("\n7:00 PM – 8:00 PM Dinner"), out)  # the whole day: a line per item
 
     def test_answers_in_chunks_when_the_user_counts_in_chunks(self):
         out = self.say("when am I free tonight?", {"type": "question", "topic": "free time tonight"})
@@ -639,7 +639,7 @@ class TestFromTheMilestoneRun(SlmTestCase):
                                      parent_note_title="Home", parent_note_id="n_home")
                             for i, t in enumerate(("Hang the shelf", "Fix the door"))]
         out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
-        self.assertEqual(out, "On Home:\n- Hang the shelf\n- Fix the door")
+        self.assertEqual(out, "On Home:\nHang the shelf\nFix the door")
 
     def test_a_long_list_is_listed_whole(self):
         from thirties_core.models import TaskItem
@@ -647,7 +647,7 @@ class TestFromTheMilestoneRun(SlmTestCase):
         self.brain.tasks = [TaskItem(id=f"h{i}", source_notebook="Tasks", title=t, is_checkbox_item=True,
                                      parent_note_title="Home", parent_note_id="n_home") for i, t in enumerate(titles)]
         out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
-        self.assertEqual(out, "On Home:\n" + "\n".join(f"- {t}" for t in titles))
+        self.assertEqual(out, "On Home:\n" + "\n".join(titles))
 
     def test_calendar_events_need_no_checking_off(self):
         out = self.say("dentist done", {"type": "outcome", "target": "dentist", "status": "done"})
