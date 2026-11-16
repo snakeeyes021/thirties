@@ -661,17 +661,17 @@ class TimelineNarrowTests(unittest.TestCase):
         return view
 
     def shown(self, width: int):
-        """The Day tab in a window `width` px wide (a clamp: the headless screen is bigger than a phone)."""
-        view = self.built()
-        win = Gtk.Window(child=Adw.Clamp(maximum_size=width, tightening_threshold=width, child=view),
-                         default_width=width, default_height=700)
-        win.present()
-        self.addCleanup(win.destroy)
-        canvas = view.timeline.canvas
-        _iterate_until(lambda: 0 < canvas.get_width() <= width, 5)
-        _iterate_until(lambda: all(w.fit == canvas.fit_for(canvas.lane_rect(canvas.get_width(), w.card)[2])
-                                   for w in canvas.cards), 5)
-        _iterate_until(lambda: False, 0.3)
+        """The Day tab's canvas laid out exactly `width` px wide: fitted and allocated directly, in no window, so
+        nothing depends on the size a compositor grants or on when a frame is painted."""
+        canvas = self.built().timeline.canvas
+        height = canvas.measure(Gtk.Orientation.VERTICAL, width)[0]
+        canvas.measure(Gtk.Orientation.HORIZONTAL, -1)
+        for _ in range(3):  # allocate, fit each card to its width, allocate again with the cards reshaped
+            canvas.allocate(width, height, -1, None)
+            canvas._refit(width)
+        canvas.allocate(width, height, -1, None)
+        self.assertEqual(canvas.get_width(), width)
+        self.assertTrue(all(w.fit == canvas.fit_for(canvas.lane_rect(width, w.card)[2]) for w in canvas.cards))
         return canvas
 
     @staticmethod
