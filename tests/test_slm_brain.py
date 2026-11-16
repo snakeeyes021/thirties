@@ -641,6 +641,14 @@ class TestFromTheMilestoneRun(SlmTestCase):
         out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
         self.assertEqual(out, "On Home:\n- Hang the shelf\n- Fix the door")
 
+    def test_a_long_list_is_listed_whole(self):
+        from thirties_core.models import TaskItem
+        titles = [f"Shelf job {n}" for n in range(15)]
+        self.brain.tasks = [TaskItem(id=f"h{i}", source_notebook="Tasks", title=t, is_checkbox_item=True,
+                                     parent_note_title="Home", parent_note_id="n_home") for i, t in enumerate(titles)]
+        out = self.say("what's on my home list?", {"type": "question", "topic": "home list"})
+        self.assertEqual(out, "On Home:\n" + "\n".join(f"- {t}" for t in titles))
+
     def test_calendar_events_need_no_checking_off(self):
         out = self.say("dentist done", {"type": "outcome", "target": "dentist", "status": "done"})
         self.assertEqual(out, "Dentist is on your calendar, so there's nothing to check off.")

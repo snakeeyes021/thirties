@@ -1972,8 +1972,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                      and not t.parent_task_id]
             if not items:
                 return f"Nothing open on {named_list}.", False
-            return f"On {named_list}:\n" + "\n".join(f"- {t}" for t in items[:12]) + \
-                (f"\n(and {len(items) - 12} more)" if len(items) > 12 else ""), False
+            return f"On {named_list}:\n" + "\n".join(f"- {t}" for t in items), False  # every one of them
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:

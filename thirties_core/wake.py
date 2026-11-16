@@ -49,7 +49,6 @@ def user_is_up(db, plan, now: datetime) -> bool:
     return woke is not None and woke >= plan.day_start - timedelta(hours=6) and woke <= now
 
 
-MAX_HELLO_ITEMS = 12
 RECENT_KEY = "morning_hello_recent"  # the last few first messages, so the model doesn't repeat itself
 PLATE_HEADING = "On the plate today:"  # copy-madlibs T3-003
 FALLBACK = {  # when no model can write it (copy-madlibs T3-001, T3-002): the time and the offer, nothing more
@@ -142,13 +141,11 @@ def write_hello(engine, mode: str, at: datetime, recent: List[str], now: Optiona
 
 def hello_text(line: str, titles) -> str:
     """The one message before the user is up: the line, and (if the setting is on) the day's items, one per line,
-    no bullets, no times (11-05): what's on the plate, not a schedule yet."""
+    no bullets, no times (11-05): what's on the plate, not a schedule yet. Every one of them, however many."""
     items = []
     for t in titles:
         if t and t.lower() not in {i.lower() for i in items}:
             items.append(t)
     if not items:
         return line
-    shown = items[:MAX_HELLO_ITEMS]
-    more = len(items) - len(shown)
-    return (line + f"\n\n{PLATE_HEADING}\n" + "\n".join(shown) + (f"\n…and {more} more" if more else ""))
+    return line + f"\n\n{PLATE_HEADING}\n" + "\n".join(items)

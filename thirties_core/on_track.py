@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from thirties_core.horizons import HorizonPlanner, Period
 
 # Titles named in a line before "and N more": a line, not a report.
-MAX_NAMED = 3
 
 
 @dataclass
@@ -85,8 +84,8 @@ def _left(days: int) -> str:
 
 
 def _names(titles: List[str]) -> str:
-    named = ", ".join(titles[:MAX_NAMED])
-    return named + (f" and {len(titles) - MAX_NAMED} more" if len(titles) > MAX_NAMED else "")
+    """Every slipped item by name, however many (a count in place of names leaves the user to find them)."""
+    return ", ".join(titles)
 
 
 def summary(t: Track) -> str:
@@ -117,4 +116,4 @@ def track_line(planner: "HorizonPlanner", p: "Period", label: str = "") -> str:
     return text[:1].upper() + text[1:] + "."
 
 
-__all__ = ["Track", "track", "track_line", "summary", "slipped_items", "MAX_NAMED"]
+__all__ = ["Track", "track", "track_line", "summary", "slipped_items"]

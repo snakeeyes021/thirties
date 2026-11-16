@@ -37,6 +37,12 @@ class TestHello(unittest.TestCase):
         self.assertEqual(hello_text("Morning!", ["Dentist", "dentist", "Call"]),
                          "Morning!\n\nOn the plate today:\nDentist\nCall")
 
+    def test_every_item_however_many(self):
+        titles = [f"Errand {n}" for n in range(20)]
+        text = hello_text("Morning!", titles)
+        self.assertEqual(text.splitlines()[3:], titles)  # every one, never a count in their place
+        self.assertNotIn("more", text)
+
     def test_the_model_writes_it_and_python_checks_it(self):
         from thirties_core.inference import MockInferenceEngine
         from thirties_core.wake import write_hello

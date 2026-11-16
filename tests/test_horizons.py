@@ -443,6 +443,13 @@ class TestPullingForward(PlannerCase):
 class TestOnTrack(PlannerCase):
     """C2: "how on track are we" at each level, counted by Python."""
 
+    def test_every_slipped_item_by_name(self):
+        from thirties_core.on_track import Track, summary
+        slipped = [f"Garden task {n}" for n in range(6)]
+        text = summary(Track(planned=8, done=1, slipped=slipped, days_left=3))
+        self.assertIn("slipped: " + ", ".join(slipped) + ";", text)
+        self.assertNotIn("more", text)
+
     def test_the_week_says_whats_done_what_slipped_and_whats_left(self):
         from thirties_core.on_track import track_line
         week = parse_period("this week", DAY)
