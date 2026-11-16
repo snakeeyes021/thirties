@@ -22,10 +22,12 @@ _NOT_DONE_HERE = ("routine", "reference", "ignore")
 
 
 def _candidates(assistant) -> List[Any]:
-    from thirties_core.list_reading import ENTRY
+    from thirties_core.list_reading import CLOSED, DROPPED, ENTRY, OPTION, REFERENCE
+    not_work = (DROPPED, CLOSED, REFERENCE, OPTION)  # dropped, closed, kept for reference, or a choice to make
     return [t for t in assistant.s.tasks if not t.id.startswith("media:") and t.list_role not in _NOT_DONE_HERE
             and not getattr(t, "someday", False) and (t.title or "").strip()
-            and (getattr(t, "line_kind", "") or ENTRY) == ENTRY]  # a label, a link or an option is never "done"
+            and (getattr(t, "line_kind", "") or ENTRY) == ENTRY  # a label, a link or a question is never "done"
+            and getattr(t, "state", "") not in not_work]
 
 
 def matches(assistant, event: str, message: Optional[str], skip: tuple = ()) -> List[Any]:

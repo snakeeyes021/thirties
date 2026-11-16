@@ -14,7 +14,7 @@ lines are its pieces. Four rules, all Python, none of them judgement:
    stretch, with anything unrelated before or after it. Fixed items and routines keep their times, and a meal
    may sit inside the stretch.
 4. Sub-items first. An item with open indented lines is offered as its first open one, in the note's order,
-   titled "Item: piece". When its last open piece is ticked, the item itself is ticked too.
+   titled "Item: piece". When its last open piece is ticked, the item itself stays open: the user ticks it.
 
 5. Steady pieces (11-14). Every active project gets one small piece offered each day, whether or not
    anything in it is pressing: any work on the project is useful, so it never waits for a due date. The piece is
@@ -125,9 +125,10 @@ def piece_title(tasks: Iterable[Any], task) -> str:
     if task is None:
         return ""
     parent = next((t for t in tasks if task.parent_task_id and t.id == task.parent_task_id), None)
-    if parent is None:
-        return task.title
     from thirties_core.list_reading import name_of
+    if parent is None:  # a parent that's no item (ticked): the line's own path still names it
+        path = getattr(task, "path", None) or []
+        return f"{str(path[-1]).rstrip(':').strip()}: {task.title}" if path else task.title
     return f"{name_of(parent).rstrip(':').strip()}: {task.title}"  # a label line's colon isn't doubled
 
 
@@ -178,19 +179,21 @@ def first_pieces(assistant, cands: List[Dict[str, Any]], day: date, on_plan: Ite
     return out
 
 
-def tick_parent_if_last(assistant, task) -> str:
-    """The last open piece of an item was ticked: the item is ticked too (the same safe writes)."""
+def last_piece_note(assistant, task) -> str:
+    """The last open piece of an item was ticked: the item itself stays open (a parent is done only when the user
+    ticks it or says so; its list of pieces may not be complete). The model is told, so it can ask."""
     if not task.parent_task_id:
         return ""
     parent = next((t for t in assistant.s.tasks if t.id == task.parent_task_id), None)
-    if parent is None:
+    if parent is None or getattr(parent, "line_kind", "") not in ("", "entry"):  # a label is never done
         return ""
     db = assistant._db
     done = db.completed_since(assistant.pt.day_plan.target_date - timedelta(days=1)) if db is not None else set()
     if open_children(assistant.s.tasks, parent, done | {task.id}):
         return ""
-    said = assistant._complete_backlog_task(parent)
-    return f"That was the last of {parent.title}, so it's ticked too" + (f" {said}" if said else "") + "."
+    from thirties_core.list_reading import name_of
+    return (f"That was the last open piece under {name_of(parent)}; {name_of(parent)} itself stays open until the "
+            f"user says it's done (ask whether it's finished)")
 
 
 # --- 5 and 6. a steady piece of each project, and momentum across days ---
@@ -577,4 +580,4 @@ def _fit(taken, earliest: datetime, length: timedelta, bed: datetime) -> Optiona
 __all__ = ["credit_overrun", "displaced_ids", "displaced_titles", "first_piece", "first_pieces", "group_in_order",
            "keep_together", "momentum", "momentum_first", "overruns", "part_of", "piece_title", "project_notes",
            "project_of",
-           "steady_pieces", "tick_parent_if_last", "top_item", "with_steady_pieces"]
+           "steady_pieces", "last_piece_note", "top_item", "with_steady_pieces"]

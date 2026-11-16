@@ -22,15 +22,19 @@ B. Name and notes
      ticked line, the reason it was dropped.
    - A trailing " - X" (or " -- X") is split off only when X is a known kind: a state or blocker, a drop word, a
      time estimate (a whole number of minutes, a fraction of an hour, "N+", "N+N", with "(hours)" if said), a
-     price, a when, or a known owner. Otherwise it's part of the name ("Router - guest network"). A leading
+     price, a when, or a known owner. Otherwise it's part of the name ("Router - guest network"), and so is a tail
+     that only starts like a note: a title ("Book club - No Small Matter"), a drop word with words after it ("Film
+     night - Skip the Interval"), or what the item is about ("Garden gate - broken spring"). A deadline in
+     parentheses ("(before Friday)") is a when, not something it waits for. A leading
      weekday, date, "Due <day>" or order marker ("FIRST - ") is a note too.
    - The display name is the name without its notes. The item's identity (its id, its exact link to the line)
      stays the full original line, so a note added or changed never breaks the link.
 
 C. Nesting
    - An entry means its parents plus its own name (item_path.py names it so; matching and the model get it too).
-   - A parent with open entries under it is a **container**: its children are planned, never the parent, and it
-     shows its progress as "n of m done".
+   - A parent with open entries under it that are still to do (or a label with such entries) is a **container**:
+     its children are planned, never the parent, and it shows its progress as "n of m done". A link, a question,
+     or a dropped, paused or optional line under it doesn't count: with only those, the parent is offered itself.
    - Ticks never follow each other: a parent with every child ticked stays open, and a ticked parent never closes
      its children. Open lines under a ticked parent are **leftovers**: kept, never pushed, asked about once.
 
@@ -135,8 +139,13 @@ _YEAR = re.compile(r"^(19|20)\d\d$")  # "Title - 1987" is a year in the name, no
 _OWNER_WORDS = re.compile(r"^(me|mine|myself)$", re.IGNORECASE)
 _PAREN = re.compile(r"\s*\(([^()]*)\)")
 _DEPENDENCY = re.compile(r"^(depends on|after|before|until|till|til|wait(ing)?( for| on| til| till| until)?|"
-                         r"once|when)\b", re.IGNORECASE)
-_FACT = re.compile(r"\b(but|not|missing|show as|shows as|isn'?t|aren'?t|no longer)\b", re.IGNORECASE)
+                         r"once|when)(?![\w-])", re.IGNORECASE)
+_DEADLINE = re.compile(r"^(?:before|by|until|till|til|due)\s+(.+)$", re.IGNORECASE)  # "(before Friday)": a when
+# a whole word, not part of a hyphenated one ("forget-me-not" is a name)
+_FACT = re.compile(r"(?<![\w-])(but|not|missing|show as|shows as|isn'?t|aren'?t|no longer)(?![\w-])", re.IGNORECASE)
+# state words that, with more words after them, describe what the item is about ("broken spring"), not where it is
+_ABOUT_WORDS = ("broken", "lost")
+_DROP_TAIL = re.compile(r"(for now|now|any ?more|after all)\W*", re.IGNORECASE)
 _PLACE = re.compile(r"^(at|from|@)\s+\S", re.IGNORECASE)
 _UPDATE = re.compile(r"\s+-{3,}\s+(.+)$")
 
@@ -190,12 +199,38 @@ def estimate_minutes(text: str) -> int:
     return int(round(total))
 
 
+def _is_drop(x: str) -> bool:
+    """A drop word that stands alone ("cancelled", "scrapped: too dear"), not the first word of a name
+    ("Skip the Interval")."""
+    m = DROP_WORDS.match(x)
+    if not m or x[m.end():m.end() + 1] == "-":
+        return False
+    rest = x[m.end():].strip()
+    return not rest or rest[0] in ",:;(—–-" or bool(_DROP_TAIL.fullmatch(rest))
+
+
+def _state_kind(x: str) -> Optional[str]:
+    """"blocker" or "state" for a tail that says where the item stands ("waiting on posts", "no reply yet"); None
+    when the words only start like one: a title ("No Small Matter"), a hyphenated word ("no-knead"), or what the
+    item is about ("broken spring")."""
+    m = STATE_NOTE.match(x)
+    if not m or x[m.end():m.end() + 1] == "-":
+        return None
+    rest = x[m.end():].strip()
+    if rest:
+        if rest[0].isupper() and not x.isupper():
+            return None
+        if m.group(1).strip().lower() in _ABOUT_WORDS:
+            return None
+    return "blocker" if _BLOCKING.match(x) else "state"
+
+
 def _note_kind(text: str, owners: Iterable[str] = ()) -> Optional[str]:
     """The kind of a " - X" tail, or None when it's part of the name."""
     x = text.strip().strip(".")
     if not x:
         return None
-    if DROP_WORDS.match(x):
+    if _is_drop(x):
         return "dropped"
     if _ESTIMATE.match(x) and not _YEAR.match(x):
         return "estimate"
@@ -203,8 +238,9 @@ def _note_kind(text: str, owners: Iterable[str] = ()) -> Optional[str]:
         return "price"
     if _WHEN.match(x):
         return "when"
-    if STATE_NOTE.match(x):
-        return "blocker" if _BLOCKING.match(x) else "state"
+    state = _state_kind(x)
+    if state:
+        return state
     low = x.lower()
     if _OWNER_WORDS.match(x) or low in {o.strip().lower() for o in owners if o and o.strip()}:
         return "owner"
@@ -218,8 +254,11 @@ def _paren_kind(inner: str, ticked: bool) -> Optional[str]:
         return None
     if ticked and _DROP_REASON.match(x):
         return "dropped"
-    if DROP_WORDS.match(x) and not ticked:
+    if not ticked and _is_drop(x):
         return "dropped"
+    deadline = _DEADLINE.match(x)
+    if deadline and _WHEN.match(deadline.group(1).strip()):
+        return "when"
     if _DEPENDENCY.match(x):
         return "dependency"
     if _PRICE.match(x) or x.startswith(("~$", "$", "€", "£")):
@@ -284,15 +323,19 @@ def read_text(text: str, ticked: bool = False, nested: bool = False, has_childre
         if m:
             notes.append({"kind": kind, "text": m.group(1).strip(" -")})
             name = m.group(2).strip()
-    while True:  # trailing " - X" / " -- X", from the end, while each is a known kind
+    while True:  # from the end, while each is a known kind: a " - X" / " -- X", or a note in parentheses
         m = re.match(r"^(.*\S)\s+-{1,2}\s+([^-\s].*?)\s*$", name)
-        if not m:
-            break
-        kind = _note_kind(m.group(2), owners)
+        kind = _note_kind(m.group(2), owners) if m else None
+        if kind is not None:
+            notes.append({"kind": kind, "text": m.group(2).strip()})
+            name = m.group(1).rstrip()
+            continue
+        p = re.search(r"\s*\(([^()]*)\)\s*$", name)  # "- 1/6 (after the frost)": the note, then the estimate
+        kind = _paren_kind(p.group(1), ticked) if p and p.start() > 0 else None
         if kind is None:
             break
-        notes.append({"kind": kind, "text": m.group(2).strip()})
-        name = m.group(1).rstrip()
+        notes.append({"kind": kind, "text": p.group(1).strip()})
+        name = name[:p.start()].rstrip()
     kept = []
     for m in list(_PAREN.finditer(name)):
         kind = _paren_kind(m.group(1), ticked)
@@ -402,10 +445,21 @@ class NoteReading:
     def entry_children(self, line: Line) -> List[Line]:
         return [self.lines[i] for i in line.children if self.lines[i].kind not in (CONDITION, PLACEHOLDER)]
 
+    def _open_work(self, line: Line) -> bool:
+        """An open line that is still to do: an entry in a live state, or a label with such an entry under it."""
+        if line.ticked or line.state not in OFFERED_STATES:
+            return False
+        if line.kind == ENTRY:
+            return True
+        return line.kind == GROUP and any(self._open_work(self.lines[i]) for i in line.children)
+
     def counts(self, line: Line) -> Tuple[int, int]:
-        """(done, all) of the entries directly under a line."""
+        """(done, all) of the work directly under a line: entries ticked (not dropped), and those plus the open
+        ones still to do. Links, questions and their choices, and lines in a state that isn't offered (cancelled,
+        on hold...) don't count, so a parent with only those beneath it is no container: it's offered itself."""
         kids = self.entry_children(line)
-        return sum(1 for k in kids if k.ticked), len(kids)
+        done = sum(1 for k in kids if k.ticked and k.kind == ENTRY and k.state != DROPPED)
+        return done, done + sum(1 for k in kids if self._open_work(k))
 
 
 def _indent(prefix: str) -> int:
@@ -805,13 +859,17 @@ def once_lines(db, tasks: Iterable[Any], notes: Iterable[Dict[str, Any]], today:
 
 _HEX = re.compile(r"^[0-9a-f]{8,}$", re.IGNORECASE)
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
-_PREFIXED = re.compile(r"^(?:media|task|item|span|note|id)[:_-]\S*\d\S*$", re.IGNORECASE)
-_SAID_ID = re.compile(r"^(?:item\s+|task\s+)?id\s*:?\s*[0-9a-f]{6,}$", re.IGNORECASE)
+_PREFIXED = re.compile(r"^(?:media|task|item|span|note|id|cal)[:_-]\S*\d\S*$", re.IGNORECASE)
+_SAID_ID = re.compile(r"^(?:(?:item|task|span|event|note)[\s_-]?)?id\s*[:=]?\s*[0-9a-f]{6,}$", re.IGNORECASE)
+_ID_MARK = re.compile(r"\[\s*id\s*[:=]?\s*[0-9a-f]{6,}\s*\]", re.IGNORECASE)  # "Sweep the porch [ID: 3fa9c2d1]"
 
 
 def looks_like_id(text: Any) -> bool:
     """Text that is an item id (16 hex characters) or another bare id-like token ("media:gr:123", a uuid,
-    "ID: 3fa9c2d1"), not words a person wrote."""
+    "ID: 3fa9c2d1", "id=3fa9c2d1", a calendar event's "cal:..."), or words carrying an item's id marker, not
+    words a person wrote."""
+    if _ID_MARK.search(str(text or "")):
+        return True
     t = str(text or "").strip().strip("'\"`*_[](). ")
     if not t:
         return False
@@ -824,7 +882,7 @@ def looks_like_id(text: Any) -> bool:
 
 # What each change writes as new text into a note (the rest only looks an item up by its words).
 WRITTEN_FIELDS = {"add_task": ("title",), "rename": ("new_title",), "split": ("parts",), "break_down": ("steps",),
-                  "create_list": ("title", "items"), "split_note": ("new_title",)}
+                  "create_list": ("title", "items"), "move_many": ("new_title",)}
 
 
 def refused_text(op: Dict[str, Any]) -> Optional[str]:

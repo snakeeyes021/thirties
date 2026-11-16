@@ -211,7 +211,7 @@ class TestNesting(unittest.TestCase):
         ask = find(self.tasks, "Ask sponsors for raffle prizes")
         self.assertTrue(lr.is_container(ask))
         self.assertFalse(lr.offerable(ask))
-        self.assertEqual(lr.progress_count(ask), "1 of 5 done")
+        self.assertEqual(lr.progress_count(ask), "1 of 4 done")  # the cancelled one isn't counted
         self.assertTrue(lr.offerable(find(self.tasks, "Larkspur Hardware")))
 
     def test_a_parent_whose_children_are_all_ticked_stays_open_and_is_offered(self):
@@ -334,7 +334,7 @@ class TestBodyEvidence(unittest.TestCase):
     def test_the_container_says_how_far_its_items_have_got(self):
         ask = find(self.tasks, "Ask sponsors for raffle prizes")
         tag = lr.prompt_tag(ask, self.tasks)
-        self.assertIn("container: 1 of 5 done", tag)
+        self.assertIn("container: 1 of 4 done", tag)
         self.assertIn("1 ready", tag)
         self.assertIn("1 only started", tag)
 
@@ -394,7 +394,7 @@ class TestWhatTheConsumersSee(ListsTestCase):
         text = FrontierBrain(self.t, None, tasks=tasks, active_notes=self.active_notes()).build_backlog_summary()
         ask = find(tasks, "Ask sponsors for raffle prizes")
         line = next(x for x in text.splitlines() if f"[ID: {ask.id}]" in x)
-        self.assertIn("container: 1 of 5 done", line)
+        self.assertIn("container: 1 of 4 done", line)
         chairs = find(tasks, "Return the spare chairs")
         self.assertIn("left open under a finished item", next(x for x in text.splitlines() if chairs.id in x))
         self.assertIn("HOW THE LISTS READ", text)
