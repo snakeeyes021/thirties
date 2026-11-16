@@ -688,6 +688,8 @@ class ConversationManager:
             whats_next.SentSummaries(db).mark(self.day_plan, now)
         if part and unmarked and MISSED_HEADING in part and self.scheduler is not None:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # every one of them is listed
+            from thirties_core.away import LastSentList  # the list as last sent (away.py)
+            LastSentList(self.scheduler.state_db).mark(now, unmarked)
         from thirties_core.messages import join_sections
         return join_sections(reply, part) if part else reply
 

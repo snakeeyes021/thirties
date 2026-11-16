@@ -8,6 +8,8 @@ window closed. Every few seconds it:
 - delivers reminders the user asked for,
 - says when a planned item starts,
 - ends a start notice or a check-in with what's next, when that says something new (whats_next.SentSummaries),
+- lists what's not marked yet only when that list changed, and after two check-ins with no reply sends no
+  more until the user writes again (away.py),
 - tells the phone what was ticked in the app's day panel, with what's next,
 - offers once an evening to move what's still not marked to tonight (catch_up.py),
 - holds every message while the user asked for quiet, until they say it's over (holds.py),
@@ -188,6 +190,15 @@ class BackgroundService:
         if kind not in HOLD_PASSES and self._held(now or self.now()):
             logger.info("Held (the user asked for quiet): %r", text[:80])
             return
+        # --- quiet while the user is away (away.py): two check-ins with no reply, then none until they write ---
+        if kind == "checkin":
+            from thirties_core.away import UnansweredCheckins
+            unanswered = UnansweredCheckins(self.scheduler.state_db)
+            if unanswered.paused():
+                logger.info("Not sent (the last check-ins went unanswered): %r", text[:80])
+                return
+            unanswered.sent()
+        # --- end quiet while the user is away ---
         if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
             try:
                 from thirties_core.if_time import gap_line
@@ -336,11 +347,15 @@ class BackgroundService:
         from thirties_core.reply_extras import effective
         if not effective(self.config, self.scheduler.state_db, self.manager().day_plan.target_date)["not_marked"]:
             return status  # the person asked for the Not marked yet list to stop (reply_extras.py)
+        from thirties_core.away import LastSentList, UnansweredCheckins
+        if UnansweredCheckins(self.scheduler.state_db).paused():
+            return status  # nobody is answering: the notice alone (away.py)
         missed = missed_for(self.manager().tools, now)
         tracker = MissedTracker(self.scheduler.state_db)
-        if not missed or not tracker.anything_new(now, missed):
+        if not missed or not tracker.anything_new(now, missed) or LastSentList(self.scheduler.state_db).same(now, missed):
             return status
         tracker.mark(now, missed)
+        LastSentList(self.scheduler.state_db).mark(now, missed)
         return with_missed(status, missed)
 
     def _with_next(self, status: str, now: datetime, with_now: bool = True, asked: Sequence[str] = ()) -> str:
@@ -353,13 +368,19 @@ class BackgroundService:
         from thirties_core.messages import MISSED_HEADING, MissedTracker, join_sections, missed_for
         if self._held(now):
             return status  # it won't go out: nothing counts as shown
+        from thirties_core.away import LastSentList, UnansweredCheckins
+        if UnansweredCheckins(self.scheduler.state_db).paused():
+            return status  # nobody is answering: the notice alone, short (away.py)
         manager = self.manager()
         plan = manager.day_plan
         sent = whats_next.SentSummaries(self.scheduler.state_db)
         if not (plan.day_start <= now < plan.day_end) or not sent.due(plan, now):
             return self._with_missed(status, now) if not asked else status
         skip = {t.strip().lower() for t in asked}
-        unmarked = [s for s in missed_for(manager.tools, now) if s.title.strip().lower() not in skip]
+        everything = missed_for(manager.tools, now)
+        last_sent = LastSentList(self.scheduler.state_db)
+        unmarked = [] if last_sent.same(now, everything) else \
+            [s for s in everything if s.title.strip().lower() not in skip]  # the list again only once it changed
         # as the person wants it (render with no mode: reply_extras.py): off, no Not marked yet, no "Now" line
         part = whats_next.summary(manager.tools, now, unmarked=unmarked, with_now=with_now)
         if not part:
@@ -367,7 +388,13 @@ class BackgroundService:
         sent.mark(plan, now)
         if unmarked and MISSED_HEADING in part:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)
+            last_sent.mark(now, everything)
         return join_sections(status, part)
+
+    def _checkins_paused(self) -> bool:
+        """The last check-ins went unanswered: none until the user writes again (away.py)."""
+        from thirties_core.away import UnansweredCheckins
+        return UnansweredCheckins(self.scheduler.state_db).paused()
 
     def _asked(self, now: datetime, titles: List[str]) -> None:
         """A check-in asked about these: a reply needn't ask again (C5)."""
@@ -492,7 +519,7 @@ class BackgroundService:
                 self._remember("stretch_asked", asked, now)
                 continue
             if (ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items
-                    and not self._talking(now)):
+                    and not self._talking(now) and not self._checkins_paused()):
                 asked[key] = now.date().isoformat()
                 self._remember("stretch_asked", asked, now)
                 titles = [s.title for s in open_items]
@@ -504,7 +531,7 @@ class BackgroundService:
     def wrap_up(self, now: datetime) -> None:
         """Medium: once a day, 45 minutes before bed, one question about whatever from today still isn't reported,
         so the record stays good without asking all day."""
-        if self.level() != "medium" or self._quiet(now) or self._talking(now):
+        if self.level() != "medium" or self._quiet(now) or self._talking(now) or self._checkins_paused():
             return
         plan = self.manager().day_plan
         bed = min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start),
@@ -539,7 +566,7 @@ class BackgroundService:
         its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
         late day build never pushes check-ins later or sends one for a block that was half over by then."""
         cfg = self.config.assistant
-        if self.level() != "heavy" or self._quiet(now):
+        if self.level() != "heavy" or self._quiet(now) or self._checkins_paused():
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
@@ -927,7 +954,7 @@ class BackgroundService:
         """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),
         unless the answer is already on the record."""
         from thirties_core.day_times import ASK_AT_LEVELS, due_question
-        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now):
+        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now) or self._checkins_paused():
             return
         plan = self.manager().day_plan
         history = self.scheduler.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)

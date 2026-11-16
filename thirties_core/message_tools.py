@@ -98,6 +98,8 @@ class MessageTools:
             text += pencilled_section(tools.assistant) + text_for(tools.assistant)
         if missed:
             MissedTracker(tools._state_db).mark(now, missed)  # shown: notices and replies needn't list them again
+            from thirties_core.away import LastSentList  # the list as last sent (away.py)
+            LastSentList(tools._state_db).mark(now, missed)
         tools.shown_schedule = text  # the conversation layer makes sure the reply carries this, as it is
         return text
 
