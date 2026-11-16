@@ -186,7 +186,7 @@ def scene_hand(out: Path, prefix: str) -> list:
     return shots
 
 
-def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), energy=None, theirs=True):
+def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), theirs=True):
     """A DayView with the window's providers stood in by invented data, and a real tool runner on the day."""
     from thirties_core.plan_tools import PlanTools
     view = day_view(sched, plan, tab, period)
@@ -203,7 +203,6 @@ def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), energy
             return "- cal-r"
         return ""
     agenda.read_tool = read
-    agenda.energy_today = (lambda: energy) if energy is not None else None
     agenda.pencil_action = lambda title, action: ""
     shown = {"on": theirs}
     view.set_theirs_provider(lambda: shown["on"], lambda on: shown.update(on=on))
@@ -213,16 +212,13 @@ def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), energy
 
 
 def scene_agenda(out: Path, prefix: str) -> list:
-    """Today's Agenda at 9:50: Not marked yet (with Not reported), Now, Work's button and Energy, then other
+    """Today's Agenda at 9:50: Not marked yet (with Not reported), Now and Work's button, then other
     people's events shown, and hidden by the one switch."""
-    from datetime import timezone
     shots = []
     set_debug_time(at("09:50"))
-    for name, theirs, energy in (("agenda_work_energy_theirs_shown", True, []),
-                                 ("agenda_energy_noted_theirs_hidden", False,
-                                  [{"at": at("09:20").astimezone(timezone.utc), "level": 4, "note": ""}])):
+    for name, theirs in (("agenda_work_theirs_shown", True), ("agenda_theirs_hidden", False)):
         sched, plan = day_sched()
-        view = _wired_view(sched, plan, "day", energy=energy, theirs=theirs, if_time=["Repot the fern"])
+        view = _wired_view(sched, plan, "day", theirs=theirs, if_time=["Repot the fern"])
         path = out / f"{prefix}{name}.png"
         shots.append((path, render(view, 683, 1500, path)))
     set_debug_time(at("15:40"))
@@ -448,7 +444,7 @@ def scene_after_work(out: Path, prefix: str) -> list:
     shots = []
     set_debug_time(at("16:20"))
     sched, plan = day_sched()
-    view = _wired_view(sched, plan, "day", energy=[])
+    view = _wired_view(sched, plan, "day")
     path = out / f"{prefix}agenda_finished_work_button.png"
     shots.append((path, render(view, 683, 1400, path)))
     result = ("Recorded: finished work 4:35 PM. After work: 2 daylight thirties and 8 dark thirties free before bed. "

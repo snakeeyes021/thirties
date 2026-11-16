@@ -1,14 +1,14 @@
-"""What the day pages offer with a tap (thirties_core/day_actions.py): work started or finished, energy,
+"""What the day pages offer with a tap (thirties_core/day_actions.py): work started or finished,
 and the actions on a later day's pencilled-in items, with the guard on their one Joplin write."""
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from tests.fixtures import DAY, at, make_scheduler
 from tests.test_list_placement import ListsTestCase
 from thirties_core.astronomy import set_debug_time
 from thirties_core.day_actions import (PENCIL_DONE, PENCIL_DROP, PENCIL_NEXT_DAY, PENCIL_SCHEDULE, WORK_END,
-                                       WORK_START, energy_call, energy_line, first_free_start, pencil_act, work_call,
+                                       WORK_START, first_free_start, pencil_act, work_call,
                                        work_line, work_step)
 from thirties_core.day_lists import AheadLists, pencilled_in
 from thirties_core.models import SpanCategory, SpanStatus
@@ -63,13 +63,6 @@ class TestWorkButton(unittest.TestCase):
 
 class TestEnergy(unittest.TestCase):
 
-    def test_a_level_through_log_energy_and_the_line_it_reads(self):
-        self.assertEqual(energy_call(4), ("log_energy", {"level": 4}))
-        self.assertEqual(energy_call(9), ("log_energy", {"level": 5}))
-        self.assertEqual(energy_line([], at("09:00").tzinfo), "How are you feeling? Tap a level")
-        entries = [{"at": datetime(2026, 10, 15, 18, 10, tzinfo=timezone.utc), "level": 2, "note": ""}]
-        self.assertEqual(energy_line(entries, at("09:00").tzinfo), "Low (2 of 5), noted 2:10 PM")
-
     def test_it_is_stored_where_the_statistics_read_it(self):
         set_debug_time(at("14:00"))
         self.addCleanup(set_debug_time, None)
@@ -78,7 +71,7 @@ class TestEnergy(unittest.TestCase):
         plan, pending = sched.build_day_plan(DAY)
         services = Services.for_db(sched.state_db, [], None)
         t = PlanTools(plan, pending, sched, services=services)
-        self.assertEqual(t.execute(*energy_call(4)), "Noted energy 4/5.")
+        self.assertEqual(t.execute("log_energy", {"level": 4}), "Noted energy 4/5.")
         self.assertEqual([e["level"] for e in services.energy.entries()], [4])
 
 

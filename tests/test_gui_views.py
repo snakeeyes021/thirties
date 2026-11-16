@@ -384,20 +384,10 @@ class AgendaLaneTests(unittest.TestCase):
         self.view.refresh_plan(tools.day_plan, force=True)
         self.assertIsNone(agenda.work_btn)  # both said
 
-    def test_energy_is_a_tap_and_shows_the_latest(self) -> None:
-        from datetime import datetime, timezone
-        entries = []
-        agenda = self.view.agenda
-        agenda.energy_today = lambda: list(entries)
-        agenda.read_tool = lambda name, args: (entries.append({"at": datetime(2026, 10, 15, 21, 10, tzinfo=timezone.utc),
-                                                               "level": args["level"], "note": ""})
-                                               or "Noted energy.") if name == "log_energy" else ""
+    def test_the_agenda_has_no_energy_row(self) -> None:
         self.view.refresh_plan(self.plan)
-        self.assertEqual(agenda.energy_row.get_subtitle(), "How are you feeling? Tap a level")
-        self.assertEqual([b.get_label() for b in agenda.energy_buttons], ["1", "2", "3", "4", "5"])
-        agenda.energy_buttons[3].emit("clicked")
-        self.assertEqual(entries[-1]["level"], 4)
-        self.assertEqual(agenda.energy_row.get_subtitle(), "Good (4 of 5), noted 5:10 PM")
+        self.assertFalse(hasattr(self.view.agenda, "energy_row"))
+        self.assertFalse(hasattr(self.view.agenda, "energy_today"))
 
     def test_if_theres_time_on_the_timeline_with_the_agendas_actions(self) -> None:
         agenda = self.view.agenda
