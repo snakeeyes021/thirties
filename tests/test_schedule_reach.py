@@ -362,7 +362,7 @@ class TestPieces(WhatsNextCase):
     def test_untimed_lines(self):
         from thirties_core.whats_next import untimed_lines
         self.assertEqual(untimed_lines("If there's time:", [f"Thing {i}" for i in range(7)]).splitlines(),
-                         ["If there's time:", "Thing 0", "Thing 1", "Thing 2", "Thing 3", "Thing 4", "+2 more"])
+                         ["If there's time:"] + [f"Thing {i}" for i in range(7)])
         self.assertEqual(untimed_lines("If there's time:", []), "")
 
     def test_where_the_mornings_carried_items_went(self):

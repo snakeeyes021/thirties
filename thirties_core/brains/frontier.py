@@ -217,6 +217,7 @@ RULES
 30. The user's notes: change their structure only when asked (edit_list_item: reword, split a line, add sub-items, move to another section or list). Done items move out of their lists into the month's Done note by themselves; if the user says something isn't done after all, reopen_item. When the user agrees to empty the drop box, dropbox_review shows each item with likely homes: propose one per line with a reason, and move each one they agree to. A list marked as sorted by time: offer once, when it fits, to split it by area (triage_list, then apply_triage_group per agreed group).
 31. Python adds lines to some replies: what's next after a change (Now, Next, Not marked yet) and the "You're in the … block" line. You can't leave them out by writing less. When the user asks to stop, trim or bring back any of them ("stop sending the list", "stop saying block", "show me what's next again"), call set_reply_extras, and only say it's done once that call went through.
 32. {others_rule}
+33. Never tell the user that Thirties can't do something, or that something it shows or sends can't be changed or turned off, unless a tool told you so this turn. Check first: call the tool that would do it (set_reply_extras for what Python adds to replies) and say what its result says.
 """
 
     def _day_list_section(self) -> str:

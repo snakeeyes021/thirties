@@ -31,8 +31,6 @@ from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
 MODES = ("nothing", "next", "rest")
 DEFAULT_MODE = "next"
 NEXT_ROWS = 3  # the next few rows after the current block
-UNMARKED_ROWS = 5  # how many unmarked items are listed; any before them only as a count
-UNTIMED_ROWS = 5  # how many of today's list items with no time are listed; the rest as a count
 FREE_MIN = timedelta(hours=1)  # an open stretch this long or longer gets its own "Free" line
 HALF = timedelta(minutes=30)
 NO_TIME_HEADING = "On today's list, no time yet:"
@@ -140,26 +138,22 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
 
 
 def unmarked_lines(spans: List[EventSpan]) -> List[str]:
-    """"Not marked yet:" and one plain line per item, by the block it started in, oldest first: the most recent
-    few, and how many more came before them. Nothing at all when there's nothing."""
+    """"Not marked yet:" and one plain line per item, by the block it started in, oldest first: every one of them,
+    however many (a count in place of names leaves the user to work out which ones). Nothing at all when there's
+    nothing."""
     from thirties_core.messages import MISSED_HEADING
     items = sorted(spans, key=lambda s: (s.start_dt.timestamp(), s.end_dt.timestamp()))
     if not items:
         return []
-    shown = items[-UNMARKED_ROWS:]
-    more = len(items) - len(shown)
-    return [MISSED_HEADING] + ([f"+{more} more earlier"] if more else []) \
-        + [f"{format_clock(thirty_of(s.start_dt))} – {s.title}" for s in shown]
+    return [MISSED_HEADING] + [f"{format_clock(thirty_of(s.start_dt))} – {s.title}" for s in items]
 
 
 def untimed_lines(heading: str, titles: Sequence[str]) -> str:
-    """A heading and one plain line per item, the first few, and how many more."""
+    """A heading and one plain line per item, every one of them."""
     titles = [t for t in titles if str(t).strip()]
     if not titles:
         return ""
-    shown = titles[:UNTIMED_ROWS]
-    more = len(titles) - len(shown)
-    return "\n".join([heading] + list(shown) + ([f"+{more} more"] if more else []))
+    return "\n".join([heading] + list(titles))
 
 
 def untimed_for(tools) -> List[Tuple[str, List[str]]]:

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from tests.fixtures import DAY, at, make_scheduler
 from tests.test_conversation import reply
+from thirties_core.clock import format_clock
 from thirties_core.astronomy import set_debug_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import MockInferenceEngine
@@ -226,13 +227,14 @@ class TestNotMarkedYet(WhatsNextCase):
         self.assertEqual(tail[-3:], ["Not marked yet:", "7:00 AM – Water the seedlings", "4:00 PM – Tune the ukulele"])
         self.assertFalse(any("Post the parcel" in line or "Feed the cat" in line for line in tail))
 
-    def test_only_the_most_recent_five(self) -> None:
-        self.earlier(*[(f"c{n}", f"Chore {n}", f"{9 + n:02d}:00", f"{9 + n:02d}:30") for n in range(7)])
+    def test_every_one_listed_however_many(self) -> None:
+        self.earlier(*[(f"c{n}", f"Chore {n}", f"{7 + n:02d}:00", f"{7 + n:02d}:30") for n in range(10)])
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         tail = self.tail(out)
         section = tail[tail.index("Not marked yet:"):]
-        self.assertEqual(section, ["Not marked yet:", "+2 more earlier", "11:00 AM – Chore 2", "12:00 PM – Chore 3",
-                                   "1:00 PM – Chore 4", "2:00 PM – Chore 5", "3:00 PM – Chore 6"])
+        self.assertEqual(section, ["Not marked yet:"] + [f"{format_clock(at(f'{7 + n:02d}:00'))} – Chore {n}"
+                                                         for n in range(10)])
+        self.assertFalse(any("more" in line for line in tail))
 
     def test_none_when_nothing_is_unmarked(self) -> None:
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
