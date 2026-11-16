@@ -123,6 +123,13 @@ class FakeJoplinAPI:
         return {"id": nid, "title": title}
 
 
+def morning_sent(db: StateDatabase, day: date = DAY) -> None:
+    """The day's morning has gone out already, so the next reply is an ordinary one (the morning's own reply lists
+    the day and has no what's-next slice under it: morning_reply.py)."""
+    from thirties_core import morning
+    db.set_sync_meta(morning.done_key(day), "1")
+
+
 def mark_up(db: StateDatabase, when: datetime) -> None:
     """The user wrote at ``when``: their day has started (wake.user_is_up), so the morning and check-ins can go."""
     db.set_sync_meta("last_user_message_at", when.isoformat())
