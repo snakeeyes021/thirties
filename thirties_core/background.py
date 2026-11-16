@@ -197,7 +197,7 @@ class BackgroundService:
             if unanswered.paused():
                 logger.info("Not sent (the last check-ins went unanswered): %r", text[:80])
                 return
-            unanswered.sent()
+            # counted once it reaches the user (below, or delivered_late): one dropped unseen was never asked
         # --- end quiet while the user is away ---
         if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
             try:
@@ -243,6 +243,8 @@ class BackgroundService:
                 with self._lock:
                     self._waiting[plain_lists(rendered)] = (text, kind, day)
                 waiting = True
+        if kind == "checkin" and delivered:  # it reached the user (or there's no phone to wait for): asked
+            self._count_checkin()
         if to_conversation and not waiting:  # after delivery: this waits for a turn under way (Telegram) to finish
             self._keep(text, kind, day, undelivered=not delivered)
             if not delivered:  # its mark comes off if it gets there late
@@ -302,6 +304,8 @@ class BackgroundService:
             marked = next((k for k in self._marked if chunk in k), None)
             day = self._marked.pop(marked) if marked is not None else None
         if found is not None:
+            if found[1] == "checkin":  # it reached the user after all: asked (away.py)
+                self._count_checkin()
             self._keep(*found)
             return True
         if marked is None:
@@ -390,6 +394,14 @@ class BackgroundService:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)
             last_sent.mark(now, everything)
         return join_sections(status, part)
+
+    def _count_checkin(self) -> None:
+        """A check-in reached the user: one more with no reply yet (away.py)."""
+        from thirties_core.away import UnansweredCheckins
+        try:
+            UnansweredCheckins(self.scheduler.state_db).sent()
+        except Exception as e:
+            logger.warning("Couldn't count the check-in: %s", e)
 
     def _checkins_paused(self) -> bool:
         """The last check-ins went unanswered: none until the user writes again (away.py)."""
@@ -775,7 +787,7 @@ class BackgroundService:
         """Once an evening, when two or more of today's things are still not marked and there's room tonight:
         "Move these 5 to tonight?" (catch_up.py). A yes, in the app or on the phone, or a 👍 there, moves them."""
         if self.level() in ("off", "light") or self._quiet(now) or self._talking(now) or self._turn_running() \
-                or self._held(now):
+                or self._held(now) or self._checkins_paused():  # a question too: none while nobody answers
             return
         from thirties_core import catch_up
         from thirties_core.messages import missed_for
@@ -784,6 +796,10 @@ class BackgroundService:
         if not catch_up.due(tools, now, missed):
             return
         self.send(catch_up.offer(tools, now, missed), "catch_up", now=now)
+        from thirties_core.away import LastSentList  # the list it carried counts as sent (away.py)
+        from thirties_core.messages import MissedTracker
+        MissedTracker(self.scheduler.state_db).mark(now, missed)
+        LastSentList(self.scheduler.state_db).mark(now, missed)
 
     # --- the people and tickets duties. Each runs inside the tick's own try/except, so one failing
     # never stops the service. ---
