@@ -49,7 +49,7 @@
           <li>When the assistant's usage limit is reached, a simpler assistant answers until it's back, and Thirties says so once; if none is available, your lists, the Day page and ticking things off still work, and your message is answered when the assistant returns</li>
           <li>Something is marked done, and ticked in Joplin, only when you've said which item you mean; a question about why something isn't marked is never taken as "not done"</li>
           <li>The Timeline has Month and Year tabs, and the Week shows what each block holds. Its marks, ticks and quarters are easier to read, and a card left Not reported can still be ticked there</li>
-          <li>On the Agenda, one tap says work started or finished, and another logs how much energy you have. An item with no time yet can be done, given a time or put off, on the Agenda and the Timeline</li>
+          <li>On the Agenda, one tap says work started or finished. An item with no time yet can be done, given a time or put off, on the Agenda and the Timeline</li>
           <li>The days ahead are pencilled in: a later day shows what's planned for it on the Agenda and the Timeline, and its items can be done early, given a time or put off</li>
           <li>All conversations, by day, with a search, and spell check in the message box</li>
           <li>The night (your own sleep window) is a thin strip under the day in the Timeline; it opens when you click it or drag something into it, and you can plan in it like any other time</li>

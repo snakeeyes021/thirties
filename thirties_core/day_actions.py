@@ -4,7 +4,6 @@
   an hour before its planned start), "Started work"; once started, or once its time is over with no start said,
   "Finished work"; once finished, nothing. A tap
   records the time through log_day_times, the same tool the assistant uses for "started work at 9:40".
-- **Energy**: five levels, 1 (drained) to 5 (great), logged through log_energy; the day's latest is shown.
 - **Pencilled in**: what's on a later day's list with no time yet can be done early, given a time on that
   day, moved to the day after, or dropped from that day's list.
 """
@@ -23,8 +22,6 @@ RELIABLE = ("reported", "checkin", "tracker")  # day_times.RELIABLE: times the u
 
 WORK_START, WORK_END = "start", "end"
 WORK_LABELS = {WORK_START: "Started work", WORK_END: "Finished work"}
-
-ENERGY_LEVELS = ((1, "Drained"), (2, "Low"), (3, "OK"), (4, "Good"), (5, "Great"))
 
 
 def _work(plan: DayPlan) -> Optional[EventSpan]:
@@ -81,23 +78,6 @@ def work_line(work: EventSpan) -> str:
     if start is not None:
         return f"Started {format_clock(start)}"
     return f"{format_clock(work.start_dt)} – {format_clock(work.end_dt)}"
-
-
-def energy_call(level: int, note: str = "") -> Tuple[str, Dict[str, Any]]:
-    args: Dict[str, Any] = {"level": max(1, min(5, int(level)))}
-    if note:
-        args["note"] = note
-    return "log_energy", args
-
-
-def energy_line(entries: List[Dict[str, Any]], tz) -> str:
-    """The Energy row's quiet line: the latest level noted today and when, or how to note one."""
-    if not entries:
-        return "How are you feeling? Tap a level"
-    last = entries[-1]
-    name = dict(ENERGY_LEVELS).get(int(last["level"]), "")
-    at = last["at"].astimezone(tz) if tz is not None else last["at"]
-    return f"{name} ({last['level']} of 5), noted {format_clock(at)}"
 
 
 # --- effort: the user's own estimate per item, in the unit they pick (efforts.py keeps it) ----------------------
@@ -201,6 +181,6 @@ def _tick_home(assistant, row: Dict[str, str]) -> None:
         writer.submit(complete_op(home))
 
 
-__all__ = ["work_reply", "ESTIMATE_UNITS", "estimate_text", "estimate_calls", "shown_estimate", "work_step", "work_call", "work_line", "energy_call", "energy_line", "ENERGY_LEVELS", "WORK_LABELS",
+__all__ = ["work_reply", "ESTIMATE_UNITS", "estimate_text", "estimate_calls", "shown_estimate", "work_step", "work_call", "work_line", "WORK_LABELS",
            "WORK_START", "WORK_END", "pencil_act", "first_free_start", "PENCIL_DONE", "PENCIL_SCHEDULE",
            "PENCIL_NEXT_DAY", "PENCIL_DROP"]

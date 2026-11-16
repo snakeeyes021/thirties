@@ -154,8 +154,6 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.paused: Callable[[], str] = lambda: ""  # "Check-ins paused until 6:30 AM" while they are (the window)
         # the one switch for other people's events: read, and changed (the window saves it and redraws)
         self.show_theirs: Callable[[], bool] = lambda: True
-        # today's energy entries ([{"at", "level", "note"}], EnergyLog.entries) for the Energy row
-        self.energy_today: Optional[Callable[[], List[Dict[str, Any]]]] = None
         # after a work button's log_day_times: the window's hook (the rest of the day is replanned from it)
         self.on_work_times: Callable[[str], None] = lambda result: None
         # (title, action) -> what's said: an action on a later day's pencilled-in item (day_actions.pencil_act)
@@ -259,7 +257,7 @@ class AgendaPage(Gtk.ScrolledWindow):
                 self._fill(group, current, now)
         upcoming = [s for s in spans if thirty_of(s.start_dt) > block and s.status == SpanStatus.PLANNED]
         listed = {s.id for s in (current if any(_takes_time(x) for x in current) else []) + upcoming}
-        self._fill_today_rows(now, listed)  # work started or finished, and energy: a tap each
+        self._fill_today_rows(now, listed)  # work started or finished: a tap
         if upcoming:
             self._fill(self._group("next", "Next"), upcoming, now, ahead=True)
         self._fill_if_time()  # after the day's timed items
@@ -282,34 +280,12 @@ class AgendaPage(Gtk.ScrolledWindow):
 
     def _fill_today_rows(self, now: datetime, listed: set) -> None:
         """Today only: Work's button on a row of its own when Work isn't listed under Now or Next (it's on Work's
-        own row there), and Energy (five levels, through log_energy). No time in the gutter: they're about now."""
-        from thirties_core.day_actions import ENERGY_LEVELS, energy_line
+        own row there). No time in the gutter: it's about now."""
         rows = []
         if self._work_step is not None and self._work_step[1].id not in listed:
             work = self._work_step[1]
             row = Adw.ActionRow(title=GLib.markup_escape_text(self.title_for(work)))
             self._work_button(row)
-            rows.append((None, row))
-        self.energy_buttons = []
-        if self.energy_today is not None and self.run_tool is not None:
-            try:
-                entries = self.energy_today() or []
-            except Exception:
-                entries = []
-            row = Adw.ActionRow(title="Energy", subtitle=energy_line(entries, now.tzinfo))
-            box = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
-            box.add_css_class("energy-levels")
-            last = int(entries[-1]["level"]) if entries else None
-            for level, name in ENERGY_LEVELS:
-                b = Gtk.ToggleButton(label=str(level), active=level == last, tooltip_text=f"{name} ({level} of 5)")
-                b.add_css_class("flat")
-                b.add_css_class("circular")
-                b.update_property([Gtk.AccessibleProperty.LABEL], [f"Energy: {name}"])
-                b.connect("clicked", lambda _b, lv=level, r=row: self._energy(lv, r))
-                box.append(b)
-                self.energy_buttons.append(b)
-            row.add_suffix(box)
-            self.energy_row = row
             rows.append((None, row))
         if rows:
             self._add_blocks(self._group("today_rows", ""), rows)
@@ -323,23 +299,6 @@ class AgendaPage(Gtk.ScrolledWindow):
         result = self.run_tool(*work_call(kind, now)) or ""
         if not result.startswith(NOT_DONE):
             self.on_work_times(result)
-
-    def _energy(self, level: int, row: Adw.ActionRow) -> None:
-        from thirties_core.day_actions import energy_call, energy_line
-        if self.read_tool is None and self.run_tool is None:
-            return
-        # logging energy changes no plan: through the read path, so the page isn't rebuilt under the tap
-        result = (self.read_tool or self.run_tool)(*energy_call(level)) or ""
-        if result.startswith(NOT_DONE):
-            return
-        for b in self.energy_buttons:
-            if b.get_label() != str(level) and b.get_active():
-                b.set_active(False)
-        try:
-            entries = self.energy_today() or []
-        except Exception:
-            entries = []
-        row.set_subtitle(energy_line(entries, self._tz))
 
     def _fill_not_yours(self, theirs: List[EventSpan], today: bool) -> None:
         """Someone else's events (not_yours.py), always last: each can be hidden for today, or marked not mine for

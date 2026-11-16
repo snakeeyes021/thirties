@@ -93,7 +93,6 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         self.day_view.agenda.paused = lambda: (self.conv_manager.tools.assistant.checkins_paused()
                                                if self.conv_manager is not None
                                                and self.conv_manager.tools.assistant is not None else "")
-        self.day_view.agenda.energy_today = self._energy_today
         self.day_view.agenda.on_work_times = self._after_work_times
         self.day_view.agenda.pencil_action = self._pencil_action
         self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
@@ -272,14 +271,6 @@ class ThirtiesWindow(Adw.ApplicationWindow):
         from thirties_core.titles import title_of
         self.chat_toggle_btn.set_active(True)
         self.chat_panel.suggest(BREAK_ASK.format(title=title_of(title)))
-
-    def _energy_today(self):
-        """Today's energy entries, for the Agenda's Energy row."""
-        from thirties_core.memory import EnergyLog
-        plan = self.conv_manager.day_plan if self.conv_manager else None
-        if plan is None:
-            return []
-        return EnergyLog(self.scheduler.state_db).entries(since=plan.day_start)
 
     def _after_work_times(self, result: str) -> None:
         """A work button was tapped: log_day_times recorded the time on Work and planned the rest of the day
