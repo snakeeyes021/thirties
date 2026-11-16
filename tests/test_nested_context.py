@@ -1,4 +1,4 @@
-"""A nested list item is named with where it sits ("Thank-you notes › Rivera family") wherever Thirties names it to
+"""A nested list item is named with where it sits ("Utility accounts › Harbor Water") wherever Thirties names it to
 the user, while its stored title and its list line stay as written (item_path.py); the morning's reply lists the day
 once, with no what's-next slice under it (morning_reply.py). Invented lists; DAY is Thu Oct 15."""
 
@@ -14,14 +14,14 @@ from thirties_core.joplin_engine import checklist_tasks
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus
 from thirties_core.plan_tools import PlanTools
 
-NOTE = """# Thank-you notes
-- [ ] Rivera family
-- [ ] Okafor twins
-# Invitations
-- [ ] Lee household
-    - [ ] address missing
-- [ ] Novak household
-    - [ ] address missing
+NOTE = """# Utility accounts
+- [ ] Harbor Water
+- [ ] Northgate Power
+# Moving out
+- [ ] Gas account
+    - [ ] final reading
+- [ ] Broadband account
+    - [ ] final reading
 # Garden
 - [ ] Raised beds
     - [ ] North bed
@@ -31,7 +31,7 @@ LOOSE = "- [ ] Return the library books\n"
 
 
 def nested_tasks():
-    tasks = checklist_tasks("n_party", "Winter party", "Home", NOTE, [])
+    tasks = checklist_tasks("n_party", "Moving house", "Home", NOTE, [])
     tasks += checklist_tasks("n_errands", "Errands", "Home", LOOSE, [])
     for t in tasks:
         t.list_role, t.urgency = "list", "now"
@@ -49,11 +49,11 @@ class TestLabel(unittest.TestCase):
         self.tasks = nested_tasks()
 
     def test_heading_or_parent_line_then_the_item(self):
-        self.assertEqual(label(find(self.tasks, "Rivera family"), self.tasks), "Thank-you notes › Rivera family")
-        self.assertEqual(label(find(self.tasks, "address missing", "Lee household"), self.tasks),
-                         "Invitations › Lee household › address missing")
-        self.assertEqual(label(find(self.tasks, "address missing", "Novak household"), self.tasks),
-                         "Invitations › Novak household › address missing")
+        self.assertEqual(label(find(self.tasks, "Harbor Water"), self.tasks), "Utility accounts › Harbor Water")
+        self.assertEqual(label(find(self.tasks, "final reading", "Gas account"), self.tasks),
+                         "Moving out › Gas account › final reading")
+        self.assertEqual(label(find(self.tasks, "final reading", "Broadband account"), self.tasks),
+                         "Moving out › Broadband account › final reading")
 
     def test_at_most_two_parents_the_nearest_ones(self):
         self.assertEqual(label(find(self.tasks, "order soil"), self.tasks), "Raised beds › North bed › order soil")
@@ -74,20 +74,20 @@ class TestLabel(unittest.TestCase):
         self.assertEqual(label(today[1], today), "Pack lunch › fruit")  # its parent line still says what it is
 
     def test_display_only_the_title_stays_and_a_label_said_back_finds_the_item(self):
-        novak = find(self.tasks, "address missing", "Novak household")
-        self.assertEqual(novak.title, "address missing")
-        self.assertIs(resolve("Invitations › Novak household › address missing", self.tasks), novak)
-        self.assertIs(resolve("invitations ›  novak household › Address missing", self.tasks), novak)
-        self.assertIsNone(resolve("address missing", self.tasks))  # not a label: the usual lookup takes it
-        self.assertEqual(leaf("Thank-you notes › Rivera family"), "Rivera family")
+        novak = find(self.tasks, "final reading", "Broadband account")
+        self.assertEqual(novak.title, "final reading")
+        self.assertIs(resolve("Moving out › Broadband account › final reading", self.tasks), novak)
+        self.assertIs(resolve("moving out ›  broadband account › Final reading", self.tasks), novak)
+        self.assertIsNone(resolve("final reading", self.tasks))  # not a label: the usual lookup takes it
+        self.assertEqual(leaf("Utility accounts › Harbor Water"), "Harbor Water")
 
     def test_a_plan_entry_for_the_item_is_named_the_same_way(self):
-        lee = find(self.tasks, "address missing", "Lee household")
-        span = EventSpan("s1", "address missing", at("17:00"), at("17:30"), SpanCategory.TASK, task_id=lee.id)
-        self.assertEqual(span_label(span, self.tasks), "Invitations › Lee household › address missing")
-        piece = EventSpan("s2", "Lee household: address missing", at("17:00"), at("17:30"), SpanCategory.TASK,
+        lee = find(self.tasks, "final reading", "Gas account")
+        span = EventSpan("s1", "final reading", at("17:00"), at("17:30"), SpanCategory.TASK, task_id=lee.id)
+        self.assertEqual(span_label(span, self.tasks), "Moving out › Gas account › final reading")
+        piece = EventSpan("s2", "Gas account: final reading", at("17:00"), at("17:30"), SpanCategory.TASK,
                           task_id=lee.id)  # a project's piece, as placed by its item
-        self.assertEqual(span_label(piece, self.tasks), "Invitations › Lee household › address missing")
+        self.assertEqual(span_label(piece, self.tasks), "Moving out › Gas account › final reading")
         renamed = EventSpan("s3", "Phone the Lees", at("17:00"), at("17:30"), SpanCategory.TASK, task_id=lee.id)
         self.assertEqual(span_label(renamed, self.tasks), "Phone the Lees")  # the user's own words stand
 
@@ -100,9 +100,9 @@ class PlanCase(unittest.TestCase):
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
         self.tasks = nested_tasks()
-        self.lee = find(self.tasks, "address missing", "Lee household")
-        self.novak = find(self.tasks, "address missing", "Novak household")
-        self.rivera = find(self.tasks, "Rivera family")
+        self.lee = find(self.tasks, "final reading", "Gas account")
+        self.novak = find(self.tasks, "final reading", "Broadband account")
+        self.rivera = find(self.tasks, "Harbor Water")
         for sid, task, start, end in (("lee", self.lee, "17:00", "17:30"), ("novak", self.novak, "17:30", "18:00"),
                                       ("rivera", self.rivera, "18:00", "18:30")):
             self.sched.state_db.upsert_span(EventSpan(sid, task.title, at(start), at(end), SpanCategory.TASK,
@@ -118,65 +118,65 @@ class TestWhereItsNamed(PlanCase):
     def test_whats_next(self):
         from thirties_core import whats_next
         text = whats_next.summary(self.t, at("16:40"), "rest")
-        line_with(text, "5:00 PM", "Invitations › Lee household › address missing")
-        line_with(text, "Invitations › Novak household › address missing")
-        line_with(text, "Thank-you notes › Rivera family")
+        line_with(text, "5:00 PM", "Moving out › Gas account › final reading")
+        line_with(text, "Moving out › Broadband account › final reading")
+        line_with(text, "Utility accounts › Harbor Water")
         line_with(text, "Evening walk")
 
     def test_the_schedule_and_whats_behind(self):
         set_debug_time(at("18:40"))
         out = self.t.execute("show_schedule", {})
-        line_with(out, "Thank-you notes › Rivera family")
+        line_with(out, "Utility accounts › Harbor Water")
         behind = out.split("Not marked yet:", 1)[1]
-        self.assertIn("Invitations › Lee household › address missing", behind)
-        self.assertIn("Invitations › Novak household › address missing", behind)
+        self.assertIn("Moving out › Gas account › final reading", behind)
+        self.assertIn("Moving out › Broadband account › final reading", behind)
 
     def test_what_the_model_reads(self):
         text = self.t.schedule_text()
-        line_with(text, "Invitations › Lee household › address missing", "id=lee")
-        out = self.t.execute("add_event", {"title": "Okafor twins", "start": "8:00 PM", "duration": "30 minutes",
-                                           "task_id": find(self.tasks, "Okafor twins").id, "category": "task"})
-        self.assertIn("Thank-you notes › Okafor twins", out)
+        line_with(text, "Moving out › Gas account › final reading", "id=lee")
+        out = self.t.execute("add_event", {"title": "Northgate Power", "start": "8:00 PM", "duration": "30 minutes",
+                                           "task_id": find(self.tasks, "Northgate Power").id, "category": "task"})
+        self.assertIn("Utility accounts › Northgate Power", out)
 
     def test_the_same_words_on_two_list_lines_are_two_items(self):
         self.t.day_plan.spans = [s for s in self.t.day_plan.spans if s.id != "novak"]
-        out = self.t.execute("add_event", {"title": "address missing", "start": "8:00 PM", "duration": "30 minutes",
+        out = self.t.execute("add_event", {"title": "final reading", "start": "8:00 PM", "duration": "30 minutes",
                                            "task_id": self.novak.id, "category": "task"})
-        self.assertFalse(out.startswith("NOT_DONE"), out)  # not "already planned": that's the Lee household's
-        self.assertIn("Invitations › Novak household › address missing", out)
-        again = self.t.execute("add_event", {"title": "address missing", "start": "9:00 PM", "duration": "30 minutes",
+        self.assertFalse(out.startswith("NOT_DONE"), out)  # not "already planned": that's the Gas account's
+        self.assertIn("Moving out › Broadband account › final reading", out)
+        again = self.t.execute("add_event", {"title": "final reading", "start": "9:00 PM", "duration": "30 minutes",
                                              "task_id": self.novak.id, "category": "task"})
         self.assertIn("already planned", again)  # the same item twice still isn't a second copy
 
     def test_ticking_by_the_label_marks_the_real_item_and_keeps_its_title(self):
-        out = self.t.execute("log_outcome", {"event": "Invitations › Novak household › address missing",
+        out = self.t.execute("log_outcome", {"event": "Moving out › Broadband account › final reading",
                                              "status": "done"})
         self.assertFalse(out.startswith("NOT_DONE"), out)
         spans = {s.id: s for s in self.t.day_plan.spans}
         self.assertEqual(spans["novak"].status, SpanStatus.DONE)
         self.assertEqual(spans["lee"].status, SpanStatus.PLANNED)
-        self.assertEqual(spans["novak"].title, "address missing")  # stored as it was
-        self.assertIs(self.t.assistant._exact_task("Invitations › Lee household › address missing"), self.lee)
+        self.assertEqual(spans["novak"].title, "final reading")  # stored as it was
+        self.assertIs(self.t.assistant._exact_task("Moving out › Gas account › final reading"), self.lee)
 
     def test_the_mornings_list(self):
         from thirties_core.day_lists import planned_ahead_text
         text = planned_ahead_text(self.t.assistant)
-        line_with(text, "5:00 PM", "Invitations › Lee household › address missing")
-        line_with(text, "6:00 PM", "Thank-you notes › Rivera family")
+        line_with(text, "5:00 PM", "Moving out › Gas account › final reading")
+        line_with(text, "6:00 PM", "Utility accounts › Harbor Water")
 
     def test_the_days_options_and_the_placed_lines(self):
-        okafor, soil = find(self.tasks, "Okafor twins"), find(self.tasks, "order soil")
+        okafor, soil = find(self.tasks, "Northgate Power"), find(self.tasks, "order soil")
         text = self.t.assistant.proposals.options_text()
-        line_with(text, "Thank-you notes › Okafor twins", f"task_id={okafor.id}")
+        line_with(text, "Utility accounts › Northgate Power", f"task_id={okafor.id}")
         line_with(text, "Raised beds › North bed › order soil", f"task_id={soil.id}")
         self.t.day_plan.spans = [s for s in self.t.day_plan.spans if not s.task_id]  # the evening is free
         out = self.t.execute("propose_day", {"items": [
             {"item": okafor.id, "start": "5:00 PM", "duration": "30 minutes"},
             {"item": soil.id, "start": "5:30 PM", "duration": "30 minutes"}]})
-        line_with(out, "5:00 PM", "Thank-you notes › Okafor twins")
+        line_with(out, "5:00 PM", "Utility accounts › Northgate Power")
         line_with(out, "5:30 PM", "Raised beds › North bed › order soil")
         placed = {s.task_id: s.title for s in self.t.day_plan.spans if s.task_id}
-        self.assertEqual(placed[okafor.id], "Okafor twins")  # stored as its own line
+        self.assertEqual(placed[okafor.id], "Northgate Power")  # stored as its own line
         self.assertEqual(placed[soil.id], "North bed: order soil")  # a piece, by its item, as before
 
 
@@ -189,7 +189,7 @@ class TestNotices(unittest.TestCase):
         self.sched = make_scheduler()
         self.sched.config.assistant.message_level = "heavy"
         self.tasks = nested_tasks()
-        self.rivera = find(self.tasks, "Rivera family")
+        self.rivera = find(self.tasks, "Harbor Water")
         joplin = MagicMock()
         joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = self.tasks, []
         self.sent = []
@@ -200,17 +200,17 @@ class TestNotices(unittest.TestCase):
                                      inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         self.svc.today = lambda: DAY
         self.svc.bridge = MagicMock()
-        self.sched.state_db.upsert_span(EventSpan("rv", "Rivera family", at("17:00"), at("17:30"),
+        self.sched.state_db.upsert_span(EventSpan("rv", "Harbor Water", at("17:00"), at("17:30"),
                                                   SpanCategory.TASK, task_id=self.rivera.id))
 
     def test_start_and_check_in(self):
         self.svc.starts(at("17:00"))
-        self.assertIn("Thank-you notes › Rivera family", self.sent[-1][1])
+        self.assertIn("Utility accounts › Harbor Water", self.sent[-1][1])
         self.svc.check_ins(at("17:45"))
-        self.assertIn("did you get to Thank-you notes › Rivera family", self.sent[-1][1])
+        self.assertIn("did you get to Utility accounts › Harbor Water", self.sent[-1][1])
 
     def test_the_plate_before_the_user_is_up(self):
-        self.assertEqual(self.svc._plate(self.svc.manager().day_plan), ["Thank-you notes › Rivera family"])
+        self.assertEqual(self.svc._plate(self.svc.manager().day_plan), ["Utility accounts › Harbor Water"])
 
 
 class TestBeforeToday(PlanCase):
@@ -220,19 +220,19 @@ class TestBeforeToday(PlanCase):
         OpenPool(self.sched.state_db).add([{"title": self.rivera.title, "task_id": self.rivera.id,
                                             "horizon": "week", "when": "this week"}], DAY - timedelta(days=1))
         rows = self.t.assistant.before.rows()
-        row = next(r for r in rows["keep"] + rows["drop"] if r["title"] == "Rivera family")
-        self.assertEqual(row["label"], "Thank-you notes › Rivera family")
+        row = next(r for r in rows["keep"] + rows["drop"] if r["title"] == "Harbor Water")
+        self.assertEqual(row["label"], "Utility accounts › Harbor Water")
 
 
 class TestThePromptsLists(PlanCase):
 
     def test_the_backlog_names_nested_items(self):
         from thirties_core.brains.frontier import FrontierBrain
-        notes = [{"id": "n_party", "title": "Winter party", "source_notebook": "Home", "body": NOTE}]
+        notes = [{"id": "n_party", "title": "Moving house", "source_notebook": "Home", "body": NOTE}]
         text = FrontierBrain(self.t, None, tasks=self.tasks, active_notes=notes).build_backlog_summary()
-        line_with(text, f"[ID: {self.novak.id}]", "named: Invitations › Novak household › address missing")
-        line_with(text, f"[ID: {self.rivera.id}]", "named: Thank-you notes › Rivera family")
-        line_with(text, "'Lee household'", "named: Invitations › Lee household")
+        line_with(text, f"[ID: {self.novak.id}]", "named: Moving out › Broadband account › final reading")
+        line_with(text, f"[ID: {self.rivera.id}]", "named: Utility accounts › Harbor Water")
+        line_with(text, "'Gas account'", "named: Moving out › Gas account")
 
 
 class TestPeriodProposal(unittest.TestCase):
@@ -248,7 +248,7 @@ class TestPeriodProposal(unittest.TestCase):
         from thirties_core.horizons import HorizonPlanner, parse_period
         self.hp = HorizonPlanner(self.t)
         month = parse_period("this month", DAY + timedelta(days=4))
-        for title, under in (("Rivera family", ""), ("address missing", "Lee household")):
+        for title, under in (("Harbor Water", ""), ("final reading", "Gas account")):
             self.hp.pin(find(self.tasks, title, under), month)
 
     def test_where_they_come_from_is_said_once(self):
@@ -258,8 +258,8 @@ class TestPeriodProposal(unittest.TestCase):
         self.assertNotIn("from the plan for", text)
         at_heading = lines.index("From this month's plan:")
         under = lines[at_heading + 1:-1]
-        self.assertIn("Thank-you notes › Rivera family", under)
-        self.assertIn("Invitations › Lee household › address missing", under)
+        self.assertIn("Utility accounts › Harbor Water", under)
+        self.assertIn("Moving out › Gas account › final reading", under)
         self.assertFalse(any(line.startswith("- ") for line in lines))  # plain lines
         self.assertTrue(lines[-1].startswith("Want this week"))
 

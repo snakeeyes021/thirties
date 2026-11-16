@@ -545,7 +545,7 @@ class AssistantTools(KindTools):
             if len(short) > 1:  # its Today copies share the title: the item on its own list is the one
                 short = [t for t in short if t.list_role != "today"]
             exact = short if len(short) == 1 else []
-        if not exact:  # a nested item said back the way Thirties names it ("Invitations › Lee household › …")
+        if not exact:  # a nested item said back the way Thirties names it ("Moving out › Gas account › …")
             from thirties_core.item_path import resolve
             found = resolve(ref, self.s.tasks)
             exact = [found] if found is not None else []
