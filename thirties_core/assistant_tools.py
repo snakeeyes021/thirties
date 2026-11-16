@@ -1324,6 +1324,15 @@ class AssistantTools(KindTools):
                                 "Record it with doing_now; mark it done when they say it's over.")
             if said == "not":
                 raise ToolError(f"The user said {name} hasn't happened, so it isn't done. Leave it as it is.")
+        if span is None and task is None and st == SpanStatus.DONE and not ITEM_ID.fullmatch(str(event).strip()):
+            # --- a done that's an open item on the user's lists ticks that item, never a new one (done_on_lists.py) ---
+            from thirties_core.done_on_lists import on_the_lists
+            task = on_the_lists(self, str(event))  # several: the model is told to ask which
+            if task is not None:
+                span = next((s for s in self.pt.day_plan.spans if s.task_id == task.id
+                             and s.status == SpanStatus.PLANNED), None)
+                task = None if span is not None else task
+            # --- end a done on the lists ---
         if span is None and task is None:
             if ITEM_ID.fullmatch(str(event).strip()):
                 raise ToolError(f"No item on any day's plan or list has the id {event}. Name it by its title, or "
