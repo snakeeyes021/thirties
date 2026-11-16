@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Callable, List, Optional
 
 from thirties_core.clock import format_clock
+from thirties_core.shown_times import span_when
 from thirties_core.models import _DISPLAY_PRIORITY, DayPlan, EventSpan, SpanStatus, ThirtyBlock
 
 
@@ -93,7 +94,7 @@ def segment_context(seg: Segment, plan: Optional[DayPlan] = None) -> Optional[st
     if len(seg.spans) == 1:
         span = seg.spans[0]
         if span.start_dt < seg.blocks[0].start_dt or span.end_dt > seg.blocks[-1].end_dt:
-            parts.append(f"Part of {span.title}, {format_clock(span.start_dt)} – {format_clock(span.end_dt)}")
+            parts.append(f"Part of {span.title}, {span_when(span)}")  # by blocks, unless real (shown_times)
     if seg.backdrop is not None and not seg.is_envelope:
         inside = seg.backdrop.start_dt <= seg.start_dt and seg.end_dt <= seg.backdrop.end_dt
         parts.append(("during " if inside else "partly during ") + seg.backdrop.title)
@@ -161,7 +162,7 @@ def card_rows(plan: DayPlan, seg: Segment, ongoing: Optional[Callable[[EventSpan
         rows = []
         for s in sorted(items, key=lambda s: (s.start_dt, _DISPLAY_PRIORITY[s.category])):
             block = plan.block_at(max(s.start_dt, seg.blocks[0].start_dt)) or seg.blocks[0]
-            rows.append(CardRow(block, s.title, s, f"{format_clock(s.start_dt)} – {format_clock(s.end_dt)}",
+            rows.append(CardRow(block, s.title, s, span_when(s),  # by blocks, unless real (shown_times)
                                 status_label([s], ongoing)))
         return rows
     title = segment_title(plan, seg) or ""

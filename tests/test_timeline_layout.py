@@ -153,10 +153,16 @@ class TestTheDay(DayCase):
         self.assertFalse(d.slots[-1].free)
 
     def test_the_tooltip_has_the_real_times_and_what_really_happened(self):
-        self.mark("movie", SpanStatus.DONE, actual_start=at("20:10"), actual_end=at("21:40"))
+        self.mark("movie", SpanStatus.DONE, actual_start=at("20:10"), actual_end=at("21:40"), time_source="reported")
         card = next(c for c in day_layout(self.plan(), at("22:00")).cards if c.span.title == "Movie")
-        self.assertEqual(card.times, "8:00 PM – 9:30 PM (really 8:10 PM – 9:40 PM)")
+        self.assertEqual(card.times, "8:00 PM – 9:30 PM (really 8:10 PM – 9:40 PM)")  # what the user said
         self.assertEqual((card.state, card.tickable), ("done", False))
+
+    def test_a_guessed_time_never_shows_to_the_minute(self):
+        self.mark("movie", SpanStatus.DONE, start_dt=at("20:07"), end_dt=at("21:37"), actual_start=at("20:07"),
+                  actual_end=at("21:37"), time_source="estimated")
+        card = next(c for c in day_layout(self.plan(), at("22:00")).cards if c.span.title == "Movie")
+        self.assertEqual(card.times, "8:00 PM – 10:00 PM")  # its blocks
 
     def test_no_sleep_shows_the_whole_canvas(self):
         sched = make_scheduler()

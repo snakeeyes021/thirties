@@ -38,6 +38,7 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango, PangoCairo
 
 from thirties_core.astronomy import get_current_time
 from thirties_core.clock import format_clock
+from thirties_core.shown_times import span_when
 from thirties_core.plan_tools import NOT_DONE
 from thirties_core.timeline_layout import (DEFAULT_UNITS, Card, DayLayout, FreeStretch, WeekLayout, amount_text,
                                            day_layout, delete_call, free_text, mark_label_top, movable, move_call,
@@ -1000,7 +1001,7 @@ class WeekColumnArea(Gtk.DrawingArea):
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 s = b.span
                 from thirties_core.titles import title_of
-                tooltip.set_text(f"{title_of(s.title)}\n{format_clock(s.start_dt)} – {format_clock(s.end_dt)}")
+                tooltip.set_text(f"{title_of(s.title)}\n{span_when(s)}")  # by blocks, unless real (shown_times)
                 return True
         return False
 

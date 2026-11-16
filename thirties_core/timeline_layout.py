@@ -128,10 +128,12 @@ class Card:
 
     @property
     def times(self) -> str:
-        """The real times, for the tooltip: '2:10 PM – 3:00 PM', and when it really happened if that differs."""
+        """The times, for the tooltip: '2:00 PM – 3:00 PM' by its blocks, or to the minute when the user or a
+        calendar gave them (shown_times), and when it really happened if the user said and that differs."""
+        from thirties_core.shown_times import exact, span_when
         s = self.span
-        text = f"{format_clock(s.start_dt)} – {format_clock(s.end_dt)}"
-        if s.status != SpanStatus.PLANNED and s.actual_start and s.actual_end and \
+        text = span_when(s)
+        if s.status != SpanStatus.PLANNED and s.actual_start and s.actual_end and exact(s) and \
                 (s.actual_start, s.actual_end) != (s.start_dt, s.end_dt):
             text += f" (really {format_clock(s.actual_start)} – {format_clock(s.actual_end)})"
         return text
