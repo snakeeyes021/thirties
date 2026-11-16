@@ -170,6 +170,14 @@ def _listed(text: str, title: str) -> bool:
     return bool(mine) and mine <= name_words(text)
 
 
+def pointed_back(pt: "PlanTools", titles: List[str]) -> List[str]:
+    """The items a pointer this turn ("it", "that", "both") can reach: those the last message the user was shown
+    lists, else those the user's previous message named."""
+    said, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    pool = titles + _open_items_shown(pt, shown, titles)
+    return [t for t in pool if _listed(shown, t)] or [t for t in titles if _named(said, t, titles)]
+
+
 def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
           besides: Iterable[str] = ()) -> Tuple[Optional[str], Optional[str]]:
     """(why the done can't go ahead, the user's words about the item). The words are the message with a pointer
@@ -198,8 +206,7 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         return None, message
     if any(_named(message, t, titles) for t in others):
         return refusal, message  # they're talking about other items
-    pool = titles + _open_items_shown(pt, shown, titles)
-    pointed = [t for t in pool if _listed(shown, t)] or [t for t in titles if _named(said, t, titles)]
+    pointed = pointed_back(pt, titles)
     if title not in pointed:
         return refusal, message
     many = len(set(pointed))
@@ -219,4 +226,4 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     return None, POINTER_RE.sub(title, message)
 
 
-__all__ = ["check", "prior_exchange", "BULK_RE", "MOST_POINTED"]
+__all__ = ["check", "pointed_back", "prior_exchange", "BULK_RE", "MOST_POINTED"]

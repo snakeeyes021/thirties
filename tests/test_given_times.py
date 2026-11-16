@@ -95,6 +95,83 @@ class TestATimeTheUserStates(GivenCase):
         self.assertIn("7:40 AM", span_when(done))
 
 
+
+class TestPointersAndItemsSaidTogether(GivenCase):
+    """"Put it at 4:45" is the user's time for the one item just named; "A and B at 4:45" is both items' time."""
+
+    def test_a_pointer_to_the_one_item_just_named(self):
+        self.t.prior_exchange = ("", "Want me to put Drop off the parcel on this afternoon?")
+        span = self.add({"title": "Drop off the parcel", "start": "4:45 PM", "duration": "15 min"},
+                        "yes, put it at 4:45")
+        self.assertEqual(span.given_start, at("16:45"))
+        self.assertEqual(span_when(span), "4:45 PM – 5:00 PM")
+
+    def test_a_pointer_to_what_the_user_named_last_time(self):
+        span = self.add({"title": "Water the ferns", "start": "2:00 PM", "duration": "15 min"}, "water the ferns at 2")
+        self.t.prior_exchange = ("the ferns look dry", "")
+        self.t.user_message = "move that to 5:10"
+        out = self.t.execute("update_event", {"event": span.id, "start": "5:10 PM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        span = next(s for s in self.t.day_plan.spans if s.id == span.id)
+        self.assertEqual(span.given_start, at("17:10"))
+
+    def test_a_pointer_is_no_ones_when_two_items_were_named(self):
+        self.add({"title": "Water the ferns", "start": "2:00 PM", "duration": "15 min"}, None)
+        self.t.prior_exchange = ("", "Drop off the parcel, or Water the ferns first?")
+        span = self.add({"title": "Drop off the parcel", "start": "4:45 PM", "duration": "15 min"}, "put it at 4:45")
+        self.assertIsNone(span.given_start)
+        self.assertEqual(span_when(span), "4:30 PM – 5:00 PM")
+
+    def test_items_said_together_share_the_time(self):
+        message = "drop off the parcel and water the ferns at 4:45"
+        parcel = self.add({"title": "Drop off the parcel", "start": "4:45 PM", "duration": "15 min"}, message)
+        ferns = self.add({"title": "Water the ferns", "start": "4:45 PM", "duration": "15 min", "alongside": True},
+                         message)
+        self.assertEqual((parcel.given_start, ferns.given_start), (at("16:45"), at("16:45")))
+
+    def test_items_each_with_their_own_time_keep_their_own(self):
+        message = "water the ferns at 4 and drop off the parcel at 4:45"
+        parcel = self.add({"title": "Drop off the parcel", "start": "4:45 PM", "duration": "15 min"}, message)
+        ferns = self.add({"title": "Water the ferns", "start": "4:45 PM", "duration": "15 min", "alongside": True},
+                         message)  # put at the parcel's time: not a time the user gave the ferns
+        self.assertEqual((parcel.given_start, ferns.given_start), (at("16:45"), None))
+
+
+class TestAShiftTheUserAsksFor(GivenCase):
+    """A stated time shifted at the user's word ("an hour later") is still theirs: they anchored it."""
+
+    def shifted(self, message, shift, prior=None):
+        span = self.add({"title": "Water the ferns", "start": "4:45 PM", "duration": "30 min"},
+                        "water the ferns at 4:45")
+        self.t.prior_exchange = prior
+        self.t.user_message = message
+        out = self.t.execute("update_event", {"event": span.id, "shift": shift})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        return next(s for s in self.t.day_plan.spans if s.id == span.id)
+
+    def test_an_hour_later(self):
+        span = self.shifted("move the ferns an hour later", "+1 hour")
+        self.assertEqual((span.start_dt, span.given_start), (at("17:45"), at("17:45")))
+        self.assertEqual(span_when(span), "5:45 PM – 6:30 PM")
+
+    def test_pushed_back_by_a_pointer(self):
+        span = self.shifted("push it back 20 minutes", "+20 minutes", prior=("", "Water the ferns is at 4:45 PM."))
+        self.assertEqual(span.given_start, at("17:05"))
+        self.assertTrue(start_exact(span))
+
+    def test_a_shift_the_user_did_not_ask_for_drops_it(self):
+        span = self.shifted("sounds good", "+1 hour")
+        self.assertIsNone(span.given_start)
+        self.assertEqual(span_when(span), "5:30 PM – 6:30 PM")
+
+    def test_a_shift_of_a_time_thirties_picked_stays_by_blocks(self):
+        span = self.add({"title": "Water the ferns", "start": "2:00 PM", "duration": "15 min"}, "water the ferns")
+        self.t.user_message = "push the ferns back 15 minutes"
+        self.t.execute("update_event", {"event": span.id, "shift": "+15 minutes"})
+        span = next(s for s in self.t.day_plan.spans if s.id == span.id)
+        self.assertIsNone(span.given_start)
+
+
 class TestATimeThirtiesPicks(GivenCase):
 
     def test_with_nobody_talking_nothing_is_kept(self):

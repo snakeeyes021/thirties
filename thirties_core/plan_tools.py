@@ -1150,6 +1150,7 @@ class PlanTools:
             return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
+        was = (span.start_dt, span.end_dt)  # for a time the user stated, moved by a shift (given_times.py)
 
         if shift not in (None, ""):
             delta = timedelta(minutes=parse_shift_minutes(shift))
@@ -1208,7 +1209,8 @@ class PlanTools:
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
         # --- a new time the user stated for it is kept, to be shown as said (given_times.py) ---
         from thirties_core.given_times import keep as keep_given
-        keep_given(self, span, start not in (None, "") or shift not in (None, ""), end not in (None, ""))
+        keep_given(self, span, start not in (None, ""), end not in (None, ""),
+                   was if shift not in (None, "") else None)
         # --- end a time the user stated ---
         self._persist(span)
         notes = self._if_doing_now(span, notes)
