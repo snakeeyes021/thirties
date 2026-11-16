@@ -158,8 +158,9 @@ def unreviewed_spans(spans: List[EventSpan], now: datetime, since: datetime) -> 
     )
 
 
-def typical_minutes(spans: List[EventSpan], title: str, min_samples: int = 3) -> Optional[int]:
-    """How long this kind of activity really takes, from reliable times: the median, rounded to 15 minutes."""
+def typical_minutes(spans: List[EventSpan], title: str, min_samples: int = 3, unit: int = 15) -> Optional[int]:
+    """How long this kind of activity really takes, from reliable times: the median, rounded to ``unit`` minutes
+    (15 for planning an item; a routine's quick steps are packed by the minute, unit=1)."""
     key = set(activity_key(title).split())
 
     def same_kind(other: str) -> bool:  # "designing" and "designing acme" are the same kind of thing
@@ -171,7 +172,7 @@ def typical_minutes(spans: List[EventSpan], title: str, min_samples: int = 3) ->
               and same_kind(s.title)]
     if len(actual) < min_samples:
         return None
-    return max(15, int(round(statistics.median(actual) / 15)) * 15)
+    return max(unit, int(round(statistics.median(actual) / unit)) * unit)
 
 
 def daily_capacity_minutes(spans: List[EventSpan], now: datetime, min_days: int = 5) -> Optional[int]:

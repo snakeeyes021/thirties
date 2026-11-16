@@ -1019,12 +1019,12 @@ class AssistantTools(KindTools):
             if start in (None, ""):
                 raise ToolError("Give start (its parts go on one thirty after another from there) or parts (a start "
                                 "and the steps for each thirty).")
-            from thirties_core.routines import natural_parts  # its natural parts, one thirty each, in order
-            lasting = self.pt._lasting()
+            from thirties_core.routines import natural_parts, step_minutes  # its natural parts, one thirty each
             first = self.pt._start(start)
+            # each step as long as the user said, else as long as it really takes them (routines.step_minutes)
+            minutes_of = step_minutes(self.pt._lasting(), self._history()[0] if self.pt.scheduler else ())
             parts = [{"start": format_clock(first + timedelta(minutes=30 * k)), "items": group}
-                     for k, group in enumerate(natural_parts(note, (lambda s: lasting.for_item(s).minutes)
-                                                             if lasting is not None else None))]
+                     for k, group in enumerate(natural_parts(note, minutes_of))]
         by_text = {step_times.key(s): s for s in reversed(steps)}  # by name; the note's wording for its id
         placed, already, lines, extra, learned = [], [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan

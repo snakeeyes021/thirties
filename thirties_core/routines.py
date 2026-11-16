@@ -30,7 +30,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from thirties_core.clock import (ClockError, format_clock, format_duration, parse_clock, parse_day,
                                  first_fitting_thirty, parse_duration_minutes, resolve_clock, thirty_ceil, thirty_of)
@@ -320,6 +320,20 @@ def natural_parts(note: Dict[str, Any], minutes_of=None) -> List[List[str]]:
     if len(groups) > 1:
         return [p for g in groups for p in split(g)]
     return split(groups[0]) if groups else []
+
+
+def step_minutes(lasting=None, history=()) -> Callable[[str], int]:
+    """How long each step of a routine takes the user, for packing its parts (natural_parts): the length the user
+    stated for it (item_facts), else how long it really took them (stats.typical_minutes: done steps with times
+    they gave, to the minute), else 0 (natural_parts then uses STEP_MINUTES). Steps the user really finishes
+    quickly share a thirty; ones that run long get one of their own."""
+    from thirties_core.stats import typical_minutes
+    spans = list(history or [])
+
+    def minutes_of(step: str) -> int:
+        stated = lasting.for_item(step).minutes if lasting is not None else 0
+        return stated or (typical_minutes(spans, step, unit=1) if spans else None) or 0
+    return minutes_of
 
 
 def _hhmm(dt: datetime) -> str:
