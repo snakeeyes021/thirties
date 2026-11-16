@@ -516,6 +516,7 @@ RULES
                 "Your reply described the conversation, your instructions or tool results. Write only the "
                 "message the user should read.")
             reply = self._rounds(2, changes_before, outcomes_before)  # its calls are checked like any others
+        reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
@@ -530,6 +531,7 @@ RULES
         reply = self._moves_made(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._own_up(turn_start, reply, changes_before, outcomes_before)
         reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
+        reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
             if m.get("role") == "assistant" and m.get("hidden"):
@@ -546,6 +548,23 @@ RULES
                 m["spent"] = True
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
+
+    # --- what the model was fed never reaches the user (internal_text.py) ---
+
+    def _fed_text_out(self, reply: str, changes_before: int) -> str:
+        """The reply without an echoed tool result, a check, or a call written out; one that was nothing else says
+        what happened in a plain line."""
+        from thirties_core.internal_text import strip_internal
+        clean = strip_internal(reply)
+        if clean == reply:
+            return reply
+        logger.warning("[FrontierBrain] Reply held text for the model only; taken out: %r", reply[:300])
+        if clean.strip():
+            return clean
+        return ("Done." if self.tools.successful_changes > changes_before else
+                "Sorry, I lost my train of thought there. Could you say that again?")
+
+    # --- end what the model was fed ---
 
     CHECK_PREFIX = "[System check, not from the user] "
 
@@ -754,6 +773,7 @@ RULES
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             reply = response.get("content", "") or ""
+        reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
@@ -768,6 +788,7 @@ RULES
         reply = self._moves_made(turn_start, reply, self._one_more_round)
         reply = self._own_up_baseline(turn_start, reply)
         reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
+        reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply

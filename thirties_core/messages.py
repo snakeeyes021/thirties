@@ -404,6 +404,8 @@ def clean_message(text: str, tools=None, said: str = "") -> str:
     phone."""
     if not text:
         return text
+    from thirties_core.internal_text import strip_internal  # what only the model was fed never reaches the user
+    text = strip_internal(text) or "Sorry, I lost my train of thought there. Could you say that again?"
     shown = str(getattr(tools, "shown_schedule", "") or "") if tools is not None else ""
     out = text if DONE_ASKED_RE.search(said or "") else without_done_rows(text, shown.splitlines())
     out = names_not_ids(out, known_names(tools) if tools is not None else None)
