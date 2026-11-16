@@ -23,7 +23,7 @@ class TestTelegramSplitsWithoutCutting(unittest.TestCase):
         text = long_reply()
         self.assertGreater(len(text), 4000)
         sent = []
-        with patch.object(TelegramClient, "_send_chunk", lambda _self, chat, chunk, mode, key=None: sent.append(chunk) or True):
+        with patch.object(TelegramClient, "_send_chunk", lambda _self, chat, chunk, mode, key=None, reply_markup=None: sent.append(chunk) or True):
             self.assertTrue(self.client.send_message(42, text))
         self.assertGreater(len(sent), 1)
         self.assertTrue(all(len(c) <= 4000 for c in sent))
