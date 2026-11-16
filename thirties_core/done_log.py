@@ -438,15 +438,23 @@ class DoneLog:
         by hand in the Done note go back to their lists. Returns what moved, for the log. Runs while Joplin is up
         (every couple of minutes, from the background service)."""
         from thirties_core.lists import ListCatalog
-        writer = assistant._writer()
-        if writer is None or not writer.allowed or not getattr(writer.cfg, "file_done", True):
-            return []
         if not assistant._joplin_up():
             return []
+        # --- a line Thirties ticked and the user unticked: not done after all (unticked.py; it writes nothing) ---
+        from thirties_core.unticked import not_done_after_all
+        try:
+            undone = not_done_after_all(self.db, assistant)
+        except Exception as e:
+            logger.warning("Couldn't check for lines unticked by hand: %s", e)
+            undone = []
+        # --- end not done after all ---
+        writer = assistant._writer()
+        if writer is None or not writer.allowed or not getattr(writer.cfg, "file_done", True):
+            return undone
         roles = ListCatalog(self.db).roles()
         now, today = assistant.pt._now(), assistant._today()
         completed = self.db.completed_since(today - timedelta(days=2))
-        moved: List[str] = []
+        moved: List[str] = list(undone)
         for note in assistant._joplin_notes():
             role = (roles.get(note["id"]) or {}).get("role")
             if role not in FILED_ROLES:
