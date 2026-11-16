@@ -1,5 +1,6 @@
-"""The whole day as a record: one plain line per item with its start and end, things that start together on one
-line, no bullets, and every time with its AM/PM (in the schedule, what's next and the notices alike)."""
+"""The whole day as a record, by blocks: one plain line per thirty something starts in, with its block and the end
+of the last block it reaches, things in that thirty on one line, no bullets, and every time with its AM/PM (in the
+schedule, what's next and the notices alike)."""
 
 from __future__ import annotations
 
@@ -52,8 +53,7 @@ class TestWholeDayLines(RecordCase):
     def test_one_line_per_item_with_its_start_and_end(self) -> None:
         from thirties_core.messages import whole_day_lines
         lines = whole_day_lines(self.manager.day_plan)
-        self.assertIn("9:00 AM – 9:15 AM Mist the ferns (done)", lines)
-        self.assertIn("9:15 AM – 9:30 AM Sketch a kite", lines)
+        self.assertIn("9:00 AM – 9:30 AM Mist the ferns (done), Sketch a kite", lines)  # one thirty, one line
         self.assertEqual([line for line in lines if "Shelf build" in line],
                          ["3:00 PM – 6:30 PM Shelf build (done) + Radio play (until 4:00 PM)"])  # once, with its pair
         self.assertIn("9:00 PM – 9:30 PM Read", lines)
@@ -70,7 +70,7 @@ class TestWholeDayLines(RecordCase):
         out = self.turn('CALL show_schedule {"whole_day": true}', "Here's your whole day.",
                         said="show me the whole day")
         self.assertIn("3:00 PM – 6:30 PM Shelf build (done) + Radio play (until 4:00 PM)", out.splitlines())
-        self.assertIn("9:00 AM – 9:15 AM Mist the ferns (done)", out.splitlines())  # done rows stay in the record
+        self.assertIn("9:00 AM – 9:30 AM Mist the ferns (done), Sketch a kite", out.splitlines())  # done stays
         self.assertEqual(bare_times(out), [])
         self.assertFalse(any(line.startswith("- ") for line in out.splitlines()))
 

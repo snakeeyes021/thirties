@@ -143,12 +143,16 @@ def _sounding(events: Sequence[Tuple[datetime, datetime, str]], t: datetime) -> 
     return any(s < t + SHORT and e > t for s, e, _ in events)
 
 
-def once_lines(events: Sequence[Tuple[datetime, datetime, str]]) -> List[str]:
+def once_lines(events: Sequence[Tuple[datetime, datetime, str]], exact: frozenset = frozenset()) -> List[str]:
     """Each item once, in the thirty it starts in. One that runs on past that thirty says when it ends ("Export the
-    print files (until 12:45 PM)"), so an item lasting all morning is one line, not a row in every thirty it
+    print files (until 1:00 PM)"), so an item lasting all morning is one line, not a row in every thirty it
     touches. Its end is left out when the next row starts right then (10-29: an "(until 8:30)" right before the
     next item added nothing), and on the last row. The rest get an end time only before a gap, as in
-    agenda_lines."""
+    agenda_lines. An end is said by the block it ends in (the minutes under the hood are never shown), unless
+    it's one of ``exact``: an end the user or a calendar gave (shown_times)."""
+    def shown(end: datetime) -> datetime:
+        return end if end in exact else thirty_ceil(end)
+
     starts: dict = {}
     for e in sorted(events, key=lambda e: e[0]):
         starts.setdefault(thirty_of(e[0]), []).append(e)
@@ -156,12 +160,12 @@ def once_lines(events: Sequence[Tuple[datetime, datetime, str]]) -> List[str]:
     out = []
     for n, block in enumerate(blocks):
         next_block = blocks[n + 1] if n + 1 < len(blocks) else None
-        ends = [e if e > block + SHORT and next_block is not None and next_block != e else None
+        ends = [shown(e) if shown(e) > block + SHORT and next_block is not None and next_block != shown(e) else None
                 for _, e, _ in starts[block]]
         until = ""
         if len(set(ends)) == 1 and ends[0] is not None:  # all of it ends together: said once, for the row
             until, ends = f" (until {format_clock(ends[0])})", [None] * len(ends)
-        elif next_block is not None and all(e <= block + SHORT for _, e, _ in starts[block]) \
+        elif next_block is not None and all(shown(e) <= block + SHORT for _, e, _ in starts[block]) \
                 and not _sounding(events, block + SHORT):
             until = f" (until {format_clock(block + SHORT)})"
         lines = slice_lines([(s, e, f"{title} (until {format_clock(end)})" if end else title)
@@ -175,11 +179,11 @@ def once_lines(events: Sequence[Tuple[datetime, datetime, str]]) -> List[str]:
 
 
 def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered: bool = False,
-                 once: bool = False) -> List[str]:
+                 once: bool = False, exact: frozenset = frozenset()) -> List[str]:
     """A plan as a reader expects it, by thirties: each row is a thirty and what's sounding in it (consecutive
     thirties with the same things are one row); an end time only before a gap. Items are (start, end, title,
     note). Numbered lists (options to choose from) keep one line per item. ``once``: each item listed once, in the
-    thirty it starts in, a long one with its end (once_lines)."""
+    thirty it starts in, a long one with its end (once_lines; ``exact``: ends that may be shown to the minute)."""
     if numbered:
         out = []
         for i, (start, end, title, note) in enumerate(items):
@@ -193,7 +197,7 @@ def agenda_lines(items: Sequence[Tuple[datetime, datetime, str, str]], numbered:
     if not events:
         return []
     if once:
-        return once_lines(events)
+        return once_lines(events, exact)
     rows: List[Tuple[datetime, datetime, Tuple[int, ...]]] = []
     t, last = thirty_of(min(e[0] for e in events)), max(e[1] for e in events)
     while t < last:
@@ -243,7 +247,8 @@ NOW_WINDOW = timedelta(minutes=10)
 
 
 def real_times(*texts: str, spans=(), now: Optional[datetime] = None) -> frozenset:
-    """Minute times that are facts, not arithmetic: the real start and end of items on the plan, times the user said,
+    """Minute times that are facts, not arithmetic: an item's times the user or a calendar gave
+    (shown_times.kept_times: never a routine step's, an estimate's or a length Thirties placed), times the user said,
     and the time it is now (10-26: a reply called 8:41 "8:30", rounding the current time to its block). A reply may say
     these as they are; any other time is said by its block."""
     texts = list(texts) + [s.title for s in spans]  # "Flight (boards 2:25)": a time in a title is a fact too
@@ -257,8 +262,9 @@ def real_times(*texts: str, spans=(), now: Optional[datetime] = None) -> frozens
         for m in _ANY_CLOCK_RE.finditer(t or ""):  # 12-hour or 24-hour ("boarding at 14:25")
             h = int(m.group(1))
             out.add(((h % 12) or 12, int(m.group(2))))
+    from thirties_core.shown_times import kept_times  # only an item's facts: never a minute time Thirties worked out
     for s in spans:
-        for dt in (s.start_dt, s.end_dt):
+        for dt in kept_times(s):
             out.add(((dt.hour % 12) or 12, dt.minute))
     return frozenset(out)
 

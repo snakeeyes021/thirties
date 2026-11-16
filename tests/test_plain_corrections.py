@@ -83,7 +83,7 @@ class TestALongItemIsOneLine(unittest.TestCase):
     def test_one_line_with_its_start_and_end(self):
         rows = self.rows()
         art = [r for r in rows if "Export the print files" in r]
-        self.assertEqual(art, ["- 9:30 AM – Export the print files (until 12:45 PM)"], rows)
+        self.assertEqual(art, ["- 9:30 AM – Export the print files (until 1:00 PM)"], rows)  # the end of its block
         self.assertEqual(sum("Work" in r for r in rows), 1, rows)  # Work too: once, with its end
         self.assertIn("- 8:30 AM – Work (until 4:00 PM)", rows)
         self.assertIn("- 12:30 PM – Send the invoices", rows)  # during the export: its own line
@@ -100,7 +100,7 @@ class TestALongItemIsOneLine(unittest.TestCase):
         from thirties_core.whats_next import render
         shown = render_schedule(self.plan, at("09:10"))
         self.assertEqual(shown.count("Export the print files"), 1, shown)
-        self.assertIn("Export the print files (until 12:45 PM)", shown)
+        self.assertIn("Export the print files (until 1:00 PM)", shown)
         nxt = render(self.plan, at("09:10"), mode="rest")
         self.assertEqual(nxt.count("Export the print files"), 1, nxt)
 

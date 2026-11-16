@@ -30,7 +30,7 @@ class TestNoDoneRows(WhatsNextCase):
         self.assertNotIn("Glazing", text)
         self.assertNotIn("(done)", text)
         whole = render_schedule(plan, at("17:10"), whole_day=True).splitlines()
-        self.assertIn("8:00 AM – 8:15 AM Water the plants (done)", whole)  # the whole day is the day's record
+        self.assertIn("8:00 AM – 8:30 AM Water the plants (done)", whole)  # the day's record, by its blocks
         self.assertIn("7:00 PM – 8:00 PM Glazing (done)", whole)
         self.assertIn("8:00 PM – 9:30 PM Movie", whole)
 

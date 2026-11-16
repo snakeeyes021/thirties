@@ -21,6 +21,7 @@ from typing import Callable, Iterable, List, Optional, Sequence
 
 from thirties_core.clock import agenda_lines, format_clock, slice_lines, thirty_ceil, thirty_of
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
+from thirties_core.shown_times import exact, exact_ends, shown_end
 
 HALF = timedelta(minutes=30)
 MISSED_HEADING = "Not marked yet:"
@@ -154,9 +155,9 @@ def status_line(plan: DayPlan, now: datetime, next_start: Optional[datetime] = N
     if not here:
         return f"You're in the {format_clock(block)} block, with nothing planned in it."
 
-    def said(s: EventSpan) -> str:
-        runs_on = s.end_dt > block + HALF and s.end_dt != next_start
-        return f"{s.title} (until {format_clock(s.end_dt)})" if runs_on else s.title
+    def said(s: EventSpan) -> str:  # its end by its block, unless the user or a calendar gave it (shown_times)
+        runs_on = shown_end(s) > block + HALF and shown_end(s) != next_start
+        return f"{s.title} (until {format_clock(shown_end(s))})" if runs_on else s.title
     lines = slice_lines([(max(s.start_dt, block), s.end_dt, said(s)) for s in here])
     return f"You're in the {format_clock(block)} block: " + ", then ".join(lines) + "."
 
@@ -169,6 +170,13 @@ def _note(s: EventSpan) -> str:
     return s.status.value if s.status != SpanStatus.PLANNED else ""
 
 
+def _titled(s: EventSpan, block_start: Optional[datetime] = None) -> str:
+    """The item's title in a block's row, with its real start when the user or a calendar gave one inside the block
+    ("Orthodontist at 2:45 PM" in the 2:30 PM row); Thirties' own minutes are never said (shown_times)."""
+    start = thirty_of(s.start_dt) if block_start is None else block_start
+    return f"{s.title} at {format_clock(s.start_dt)}" if exact(s) and s.start_dt != start else s.title
+
+
 def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only: bool = False) -> List[str]:
     """The plan from ``start`` on (the whole day without one), by blocks: each item once, in the block it starts
     in, things at the same time joined with +, a long item with its end, and others with an end time only before a
@@ -178,10 +186,10 @@ def schedule_rows(plan: DayPlan, start: Optional[datetime] = None, planned_only:
     day. ``planned_only``: what's still to come (nothing skipped or unanswered either)."""
     items = [s for s in _row_items(plan) if (start is None or s.start_dt >= start) and s.status != SpanStatus.DONE
              and (not planned_only or (s.status == SpanStatus.PLANNED and not s.tentative))]  # done: never listed
-    rows = [(s.start_dt, s.end_dt, s.title, _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
+    rows = [(s.start_dt, s.end_dt, _titled(s), _note(s)) for s in sorted(items, key=lambda s: s.start_dt)]
     # each item once, a long one with its end: an item lasting all morning was a row in every thirty it touched,
-    # and read as several items (clock.once_lines)
-    return agenda_lines(rows, once=True)
+    # and read as several items (clock.once_lines); ends by their blocks unless the user or a calendar gave them
+    return agenda_lines(rows, once=True, exact=exact_ends(items))
 
 
 def plain_rows(rows: List[str]) -> List[str]:
@@ -204,25 +212,38 @@ def plain_rows(rows: List[str]) -> List[str]:
 
 
 def whole_day_lines(plan: DayPlan) -> List[str]:
-    """The whole day as a record: one plain line per item with its real start and end, every time with AM/PM
-    ("3:00 PM – 6:30 PM Shelf build (done)"), done items too (it's what the day held), and things that start
-    together on one line ("A + B"), the line running to the later end and the other saying its own ("Podcast
-    (until 4:00 PM)"). Never a row per half hour, an empty time line with the items under it, or bullets."""
+    """The whole day as a record, by blocks: one plain line per thirty that something starts in, with the block it
+    starts in and the end of the last block it reaches ("9:00 AM – 9:30 AM Wake stretch, Kettle on, Floss, Tidy desk"),
+    done items too (it's what the day held). Things one after another in the thirty are joined with ", ", things
+    at the same time with " + "; one that runs past the others says its own end ("Podcast (until 4:00 PM)"). The
+    minutes under the hood (a routine's steps, a done item's estimate, a placed item's length) are never shown: a
+    time is a block edge, unless the user or a calendar gave it ("Dentist at 2:45 PM", "I did it 3:10 to 3:40").
+    Never a row per half hour, an empty time line with the items under it, or bullets."""
     groups: List[List[EventSpan]] = []
     for s in sorted(_row_items(plan), key=lambda s: (s.start_dt.timestamp(), -s.end_dt.timestamp())):
-        if groups and groups[-1][0].start_dt == s.start_dt:
+        if groups and thirty_of(groups[-1][0].start_dt) == thirty_of(s.start_dt):
             groups[-1].append(s)
         else:
             groups.append([s])
     out = []
     for group in groups:
-        end = max(s.end_dt for s in group)
+        block = thirty_of(group[0].start_dt)
+        end = max(shown_end(s) for s in group)
+        # a line of facts only (a calendar event, what the user said they did) keeps its real start
+        first = group[0].start_dt if all(exact(s) and s.start_dt == group[0].start_dt for s in group) else block
+        notes = [_note(s) for s in group]
+        one_note = notes[0] if len(group) > 1 and notes[0] and len(set(notes)) == 1 else ""
 
         def said(s: EventSpan) -> str:
-            notes = [f"until {format_clock(s.end_dt)}"] if s.end_dt != end else []
-            notes += [_note(s)] if _note(s) else []
-            return s.title + (f" ({', '.join(notes)})" if notes else "")
-        out.append(f"{format_clock(group[0].start_dt)} – {format_clock(end)} " + " + ".join(said(s) for s in group))
+            extras = []
+            if shown_end(s) != end and shown_end(s) > block + HALF:
+                extras.append(f"until {format_clock(shown_end(s))}")
+            if _note(s) and not one_note:
+                extras.append(_note(s))
+            return _titled(s, first) + (f" ({', '.join(extras)})" if extras else "")  # a real time: "at 2:45 PM"
+        lines = slice_lines([(s.start_dt, s.end_dt, said(s)) for s in group])
+        out.append(f"{format_clock(first)} – {format_clock(end)} " + ", ".join(lines)
+                   + (f" (all {one_note})" if one_note else ""))
     return out
 
 
@@ -317,7 +338,7 @@ _ID_TOKEN_RE = re.compile(r"(?<![\w/.#=-])(?:cal:)?(?=[0-9a-f]*[0-9])(?=[0-9a-f]
                           r"|(?<![\w-])routine-\d{4}-\d{2}-\d{2}-[\w-]+")
 # The user asking what got done: then done rows are the answer, and stay
 DONE_ASKED_RE = re.compile(r"\b(done|did i|finished|completed|accomplish\w*|got through|ticked)\b", re.IGNORECASE)
-_DONE_ROW_RE = re.compile(r"^\s*(?:[-•*]\s*)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*[–—-].*\((?:done|[^)]*, done)\)\s*$")
+_DONE_ROW_RE = re.compile(r"^\s*(?:[-•*]\s*)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*[–—-].*\((?:(?:all )?done|[^)]*, done)\)\s*$")
 
 
 def plain_lines(text: str) -> str:

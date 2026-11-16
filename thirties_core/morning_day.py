@@ -21,7 +21,7 @@ def place_pinned(assistant: Any) -> List[str]:
     if pt.scheduler is None or not pt.is_current(pt.day_plan):
         return []
     from thirties_core import if_time
-    from thirties_core.clock import format_clock
+    from thirties_core.clock import format_clock, thirty_of
     from thirties_core.horizons import candidates_for_day
     try:
         pinned = [c for c in candidates_for_day(pt, pt.day_plan.target_date, limit=None) if c.source == "pinned"]
@@ -36,7 +36,7 @@ def place_pinned(assistant: Any) -> List[str]:
             logger.warning("Couldn't place %s: %s", c.title, e)
             continue
         if spot is not None:
-            out.append(f"{c.title} at {format_clock(spot)}")
+            out.append(f"{c.title} at {format_clock(thirty_of(spot))}")  # Thirties picked it: its block
     return out
 
 

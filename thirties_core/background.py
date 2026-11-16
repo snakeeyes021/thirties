@@ -217,7 +217,10 @@ class BackgroundService:
         try:  # a message a turn already stored goes out as it was stored: the phone reads what the chat shows
             now = now or self.now()
             if to_conversation:
-                keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41
+                spans = self.manager().day_plan.spans  # "it's 8:41" stays 8:41, and a fixed item's own time
+                fixed = self.manager().tools._is_fixed  # (the bell says it: "Vet at 4:45")
+                keep = real_times(*(format_clock(s.start_dt) for s in spans if not s.is_envelope and fixed(s)),
+                                  spans=spans, now=now)
                 text = to_thirties(self.manager().tools.shorten(text), keep)  # short titles, AM/PM kept
         except Exception:
             pass
