@@ -1071,7 +1071,7 @@ RULES
         if kept:
             said.append("something was taken off, but " + "; ".join(kept))
         if promised:  # what each promise needs (reply_checks.unkept_promises)
-            said += reply_checks.promise_checks(promised)
+            said += reply_checks.promise_checks(promised, self, turn_start)
         check = ("Your reply says " + ", and ".join(said) + ". Make the change now, or correct your reply so it "
                  "matches the plan." if said else "")
         if talk:

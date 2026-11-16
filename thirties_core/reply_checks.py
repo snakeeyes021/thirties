@@ -94,11 +94,18 @@ PROMISE_RE = re.compile(
 # what Python adds to replies (what's next, Not marked yet, the block line): a promise that it stops or changes holds
 # only after set_reply_extras, never with another call; writing less never removes them
 _PART = r"(?:block(?: talk| mention| line)?s?|lists?|next (?:section|lines?|list)|what'?s next|not marked yet|status line)"
+# a part's name as a reply writes it: in quotes or not ('the "Not marked yet" section', the “what's next” lines)
+_Q = "[\"'“”‘’]?"
+_NAMED = rf"{_Q}{_PART}{_Q}"
+_WORDS = rf"(?:{_Q}\w+{_Q} ){{0,2}}"
 EXTRAS_RE = re.compile(
-    rf"\bno (?:more )?{_PART}"
+    rf"\bno (?:more )?{_NAMED}"
     rf"|\b(?:won'?t|will not|i'?ll stop|stop(?:ped)?|not going to|no longer) (?:\w+ ){{0,2}}(?:show|send|includ|add|"
-    rf"mention|list|say|print)\w*(?: \w+){{0,4}} {_PART}"
-    rf"|\b(?:dropped|removed|deleted|cut|took out|turned off|switched off) (?:\w+ ){{0,2}}{_PART}",
+    rf"mention|list|say|print)\w*(?: \w+){{0,4}} {_NAMED}"
+    rf"|\b(?:dropped|removed|deleted|cut|took out|turned off|switched off|hid|hidden|muted|turned (?:it |them )?back "
+    rf"on|turned on|switched (?:back )?on|brought back|restored) {_WORDS}{_NAMED}"
+    rf"|\b(?:the |your )?{_NAMED}(?: (?:section|lines?|list|part))? (?:is|are) (?:now )?(?:off|hidden|gone|back on|"
+    rf"back|on again)\b",
     re.IGNORECASE)
 # the calls that record any other such promise, so Python keeps it
 RECORDING_TOOLS = ("set_reply_extras", "mute_checkins", "unmute_checkins", "remember", "update_profile",
@@ -249,6 +256,14 @@ def strip_corrections(reply: str) -> str:
     return out or reply
 
 
+def _refused(brain: Any, turn_start: int, name: str) -> bool:
+    """The call was made this turn and refused, with no later one of it going through: nothing changed."""
+    from thirties_core.plan_tools import NOT_DONE
+    outs = [str(m.get("content") or "") for m in brain.messages[turn_start:]
+            if m.get("role") == "tool" and m.get("name") == name]
+    return bool(outs) and all(o.startswith(NOT_DONE) for o in outs)
+
+
 def unkept_promises(brain: Any, turn_start: int, reply: str) -> List[str]:
     """Sentences promising what Thirties will or won't do from now on that no call this turn recorded: one about what
     Python adds to replies needs set_reply_extras; any other needs a call that records it (a mute, a note). The
@@ -268,13 +283,18 @@ def unkept_promises(brain: Any, turn_start: int, reply: str) -> List[str]:
     return out
 
 
-def promise_checks(promised: List[str]) -> List[str]:
-    """What the rewrite is told about each kind of unkept promise."""
+def promise_checks(promised: List[str], brain: Any = None, turn_start: int = 0) -> List[str]:
+    """What the rewrite is told about each kind of unkept promise (with the turn, a refused call is named as one)."""
     out = []
     if any(EXTRAS_RE.search(s) for s in promised):
-        out.append("something Python adds to replies (what's next, Not marked yet, or the block line) will stop or "
-                   "change, but set_reply_extras wasn't called this turn, so it won't: call set_reply_extras now, "
-                   "or leave the promise out")
+        if brain is not None and _refused(brain, turn_start, "set_reply_extras"):
+            out.append("something Python adds to replies (what's next, Not marked yet, or the block line) changed, "
+                       "but set_reply_extras was refused this turn, so nothing changed: leave that claim out, and "
+                       "answer only what the user asked")
+        else:
+            out.append("something Python adds to replies (what's next, Not marked yet, or the block line) will stop "
+                       "or change, but set_reply_extras wasn't called this turn, so it won't: call set_reply_extras "
+                       "now, or leave the promise out")
     if any(not EXTRAS_RE.search(s) for s in promised):
         out.append("later replies or messages will change, but no call recorded it, so nothing will change: make "
                    f"the call ({promise_tools()}) or leave the promise out")
@@ -289,14 +309,19 @@ def promise_tools() -> str:
     return ", ".join(named) or "the tool that records it"
 
 
+# said when a reply was nothing but a claim that didn't happen
+NOTHING_CHANGED = "I couldn't change that just now."
+
+
 def drop_sentences(reply: str, sentences: List[str]) -> str:
-    """The reply without these sentences (a promise Python can't keep), lines kept."""
+    """The reply without these sentences (a promise Python can't keep), lines kept; a reply that was nothing else
+    says plainly that nothing changed, never the claim."""
     out = reply
     for s in sentences:
         out = out.replace(s, "")
     out = re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", out))
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
-    return out or reply
+    return out or NOTHING_CHANGED
 
 
 def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = None) -> List[str]:

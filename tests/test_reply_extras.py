@@ -193,6 +193,36 @@ class TestSayingSoMatchesDoingSo(WhatsNextCase):
         self.assertFalse(effective(self.sched.config, self.sched.state_db, DAY)["status_line"])  # and kept
         self.assertEqual(out, "Done: the block line is off.")
 
+    def test_a_refused_change_said_as_made_is_sent_back(self) -> None:
+        # the user asked to clear an item, not to hide a list: set_reply_extras was refused, so nothing changed,
+        # while another call (a mute) went through. A reply saying the list is off is sent back, naming the refusal,
+        # and if the rewrite still says so the claim is left out
+        claim = ('Check-ins on it are paused, and I\'ve switched off the \u201cNot marked yet\u201d part so the page '
+                 'stays tidy. Enjoy the glazing!')
+        out = self.turn('CALL set_reply_extras {"part": "not_marked", "show": "off"}\n'
+                        'CALL mute_checkins {"event": "feed"}', claim, claim,
+                        said="the cat feeding from earlier is still showing, take it away")
+        refused = [m for m in self.manager.messages if m.get("role") == "tool" and m.get("name") == "set_reply_extras"]
+        self.assertTrue(refused and str(refused[0]["content"]).startswith("NOT_DONE"), refused)
+        self.assertTrue(effective(self.sched.config, self.sched.state_db, DAY)["not_marked"])  # nothing changed
+        checks = [m for call in self.engine.call_history for m in sent_messages(call)
+                  if m.get("role") == "user" and "set_reply_extras was refused" in str(m.get("content"))]
+        self.assertTrue(checks)  # sent back, saying the change didn't happen
+        self.assertNotIn("switched off", out)
+        self.assertIn("Enjoy the glazing!", out)  # the rest of the reply stays
+
+    def test_every_way_of_saying_a_part_changed_is_read_as_a_claim(self) -> None:
+        from thirties_core.reply_checks import EXTRAS_RE
+        for said in ('Okay, I turned off the "what\'s next" lines.', "I've hidden the Not marked yet list.",
+                     "The “what's next” lines are now off.", "I brought back the block line.",
+                     "Done: the block line is off."):
+            self.assertTrue(EXTRAS_RE.search(said), said)
+        for said in ("I turned off the oven timer reminder.", "Not marked yet:", "Feed the cat is next on the list."):
+            self.assertFalse(EXTRAS_RE.search(said), said)
+        from thirties_core.reply_checks import drop_sentences
+        only = "I turned off the block line."
+        self.assertNotIn("turned off", drop_sentences(only, [only]))  # nothing else to say: never the claim
+
     def test_an_ordinary_reply_isnt_mistaken_for_one(self) -> None:
         self.turn(ADD, "The fern's at 5:30, and the rest stays.", said="fern at 5:30")
         checks = [m for call in self.engine.call_history for m in sent_messages(call)
