@@ -271,7 +271,7 @@ class TestTheMorningReply(unittest.TestCase):
         set_debug_time(at("09:25"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
-        self.sched.config.assistant.after_change = "next"
+        self.sched.config.assistant.after_change = "rest"
         self.sched.state_db.upsert_span(EventSpan("pots", "Repot the fern", at("10:00"), at("10:30"),
                                                   SpanCategory.ACTIVITY))
         joplin = MagicMock()
@@ -295,13 +295,13 @@ class TestTheMorningReply(unittest.TestCase):
         out = self.say('CALL add_event {"title": "Fold laundry", "start": "11:00 AM", "duration": "30 minutes"}',
                        "Morning! Today: Repot the fern at 10, Fold laundry at 11.", said="morning")
         self.assertTrue(morning.is_done(self.sched.state_db, DAY))
-        self.assertNotIn("Next:", out)
+        self.assertNotIn("The rest of today:", out)
         self.assertNotIn("Now:", out)
         self.assertEqual(out.count("Fold laundry"), 1, out)
         set_debug_time(at("09:40"))
         out = self.say('CALL add_event {"title": "Call the vet", "start": "11:30 AM", "duration": "30 minutes"}',
                        "Added the vet call.", said="add a vet call at 11:30")
-        self.assertIn("Next:", out)  # a later change gets what's next, as before
+        self.assertIn("The rest of today:", out)  # a later change gets what's next, as before
 
 
 if __name__ == "__main__":

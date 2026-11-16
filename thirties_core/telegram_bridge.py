@@ -664,8 +664,8 @@ class ThirtiesTelegramBridge:
         return msg, "The list of Telegram commands is on your phone."
 
     def _cmd_now(self, chat_id: int) -> tuple:
-        """What's next (whats_next.py): what's on now, the next few things, open stretches, what's on today's list
-        with no time and what's not marked yet, the same slice a reply or a notice shows. The "What's next"
+        """What's next (whats_next.py): what's on now, the rest of today, open stretches, what's on today's list
+        with no time and what's not marked yet, the same as a reply or a notice shows. The "What's next"
         button sends this too."""
         from thirties_core import whats_next
         now = self._get_current_time()
@@ -673,9 +673,7 @@ class ThirtiesTelegramBridge:
         plan = self.conv_manager.day_plan
         if not (plan.day_start <= now < plan.day_end):
             return f"It's {format_clock(now)}, and nothing is planned for now.", None
-        from thirties_core.reply_extras import effective
-        mode = "rest" if effective(self.config, getattr(self.scheduler, "state_db", None),
-                                   plan.target_date)["whats_next"] == "rest" else "next"
+        mode = whats_next.asked_mode(self.config, getattr(self.scheduler, "state_db", None), plan.target_date)
         text = whats_next.summary(tools, now, mode)  # asked for: a mode given, so it's whole, whatever the settings
         whats_next.SentSummaries(getattr(self.scheduler, "state_db", None)).mark(plan, now, mode)
         return text or f"It's {format_clock(now)}, and nothing is planned for now.", None

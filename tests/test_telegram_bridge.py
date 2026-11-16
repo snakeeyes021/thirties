@@ -225,7 +225,7 @@ class TestThirtiesTelegramBridge(BridgeCase):
             self.bridge.handle_message(chat_id=1001, text="/now")
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
-        self.assertEqual(msg, "Now: Deep Work Code Review\n\nNext:\n8:30 AM – Work\nFree 4:00 PM – 11:00 PM")  # what's next
+        self.assertEqual(msg, "Now: Deep Work Code Review\n\nThe rest of today:\n8:30 AM – Work\nFree 4:00 PM – 11:00 PM")  # what's next
 
     def test_day_command(self):
         self.bridge.handle_message(chat_id=1001, text="/day")

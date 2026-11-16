@@ -1155,10 +1155,11 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
     items = Adw.SwitchRow(title="List the day's items in it", subtitle="What's on your plate, without times",
                           active=bool(getattr(cfg.assistant, "morning_message_items", True)))
     items.connect("notify::active", lambda r, _p: ctx.set("assistant.morning_message_items", r.get_active()))
-    afters = [("nothing", "Nothing"), ("next", "What's next"), ("rest", "The rest of today")]
+    afters = [("nothing", "Nothing"), ("rest", "The rest of today"), ("few", "Only the next few things")]
     after = Adw.ComboRow(title="After a change, show", subtitle="At the end of the reply, on every device",
                          model=Gtk.StringList.new([name for _, name in afters]))
-    after_now = getattr(cfg.assistant, "after_change", "next")
+    from thirties_core.whats_next import mode_of
+    after_now = mode_of(getattr(cfg.assistant, "after_change", "rest"))
     after.set_selected(next((i for i, (k, _) in enumerate(afters) if k == after_now), 1))
     def choose(key, part, value):
         ctx.set(key, value)

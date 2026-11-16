@@ -383,7 +383,9 @@ def unavailable_reply(manager, resume: datetime, now: datetime) -> str:
     from thirties_core import whats_next
     from thirties_core.messages import join_sections
     try:
-        slice_ = whats_next.summary(manager.tools, now, "next") if manager.tools.is_current(manager.day_plan) else ""
+        mode = whats_next.asked_mode(getattr(getattr(manager.tools, "scheduler", None), "config", None),
+                                     getattr(manager.tools, "_state_db", None), manager.day_plan.target_date)
+        slice_ = whats_next.summary(manager.tools, now, mode) if manager.tools.is_current(manager.day_plan) else ""
     except Exception as e:
         logger.warning("Couldn't add what's next: %s", e)
         slice_ = ""

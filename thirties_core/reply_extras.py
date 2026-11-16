@@ -35,7 +35,8 @@ REPLY_EXTRAS_TOOL_SPECS: List[Dict[str, Any]] = [{
                    "one way to honour 'stop sending the list' or 'stop saying block'; never say it's stopped without "
                    "this call, and never call it for a complaint about the schedule itself.",
     "parameters": {"part": "'whats_next', 'not_marked', 'status_line', or 'all'.",
-                   "show": "'off' or 'on'; for whats_next also 'rest' (the rest of today instead of the next few).",
+                   "show": "'off' or 'on'; for whats_next also 'few' (only the next few things, when they ask for "
+                           "less) or 'rest' (the rest of today, every row: the usual).",
                    "for_today": "true when the user says it's only for today."},
     "required": ["part", "show"],
 }]
@@ -54,6 +55,12 @@ _STOP = re.compile(r"\b(?:stop|don'?t|dont|no more|no need|quit|leave (?:it|them
                    r"hide|drop|skip|remove|delete|cut|lose|get rid|no (?:the )?(?:lists?|lines))\b", re.IGNORECASE)
 _BACK = re.compile(r"\b(?:again|back|turn (?:it |them )?on|start (?:showing|sending)|i want (?:the|it|them))\b",
                    re.IGNORECASE)
+# Asking for less or more of what's next: "just the next few things after a change", "the whole rest of the day
+# under each reply"; the message names the list (or what comes after a reply) and how much of it
+_RESIZE_ABOUT = re.compile(r"what'?s next|next few|\bthe list\b|(?:after|under|at the (?:end|bottom) of) "
+                           r"(?:each|every|a|the|your|my) (?:change|reply|replies|message|answer)", re.IGNORECASE)
+_RESIZE = re.compile(r"\b(?:just|only|shorter|short|fewer|less|trim|next (?:few|couple|two|three)|whole|full|"
+                     r"entire|all of|every(?:thing| row)|rest of (?:the |to|my )?day|longer)\b", re.IGNORECASE)
 _LASTING = re.compile(r"\b(?:from now on|always|for good|permanently|anymore|any more|ever again|every (?:day|time)|"
                       r"going forward|in future|never)\b", re.IGNORECASE)
 
@@ -66,8 +73,11 @@ def asked(said: Optional[str], show: str, for_today: Any) -> bool:
     """Whether the user's message asks for this change; raises NotAsked if it doesn't. Returns True when the change is
     for today only: it lasts only when the message says so, whatever the call asked for."""
     said = said or ""
-    off = str(show or "").strip().lower() in ("off", "false", "no", "0", "nothing", "stop", "hide")
-    if not _ABOUT.search(said) or not (_STOP if off else _BACK).search(said):
+    show = str(show or "").strip().lower()
+    off = show in ("off", "false", "no", "0", "nothing", "stop", "hide")
+    resize = show in ("few", "next", "rest")
+    if not (_ABOUT.search(said) and (_STOP if off else _BACK).search(said)) \
+            and not (resize and _RESIZE_ABOUT.search(said) and _RESIZE.search(said)):
         raise NotAsked("The user's message doesn't ask to stop or bring back what's added to replies (what's next, "
                        "Not marked yet, or the block line). Leave it as it is, and answer what they did ask.")
     only_today = str(for_today).strip().lower() in ("true", "1", "yes", "today")
@@ -85,11 +95,13 @@ def _today_values(db, today: date) -> Dict[str, Any]:
 
 def effective(config, db, today: date) -> Dict[str, Any]:
     """What applies now: today's own choices over the shared preferences."""
+    from thirties_core.whats_next import mode_of
     assistant = getattr(config, "assistant", None)
-    values = {"whats_next": getattr(assistant, "after_change", "next"),
+    values = {"whats_next": getattr(assistant, "after_change", "rest"),
               "not_marked": bool(getattr(assistant, "after_change_unmarked", True)),
               "status_line": bool(getattr(assistant, "status_line", True))}
     values.update(_today_values(db, today))
+    values["whats_next"] = mode_of(values["whats_next"])
     return values
 
 
@@ -99,7 +111,9 @@ def _value(part: str, show: str, current: Any) -> Any:
     if part == "whats_next":
         if off:
             return "nothing"
-        return "rest" if show == "rest" else (current if current in ("next", "rest") else "next")
+        if show in ("few", "next"):
+            return "few"
+        return "rest" if show == "rest" else (current if current in ("few", "rest") else "rest")
     return not off
 
 
@@ -113,7 +127,7 @@ def set_extras(config, settings, db, today: date, part: str, show: str, for_toda
     now = effective(config, db, today)
     held = _today_values(db, today)
     for p in parts:
-        value = _value(p, show, now[p] if now[p] != "nothing" else getattr(config.assistant, "after_change", "next"))
+        value = _value(p, show, now[p] if now[p] != "nothing" else getattr(config.assistant, "after_change", "rest"))
         if only_today:
             held[p] = value
         else:
@@ -133,6 +147,9 @@ def set_extras(config, settings, db, today: date, part: str, show: str, for_toda
                    "still shows it.")
     if shown:
         out.append("Replies show " + " and ".join(shown) + f" again {when}.")
+    if "whats_next" in parts and after["whats_next"] in ("few", "rest"):
+        out.append("What's next lists " + ("only the next few things" if after["whats_next"] == "few"
+                                           else "the rest of today, every block") + ".")
     return " ".join(out)
 
 

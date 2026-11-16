@@ -19,7 +19,7 @@ class WhatsNextCase(unittest.TestCase):
         set_debug_time(at("17:10"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
-        self.sched.config.assistant.after_change = "next"
+        self.sched.config.assistant.after_change = "rest"
         morning_sent(self.sched.state_db)  # a reply later in the day, not the morning's
         for sid, title, start, end in (("feed", "Feed the cat", "17:00", "17:15"),
                                        ("dinner", "Dinner", "18:00", "19:00"),
@@ -50,19 +50,28 @@ class TestWhatsNext(WhatsNextCase):
         out = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',
                         "Quilting's on at 5:30.", said="add quilting at 5:30")
         self.assertTrue(out.startswith("Quilting's on at 5:30."))
-        self.assertEqual(self.tail(out), ["Now: Feed the cat", "Next:", "5:30 PM – Quilting", "6:00 PM – Dinner",
-                                          "7:00 PM – Glazing"])
+        from thirties_core.whats_next import free_line
+        tail = self.tail(out)
+        self.assertEqual(tail[0], "Now: Feed the cat")
+        starts = ("17:30", "18:00", "19:00", "20:00", "21:30")
+        titles = ("Quilting", "Dinner", "Glazing", "Movie", "Bins out")
+        self.assertEqual(tail[1:8], [tail[1]] + [f"{format_clock(at(t))} – {title}" for t, title in zip(starts, titles)]
+                         + [free_line(at("22:00"), at("23:00"))])  # every row to the end of the day
+        self.assertEqual(tail[1].rstrip(":"), "The rest of today")
+        self.assertEqual(len(tail), 9)  # and someone else's event on its own line
         self.assertFalse(any(line.startswith("- ") for line in self.tail(out)))  # plain lines
 
     def test_after_a_done(self) -> None:
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Nice, noted.", said="fed the cat")
-        self.assertEqual(self.tail(out)[0], "Next:")  # the cat's done: nothing on now, so no "Now" line
+        self.assertEqual(self.tail(out)[0], "The rest of today:")  # the cat's done: nothing on now, no "Now" line
         self.assertIn("6:00 PM – Dinner", self.tail(out))
 
     def test_a_move_that_bumps_something_names_it_where_it_went(self) -> None:
         out = self.turn('CALL update_event {"event": "bins", "start": "10:30 PM"}', "Moved the bins to 10:30.",
                         said="bins at 10:30")
-        self.assertIn("Also moved: Bins out, now 10:30 PM", self.tail(out))  # past the next few: named
+        self.assertIn("10:30 PM – Bins out", self.tail(out))  # in its row: the whole rest of today is listed
+        self.assertFalse(any(line.startswith("Also moved") for line in self.tail(out)))
+        self.sched.config.assistant.after_change = "few"  # asked for only the next few
         self.manager.tools.user_message = None
         out = self.turn('CALL add_event {"title": "Kiln check", "start": "6:00 PM", "duration": "30 minutes", '
                         '"push_later": true}', "Kiln check at 6, the rest pushed back.",
@@ -77,7 +86,7 @@ class TestWhatsNext(WhatsNextCase):
         moved = [EventSpan("r1", "Shower", at("22:00"), at("22:10"), SpanCategory.ACTIVITY),
                  EventSpan("r2", "Journal", at("22:10"), at("22:25"), SpanCategory.ACTIVITY)]  # pushed past the rows
         plan.spans.extend(moved)
-        lines = render(plan, at("17:10"), moved, said="push the rest back").splitlines()
+        lines = render(plan, at("17:10"), moved, mode="few", said="push the rest back").splitlines()
         self.assertIn("Also moved: Shower, then Journal, now 10:00 PM", lines)  # the block, never a minute (10:10)
         self.assertFalse(any("10:10" in line for line in lines))
 
@@ -102,13 +111,13 @@ class TestWhatsNext(WhatsNextCase):
         out = self.turn('CALL update_event {"event": "nonexistent thing", "start": "6:00 PM"}',
                         "I couldn't find that one.", said="move the thing to 6")
         self.assertTrue(out.startswith("I couldn't find that one.\n\n"))  # what failed, first
-        self.assertIn("Next:", out)  # then the plan as it really stands (10-26: failed moves, then the ask)
+        self.assertIn("The rest of today:", out)  # then the plan as it really stands (10-26: failed moves, then the ask)
         self.assertIn("6:00 PM – Dinner", self.tail(out))
 
     def test_never_two_schedules_in_one_reply(self) -> None:
         out = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',
                         "Added, here's the evening.", said="add quilting at 5:30 and what's next after that?")
-        self.assertNotIn("Next:", out)  # asked for the schedule: the reply shows it its own way
+        self.assertNotIn("The rest of today:", out)  # asked for the schedule: the reply shows it its own way
         self.manager.tools.shown_schedule = None
         out = self.turn('CALL add_event {"title": "Sanding", "start": "10:00 PM", "duration": "30 minutes"}',
                         'CALL show_schedule {}', "Here you go.", said="sanding at 10")
@@ -147,9 +156,10 @@ class TestOneRowFormatter(WhatsNextCase):
         from thirties_core.messages import plain_rows, render_schedule, schedule_rows
         from thirties_core.whats_next import render
         plan, now = self.manager.day_plan, at("17:10")
-        nxt = render(plan, now).splitlines()
-        rows = nxt[nxt.index("Next:") + 1:nxt.index("Next:") + 4]
-        self.assertEqual(rows, plain_rows(schedule_rows(plan, at("17:30"), planned_only=True))[:3])
+        nxt = render(plan, now, free=False).splitlines()
+        head = nxt.index("The rest of today:")
+        rows = nxt[head + 1:nxt.index("", head)]
+        self.assertEqual(rows, plain_rows(schedule_rows(plan, at("17:30"), planned_only=True)))  # every row
         shown = render_schedule(plan, now).splitlines()
         for row in rows:
             self.assertIn(row, shown)  # the schedule's own row, word for word
@@ -176,11 +186,13 @@ class TestTheLayout(WhatsNextCase):
         plan.spans.append(EventSpan("tune", "Tune the ukulele", at("16:00"), at("16:30"), SpanCategory.ACTIVITY))
         moved = [EventSpan("late", "Wax the skis", at("22:00"), at("22:30"), SpanCategory.ACTIVITY)]
         plan.spans.extend(moved)
-        text = render(plan, at("17:10"), moved, mode="next")
-        sections_apart(self, text)
-        heads = [line.split(":")[0] for line in text.splitlines() if line.startswith(HEADERS)]
-        self.assertEqual(heads, ["Now", "Next", "Also moved", "Not marked yet", "Not yours"])
-        self.assertNotIn("\n\n\n", text)  # one blank line, never two
+        for mode, rows in (("rest", "The rest of today"), ("few", "Next")):
+            text = render(plan, at("17:10"), moved, mode=mode)
+            sections_apart(self, text)
+            heads = [line.split(":")[0] for line in text.splitlines() if line.startswith(HEADERS)]
+            also = ["Also moved"] if mode == "few" else []  # the whole rest of today has it in its row
+            self.assertEqual(heads, ["Now", rows] + also + ["Not marked yet", "Not yours"])
+            self.assertNotIn("\n\n\n", text)  # one blank line, never two
 
     def test_the_reply_the_schedule_and_a_notice_too(self):
         from thirties_core.messages import render_schedule, with_missed
@@ -224,7 +236,7 @@ class TestNotMarkedYet(WhatsNextCase):
                         'CALL log_outcome {"event": "feed", "status": "done"}', "Nice, noted.",
                         said="fed the cat, and the parcel can wait")
         tail = self.tail(out)
-        self.assertEqual(tail[0], "Next:")
+        self.assertEqual(tail[0], "The rest of today:")
         self.assertEqual(tail[-3:], ["Not marked yet:", "7:00 AM – Water the seedlings", "4:00 PM – Tune the ukulele"])
         self.assertFalse(any("Post the parcel" in line or "Feed the cat" in line for line in tail))
 

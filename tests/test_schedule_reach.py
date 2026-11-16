@@ -29,7 +29,7 @@ class ServiceCase(unittest.TestCase):
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
         self.sched.config.assistant.message_level = "heavy"
-        self.sched.config.assistant.after_change = "next"
+        self.sched.config.assistant.after_change = "rest"
         joplin = MagicMock()
         joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
         self.desktop = []
@@ -57,7 +57,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
 
     def test_the_bell_ends_with_whats_next_and_its_free_time(self):
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts\n\nNext:\n6:00 PM – Dinner (until 7:00 PM)\n"
+        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts\n\nThe rest of today:\n6:00 PM – Dinner (until 7:00 PM)\n"
                                              "Free 7:00 PM – 8:00 PM\n8:00 PM – Film night\nFree 9:30 PM – 11:00 PM")  # every time with AM/PM
         self.assertNotIn("Now:", self.last("start"))  # the bell says what's on now itself
 
@@ -65,13 +65,13 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.svc.starts(at("17:00"))
         self.svc.starts(at("18:00"))
         self.assertEqual(self.last("start").split("\n\n")[0], f"🔔 {format_clock(at('18:00'))}: Dinner")  # the 5:00 one still holds
-        self.assertNotIn("Next:", self.last("start"))  # just the bell, and what fell behind since (as before)
+        self.assertNotIn("The rest of today:", self.last("start"))  # just the bell, and what fell behind since (as before)
 
     def test_again_once_the_plan_changes(self):
         self.svc.starts(at("17:00"))
         self.add("call", "Call the plumber", "18:00", "18:15")  # added in the app, or by a turn
         self.svc.starts(at("18:00"))
-        self.assertIn("Next:", self.last("start"))
+        self.assertIn("The rest of today:", self.last("start"))
 
     def test_again_once_the_last_one_ran_out_or_two_hours_passed(self):
         self.svc.starts(at("17:00"))  # it listed up to Film night at 8:00
@@ -96,7 +96,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.svc.check_ins(at("18:15"))
         text = self.last("checkin")
         self.assertTrue(text.startswith("👋 Just checking in: have you started Dinner yet, or are you still on Sort "
-                                        "the receipts?\n\nNext:\n"), text)  # it names what's on now: no "Now" line
+                                        "the receipts?\n\nThe rest of today:\n"), text)  # it names what's on now: no "Now" line
         self.assertNotIn("Not marked yet", text)  # what it asks about isn't listed under it again
         self.assertIn("8:00 PM – Film night", lines(text))
 
@@ -132,7 +132,7 @@ class TestTheUsersSayOverIt(ServiceCase):
         self.add("old", "Water the ferns", "16:00", "16:15")
         self.extras("not_marked", "off")
         self.svc.starts(at("17:00"))
-        self.assertIn("Next:", self.last("start"))
+        self.assertIn("The rest of today:", self.last("start"))
         self.assertNotIn("Water the ferns", self.last("start"))
         self.add("call", "Call the plumber", "18:00", "18:15")
         from thirties_core.whats_next import SentSummaries
@@ -152,8 +152,8 @@ class TestTheUsersSayOverIt(ServiceCase):
         self.extras("all", "off")
         tools = self.svc.manager().tools
         self.assertEqual(whats_next.summary(tools, at("17:10")), "")
-        self.assertIn("Next:", whats_next.summary(tools, at("17:10"), "next"))
-        self.assertIn("Now: Sort the receipts", whats_next.summary(tools, at("17:10"), "next"))
+        self.assertIn("The rest of today:", whats_next.summary(tools, at("17:10"), "rest"))
+        self.assertIn("Now: Sort the receipts", whats_next.summary(tools, at("17:10"), "rest"))
 
 
 class TestTicksInTheDayPanel(ServiceCase):
@@ -178,7 +178,7 @@ class TestTicksInTheDayPanel(ServiceCase):
         self.svc.bridge.broadcast.assert_called_once()
         sent = self.svc.bridge.broadcast.call_args[0][0]
         self.assertTrue(sent.startswith("Marked done in the app: Sort the receipts. Skipped in the app: Dinner."), sent)
-        self.assertIn("Next:", sent)
+        self.assertIn("The rest of today:", sent)
         self.assertIn("8:00 PM – Film night", lines(sent))
         self.assertIn("Marked done in the app", self.svc.manager().history()[-1]["content"])  # one conversation
 
@@ -239,7 +239,7 @@ class TestTheEveningCatchUp(ServiceCase):
         self.assertTrue(all(s.start_dt.minute in (0, 15, 30, 45) for s in moved.values()))  # block times, stacked
         self.assertFalse(any(moved[a].start_dt < moved[b].end_dt and moved[b].start_dt < moved[a].end_dt
                              for a in moved for b in moved if a < b))  # one after another, never on top
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
         stored = [m["content"] for m in self.svc.manager().history()]
         self.assertEqual(stored[-2:], ["yes", out])  # in the conversation, as on the phone
         from thirties_core import catch_up
@@ -266,7 +266,7 @@ class TestOneTapOnThePhone(OneConversationCase):
 
     def setUp(self):
         super().setUp()
-        self.sched.config.assistant.after_change = "next"
+        self.sched.config.assistant.after_change = "rest"
         self.calls = []
         phone = self.phone
 
@@ -319,19 +319,19 @@ class TestRepliesEndWithIt(WhatsNextCase):
 
     def test_an_apology_ends_with_whats_next(self):
         out = self.turn("Sorry about that, the movie is at 8 as you said.", said="the movie is at 8, not 9")
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
         self.assertTrue(out.startswith("Sorry about that"))
 
     def test_a_question_about_the_plan_answered_with_its_items(self):
         # the reason comes from what item_history records, never a story (reply_checks)
         out = self.turn('CALL item_history {"item": "Dinner"}', "Dinner is at 6 because Glazing needs the evening light.",
                         said="why is dinner so early?")
-        self.assertIn("Next:", out)
+        self.assertIn("The rest of today:", out)
 
     def test_a_plain_question_or_a_question_back_gets_none(self):
         self.assertEqual(self.turn("You've got dinner at 6.", said="when's dinner?"), "You've got dinner at 6.")
         out = self.turn("Sorry, do you mean the movie or the glazing?", said="why is that one late?")
-        self.assertNotIn("Next:", out)  # the question comes first
+        self.assertNotIn("The rest of today:", out)  # the question comes first
 
     def test_list_items_with_no_time_are_in_it(self):
         with patch("thirties_core.whats_next.untimed_for",
