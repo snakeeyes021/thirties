@@ -566,7 +566,9 @@ class PlanTools:
         on_blocks = span.start_dt == first and span.end_dt == thirty_ceil(span.end_dt)
         times = f"{format_clock(span.start_dt)} – {format_clock(span.end_dt)} ({length})"
         fixed = ", fixed" if span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and self._is_fixed(span) else ""
-        return f"{span.title}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})")
+        from thirties_core.item_path import span_label, tasks_of  # a nested list item with its parents
+        name = span_label(span, tasks_of(self))
+        return f"{name}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})")
 
     def _find_span(self, ref: Any) -> EventSpan:
         ref_str = str(ref or "").strip()
@@ -577,6 +579,14 @@ class PlanTools:
             if span.id == ref_str or span.id == f"cal:{ref_str}" or span.source_event_id == ref_str:
                 return span
         lowered = ref_str.lower()
+        from thirties_core.item_path import SEP, leaf, span_label, tasks_of
+        if SEP.strip() in ref_str:  # a nested item said back the way Thirties names it: its own line underneath
+            tasks = tasks_of(self)
+            named = [s for s in in_view if " ".join(span_label(s, tasks).lower().split()) == " ".join(lowered.split())]
+            if len(named) == 1:
+                return named[0]
+            if not any(lowered in s.title.lower() for s in in_view):
+                return self._find_span(leaf(ref_str))
         from thirties_core.titles import title_of
         exact = [s for s in in_view if s.title.lower() == lowered] or \
             [s for s in in_view if title_of(s.title).lower() == lowered]  # by its short title too (11-07)
@@ -929,13 +939,14 @@ class PlanTools:
         def short(text: str) -> str:
             return low(title_of(text))
         linked = {task_id} if task_id else set()
-        if self.assistant is not None:
+        if self.assistant is not None and not task_id:  # the item given by id is the item, not a namesake
             same = self.assistant._exact_task(str(title))
             if same is not None:
                 linked.add(same.id)
         given, given_short = low(title), short(title)
         return [s for s in plan.spans_in_view() if s.status == SpanStatus.PLANNED and not s.is_envelope
                 and s.source != "calendar"
+                and not (task_id and s.task_id and s.task_id not in linked)  # the same words on another list line
                 and ((s.task_id and s.task_id in linked) or low(s.title) == given
                      or (given == given_short and short(s.title) == given)
                      or (low(s.title) == short(s.title) and low(s.title) == given_short))]
@@ -1764,6 +1775,7 @@ class PlanTools:
         scope = "Free time remaining" if upcoming_from else "Free time"
         now = self._now()
         from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
+        from thirties_core.item_path import labelled, tasks_of  # a nested list item with its parents
         from thirties_core.day_lists import pencilled_text
         from thirties_core.if_time import text_for as if_time_text
         from thirties_core.not_yours import text_for as not_yours_text
@@ -1778,7 +1790,7 @@ class PlanTools:
                 + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
-                   + "\n".join(missed_lines(behind)) if behind else "")
+                   + "\n".join(missed_lines(labelled(behind, tasks_of(self)))) if behind else "")
                 + not_yours_text(plan, self._state_db))  # someone else's: always last, never the user's own
 
     def _title(self, span) -> str:
@@ -1787,7 +1799,9 @@ class PlanTools:
         if is_raw_id(span.title):
             return title_of(resolve_raw(self.scheduler.state_db if self.scheduler else None, span.title,
                                         self.services.tasks if self.services is not None else []) or "an item")
-        return title_of(span.title)
+        from thirties_core.item_path import span_label, tasks_of  # a nested list item with its parents
+        named = span_label(span, tasks_of(self))
+        return named if named != span.title else title_of(span.title)
 
     def hide_for_today(self, event: Any = None, **_: Any) -> str:
         """Someone else's event, hidden for today only (not_yours.py)."""

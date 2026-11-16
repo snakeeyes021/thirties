@@ -234,6 +234,8 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
                     and s.end_dt > pt._now()), key=lambda s: s.start_dt)
     rows: List[Tuple[datetime, str]] = []  # (when, line)
     parts: Dict[Tuple[datetime, str], List[str]] = {}  # the morning's routines are part of the day's plan, by part
+    from thirties_core.item_path import span_label  # a nested list item with its parents
+    tasks = list(assistant.s.tasks)
     for s in items:
         from thirties_core.step_times import key as step_key  # a step by name, without a leading time
         routine = steps.get(s.title.strip().lower()) or steps.get(step_key(s.title))
@@ -241,7 +243,7 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
             parts.setdefault((thirty_of(s.start_dt), routine), []).append(s.title)
             continue
         when = format_clock(s.start_dt) if pt._is_fixed(s) else format_clock(thirty_of(s.start_dt))
-        rows.append((s.start_dt, f"{when} {s.title}"))
+        rows.append((s.start_dt, f"{when} {span_label(s, tasks)}"))
     rows += [(block, f"{format_clock(block)} {', '.join(titles)}") for (block, _), titles in parts.items()]
     lines = [line for _, line in sorted(rows, key=lambda r: r[0])]
     out = ("Already planned for today:\n" + "\n".join(lines)) if lines else ""

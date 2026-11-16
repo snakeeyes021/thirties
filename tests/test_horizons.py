@@ -557,7 +557,7 @@ class TestSessions(PlannerCase):
 
     def test_offered_once_on_the_weeks_first_morning_and_applied_on_yes(self):
         text = self.hp.offer_session()
-        self.assertTrue(text.startswith("A new week. For this week I'd plan:\n- File the taxes (overdue)"), text)
+        self.assertTrue(text.startswith("A new week. For this week I'd plan:\nFile the taxes (overdue)"), text)
         self.assertTrue(text.endswith("Want this week like that?"))
         self.assertIsNone(self.hp.offer_session())  # once
         self.assertEqual(self.hp.pending(), period_of("week", self.when.date()))

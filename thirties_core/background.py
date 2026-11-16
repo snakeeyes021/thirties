@@ -360,7 +360,8 @@ class BackgroundService:
             return status
         tracker.mark(now, missed)
         LastSentList(self.scheduler.state_db).mark(now, missed)
-        return with_missed(status, missed)
+        from thirties_core.item_path import labelled, tasks_of  # a nested item with its parents
+        return with_missed(status, labelled(missed, tasks_of(self.manager().tools)))
 
     def _with_next(self, status: str, now: datetime, with_now: bool = True, asked: Sequence[str] = ()) -> str:
         """A notice that ends with what's next (whats_next.py), when that says something new since the user was
@@ -407,6 +408,14 @@ class BackgroundService:
         """The last check-ins went unanswered: none until the user writes again (away.py)."""
         from thirties_core.away import UnansweredCheckins
         return UnansweredCheckins(self.scheduler.state_db).paused()
+
+    def _name(self, span) -> str:
+        """How a notice names a plan entry: a nested list item with its parents (item_path.py), else its title."""
+        try:
+            from thirties_core.item_path import span_label, tasks_of
+            return span_label(span, tasks_of(self.manager().tools))
+        except Exception:
+            return span.title
 
     def _asked(self, now: datetime, titles: List[str]) -> None:
         """A check-in asked about these: a reply needn't ask again (C5)."""
@@ -471,7 +480,7 @@ class BackgroundService:
                 and s.id not in told and now < s.start_dt <= now + timedelta(minutes=15)]
         for event in soon:
             told[event.id] = now.date().isoformat()
-            behind = [s.title for s in plan.active_spans() if self._unreported(s)
+            behind = [self._name(s) for s in plan.active_spans() if self._unreported(s)
                       and event.start_dt - timedelta(hours=2) <= s.start_dt and s.end_dt <= event.start_dt]
             on_thirty = event.start_dt == thirty_of(event.start_dt)
             text = (f"⏰ {event.title} at {format_clock(event.start_dt)}." if on_thirty else  # its real time, and block
@@ -520,7 +529,8 @@ class BackgroundService:
             if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
-                self.send(self._with_missed(f"🗓 Until {format_clock(b)}: " + ", then ".join(s.title for s in items)
+                self.send(self._with_missed(f"🗓 Until {format_clock(b)}: "
+                                            + ", then ".join(self._name(s) for s in items)
                                             + ".", now), "start", now=now, expires=thirty_of(now) + timedelta(minutes=30))
             open_items = [s for s in items if not mutes.is_muted(s.id, now)]
             ask_at = b + grace
@@ -535,7 +545,8 @@ class BackgroundService:
                 asked[key] = now.date().isoformat()
                 self._remember("stretch_asked", asked, now)
                 titles = [s.title for s in open_items]
-                listed = titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}"
+                names = [self._name(s) for s in open_items]
+                listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
                 self._asked(now, titles)
                 self.send(self._with_next(f"👋 Since {format_clock(a)}: did you get to {listed}?", now,
                                           asked=titles), "checkin", now=now, expires=now + timedelta(minutes=30))
@@ -553,11 +564,13 @@ class BackgroundService:
             return
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
-        open_items = [s.title for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
-                      if self._unreported(s) and s.end_dt <= now and not mutes.is_muted(s.id, now)]
+        spans = [s for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
+                 if self._unreported(s) and s.end_dt <= now and not mutes.is_muted(s.id, now)]
+        open_items = [s.title for s in spans]
+        names = [self._name(s) for s in spans]
         self.scheduler.state_db.set_sync_meta(key, "1")
         if open_items:
-            listed = open_items[0] if len(open_items) == 1 else ", ".join(open_items[:-1]) + f" and {open_items[-1]}"
+            listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
             self._asked(now, open_items)
             self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now,
                       expires=bed)
@@ -606,15 +619,16 @@ class BackgroundService:
             asked[s.id] = now.date().isoformat()
         self._remember("checkins_asked", asked, now)
         titles = [s.title for s in sorted(due, key=lambda s: s.start_dt)]
+        names = [self._name(s) for s in sorted(due, key=lambda s: s.start_dt)]  # what the user reads
         current = self._on_now(plan, now, {s.id for s in due})
         if len(titles) == 1 and current:  # asked the way the user wants it: the next one started, or still on this one?
-            question = f"👋 Just checking in: have you started {current} yet, or are you still on {titles[0]}?"
-            bold = [current, titles[0]]
+            question = f"👋 Just checking in: have you started {current} yet, or are you still on {names[0]}?"
+            bold = [current, names[0]]
         elif len(titles) == 1:
-            question = f"👋 Just checking in: did you get to {titles[0]}, or are you still on it?"
-            bold = [titles[0]]  # in bold on the phone: the same words
+            question = f"👋 Just checking in: did you get to {names[0]}, or are you still on it?"
+            bold = [names[0]]  # in bold on the phone: the same words
         else:
-            listed = ", ".join(titles[:-1]) + f" and {titles[-1]}"
+            listed = ", ".join(names[:-1]) + f" and {names[-1]}"
             question = f"👋 How did it go? Did you get to {listed}?" + (
                 f" And have you started {current} yet?" if current else "")
             bold = []
@@ -628,7 +642,7 @@ class BackgroundService:
         block = thirty_of(now)
         on = [s for s in plan.active_spans() if self._unreported(s) and s.id not in skip and not s.is_envelope
               and s.start_dt < block + timedelta(minutes=30) and s.start_dt <= now < s.end_dt]
-        titles = list(dict.fromkeys(s.title for s in sorted(on, key=lambda s: s.start_dt)))
+        titles = list(dict.fromkeys(self._name(s) for s in sorted(on, key=lambda s: s.start_dt)))
         return titles[0] if len(titles) == 1 else ""
 
     def reminders(self, now: datetime) -> None:
@@ -648,6 +662,8 @@ class BackgroundService:
                        f"{format_clock(rem.due.astimezone(now.tzinfo))}): {rem.text}"
             else:
                 text = f"⏰ Reminder: {rem.text}"
+            if span is not None and rem.text.strip().lower() == span.title.strip().lower():
+                text = text[:len(text) - len(rem.text)] + self._name(span)  # a nested item with its parents
             details = self._details(span.title if span is not None else rem.text,
                                     span.task_id if span is not None else "")
             if details:  # what the reminder was given to say (its details)
@@ -707,12 +723,12 @@ class BackgroundService:
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
         if rest:
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
-            said = [f"{s.title} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s) else s.title
-                    for s in rest]
+            said = [f"{self._name(s)} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s)
+                    else self._name(s) for s in rest]
             bell = f"🔔 {format_clock(block)}: " + ", ".join(said)
             from thirties_core.memory import ReminderStore
             pinged = {r["span_id"] for r in ReminderStore(self.scheduler.state_db).all_records() if r.get("span_id")}
-            details = [(s.title, self._details(s.title, s.task_id or "")) for s in rest if s.id in pinged]
+            details = [(self._name(s), self._details(s.title, s.task_id or "")) for s in rest if s.id in pinged]
             details = [(t, d) for t, d in details if d]
             if details:  # a reminder's details: at heavy the bell is its ping
                 bell += "\n" + "\n".join(d if len(rest) == 1 else f"{t}: {d}" for t, d in details)
@@ -767,9 +783,9 @@ class BackgroundService:
                 continue
             seen.add(span.id)
             if span.status == SpanStatus.DONE:
-                done.append(span.title)
+                done.append(self._name(span))
             elif span.status == SpanStatus.SKIPPED:
-                skipped.append(span.title)
+                skipped.append(self._name(span))
         if not done and not skipped:
             return  # ticked and unticked again
         def listed(titles):
@@ -920,14 +936,20 @@ class BackgroundService:
         from thirties_core.assistant_tools import _short
         assistant = self.manager().tools.assistant
         daily = assistant.routines.daily_titles() if assistant is not None else set()
-        out = [s.title for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
+        from thirties_core.item_path import label, span_label  # a nested item with its parents
+        tasks = list(assistant.s.tasks) if assistant is not None else []
+
+        def name(s) -> str:
+            said = span_label(s, tasks)
+            return said if said != s.title else _short(s.title)
+        out = [name(s) for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
                if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
                and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
         if assistant is not None:
             day = plan.target_date.isoformat()
-            out += [t.title for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
+            out += [label(t, tasks) for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
                     and t.title.strip().lower() not in daily]
-        return [_short(t) for t in out]
+        return out
 
     def rollover(self, now: datetime) -> None:
         """The morning, if no turn did it (morning.py): normally the user's first message of the day builds the

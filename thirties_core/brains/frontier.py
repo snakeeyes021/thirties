@@ -218,6 +218,7 @@ RULES
 31. Python adds lines to some replies: what's next after a change (Now, Next, Not marked yet) and the "You're in the … block" line. You can't leave them out by writing less. When the user asks to stop, trim or bring back any of them ("stop sending the list", "stop saying block", "show me what's next again"), call set_reply_extras, and only say it's done once that call went through.
 32. {others_rule}
 33. Never tell the user that Thirties can't do something, or that something it shows or sends can't be changed or turned off, unless a tool told you so this turn. Check first: call the tool that would do it (set_reply_extras for what Python adds to replies) and say what its result says.
+34. A list item under a heading or under another line is named with where it sits, as the lists show it after "named:" (for example "Garden › Raised beds › order soil": its heading or parent line, then the item, at most two levels up). Name it that way whenever you mention it to the user: its own line alone means little. The tools still take its id or its own words.
 """
 
     def _day_list_section(self) -> str:
@@ -344,6 +345,8 @@ RULES
                 nb_block.append(f"### Note: \"{title}\"{note_type_badge}")
 
                 if note_tasks:
+                    from thirties_core.item_path import label, parents
+                    by_task = {t.id: t for t in note_tasks}
                     nb_block.append("  Open checklist items:")
                     depth: Dict[str, int] = {}
                     current_section = None
@@ -360,7 +363,10 @@ RULES
                         pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else (
                             "this month" if t.horizon == "month" else "")  # the horizon urgency can't say
                         pressing = f" [{pressing}]" if pressing and t.list_role not in ("today", "routine") else ""
-                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{def_str}{maybe}{pressing}")
+                        # a nested item: how it's named to the user (item_path.py)
+                        named = label(t, by_task) if parents(t, by_task) else ""
+                        named = f" (named: {named})" if named else ""
+                        nb_block.append(f"{indent}- [ID: {t.id}] '{t.title}'{named}{def_str}{maybe}{pressing}")
                 elif is_todo and todo_comp == 0:
                     nb_block.append(f"  - [ID: {n_id}] Single Actionable Item: '{title}'")
                     if body.strip() and is_private_note(note):

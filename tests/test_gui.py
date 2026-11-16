@@ -886,6 +886,8 @@ class ChatPanelTests(unittest.TestCase):
     def test_whats_next_shows_one_line_per_item_in_the_chat_and_after_a_restart(self) -> None:
         from tests.test_conversation import reply
         self.sched.config.assistant.after_change = "next"
+        from tests.fixtures import morning_sent
+        morning_sent(self.sched.state_db)  # a reply later in the day, not the morning's
         for sid, title, start, end in (("dinner", "Dinner", "20:00", "21:00"), ("glaze", "Glazing", "21:00", "22:00"),
                                        ("bins", "Bins out", "22:00", "22:30")):
             self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(end), SpanCategory.ACTIVITY))

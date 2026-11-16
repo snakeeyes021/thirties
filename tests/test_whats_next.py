@@ -4,7 +4,7 @@ Scripted model replies; invented items. DAY is Thu Oct 15 (Work 8:30 AM - 4 PM, 
 import unittest
 from datetime import timedelta
 
-from tests.fixtures import DAY, at, make_scheduler
+from tests.fixtures import DAY, at, make_scheduler, morning_sent
 from tests.test_conversation import reply
 from thirties_core.clock import format_clock
 from thirties_core.astronomy import set_debug_time
@@ -20,6 +20,7 @@ class WhatsNextCase(unittest.TestCase):
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
         self.sched.config.assistant.after_change = "next"
+        morning_sent(self.sched.state_db)  # a reply later in the day, not the morning's
         for sid, title, start, end in (("feed", "Feed the cat", "17:00", "17:15"),
                                        ("dinner", "Dinner", "18:00", "19:00"),
                                        ("glaze", "Glazing", "19:00", "20:00"),

@@ -690,8 +690,11 @@ class ThirtiesTelegramBridge:
         if live:
             from thirties_core.whats_next import SentSummaries
             SentSummaries(getattr(self.scheduler, "state_db", None)).mark(plan, now, whole_day=True)
-        text = render_schedule(plan, now if live else None, whole_day=True,
-                               missed=missed_for(self.conv_manager.tools, now, muted_too=True) if live else [],
+        from thirties_core.item_path import labelled, labelled_plan, tasks_of  # a nested item with its parents
+        tasks = tasks_of(self.conv_manager.tools)
+        text = render_schedule(labelled_plan(plan, tasks), now if live else None, whole_day=True,
+                               missed=labelled(missed_for(self.conv_manager.tools, now, muted_too=True)
+                                               if live else [], tasks),
                                label="today")
         if live and getattr(self.conv_manager.tools, "assistant", None) is not None:
             from thirties_core.if_time import text_for

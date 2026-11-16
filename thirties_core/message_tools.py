@@ -90,7 +90,10 @@ class MessageTools:
         now = tools._now()
         live = tools.is_current(plan) and plan.day_start <= now < plan.day_end
         missed = missed_for(tools, now, muted_too=True) if live else []  # asked for: muted or not
-        text = render_schedule(plan, now if live else None, whole_day=_as_bool(whole_day), missed=missed,
+        from thirties_core.item_path import labelled, labelled_plan, tasks_of  # a nested item with its parents
+        tasks = tasks_of(tools)
+        text = render_schedule(labelled_plan(plan, tasks), now if live else None, whole_day=_as_bool(whole_day),
+                               missed=labelled(missed, tasks),
                                config=getattr(tools.scheduler, "config", None), db=tools._state_db,
                                said=tools.user_message or "")  # the block line as the person wants it
         if live and getattr(tools, "assistant", None) is not None:  # after the day's timed items (if_time.py)

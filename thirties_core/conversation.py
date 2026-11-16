@@ -582,7 +582,11 @@ class ConversationManager:
         if notes:  # Python's own lines for the user (a reminder to export a finished book), once, under the reply
             from thirties_core.messages import join_sections
             final = join_sections(final.rstrip(), "\n".join(notes))
-        final = self._with_whats_next(final, merged, before)
+        # --- the morning's reply lists the day itself: no what's-next slice under it (morning_reply.py) ---
+        from thirties_core import morning_reply
+        final = morning_reply.without_slice(self, final) if morning_now else \
+            self._with_whats_next(final, merged, before)
+        # --- end morning reply ---
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
         final = clean_message(final, self.tools, merged)
         from thirties_core import fallback  # said once: a simpler assistant is answering, or the usual one is back

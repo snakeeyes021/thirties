@@ -34,6 +34,12 @@ def _short(title: str, limit: int = 80) -> str:
     return short(title, limit)
 
 
+def _named(assistant, title: str, task_id: Optional[str] = None, limit: int = 80) -> str:
+    """An item as the user reads it: a nested list item with its parents (item_path.py), else its short title."""
+    from thirties_core.item_path import named
+    return named(getattr(getattr(assistant, "s", None), "tasks", None), title, task_id or "", limit)
+
+
 MAX_CANDIDATES = 8   # what the model chooses from: enough to choose, never the backlog
 MAX_DEFAULT = 3      # Python's own proposal (no model): a few things, not a full day
 PENDING_HOURS = 4    # a proposal left unanswered this long doesn't catch a later "yes"
@@ -316,7 +322,8 @@ class DayProposal:
         for c in cands:
             ref = f" task_id={c['task'].id}" if c["task"] is not None else ""
             size = energy.weight(c) if said else ""  # light or bigger, when the energy makes it matter
-            lines.append(f"- {_short(c['title'], 120)} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}"
+            name = _named(self.a, c["title"], c["task"].id if c["task"] is not None else None, 120)
+            lines.append(f"- {name} ({c['why']}; {c['where']}; about {format_duration(c['minutes'])}"
                          f"{'; ' + size if size else ''}){ref}")
         lines.append("Free time:")
         saved, self.pt.day_plan = self.pt.day_plan, plan
@@ -349,10 +356,10 @@ class DayProposal:
 
     # --- the proposal ---
 
-    @staticmethod
-    def _lines(items: List[Dict[str, Any]]) -> List[str]:
-        from thirties_core.assistant_tools import _short  # a list line said in brief (11-05: whole paragraphs)
-        return [f"{format_clock(datetime.fromisoformat(i['start']))} {_short(i['title'])}" for i in items]
+    def _lines(self, items: List[Dict[str, Any]]) -> List[str]:
+        # a list line said in brief (11-05: whole paragraphs), a nested item with its parents
+        return [f"{format_clock(datetime.fromisoformat(i['start']))} {_named(self.a, i['title'], i.get('task_id'))}"
+                for i in items]
 
     def _store(self, items: List[Dict[str, Any]], why: str = "") -> str:
         day = self.pt.day_plan.target_date
@@ -512,7 +519,8 @@ class DayProposal:
             if out.startswith(NOT_DONE):
                 failed.append(f"{item['title']} ({out[len(NOT_DONE):].lstrip(': ')})")
             else:
-                placed.append(f"- {format_clock(thirty_of(start))} – {_short(item['title'])}")
+                name = _named(self.a, item["title"], item.get("task_id"))
+                placed.append(f"- {format_clock(thirty_of(start))} – {name}")
         self.db.set_sync_meta(self._key(key_day), json.dumps({**data, "state": "applied"}))
         placed = self._together(key_day, placed)
         parts = []
@@ -538,12 +546,15 @@ class DayProposal:
             logger.warning("Couldn't keep the project's pieces together: %s", e)
             return placed
         out = []
+
+        def shown(sp) -> set:  # the words a placed line names an item by
+            return {_short(sp.title), _named(self.a, sp.title, sp.task_id)}
         for line in placed:
             title = line.split(" – ", 1)[1]
-            span = next((sp for sp in plan.spans if _short(sp.title) == title and sp.status == SpanStatus.PLANNED), None)
+            span = next((sp for sp in plan.spans if title in shown(sp) and sp.status == SpanStatus.PLANNED), None)
             out.append(f"- {format_clock(thirty_of(span.start_dt))} – {title}" if span is not None else line)
         return sorted(out, key=lambda l: next((sp.start_dt.timestamp() for sp in plan.spans
-                                               if _short(sp.title) == l.split(" – ", 1)[1]), 0))
+                                               if l.split(" – ", 1)[1] in shown(sp)), 0))
 
     def day_options(self, energy: Any = None, hours: Any = None, **_: Any) -> str:
         """What to offer, sorted to fit the energy the user gave (kept in the energy log), within the time they
