@@ -678,6 +678,8 @@ class DeterministicScheduler:
         days_off(self, plan)
         from thirties_core.calendar_outcomes import CalendarOutcomes
         CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar
+        from thirties_core.calendar_times import CalendarOwnTimes
+        CalendarOwnTimes(self.state_db).apply(calendar_spans)  # a start or end the user gave, on their plan only
         plan.spans.extend(calendar_spans)
         plan.spans.sort(key=lambda s: s.start_dt)
 
