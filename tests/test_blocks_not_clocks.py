@@ -224,6 +224,49 @@ class TestItemPaths(unittest.TestCase):
                                 path=["Grout the tiles"], parent_task_id=None)
         self.assertEqual(label(child, [child]), "Grout the tiles › Buy grout")  # a parent line still counts
 
+    def labels(self, body: str) -> dict:
+        from thirties_core.item_path import label
+        from thirties_core.joplin_engine import checklist_tasks
+        tasks = checklist_tasks("n1", "House", "Lists", body, [])
+        return {t.name or t.title: (label(t, tasks), t.state, t.blocker) for t in tasks}
+
+    def test_a_list_notes_state_headings_stay_out_of_paths(self) -> None:
+        got = self.labels("## Active\n- [ ] Grout the tiles\n    - [ ] Buy grout\n\n"
+                          "## Blocked by the plumber\n- [ ] Fit the new tap\n\n"
+                          "## Garage\n- [ ] Hang the bike hooks\n")
+        self.assertEqual(got["Grout the tiles"][0], "Grout the tiles")
+        self.assertEqual(got["Buy grout"][0], "Grout the tiles › Buy grout")
+        self.assertEqual(got["Fit the new tap"][:1], ("Fit the new tap",))
+        self.assertEqual(got["Fit the new tap"][2], "the plumber")  # still known as what it waits on
+        self.assertEqual(got["Hang the bike hooks"][0], "Garage › Hang the bike hooks")  # a topic stays
+
+    def test_a_checkbox_heading_sets_its_state_and_is_no_parent(self) -> None:
+        got = self.labels("- [ ] Probation:\n    - [ ] Paint the fence\n    - [ ] Oil the gate\n"
+                          "- [ ] Clear the gutters\n"
+                          "- [ ] Blocked by the delivery:\n    - [ ] Assemble the shelf\n"
+                          "- [ ] Bathroom:\n    - [ ] Reseal the bath\n")
+        self.assertNotIn("Probation:", got)
+        self.assertNotIn("Probation", got)
+        self.assertEqual(got["Paint the fence"][:2], ("Paint the fence", "on_hold"))
+        self.assertEqual(got["Oil the gate"][:2], ("Oil the gate", "on_hold"))
+        self.assertEqual(got["Clear the gutters"][:2], ("Clear the gutters", ""))  # the label ends with its lines
+        self.assertEqual(got["Assemble the shelf"], ("Assemble the shelf", "", "the delivery"))
+        self.assertIn("Bathroom", got["Reseal the bath"][0])  # a heading that names a topic is still a parent
+
+    def test_a_checkbox_heading_never_shifts_item_ids(self) -> None:
+        from thirties_core.item_ids import checklist_lines
+        from thirties_core.joplin_engine import checklist_tasks
+        body = "- [ ] Mow the lawn\n- [ ] On hold:\n    - [ ] Paint the fence\n- [x] Sweep the drive\n- [ ] Wash the car\n"
+        ids = [f"id-{n}" for n in range(len(checklist_lines(body)))]  # one per checkbox line, as the id table keeps
+        got = {t.title: t.id for t in checklist_tasks("n1", "House", "Lists", body, [], ids=ids)}
+        self.assertEqual(got, {"Mow the lawn": "id-0", "Paint the fence": "id-2", "Wash the car": "id-4"})
+
+    def test_a_flat_checkbox_heading_holds_until_the_next_heading(self) -> None:
+        got = self.labels("- [ ] Someday:\n- [ ] Learn to whittle\n- [ ] Done:\n- [ ] Return the ladder\n")
+        self.assertEqual(got["Learn to whittle"][0], "Learn to whittle")
+        self.assertNotIn("Done:", got)
+        self.assertEqual(got["Return the ladder"][1], "closed")
+
 
 if __name__ == "__main__":
     unittest.main()

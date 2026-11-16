@@ -355,7 +355,7 @@ _BULLET = re.compile(r"^([ \t]*)(?:[-*+]|\d+[.)])\s+(.*)$")
 @dataclass
 class Line:
     """One checklist line of a note, read in its place."""
-    index: int                        # its place among the note's checklist lines (open and ticked), as ids follow
+    index: int                        # its place among the note's items (parent and children point here)
     text: str                         # the line's own words, as written (its identity)
     ticked: bool
     indent: int
@@ -370,6 +370,8 @@ class Line:
     conditions: List[Dict[str, Any]] = field(default_factory=list)  # {"text", "met", "holds"}
     context: List[str] = field(default_factory=list)                # plain lines nested under it
     progress: str = ""                # from the body: not_started / started / drafting / ready
+    box: int = -1                     # its place among all the note's checkbox lines, open and ticked, as ids follow
+                                      # (a checkbox written as a label, "- [ ] On hold:", counts there but isn't a line)
 
     @property
     def kind(self) -> str:
@@ -418,12 +420,15 @@ def read_note(body: str, someday_sections: Sequence[str] = (), owners: Iterable[
     context_rows: List[Tuple[int, int, str]] = []  # (row, indent, text) of plain bullets
     heading, label_state, label_blocker = "", ("", ""), ""
     head_state: Tuple[str, str] = ("", "")
+    box_label: Optional[Tuple[int, Optional[int]]] = None  # a checkbox label: its indent, and its lines' (0: flat)
+    boxes: List[int] = []  # each found line's place among all the checkbox lines
+    n_box = -1
     for row, line in enumerate(raw_lines):
         h = HEADING_REGEX.match(line)
         if h:
             heading = h.group(1).strip()
             head_state = section_state(heading)
-            label_state = ("", "")
+            label_state, box_label = ("", ""), None
             continue
         m = CHECKBOX_REGEX.match(line)
         ticked = False
@@ -431,18 +436,33 @@ def read_note(body: str, someday_sections: Sequence[str] = (), owners: Iterable[
             m = DONE_CHECKBOX_REGEX.match(line)
             ticked = bool(m)
         if m:
+            n_box += 1
+            text, ind = m.group(2).strip(), _indent(m.group(1))
+            if box_label is not None:  # a checkbox label holds for the lines under it, or (flat) like a bold label
+                at, under = box_label
+                under = under if under is not None else (ind if ind > at else 0)
+                box_label = (at, under)
+                if under and ind <= at:
+                    label_state, box_label = ("", ""), None
+                elif under:  # the lines under it stand where it stood, so they never hang on the line before it
+                    ind = at + ind - under
+            got = section_state(text[:-1]) if text.endswith(":") else ("", "")
+            if got != ("", ""):  # "- [ ] On hold:": a label written as a checkbox, never an item or a parent
+                label_state, box_label = got, (ind, None)
+                continue
             state = label_state[0] or head_state[0]
             blocker = label_state[1] or head_state[1]
-            found.append((row, m.group(2).strip(), ticked, _indent(m.group(1)), heading, state, blocker))
+            found.append((row, text, ticked, ind, heading, state, blocker))
+            boxes.append(n_box)
             continue
         bold = _BOLD_LABEL.match(line) or (_COLON_LABEL.match(line) if not _BULLET.match(line) else None)
         if bold:
             got = section_state(bold.group(1))
             if got != ("", ""):
-                label_state = got
+                label_state, box_label = got, None
             continue
         if _RULE.match(line) and line.strip() in ("---", "* * *", "***", "___"):
-            label_state = ("", "")
+            label_state, box_label = ("", ""), None
             continue
         b = _BULLET.match(line)
         if b and b.group(2).strip():
@@ -464,7 +484,8 @@ def read_note(body: str, someday_sections: Sequence[str] = (), owners: Iterable[
     for i, (row, text, ticked, ind, head, state, blocker) in enumerate(found):
         reading = read_text(text, ticked=ticked, nested=parents[i] is not None, has_children=has_child[i],
                             owners=owners)
-        lines.append(Line(i, text, ticked, ind, parents[i], head, reading, state=state, blocker=blocker))
+        lines.append(Line(i, text, ticked, ind, parents[i], head, reading, state=state, blocker=blocker,
+                          box=boxes[i]))
     for ln in lines:
         if ln.parent is not None:
             lines[ln.parent].children.append(ln.index)

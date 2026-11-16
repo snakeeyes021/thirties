@@ -66,7 +66,7 @@ def checklist_tasks(note_id: str, note_title: str, notebook: str, body: str,
         text = ln.text
         n = seen.get(text, 0)
         seen[text] = n + 1
-        task_id = ids[ln.index] if ids is not None and ln.index < len(ids) else item_id(note_id, text, n)
+        task_id = ids[ln.box] if ids is not None and 0 <= ln.box < len(ids) else item_id(note_id, text, n)
         if ln.kind in (PLACEHOLDER, CONDITION):
             continue
         task = TaskItem(
