@@ -121,11 +121,13 @@ class BeforeToday:
         except Exception:
             pass
         keep, drop, archive = [], [], {}
+        from thirties_core.item_path import named  # how a row reads: a nested list item with its parents
+        tasks = list(self.a.s.tasks)
         for rec in pool.all().values():
             if rec.get("horizon") == "gone":
                 continue
-            row = {"title": rec["title"], "why": rec.get("why") or "", "when": rec.get("when") or "this week",
-                   "at": None}
+            row = {"title": rec["title"], "label": named(tasks, rec["title"], rec.get("task_id")),
+                   "why": rec.get("why") or "", "when": rec.get("when") or "this week", "at": None}
             if rec.get("end") and rec["end"] < day.isoformat():  # its day went by: say which, not "today"
                 row["when"] = "from " + date.fromisoformat(rec["end"]).strftime("%a")  # copy-madlibs T3-040
             if rec.get("horizon") == DROPPED:  # every applied drop, the app's or the user's (11-06)
@@ -145,7 +147,8 @@ class BeforeToday:
         keep.sort(key=lambda r: (r["at"] is None, r["at"].timestamp() if r["at"] else 0, r["title"].lower()))
         drop.sort(key=lambda r: r["title"].lower())
         from thirties_core.backoff import MissStreaks
-        ask = [{"title": r["title"], "why": f"missed {r['misses']} days running"}
+        ask = [{"title": r["title"], "label": named(tasks, r["title"], r.get("task_id")),
+                "why": f"missed {r['misses']} days running"}
                for r in MissStreaks(self.db).asked_open()] if self.db is not None else []
         return {"keep": keep, "drop": drop, "archive": sorted(archive.items(), reverse=True),
                 "restore": [r["title"] for r in self.old_filed_drops()], "ask": ask}

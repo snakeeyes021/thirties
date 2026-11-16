@@ -120,7 +120,7 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
             for r in ask:  # the title and why on top, the choices on a line of their own under them
                 box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_top=10, margin_bottom=8,
                               margin_start=12, margin_end=12)
-                title = Gtk.Label(label=title_of(r["title"]), xalign=0, wrap=True)
+                title = Gtk.Label(label=r.get("label") or title_of(r["title"]), xalign=0, wrap=True)
                 box.append(title)
                 if r.get("why"):
                     why = Gtk.Label(label=r["why"], xalign=0)
@@ -196,7 +196,7 @@ class BeforeTodayPage(Gtk.ScrolledWindow):
 
     def _row(self, r: Dict[str, Any], actions: tuple) -> tuple:
         """(the item's row, the line of its buttons under it on a narrow page, else None)."""
-        row = Adw.ActionRow(title=GLib.markup_escape_text(title_of(r["title"])),  # short title; actions use the item
+        row = Adw.ActionRow(title=GLib.markup_escape_text(r.get("label") or title_of(r["title"])),  # actions: the item
                             subtitle=GLib.markup_escape_text(r.get("why") or ""))
         buttons = []
         for action in actions:

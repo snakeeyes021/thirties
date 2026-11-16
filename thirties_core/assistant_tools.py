@@ -545,6 +545,10 @@ class AssistantTools(KindTools):
             if len(short) > 1:  # its Today copies share the title: the item on its own list is the one
                 short = [t for t in short if t.list_role != "today"]
             exact = short if len(short) == 1 else []
+        if not exact:  # a nested item said back the way Thirties names it ("Invitations › Lee household › …")
+            from thirties_core.item_path import resolve
+            found = resolve(ref, self.s.tasks)
+            exact = [found] if found is not None else []
         if exact and exact[0].list_role == "today" and self._db is not None:  # a Today line twinned with its home
             from thirties_core.titles import title_of                        # item (by its short title): the home
             from thirties_core.today import TodayLinks
@@ -1912,9 +1916,10 @@ class AssistantTools(KindTools):
         today = self._today().isoformat()
         on_today = [k for k in lo.get("keep", []) if k.get("end") and k["end"] <= today
                     and k["title"] not in data.get("overflow", [])]
+        from thirties_core.item_path import named  # a nested list item with its parents
         return notice_text(len(lo.get("keep", [])), len(on_today), len(lo.get("drop", [])),
-                           [_short(t) for t in data.get("overflow", [])],
-                           [(_short(k["title"]), carried_where(self.pt.day_plan, k))  # where each went, plainly
+                           [named(self.s.tasks, t) for t in data.get("overflow", [])],
+                           [(named(self.s.tasks, k["title"], k.get("task_id")), carried_where(self.pt.day_plan, k))
                             for k in lo.get("keep", []) if k.get("when")])
 
     def leftover_brief(self) -> str:
@@ -1938,7 +1943,8 @@ class AssistantTools(KindTools):
                 [f"urgency {t.urgency}"] if t is not None and t.urgency else []) + (
                 [f"list {t.parent_note_title}"] if t is not None and t.parent_note_title else ["no list"]) + (
                 ["DOESN'T FIT TODAY"] if k["title"] in data.get("overflow", []) else [])
-            lines.append(f"- {k['title']} ({'; '.join(facts)})")
+            from thirties_core.item_path import named  # a nested list item with its parents
+            lines.append(f"- {named(tasks, k['title'], k.get('task_id'), 200)} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; today's "
                 "are on the plan):\n" + "\n".join(lines) + ("\n" + ask if ask else ""))

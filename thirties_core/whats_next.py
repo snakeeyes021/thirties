@@ -251,7 +251,11 @@ def summary(tools, now: datetime, mode: Optional[str] = None, moved: Iterable[Ev
     if unmarked is None:
         unmarked = missed_for(tools, now, muted_too=True)
     scheduler = getattr(tools, "scheduler", None)
-    return render(tools.day_plan, now, moved, mode, said, unmarked, config=getattr(scheduler, "config", None),
+    from thirties_core.item_path import labelled, labelled_plan, tasks_of  # a nested item with its parents
+    tasks = tasks_of(tools)
+    plan, moved, unmarked = labelled_plan(tools.day_plan, tasks), labelled(list(moved), tasks), \
+        labelled(unmarked, tasks)
+    return render(plan, now, moved, mode, said, unmarked, config=getattr(scheduler, "config", None),
                   db=getattr(tools, "_state_db", None), untimed=untimed_for(tools), with_now=with_now)
 
 

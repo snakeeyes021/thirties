@@ -37,7 +37,7 @@ def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpa
     twice (a copy left by a move, a routine step planned twice) is listed once (10-29 18:00)."""
     block = thirty_of(now)
     out: List[EventSpan] = []
-    seen = set()
+    seen: dict = {}  # title -> the list items listed under it (two list lines with the same words are two items)
     for s in sorted(plan.active_spans(), key=lambda s: (s.start_dt, s.end_dt)):
         if s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.status != SpanStatus.PLANNED \
                 or s.tentative or thirty_ceil(s.end_dt) > block or s.start_dt < plan.day_start:  # today's only
@@ -45,9 +45,10 @@ def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpa
         if skip is not None and skip(s):
             continue
         key = s.title.strip().lower()
-        if key in seen:
+        ids = seen.get(key)
+        if ids is not None and (not s.task_id or s.task_id in ids or None in ids):
             continue
-        seen.add(key)
+        seen.setdefault(key, set()).add(s.task_id or None)
         out.append(s)
     return out
 
@@ -268,12 +269,15 @@ def now_section(tools) -> str:
         return ""
     missed = missed_for(tools, now, muted_too=True)  # where things stand, muted or not
     askable = {s.id for s in missed_for(tools, now)}
-    lines = ["NOW", status_line(plan, now)]
+    from thirties_core.item_path import labelled_plan, span_label, tasks_of  # a nested item with its parents
+    tasks = tasks_of(tools)
+    lines = ["NOW", status_line(labelled_plan(plan, tasks), now)]
     if missed:
         shown = MissedTracker(tools._state_db).titles_shown(now)
-        new = [s.title for s in missed if s.title.strip().lower() not in shown and s.id in askable]
-        muted = [s.title for s in missed if s.id not in askable]
-        lines.append("Not marked yet (their time is over, nothing said): " + ", ".join(s.title for s in missed) + ". "
+        new = [span_label(s, tasks) for s in missed if s.title.strip().lower() not in shown and s.id in askable]
+        muted = [span_label(s, tasks) for s in missed if s.id not in askable]
+        lines.append("Not marked yet (their time is over, nothing said): "
+                     + ", ".join(span_label(s, tasks) for s in missed) + ". "
                      + ("The user has already been shown all of these: don't ask about them again."
                         if not new else "Not shown to the user yet: " + ", ".join(new) + ".")
                      + (" Check-ins are muted for " + ", ".join(muted) + ": never ask about those, though a schedule "

@@ -266,6 +266,23 @@ def period_label(p: Period, today: date, week_start: int = 0) -> str:
     return p.key
 
 
+# A candidate's reason when it comes from a longer plan: "from the plan for this month (November)", with what's
+# left of its budget or when that plan ends
+_FROM_PLAN_RE = re.compile(r"^from the plan for (?P<plan>.+?)(?:, which ends (?P<ends>\w+)|, "
+                           r"(?P<left>\d+ of \d+ sessions? still to place))?$")
+
+
+def from_plan_heading(plan: str) -> str:
+    """The heading over what a longer plan contributed: "From this month's plan:", "From next week's plan:",
+    "From the November plan:", "From the plan for the week of Nov 9:"."""
+    name = re.sub(r"\s*\([^)]*\)$", "", plan.strip())
+    if name.startswith(("this ", "next ")):
+        return f"From {name}'s plan:"
+    if name.startswith("the "):
+        return f"From the plan for {name}:"
+    return f"From the {name} plan:"
+
+
 def due_horizon(due: date, today: date, week_start: int = 0) -> str:
     """The horizon a due date puts an item at, today: by tomorrow is the day; by the end of this week (or within a
     week) the week; by the end of the month (or within a month) the month; anything later, the year."""
@@ -595,9 +612,10 @@ class Candidate:
     score: float = 0.0
     task: Optional[TaskItem] = field(default=None, repr=False, compare=False)
 
-    def facts(self) -> str:
+    def facts(self, why: Optional[str] = None) -> str:
+        """The facts in brief; ``why`` in place of the reason (a list under its own heading says it once)."""
         bits = [f"{self.sessions} session{'s' if self.sessions != 1 else ''} of {self.minutes} min"
-                if self.sessions else "", self.why]
+                if self.sessions else "", self.why if why is None else why]
         if self.due and "due" not in self.why:
             bits.append(f"due {_as_date(self.due).strftime('%a %b %-d')}" if _as_date(self.due) else "")
         if self.deferred:
@@ -606,10 +624,11 @@ class Candidate:
             bits.append(f"carried {self.carried}x")
         return "; ".join(b for b in bits if b)
 
-    def line(self) -> str:
-        """For a model: '- Call the ENT [Medical] (due Tue Nov 3; from the November plan) id=t_ent'."""
+    def line(self, name: str = "") -> str:
+        """For a model: '- Call the ENT [Medical] (due Tue Nov 3; from the November plan) id=t_ent'. ``name``: how
+        the user reads it, when not by its title (a nested item with its parents, item_path.py)."""
         where = f" [{self.list}]" if self.list else ""
-        return f"- {self.title}{where} ({self.facts()}) id={self.task_id}"
+        return f"- {name or self.title}{where} ({self.facts()}) id={self.task_id}"
 
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in self.__dict__.items() if k != "task"}
@@ -1135,13 +1154,13 @@ class HorizonPlanner:
         head = f"Planning {self.label(p)} ({_span_text(p)})."
         if not cands:
             return head + " Nothing is waiting for it: no item is pinned, due, carried over or at this horizon.", []
-        lines = [head, "Candidates (best first; facts from Python):"] + [c.line() for c in cands[:15]]
+        lines = [head, "Candidates (best first; facts from Python):"] + [c.line(self.named(c)) for c in cands[:15]]
         if len(cands) > 15:
             lines.append(f"(and {len(cands) - 15} more at this horizon)")
         context = self.context(p)
         if context:
             lines += ["Room:"] + context
-        lines.append("Suggested: " + "; ".join(c.title for c in picks) + ". apply_period_proposal applies this "
+        lines.append("Suggested: " + "; ".join(self.named(c) for c in picks) + ". apply_period_proposal applies this "
                      "suggestion (skip what the user doesn't want, or pass items to apply your own picks).")
         return "\n".join(lines), picks
 
@@ -1154,12 +1173,32 @@ class HorizonPlanner:
         last = track_line(self, before, {"week": "last week", "month": before.start.strftime("%B"),
                                          "year": str(before.start.year)}[p.level])  # how the last one went (C2)
         lines = [f"{opening}." + (f" {last}" if last else "") + f" For {self.label(p)} I'd plan:"]
-        from thirties_core.assistant_tools import _short  # a list line in brief (11-04 replay: whole paragraphs)
+        # one plain line per item, a nested one with its parents; what comes from a longer plan under one heading
+        # that says so once, not after every line
+        loose: List[str] = []
+        groups: Dict[str, List[str]] = {}
         for c in picks:
-            why = c.facts()
-            lines.append(f"- {_short(c.title)}" + (f" ({why})" if why else ""))
+            m = _FROM_PLAN_RE.match(c.why or "")
+            if m is None:
+                why = c.facts()
+                loose.append(self.named(c) + (f" ({why})" if why else ""))
+                continue
+            rest = f"ends {m.group('ends')}" if m.group("ends") else (m.group("left") or "")
+            why = c.facts(why=rest)
+            groups.setdefault(m.group("plan"), []).append(self.named(c) + (f" ({why})" if why else ""))
+        lines += loose
+        for plan, items in groups.items():
+            lines += [from_plan_heading(plan)] + items
         lines.append(f"Want {self.label(p)} like that?")
         return "\n".join(lines)
+
+    def named(self, c: "Candidate") -> str:
+        """A candidate as the user reads it: a nested list item with its parents (item_path.py), else its short
+        title."""
+        from thirties_core.assistant_tools import _short  # a list line in brief (11-04 replay: whole paragraphs)
+        from thirties_core.item_path import label
+        task = c.task if c.task is not None else next((t for t in self.tasks if t.id == c.task_id), None)
+        return label(task, self.tasks) if task is not None else _short(c.title)
 
     def pending(self) -> Optional[Period]:
         """The period whose proposal was offered and not yet answered (and is still fresh), if any."""
@@ -1213,7 +1252,8 @@ class HorizonPlanner:
             if sessions and where.level == "day":
                 sessions = None  # a day takes no budget: the week's share stays on the week
             self.pin(t, where, sessions, minutes)
-            names.append(t.title + (f" ({self.label(where)})" if where != p else "")
+            from thirties_core.item_path import label  # a nested item with its parents
+            names.append(label(t, self.tasks) + (f" ({self.label(where)})" if where != p else "")
                          + (f" ({sessions} session{'s' if sessions != 1 else ''})" if sessions else ""))
         if data:
             self.db.set_sync_meta(self._proposal_key(p), json.dumps({**data, "state": "applied"}))
@@ -1316,8 +1356,14 @@ class HorizonPlanner:
             return ""
         from thirties_core.assistant_tools import _short
         by_period: Dict[str, List[str]] = {}
+        from thirties_core.item_path import label  # a nested item with its parents
+        by_title: Dict[str, List[TaskItem]] = {}
+        for t in self.tasks:
+            by_title.setdefault(t.title.strip().lower(), []).append(t)
         for e in recent:
-            by_period.setdefault(e["into"], []).append(_short(e["title"]))
+            same = by_title.get(str(e["title"]).strip().lower(), [])
+            by_period.setdefault(e["into"], []).append(label(same[0], self.tasks) if len(same) == 1
+                                                       else _short(e["title"]))
         return "\n".join(f"Pulled forward into {into}, where there was room: {', '.join(titles)}."
                          for into, titles in by_period.items())
 
@@ -1363,9 +1409,13 @@ class HorizonPlanner:
             from thirties_core.on_track import summary, track
             how = summary(track(self, p))
             lines.append(f"{_upper_first(self.label(p))}" + (f" ({how})" if how else "") + ":")
+            from thirties_core.item_path import label  # a nested item with its parents
+            by_id = {t.id: t for t in self.tasks}
             for r in rows[:15]:
                 slot = slot_period(r, self.week_start)
-                lines.append(f"- {r['title']}" + (f" ({self.label(slot)})" if slot else "")
+                task = by_id.get(r["item_id"])
+                name = label(task, by_id) if task is not None else r["title"]
+                lines.append(f"- {name}" + (f" ({self.label(slot)})" if slot else "")
                              + (" (on the plan)" if r["status"] == "scheduled" else "") + f" id={r['item_id']}")
         if not lines:
             return ""
