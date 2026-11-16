@@ -151,7 +151,7 @@ class TestOneRowFormatter(WhatsNextCase):
         self.assertEqual(rows, plain_rows(schedule_rows(plan, at("17:30"), planned_only=True))[:3])
         shown = render_schedule(plan, now).splitlines()
         for row in rows:
-            self.assertIn("- " + row, shown)  # the schedule's own row, word for word (it adds only its marker)
+            self.assertIn(row, shown)  # the schedule's own row, word for word
         self.assertIn("8:00 PM – Movie", render(plan, at("19:40")).splitlines())  # the same (until) rule too
 
 
@@ -190,7 +190,7 @@ class TestTheLayout(WhatsNextCase):
         sections_apart(self, out)
         sections_apart(self, render_schedule(plan, at("17:10")))
         notice = with_missed("🔔 6:00 PM: Dinner", [plan.spans[-1]])
-        self.assertEqual(notice, "🔔 6:00 PM: Dinner\n\nNot marked yet:\n- Tune the ukulele")
+        self.assertEqual(notice.split("\n\n", 1)[1], "Not marked yet:\nTune the ukulele")
 
 
 class TestTheSlice(unittest.TestCase):

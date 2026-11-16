@@ -73,7 +73,7 @@ class TestDelivery(ContextualCase):
         self.svc.contextual(at("14:30"))
         self.svc.contextual(at("14:36"))
         self.svc.contextual(at("14:40"))
-        self.assertEqual(self.sent, [("contextual", "🚗 Are you on your way to Dentist? It's at 3:00.")])  # AM/PM only where unclear
+        self.assertEqual(self.sent, [("contextual", "🚗 Are you on your way to Dentist? It's at 3:00 PM.")])  # every time with AM/PM
         self.assertEqual(self.svc.bridge.broadcast.call_args.kwargs["expires"], at("15:00"))
 
     def test_not_once_the_travel_is_reported(self):

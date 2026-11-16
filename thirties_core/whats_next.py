@@ -204,14 +204,10 @@ def free_stretches(plan: DayPlan, now: datetime, until: Optional[datetime] = Non
 
 
 def free_line(a: datetime, b: datetime, now: Optional[datetime] = None) -> str:
-    """"Free 12:30–3:00 PM" (the first AM/PM only when the stretch crosses noon), or "Free until 3:00 PM" when it
-    has already begun."""
+    """"Free 12:30 PM – 3:00 PM", or "Free until 3:00 PM" when it has already begun: every time with AM/PM."""
     if now is not None and a <= now:
         return f"Free until {format_clock(b)}"
-    first = format_clock(a)
-    if first[-2:] == format_clock(b)[-2:]:
-        first = first[:-3]
-    return f"Free {first}–{format_clock(b)}"
+    return f"Free {format_clock(a)} – {format_clock(b)}"
 
 
 _ROW_TIME_RE = re.compile(r"^(\d{1,2}:\d{2} [AP]M) –")

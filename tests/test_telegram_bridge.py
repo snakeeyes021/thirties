@@ -225,14 +225,14 @@ class TestThirtiesTelegramBridge(BridgeCase):
             self.bridge.handle_message(chat_id=1001, text="/now")
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
-        self.assertEqual(msg, "Now: Deep Work Code Review\n\nNext:\n8:30 AM – Work\nFree 4:00–11:00 PM")  # what's next
+        self.assertEqual(msg, "Now: Deep Work Code Review\n\nNext:\n8:30 AM – Work\nFree 4:00 PM – 11:00 PM")  # what's next
 
     def test_day_command(self):
         self.bridge.handle_message(chat_id=1001, text="/day")
         self.bridge.client.send_message.assert_called_once()
         msg = self.bridge.client.send_message.call_args[0][1]
         self.assertIn("Schedule for", msg)
-        self.assertIn("- 8:30 AM – Work", msg)  # laid out like the assistant's schedule replies
+        self.assertIn("8:30 AM – 4:00 PM Work", msg)  # laid out like the assistant's whole-day replies
         self.assertIn("You're in the 9:00 AM block: Work", msg)
         self.assertNotIn("Block", msg)
 
@@ -350,7 +350,7 @@ class TestBridgeBursts(BridgeCase):
             with patch("thirties_core.plan_tools.PlanTools._now", return_value=at("09:05")):
                 self.bridge.handle_message(chat_id=1001, text="/now")
         self.assertEqual(self.bridge.client.send_message.call_args[0][1],
-                         "Now: Work\n\nNothing else is planned today.\nFree 4:00–11:00 PM\n\nNot marked yet:\n8:00 AM – Shower")
+                         "Now: Work\n\nNothing else is planned today.\nFree 4:00 PM – 11:00 PM\n\nNot marked yet:\n8:00 AM – Shower")
 
 
     def test_a_thumbs_up_on_the_morning_proposal_is_a_yes(self):

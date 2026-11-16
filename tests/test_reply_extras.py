@@ -6,6 +6,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from thirties_core.clock import format_clock
 from tests.fixtures import DAY, at
 from tests.test_whats_next import WhatsNextCase
 from thirties_core.astronomy import set_debug_time
@@ -55,7 +56,7 @@ class TestStoppingWhatsNext(WhatsNextCase):
     def test_asking_whats_next_always_works_even_when_its_off(self) -> None:
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off"}', "Okay.", said="stop the list")
         out = self.turn("CALL show_schedule {}", "Here's what's left.", said="what's next?")
-        self.assertIn("6:00 – Dinner", out)
+        self.assertIn(f"{format_clock(at('18:00'))} – Dinner", out)
 
     def test_only_for_today_when_said_so(self) -> None:
         self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off", "for_today": true}', "Not today.",
@@ -163,7 +164,7 @@ class TestTheBlockLine(WhatsNextCase):
         set_debug_time(at("17:20"))
         again = self.turn(ADD, "CALL show_schedule {}", "Fern at 5:30; here's the plan.", said="fern at 5:30")
         self.assertEqual(status_lines(again), [])  # unchanged block: left out
-        self.assertIn("5:30 – Repot the fern", again)
+        self.assertIn("5:30 PM – Repot the fern", again)
         set_debug_time(at("17:40"))
         later = self.schedule_turn("show my plan")
         self.assertEqual(len(status_lines(later)), 1)  # a new block: said again
@@ -176,7 +177,7 @@ class TestTheBlockLine(WhatsNextCase):
         set_debug_time(at("17:40"))
         out = self.schedule_turn("show my plan")
         self.assertEqual(status_lines(out), [])
-        self.assertIn("6:00 – Dinner", out)
+        self.assertIn(f"{format_clock(at('18:00'))} – Dinner", out)
         self.assertFalse(settings_for(self.sched.state_db).get("assistant.status_line"))
         self.assertEqual(len(status_lines(self.schedule_turn("where am i?"))), 1)  # asked outright: still answered
 

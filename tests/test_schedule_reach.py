@@ -8,6 +8,7 @@ import unittest
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from thirties_core.clock import format_clock
 from tests.fixtures import DAY, at, make_scheduler, mark_up
 from tests.test_one_conversation import CHAT, OneConversationCase, Phone
 from tests.test_whats_next import WhatsNextCase
@@ -56,14 +57,14 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
 
     def test_the_bell_ends_with_whats_next_and_its_free_time(self):
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.last("start"), "🔔 5:00: Sort the receipts\n\nNext:\n6:00 – Dinner (until 7:00)\n"
-                                             "Free 7:00–8:00\n8:00 – Film night\nFree 9:30–11:00")  # AM/PM as needed
+        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts\n\nNext:\n6:00 PM – Dinner (until 7:00 PM)\n"
+                                             "Free 7:00 PM – 8:00 PM\n8:00 PM – Film night\nFree 9:30 PM – 11:00 PM")  # every time with AM/PM
         self.assertNotIn("Now:", self.last("start"))  # the bell says what's on now itself
 
     def test_not_repeated_every_half_hour_while_nothing_changed(self):
         self.svc.starts(at("17:00"))
         self.svc.starts(at("18:00"))
-        self.assertEqual(self.last("start").split("\n\n")[0], "🔔 6:00: Dinner")  # the 5:00 one still holds
+        self.assertEqual(self.last("start").split("\n\n")[0], f"🔔 {format_clock(at('18:00'))}: Dinner")  # the 5:00 one still holds
         self.assertNotIn("Next:", self.last("start"))  # just the bell, and what fell behind since (as before)
 
     def test_again_once_the_plan_changes(self):
@@ -75,9 +76,9 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
     def test_again_once_the_last_one_ran_out_or_two_hours_passed(self):
         self.svc.starts(at("17:00"))  # it listed up to Film night at 8:00
         self.svc.starts(at("20:00"))
-        self.assertTrue(self.last("start").startswith("🔔 8:00: Film night\n\nNothing else is planned today.\n"
-                                                      "Free 9:30–11:00"), self.last("start"))  # it ran out: anew
-        self.assertIn("Not marked yet:\n5:00 – Sort the receipts\n6:00 – Dinner", self.last("start"))
+        self.assertTrue(self.last("start").startswith("🔔 8:00 PM: Film night\n\nNothing else is planned today.\n"
+                                                      "Free 9:30 PM – 11:00 PM"), self.last("start"))  # it ran out: anew
+        self.assertIn("Not marked yet:\n5:00 PM – Sort the receipts\n6:00 PM – Dinner", self.last("start"))
         from thirties_core.whats_next import SentSummaries
         plan = self.svc.manager().day_plan
         sent = SentSummaries(self.sched.state_db)
@@ -89,7 +90,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         from thirties_core.whats_next import SentSummaries
         SentSummaries(self.sched.state_db).mark(self.svc.manager().day_plan, at("16:55"))
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.last("start"), "🔔 5:00: Sort the receipts")
+        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts")
 
     def test_the_check_in_ends_with_whats_next_without_asking_twice(self):
         self.svc.check_ins(at("18:15"))
@@ -97,18 +98,18 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.assertTrue(text.startswith("👋 Just checking in: have you started Dinner yet, or are you still on Sort "
                                         "the receipts?\n\nNext:\n"), text)  # it names what's on now: no "Now" line
         self.assertNotIn("Not marked yet", text)  # what it asks about isn't listed under it again
-        self.assertIn("8:00 – Film night", lines(text))
+        self.assertIn("8:00 PM – Film night", lines(text))
 
     def test_the_setting_nothing_keeps_notices_as_they_were(self):
         self.sched.config.assistant.after_change = "nothing"
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.last("start"), "🔔 5:00: Sort the receipts")
+        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts")
 
     def test_plain_lines_no_bullets(self):
         self.add("old", "Water the ferns", "16:00", "16:15")
         self.svc.starts(at("17:00"))
         self.assertFalse(any(line.startswith("- ") for line in lines(self.last("start"))))
-        self.assertIn("4:00 – Water the ferns", lines(self.last("start")))  # under Not marked yet
+        self.assertIn("4:00 PM – Water the ferns", lines(self.last("start")))  # under Not marked yet
 
 
 class TestTheUsersSayOverIt(ServiceCase):
@@ -125,7 +126,7 @@ class TestTheUsersSayOverIt(ServiceCase):
     def test_whats_next_off_leaves_the_bell_alone(self):
         self.extras("whats_next", "off")
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.last("start"), "🔔 5:00: Sort the receipts")
+        self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts")
 
     def test_not_marked_off_leaves_the_list_out_of_every_notice(self):
         self.add("old", "Water the ferns", "16:00", "16:15")
@@ -137,7 +138,7 @@ class TestTheUsersSayOverIt(ServiceCase):
         from thirties_core.whats_next import SentSummaries
         SentSummaries(self.sched.state_db).mark(self.svc.manager().day_plan, at("17:59"))
         self.svc.starts(at("18:00"))  # just the bell: no list under it either
-        self.assertEqual(self.last("start"), "🔔 6:00: Call the plumber, Dinner")
+        self.assertEqual(self.last("start"), "🔔 6:00 PM: Call the plumber, Dinner")
 
     def test_block_line_off_means_no_now_line_in_a_check_in(self):
         self.extras("status_line", "off")
@@ -178,7 +179,7 @@ class TestTicksInTheDayPanel(ServiceCase):
         sent = self.svc.bridge.broadcast.call_args[0][0]
         self.assertTrue(sent.startswith("Marked done in the app: Sort the receipts. Skipped in the app: Dinner."), sent)
         self.assertIn("Next:", sent)
-        self.assertIn("8:00 – Film night", lines(sent))
+        self.assertIn("8:00 PM – Film night", lines(sent))
         self.assertIn("Marked done in the app", self.svc.manager().history()[-1]["content"])  # one conversation
 
     def test_nothing_without_a_phone_or_when_unticked_again(self):
@@ -222,7 +223,7 @@ class TestTheEveningCatchUp(ServiceCase):
         self.svc.evening_catch_up(at("17:30"))  # not before the evening
         self.assertEqual(self.desktop, [])
         text = self.offer()
-        self.assertEqual(text, "Not marked yet:\n10:00 AM – Water the ferns\n10:30 – Post the parcel\n"
+        self.assertEqual(text, "Not marked yet:\n10:00 AM – Water the ferns\n10:30 AM – Post the parcel\n"
                                "4:00 PM – Pump the bike tyres\n\nMove these 3 to tonight?")
         self.svc.evening_catch_up(at("19:20"))
         self.assertEqual(len(self.desktop), 1)
@@ -349,15 +350,15 @@ class TestPieces(WhatsNextCase):
         plan = self.manager.day_plan
         self.assertEqual(free_stretches(plan, at("17:10")), [(at("22:00"), at("23:00"))])  # to bedtime
         self.assertEqual(free_stretches(plan, at("12:10"))[0], (at("16:00"), at("17:00")))  # after Work
-        self.assertEqual(free_line(at("12:30"), at("15:00")), "Free 12:30–3:00 PM")
-        self.assertEqual(free_line(at("11:30"), at("13:00")), "Free 11:30 AM–1:00 PM")
+        self.assertEqual(free_line(at("12:30"), at("15:00")), "Free 12:30 PM – 3:00 PM")
+        self.assertEqual(free_line(at("11:30"), at("13:00")), "Free 11:30 AM – 1:00 PM")
         self.assertEqual(free_line(at("17:00"), at("18:00"), at("17:10")), "Free until 6:00 PM")
 
     def test_a_done_frees_its_time(self):
         from thirties_core.whats_next import render
         plan = self.manager.day_plan
         next(s for s in plan.spans if s.id == "glaze").status = SpanStatus.DONE
-        self.assertIn("Free 7:00–8:00 PM", lines(render(plan, at("17:10"))))
+        self.assertIn("Free 7:00 PM – 8:00 PM", lines(render(plan, at("17:10"))))
 
     def test_untimed_lines(self):
         from thirties_core.whats_next import untimed_lines

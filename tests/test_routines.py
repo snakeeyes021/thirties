@@ -684,8 +684,8 @@ class TestTheMorningMessage(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("\n4:30 Call the bank", self.sent[0][1])  # half an hour clear after work
-        self.assertIn("\n3:00 Make bed, Shower, Journal", self.sent[0][1])  # routines are listed, by part
+        self.assertIn("\n4:30 PM Call the bank", self.sent[0][1])  # half an hour clear after work
+        self.assertIn("\n3:00 PM Make bed, Shower, Journal", self.sent[0][1])  # routines are listed, by part
         self.assertIn("\n12:00 PM Lunch", self.sent[0][1])  # and the meals
         self.assertNotIn("\n- ", self.sent[0][1])  # plain lines
         visible = [h["content"] for h in self.m.history()]

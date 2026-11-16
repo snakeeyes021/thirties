@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from thirties_core.clock import EXACT_ASKED_RE, real_times, thirty_of, to_thirties, trim_meridiems
+from thirties_core.clock import EXACT_ASKED_RE, real_times, thirty_of, to_thirties
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.assistant_tools import Services
 from thirties_core.brains import BRAIN_ALIASES, BRAINS, Brain, brain_choice, make_brain
@@ -566,9 +566,8 @@ class ConversationManager:
         said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"]  # all day
         keep = real_times(*said, merged, spans=self.day_plan.spans,  # real item times, the user's, and now
                           now=get_current_time(self.day_plan.day_start.tzinfo))
-        shown = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep)  # else blocks
-        final = trim_meridiems(shown, get_current_time(self.day_plan.day_start.tzinfo)
-                               if self.day_plan.target_date == self.tools.today() else None)
+        # else blocks; every time keeps its AM/PM (a schedule with some times trimmed and some not was hard to read)
+        final = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
         final = self._status_as_wanted(final, merged, before)

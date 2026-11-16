@@ -3,6 +3,7 @@
 import unittest
 from datetime import timedelta
 
+from thirties_core.clock import format_clock
 from tests.fixtures import DAY, at, line_with, make_scheduler
 from tests.test_conversation import reply
 from thirties_core.astronomy import set_debug_time
@@ -77,10 +78,11 @@ class TestStatusAndSchedule(MessagesCase):
         text = render_schedule(self.plan, at("10:10"))
         lines = text.splitlines()
         self.assertEqual(lines[:6], ["You're in the 10:00 AM block: Shower, then Journal.", "", "Not marked yet:",
-                                     "- Feed the fish", "- Make coffee", "- Make bed"])  # its own section
+                                     "Feed the fish", "Make coffee", "Make bed"])  # its own section, plain lines
         self.assertNotIn("9:00", text)  # 10-26: only what is from the current block on
-        self.assertIn("- 5:00 PM – Dinner + Book", text)  # things at the same time: one entry
-        self.assertIn("- 12:00 PM – Lunch", text)  # on top of Work, which the status says runs until 4
+        self.assertIn("5:00 PM – Dinner + Book", lines)  # things at the same time: one entry
+        # on top of Work, which the status says runs until 4
+        self.assertIn(f"{format_clock(at('12:00'))} – Lunch (until {format_clock(at('13:00'))})", lines)
 
     def test_the_whole_day_when_asked(self):
         text = render_schedule(self.plan, at("10:10"), whole_day=True)

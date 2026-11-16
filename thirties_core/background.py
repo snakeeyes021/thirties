@@ -184,7 +184,7 @@ class BackgroundService:
         reach the phone is kept with a quiet "not delivered to your phone" mark. ``phone=False``: the phone already
         has it (a mirrored turn). ``desktop=False``: no desktop notification (what the user just did at the
         desktop)."""
-        from thirties_core.clock import real_times, to_thirties, trim_meridiems
+        from thirties_core.clock import real_times, to_thirties
         if kind not in HOLD_PASSES and self._held(now or self.now()):
             logger.info("Held (the user asked for quiet): %r", text[:80])
             return
@@ -207,7 +207,7 @@ class BackgroundService:
             now = now or self.now()
             if to_conversation:
                 keep = real_times(spans=self.manager().day_plan.spans, now=now)  # "it's 8:41" stays 8:41
-                text = trim_meridiems(to_thirties(self.manager().tools.shorten(text), keep), now)  # short titles
+                text = to_thirties(self.manager().tools.shorten(text), keep)  # short titles, AM/PM kept
         except Exception:
             pass
         if self.desktop_notify is not None and desktop:

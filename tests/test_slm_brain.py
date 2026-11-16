@@ -292,9 +292,9 @@ class TestSchedulingActions(SlmTestCase):
         self.assertNotIn("Done", out)
         self.assertEqual(self.brain.state.proposal, [])
 
-    def test_what_the_user_sees_drops_obvious_am_pm(self):
+    def test_what_the_user_sees_keeps_am_pm(self):
         self.say("dinner at 7 for an hour", {"type": "add", "title": "Dinner", "start": "7", "duration": "1 hour"})
-        self.assertTrue(self.shown.startswith("Added Dinner: 7:00 – 8:00 (1h)."), self.shown)  # it's 4:40 PM
+        self.assertTrue(self.shown.startswith("Added Dinner: 7:00 PM – 8:00 PM (1h)."), self.shown)  # it's 4:40 PM
 
     def test_no_length_given_uses_how_long_it_usually_takes(self):
         from thirties_core.models import EventSpan, SpanCategory, SpanStatus

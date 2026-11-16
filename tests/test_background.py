@@ -105,9 +105,9 @@ class TestBackground(unittest.TestCase):
                                                       SpanCategory.ACTIVITY))
         for minute in (0, 1, 5, 10):  # ticks through the thirty
             self.svc.starts(at("11:00") + timedelta(minutes=minute))
-        self.assertEqual(self.desktop, [("start", "🔔 11:00: Feed the fish, Make coffee, Pack lunch")])
+        self.assertEqual(self.desktop, [("start", "🔔 11:00 AM: Feed the fish, Make coffee, Pack lunch")])
         self.svc.starts(at("17:00") + timedelta(seconds=20))
-        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00 PM: Taxes")
 
     def test_moved_item_is_not_announced_again(self):
         self.svc.starts(at("17:00"))
@@ -135,7 +135,7 @@ class TestBackground(unittest.TestCase):
         self.sched.state_db.upsert_span(EventSpan("t2", "Brush teeth", at("22:00"), at("22:30"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("22:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00: Brush teeth")  # the first was done: new
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00 PM: Brush teeth")  # the first was done: new
 
     def test_whats_behind_is_listed_under_the_status_when_something_new_falls_behind(self):
         for sid, title, start in (("k", "Feed the fish", "11:00"), ("c", "Make coffee", "11:10"), ("s", "Shower", "11:30")):
@@ -152,18 +152,18 @@ class TestBackground(unittest.TestCase):
         self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\nFeed the fish\n"
                                                                "Make coffee\nShower\nWalk")  # Walk fell behind
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00: Taxes")
+        self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00 PM: Taxes")
         self.assertIn("\nLunch", self.desktop[-1][1])
         self.sched.state_db.upsert_span(EventSpan("x", "Stretch", at("17:30"), at("18:00"), SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("17:30"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 5:30: Stretch"))  # nothing new behind: not repeated
+        self.assertEqual(self.desktop[-1], ("start", "🔔 5:30 PM: Stretch"))  # nothing new behind: not repeated
 
     def test_start_notices_are_in_the_conversation(self):
         self.svc.starts(at("17:00"))
         last = self.svc.manager().messages[-1]
-        self.assertEqual((last["content"], last.get("kind")), ("🔔 5:00: Taxes", "notice"))
-        self.assertIn("🔔 5:00: Taxes", [m["content"] for m in self.svc.manager().history()])
+        self.assertEqual((last["content"], last.get("kind")), ("🔔 5:00 PM: Taxes", "notice"))
+        self.assertIn("🔔 5:00 PM: Taxes", [m["content"] for m in self.svc.manager().history()])
 
     def test_check_ins_batch_the_items_of_a_thirty(self):
         for title, minute in (("Feed the fish", 0), ("Make coffee", 5)):
@@ -241,7 +241,7 @@ class TestMessageLevels(unittest.TestCase):
         self.run_day("14:45", "20:30")
         kinds = [k for k, _ in self.sent]
         self.assertEqual(kinds.count("heads_up"), 1)
-        self.assertIn(("heads_up", "⏰ Dentist at 3:00. (Lunch isn't reported yet.)"), self.sent)
+        self.assertIn(("heads_up", "⏰ Dentist at 3:00 PM. (Lunch isn't reported yet.)"), self.sent)
         self.assertNotRegex(" ".join(b for _, b in self.sent), r":(?!00|30)\d\d")  # only :00 and :30
         starts = [b for k, b in self.sent if k == "start"]
         self.assertTrue(starts[0].startswith("🗓 Until ") and "Shower, then Food" in starts[0], starts)
@@ -271,7 +271,7 @@ class TestMessageLevels(unittest.TestCase):
         self.sched.calendar_engine = MockCalendarEngine([event("vet", "16:45", "17:15", "Vet")])
         self.svc._manager = None
         self.run_day("16:30", "16:40")
-        self.assertIn(("heads_up", "⏰ Vet at 4:45, in the 4:30 block."), self.sent)  # its real time, and its block
+        self.assertIn(("heads_up", "⏰ Vet at 4:45 PM, in the 4:30 PM block."), self.sent)  # its real time, and its block
 
     def test_the_old_start_message_switch_doesnt_silence_everything(self):
         self.sched.config.telegram.notify_block_transitions = False  # someone who'd turned start messages off
@@ -462,7 +462,7 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         from thirties_core.wake import FALLBACK_LATE
         line, items = first.split("\n\n", 1)
         # sent at 7:30 for a 7:00 wake-up (the computer was asleep): the time said as past, never as now
-        self.assertEqual(line, FALLBACK_LATE["wake"].format(clock="7:00"))  # the mock model: the plain fallback
+        self.assertEqual(line, FALLBACK_LATE["wake"].format(clock="7:00 AM"))  # the mock model: the plain fallback
         self.assertEqual(items, "On the plate today:\nJournal\nDentist\nCall")  # one per line, no bullets, no times
         self.assertNotIn("Taxes", first)  # yesterday's leftover isn't today's by default (carry.py)
         self.assertFalse(any(s.title == "Taxes" for s in self.svc.manager().day_plan.spans))  # nothing built
@@ -524,7 +524,7 @@ class TestBeforeTheUserIsUp(unittest.TestCase):
         self.svc.morning_hello(plan.sunrise + timedelta(minutes=5))
         from thirties_core.clock import format_clock
         from thirties_core.wake import FALLBACK
-        self.assertEqual(self.sent, [("morning", FALLBACK["sunrise"].format(clock=format_clock(plan.sunrise).replace(" AM", "")))])
+        self.assertEqual(self.sent, [("morning", FALLBACK["sunrise"].format(clock=format_clock(plan.sunrise)))])
 
 
 class TestRollover(unittest.TestCase):

@@ -70,7 +70,8 @@ def join_sections(*sections: Optional[str]) -> str:
 
 
 def missed_block(spans: Sequence[EventSpan]) -> str:
-    return "\n".join([MISSED_HEADING] + missed_lines(spans)) if spans else ""
+    """What the user reads: the heading and one plain line per item (no bullets)."""
+    return "\n".join([MISSED_HEADING] + [line[2:] for line in missed_lines(spans)]) if spans else ""
 
 
 class MissedTracker:
@@ -201,18 +202,41 @@ def plain_rows(rows: List[str]) -> List[str]:
     return lines
 
 
+def whole_day_lines(plan: DayPlan) -> List[str]:
+    """The whole day as a record: one plain line per item with its real start and end, every time with AM/PM
+    ("3:00 PM – 6:30 PM Shelf build (done)"), done items too (it's what the day held), and things that start
+    together on one line ("A + B"), the line running to the later end and the other saying its own ("Podcast
+    (until 4:00 PM)"). Never a row per half hour, an empty time line with the items under it, or bullets."""
+    groups: List[List[EventSpan]] = []
+    for s in sorted(_row_items(plan), key=lambda s: (s.start_dt.timestamp(), -s.end_dt.timestamp())):
+        if groups and groups[-1][0].start_dt == s.start_dt:
+            groups[-1].append(s)
+        else:
+            groups.append([s])
+    out = []
+    for group in groups:
+        end = max(s.end_dt for s in group)
+
+        def said(s: EventSpan) -> str:
+            notes = [f"until {format_clock(s.end_dt)}"] if s.end_dt != end else []
+            notes += [_note(s)] if _note(s) else []
+            return s.title + (f" ({', '.join(notes)})" if notes else "")
+        out.append(f"{format_clock(group[0].start_dt)} – {format_clock(end)} " + " + ".join(said(s) for s in group))
+    return out
+
+
 def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = False,
                     missed: Optional[Sequence[EventSpan]] = None, label: str = "", config=None, db=None,
                     said: str = "") -> str:
-    """The schedule as the user reads it. For the day being lived (``now`` given): the status line, what's not
-    marked yet right after it, then the rest of the day (or, asked for, the whole day). For another day: the
-    day."""
+    """The schedule as the user reads it, in plain lines (no bullets). For the day being lived (``now`` given):
+    the status line, what's not marked yet right after it, then the rest of the day by blocks (or, asked for, the
+    whole day as a record: whole_day_lines). For another day: the day."""
     if now is None or not (plan.day_start <= now < plan.day_end):
-        rows = schedule_rows(plan)
+        rows = whole_day_lines(plan) if whole_day else plain_rows(schedule_rows(plan))
         head = f"Here's {label or plan.target_date.strftime('%A, %B %-d')}:"
         return "\n".join([head] + rows) if rows else f"Nothing is planned for {label or 'that day'} yet."
     block = thirty_of(now)
-    rows = schedule_rows(plan, None if whole_day else block + HALF)
+    rows = whole_day_lines(plan) if whole_day else plain_rows(schedule_rows(plan, block + HALF))
     upcoming = [s for s in _row_items(plan) if s.start_dt >= block + HALF]
     next_start = min((thirty_of(s.start_dt) for s in upcoming), default=None)
     missed = list(missed if missed is not None else missed_items(plan, now))
@@ -324,9 +348,12 @@ def names_not_ids(text: str, names: Optional[dict] = None) -> str:
     return "\n".join(lines)
 
 
-def without_done_rows(text: str) -> str:
-    """A schedule row for something already done is left out of any message (11-02)."""
-    return "\n".join(line for line in str(text or "").split("\n") if not _DONE_ROW_RE.match(line))
+def without_done_rows(text: str, keep: Iterable[str] = ()) -> str:
+    """A schedule row for something already done is left out of any message (11-02), unless it's one of ``keep``:
+    lines Python laid out to be shown (the whole day's record lists what got done on purpose)."""
+    keep = {line.strip() for line in keep if line.strip()}
+    return "\n".join(line for line in str(text or "").split("\n")
+                     if not _DONE_ROW_RE.match(line) or line.strip() in keep)
 
 
 def known_names(tools) -> dict:
@@ -352,7 +379,8 @@ def clean_message(text: str, tools=None, said: str = "") -> str:
     phone."""
     if not text:
         return text
-    out = text if DONE_ASKED_RE.search(said or "") else without_done_rows(text)
+    shown = str(getattr(tools, "shown_schedule", "") or "") if tools is not None else ""
+    out = text if DONE_ASKED_RE.search(said or "") else without_done_rows(text, shown.splitlines())
     out = names_not_ids(out, known_names(tools) if tools is not None else None)
     out = plain_lines(out)
     return re.sub(r"\n{3,}", "\n\n", out).strip() or text
@@ -360,7 +388,8 @@ def clean_message(text: str, tools=None, said: str = "") -> str:
 
 # --- placing the schedule in a reply ---
 
-_ROW_RE = re.compile(r"^\s*(?:[-•*]|\d+\.)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*(?:–|-|—)")
+_ROW_RE = re.compile(r"^\s*(?:(?:[-•*]|\d+\.)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?|\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))"
+                     r"\s*(?:–|-|—)")
 _STATUS_RE = re.compile(r"^\s*You're in the \d{1,2}:\d{2}")
 
 
@@ -380,9 +409,11 @@ def place_schedule(reply: str, schedule: str) -> str:
     if not marks:
         return (reply.rstrip() + "\n\n" + schedule.strip()).strip()
     start, end = marks[0], marks[0]
-    for i in range(marks[0] + 1, len(lines)):  # the run: rows, bullets, indented lines, blank lines between
-        line = lines[i]
+    own = {_BULLET_RE.sub("", line).strip() for line in schedule.strip().splitlines() if line.strip()}
+    for i in range(marks[0] + 1, len(lines)):  # the run: rows, bullets, indented lines, blank lines between, and
+        line = lines[i]                         # the schedule's own lines (its plain Not marked yet ones)
         if i in marks or line.startswith((" ", "\t")) or line.lstrip().startswith(("-", "•", "*")) \
+                or _BULLET_RE.sub("", line).strip() in own \
                 or line.strip().lower() in ("the whole day:", "coming up:", "next:"):
             end = i
         elif line.strip():
@@ -429,4 +460,4 @@ def drop_repeat_checkins(reply: str, missed: Sequence[EventSpan], already: set) 
 __all__ = ["MISSED_HEADING", "MissedTracker", "carried_where", "clean_message", "plain_lines", "names_not_ids",
            "without_done_rows", "known_names", "drop_repeat_checkins", "join_sections", "missed_block", "missed_for", "missed_items",
            "missed_lines", "now_section", "with_missed",
-           "place_schedule", "render_schedule", "schedule_rows", "status_line"]
+           "place_schedule", "render_schedule", "schedule_rows", "status_line", "whole_day_lines"]

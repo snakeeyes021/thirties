@@ -19,23 +19,25 @@ from thirties_core.models import EventSpan, SpanCategory, SpanStatus
 class TestNoDoneRows(WhatsNextCase):
     """A schedule sent to the user never lists what was already done that morning."""
 
-    def test_the_schedule_leaves_done_items_out_even_for_the_whole_day(self):
+    def test_the_rest_of_the_day_leaves_done_items_out_and_the_whole_day_records_them(self):
         from thirties_core.messages import render_schedule
         plan = self.manager.day_plan
         plan.spans.append(EventSpan("wtr", "Water the plants", at("08:00"), at("08:15"), SpanCategory.ACTIVITY,
                                     status=SpanStatus.DONE))
         next(s for s in plan.spans if s.id == "glaze").status = SpanStatus.DONE  # done early
-        for whole in (False, True):
-            text = render_schedule(plan, at("17:10"), whole_day=whole)
-            self.assertNotIn("Water the plants", text)
-            self.assertNotIn("Glazing", text)
-            self.assertNotIn("(done)", text)
-        self.assertIn("Movie", render_schedule(plan, at("17:10"), whole_day=True))
+        text = render_schedule(plan, at("17:10"))
+        self.assertNotIn("Water the plants", text)
+        self.assertNotIn("Glazing", text)
+        self.assertNotIn("(done)", text)
+        whole = render_schedule(plan, at("17:10"), whole_day=True).splitlines()
+        self.assertIn("8:00 AM – 8:15 AM Water the plants (done)", whole)  # the whole day is the day's record
+        self.assertIn("7:00 PM – 8:00 PM Glazing (done)", whole)
+        self.assertIn("8:00 PM – 9:30 PM Movie", whole)
 
     def test_a_done_row_in_the_models_own_reply_is_left_out(self):
         out = self.turn("Here's the day:\n- 8:00 AM – Water the plants (done)\n- 6:00 PM – Dinner\n- 7:00 PM – Glazing",
                         said="when's dinner?")
-        self.assertEqual(out, "Here's the day:\n6:00 PM – Dinner\n7:00 – Glazing")
+        self.assertEqual(out, "Here's the day:\n6:00 PM – Dinner\n7:00 PM – Glazing")
 
 
     def test_asked_what_got_done_the_done_rows_are_the_answer(self):
@@ -53,7 +55,7 @@ class TestNeverAnId(WhatsNextCase):
         self.manager.day_plan.spans.append(EventSpan("7e3b9a1c4d2f8065", "Birthday cards", at("21:00"), at("21:30"),
                                                      SpanCategory.ACTIVITY))
         out = self.turn("7e3b9a1c4d2f8065 is at 9:00 PM.", said="what's at 9?")
-        self.assertEqual(out, "Birthday cards is at 9:00.")
+        self.assertEqual(out, "Birthday cards is at 9:00 PM.")
 
     def test_the_guard_itself(self):
         from thirties_core.messages import names_not_ids
@@ -73,7 +75,7 @@ class TestPlainLines(OneConversationCase):
         self.engine.set_next_response(reply("Tonight:\n- 7:00 PM – Bake bread\n- 8:00 PM – Read\n\n1. A choice"))
         self.svc.bridge.handle_updates([self.update("what's tonight?", 600)])
         said = self.said()[-1]
-        self.assertEqual(said, "Tonight:\n7:00 PM – Bake bread\n8:00 – Read\n\n1. A choice")  # numbers stay
+        self.assertEqual(said, "Tonight:\n7:00 PM – Bake bread\n8:00 PM – Read\n\n1. A choice")  # numbers stay
         self.assertSymmetric()
         conv = self.svc.manager().messages
         self.assertNotIn("\n- ", [m for m in conv if m.get("role") == "assistant"][-1]["content"])  # stored plain
@@ -120,7 +122,7 @@ class TestReminderDetails(unittest.TestCase):
         self.assertEqual(self.sent[-1][1], "⏰ Reminder: Collect the parcels\nTwo boxes, ask at the desk")
         self.sched.config.assistant.message_level = "heavy"  # heavy: the bell is the ping
         self.svc.starts(at("17:00"))
-        self.assertEqual(self.sent[-1][1].split("\n\n")[0], "🔔 5:00: Collect the parcels\nTwo boxes, ask at the desk")
+        self.assertEqual(self.sent[-1][1].split("\n\n")[0], "🔔 5:00 PM: Collect the parcels\nTwo boxes, ask at the desk")
 
 
 class TestHold(ServiceCase):

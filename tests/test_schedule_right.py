@@ -545,7 +545,7 @@ class TestTheReplyMatchesThePlan(ConversationTestCase):
         for _ in range(3):
             self.engine.set_next_response(reply("Lentils wrap at 6:30, and the ukulele is at 6:35."))
         out = self.manager.send_user_message("what's later?")
-        self.assertIn("(On the plan, Practice the ukulele is at 6:30.)", out)
+        self.assertIn("(On the plan, Practice the ukulele is at 6:30 PM.)", out)
 
     def test_times_as_planned_and_other_times_pass(self):
         self.engine.set_next_response(reply("Lentils at 5:30 (until 6:30), then the ukulele at 6:30. The parcel is "
@@ -565,7 +565,7 @@ class TestTheReplyMatchesThePlan(ConversationTestCase):
         for _ in range(3):
             self.engine.set_next_response(reply("The ukulele is off the schedule."))
         out = self.manager.send_user_message("skip the ukulele tonight")
-        self.assertIn("(Practice the ukulele is still on the plan at 6:30.)", out)
+        self.assertIn("(Practice the ukulele is still on the plan at 6:30 PM.)", out)
 
 
 class TestNoCorrectionOfAnUnseenDraft(ConversationTestCase):
