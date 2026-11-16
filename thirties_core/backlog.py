@@ -53,6 +53,16 @@ def load_backlog(config: ThirtiesConfig, joplin_engine: Optional[TaskSource] = N
     return tasks, notes
 
 
+def done_stamp(scheduler) -> frozenset:
+    """The done records that hide items from the lists right now (as load_backlog reads them). A copy of the lists
+    is out of date when these change, even if Joplin hasn't: a record taken back (unticked by hand) means the item
+    is offered again."""
+    try:
+        return frozenset(scheduler.state_db.completed_since(date.today() - timedelta(days=DONE_HIDES_DAYS)))
+    except Exception:
+        return frozenset()
+
+
 PRIVATE_KEY = "private_text"  # this device's: the private lines seen so far (kept, so a restart still hides them)
 
 
