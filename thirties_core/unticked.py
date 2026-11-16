@@ -37,14 +37,24 @@ def _ids_for(db, note_id: str, text: str) -> Set[str]:
 
 
 def _last_writes(db, since: datetime) -> Dict[tuple, dict]:
-    """The last write Thirties made to each line since ``since``: {(note id, its wording): the write}."""
+    """The last write Thirties made to each line since ``since``: {(note id, its wording): the write}, and
+    {(note id, "id:" + an item id the line had): the write}, so a line the user reworded while unticking it (a
+    typo fixed) is still found: it keeps its item (item_ids.py), not its wording."""
+    from thirties_core.joplin_engine import item_id
     from thirties_core.joplin_writeback import WriteLog
     out: Dict[tuple, dict] = {}
     for w in WriteLog(db).since(since.astimezone(timezone.utc).isoformat()):
         op = w.get("op") or {}
+        note_id = str(w.get("note_id") or op.get("note_id") or "")
         for key in ("title", "parent_title"):
             if op.get(key):
-                out[(str(w.get("note_id") or op.get("note_id") or ""), _norm(op[key]))] = w
+                out[(note_id, _norm(op[key]))] = w
+        if op.get("title"):
+            # the item it touched: named in the write, or (an older write) the id its wording was given
+            ids = {str(op["item"])} if op.get("item") else \
+                {item_id(note_id, str(op["title"]).strip(), k) for k in range(3)}
+            for i in ids:
+                out[(note_id, "id:" + i)] = w
     return out
 
 
@@ -86,10 +96,14 @@ def not_done_after_all(db, assistant, notes: Optional[Iterable[dict]] = None,
         for text in open_lines:
             if _norm(text) in ticked:
                 continue  # another copy is still ticked: which one is open again can't be told
+            line_ids = _ids_for(db, note["id"], text)
             last = writes.get((note["id"], _norm(text)))
+            if last is None:  # worded otherwise now (reworded while unticked): the write to its item
+                found = [writes[(note["id"], "id:" + i)] for i in line_ids if (note["id"], "id:" + i) in writes]
+                last = max(found, key=lambda w: int(w.get("id") or 0), default=None)
             if not last or (last.get("op") or {}).get("op") != "complete" or not last.get("ok"):
                 continue  # Thirties never ticked it (or its tick never landed): its done record stands
-            ids = _ids_for(db, note["id"], text) & completed
+            ids = line_ids & completed
             if not ids:
                 continue
             for task_id in ids:

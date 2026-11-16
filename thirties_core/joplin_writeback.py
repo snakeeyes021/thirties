@@ -718,8 +718,9 @@ def _digest(body: str) -> str:
 
 def complete_op(task) -> Dict[str, Any]:
     if task.is_checkbox_item:  # the occurrence: with the same text twice in a note, tick the right one
+        # ``item``: which item it was, for the write log (a line the user rewords later is still that item)
         return {"op": "complete", "is_checkbox_item": True, "note_id": task.parent_note_id, "title": task.title,
-                "occurrence": getattr(task, "occurrence", 0)}
+                "occurrence": getattr(task, "occurrence", 0), "item": task.id}
     return {"op": "complete", "is_checkbox_item": False, "note_id": task.id, "title": task.title}
 
 

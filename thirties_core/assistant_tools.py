@@ -1039,16 +1039,19 @@ class AssistantTools(KindTools):
                     reads as the next morning's)."""
                     t = step_times.step_start(text, near)
                     return t if t is not None and plan.day_start <= t < plan.day_end else None
-                own = own_time(todo[0], first)  # the part's first step says when it starts
-                if own is not None and own != first:
-                    first = own
-                    learned[-1]["start"] = format_clock(first)
                 at = [first + timedelta(minutes=30 * k // len(todo)) for k in range(len(todo) + 1)]
+                # A step with its own time goes there; the others stay where the part was placed, in order, and
+                # never start before the step listed ahead of them ends (a timed step never pulls the part).
+                cursor, prev_end = first, None
                 for k, text in enumerate(todo):
-                    begin, finish = at[k], at[k + 1]
-                    mine = own_time(text, begin) if k else None  # a later step's own time
-                    if mine is not None and mine != begin:
-                        begin, finish = mine, mine + (at[k + 1] - at[k])
+                    length = at[k + 1] - at[k]
+                    mine = own_time(text, first)
+                    if mine is not None:
+                        begin = mine
+                    else:
+                        begin = cursor if prev_end is None else max(cursor, prev_end)
+                        cursor = begin + length
+                    finish = prev_end = begin + length
                     args = {"title": step_times.clean_title(text), "start": format_clock(begin),
                             "end": format_clock(finish), "alongside": True}
                     if step_times.key(text) in by_text:

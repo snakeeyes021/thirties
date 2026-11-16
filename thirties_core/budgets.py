@@ -87,7 +87,7 @@ def count_sessions(pt, title: str, start: date, end: date, today: date) -> tuple
     for s in pt.scheduler.state_db.get_spans_between(a, b):
         if not _same(s.title, title):
             continue
-        if s.status == SpanStatus.DONE:
+        if s.status in (SpanStatus.DONE, SpanStatus.PARTIAL):  # partly done: a session worked all the same
             done += 1
         elif s.status == SpanStatus.PLANNED and ahead_from is not None and s.start_dt >= ahead_from:
             planned += 1
@@ -216,7 +216,8 @@ def session_days(planner: "HorizonPlanner", task: "TaskItem", week: "Period") ->
         if d < today or (due is not None and d > due):
             continue
         plan = pt.plan_for(d)
-        if any(_same(s.title, task.title) and s.status in (SpanStatus.PLANNED, SpanStatus.DONE) for s in plan.spans):
+        if any(_same(s.title, task.title) and s.status in (SpanStatus.PLANNED, SpanStatus.DONE, SpanStatus.PARTIAL)
+               for s in plan.spans):  # a session worked that day (partly done too) is its session
             have.append(d)
         elif _free_minutes(pt, plan, b.minutes, daylight):
             room.append(d)

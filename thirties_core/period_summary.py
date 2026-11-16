@@ -232,7 +232,7 @@ def _effort(r: Dict[str, Any], src: PeriodSource, by_day: Dict[date, List[EventS
             for s in spans:
                 if s.source == "calendar" or not _same(s.title, title):
                     continue
-                if s.status == SpanStatus.DONE:
+                if s.status in (SpanStatus.DONE, SpanStatus.PARTIAL):  # partly done: a session worked
                     e.done += 1
                 elif s.status == SpanStatus.PLANNED and d >= today:
                     e.planned += 1

@@ -99,7 +99,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
         items = [i for p in parts for i in p["items"]]
         self.assertIn("Water the plants", items)
         self.assertFalse(any(i[:1].isdigit() for i in items), items)
-        self.assertEqual(parts[0]["at"], "07:30")  # learned where it went: the 7:30 thirty
+        self.assertEqual(parts[0]["at"], "08:00")  # learned where the part was placed; the step keeps its own time
 
     def test_a_time_before_the_day_starts_never_moves_it_to_the_next_morning(self):
         self.api.notes["n_routine"]["body"] = "- [ ] 6:20 Water the plants\n- [ ] Make coffee\n"

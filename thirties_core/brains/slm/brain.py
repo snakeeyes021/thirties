@@ -1937,7 +1937,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             return out, False
         if "week" in topic or re.search(r"\b(my|this|the|next) week\b", getattr(self, "_message", "").lower()):
             ok, out = self._run("week_overview", {})
-            return "Your week:\n" + "\n".join(f"- {l}" for l in out.splitlines()), False
+            return "Your week:\n" + "\n".join(out.splitlines()), False
         if any(w in topic for w in ("free", "open", "available", "time left", "packed", "busy", "room")):
             saved = self.tools.day_plan
             try:
@@ -1962,7 +1962,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
             if len(windows) == 1:
                 a, b = windows[0]
                 return f"You're free from {format_clock(a)} to {format_clock(b)} ({length(a, b)}).", False
-            return "You're free:\n" + "\n".join(f"- {format_clock(a)} – {format_clock(b)} ({length(a, b)})" for a, b in windows), False
+            return "You're free:\n" + "\n".join(f"{format_clock(a)} – {format_clock(b)} ({length(a, b)})" for a, b in windows), False
         message = getattr(self, "_message", "")
         if (not day or day == "today") and LEFT_TODAY_RE.search(f"{topic} {message}"):
             return self._left_today(), False
@@ -1972,14 +1972,14 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                      and not t.parent_task_id]
             if not items:
                 return f"Nothing open on {named_list}.", False
-            return f"On {named_list}:\n" + "\n".join(f"- {t}" for t in items), False  # every one of them
+            return f"On {named_list}:\n" + "\n".join(items), False  # every one of them, one per line
         if any(w in topic for w in ("task", "backlog", "todo", "to-do", "list")):
             rest = " ".join(w for w in _words(topic) if w not in ("task", "tasks", "backlog", "todo", "list", "my"))
             if rest:
                 ok, out = self._run("search_backlog", {"query": rest})
                 return re.sub(r" \[.*?\]| task_id=\S+", "", out), False
             top = [t for t in self.tasks if not t.someday][:5]
-            return "Some open items:\n" + "\n".join(f"- {t.title}" for t in top), False
+            return "Some open items:\n" + "\n".join(t.title for t in top), False
         if any(w in topic for w in ("talked", "said", "last week", "yesterday we", "earlier")):
             ok, out = self._run("search_history", {"query": topic})
             return out, False
@@ -2172,7 +2172,7 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         lines = []
         if ahead:
             lines.append("Still planned today:")
-            lines += [f"- {format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
+            lines += [f"{format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
         if listed:
             lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
         parts = [missed_block(behind)] if behind else []  # first: one per line, no times, not the current block
@@ -2211,6 +2211,10 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
                     from thirties_core.if_time import text_for
                     extra = text_for(self.tools.assistant) if getattr(self.tools, "assistant", None) else ""
                     return render_schedule(plan, now, missed=missed) + extra
+            if whole_day:  # the whole day as a record: one line per item, its start and end (messages.py)
+                from thirties_core.messages import whole_day_lines
+                record = whole_day_lines(plan)
+                return "\n".join([f"Here's {label}:"] + record) if record else f"Nothing is planned for {label} yet."
             items = [s for s in plan.spans_overlapping(start, end, include_tentative=True)
                      if s.category != SpanCategory.SLEEP]
             if not items:

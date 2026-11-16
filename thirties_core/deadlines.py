@@ -143,7 +143,7 @@ def parse_lead_days(value) -> int:
 
 
 def _done_minutes(pt, title: str, start: date, end: date) -> int:
-    """Minutes of ``title`` done on the days start..end."""
+    """Minutes of ``title`` worked on the days start..end (done, or partly done: a work session)."""
     from thirties_core.budgets import _same
     from thirties_core.models import SpanStatus
     try:
@@ -151,7 +151,8 @@ def _done_minutes(pt, title: str, start: date, end: date) -> int:
         spans = pt.scheduler.state_db.get_spans_between(a, b)
     except Exception:
         return 0
-    return sum(s.duration_minutes for s in spans if _same(s.title, title) and s.status == SpanStatus.DONE)
+    return sum(s.duration_minutes for s in spans if _same(s.title, title)  # partly done: the time was worked
+               and s.status in (SpanStatus.DONE, SpanStatus.PARTIAL))
 
 
 def plan_back(assistant, task, due: date, today: date, repeats: str) -> Dict[str, Any]:

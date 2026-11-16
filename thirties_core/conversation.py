@@ -148,6 +148,9 @@ class ConversationManager:
             stamp = path.stat().st_mtime if path else None
         except (OSError, AttributeError):
             stamp = None
+        if stamp is not None:  # and the done records: one taken back brings its item back (backlog.done_stamp)
+            from thirties_core.backlog import done_stamp
+            stamp = (stamp, done_stamp(self.scheduler))
         if stamp is None or stamp == self._backlog_stamp:
             return
         from thirties_core.backlog import load_backlog
