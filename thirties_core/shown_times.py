@@ -15,7 +15,7 @@ Anything else starts in the block it falls in and ends at the end of the block i
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Iterable, Optional
 
 from thirties_core.clock import format_clock, thirty_ceil, thirty_of
@@ -70,6 +70,20 @@ def exact_ends(spans: Iterable[Any]) -> frozenset:
     return frozenset(s.end_dt for s in spans if end_exact(s))
 
 
+def done_when(span: Any) -> datetime:
+    """When a done item was done, as a list of what got done shows it: the end the user (or a calendar) gave, as
+    it is; any other end by the block it falls in (a tick with no time said ends the item when it was said, so a
+    walk planned at 11:00 and ticked at 11:40 is in the 11:30 block, not at its plan). Nothing known beyond the
+    plan ("planned"), or skipped: its planned block."""
+    end = getattr(span, "actual_end", None)
+    status = getattr(getattr(span, "status", None), "value", "")
+    if end is None or status == "skipped" or getattr(span, "time_source", "") == "planned":
+        return thirty_of(getattr(span, "actual_start", None) or span.start_dt)
+    if end_exact(span) and end.timestamp() == span.end_dt.timestamp():
+        return end
+    return thirty_of(end - timedelta(minutes=1))  # the block it ended in (an end on 11:30 ends the 11:00 block)
+
+
 def kept_times(span: Any) -> list:
     """The item's times a reply may say to the minute (clock.real_times): only its facts and the times the user
     stated for it. One off the half hours on an item otherwise may be one Thirties packed in (straight after a
@@ -77,5 +91,5 @@ def kept_times(span: Any) -> list:
     return [dt for dt, ok in ((span.start_dt, start_exact(span)), (span.end_dt, end_exact(span))) if ok]
 
 
-__all__ = ["TOLD", "end_exact", "exact", "exact_ends", "kept_times", "on_edge", "shown_end", "shown_start",
+__all__ = ["TOLD", "done_when", "end_exact", "exact", "exact_ends", "kept_times", "on_edge", "shown_end", "shown_start",
            "span_when", "start_exact"]

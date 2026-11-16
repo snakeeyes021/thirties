@@ -242,6 +242,39 @@ class TestTheAgendaAndTimeline(GuardCase):
         self.assertEqual(ortho.times, "2:45 PM – 3:20 PM")  # the calendar's own time
 
 
+class TestDoneWhenItWasDone(GuardCase):
+    """What got done is listed by when it was done: the block it ended in, or the end the user gave. A tick with no
+    time said ends the item when it was said."""
+
+    def test_a_tick_after_the_plan_lists_it_when_ticked(self) -> None:
+        from thirties_core.shown_times import done_when
+        set_debug_time(at("11:40"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        sched.state_db.upsert_span(EventSpan("pan", "Pancakes", at("11:00"), at("11:30"), SpanCategory.ACTIVITY))
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(),
+                                      active_notes=[])
+        manager.tools.execute("log_outcome", {"event": "pan", "status": "done"})  # ticked now, no time said
+        pan = next(s for s in manager.day_plan.spans if s.id == "pan")
+        self.assertEqual(done_when(pan), at("11:30"))  # the 11:30 block, not its planned 11:00
+
+    def test_each_kind_of_done_time(self) -> None:
+        from thirties_core.shown_times import done_when
+        sched = make_scheduler()
+        invented_day(sched.state_db)
+        plan, _ = sched.build_day_plan(DAY)
+        by_id = {s.id: s for s in plan.spans}
+        self.assertEqual(done_when(by_id["d0"]), at("10:30"))  # estimated: its block
+        self.assertEqual(done_when(by_id["bike"]), at("13:40"))  # the user's own end, as said
+        socks = EventSpan("socks", "Sort socks", at("09:00"), at("09:30"), SpanCategory.ACTIVITY,
+                          status=SpanStatus.DONE, actual_start=at("09:00"), actual_end=at("09:30"),
+                          time_source="planned")
+        self.assertEqual(done_when(socks), at("09:00"))  # nothing known beyond the plan: its planned block
+        skipped = EventSpan("mop", "Mop", at("11:00"), at("11:30"), SpanCategory.ACTIVITY, status=SpanStatus.SKIPPED)
+        self.assertEqual(done_when(skipped), at("11:00"))
+
+
 class TestItemPaths(unittest.TestCase):
     """An item's path names what it's about, never the heading that only says where it stands."""
 
