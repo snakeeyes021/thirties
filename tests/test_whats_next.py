@@ -236,6 +236,12 @@ class TestNotMarkedYet(WhatsNextCase):
                                                          for n in range(10)])
         self.assertFalse(any("more" in line for line in tail))
 
+    def test_the_assistant_never_claims_a_limit_it_hasnt_checked(self) -> None:
+        prompt = self.manager.brain.build_system_prompt()
+        self.assertIn("Never tell the user that Thirties can't do something", prompt)
+        self.assertIn("unless a tool told you so this turn", prompt)
+        self.assertNotRegex(prompt, r"more earlier|the most recent (?:few|five)|only the (?:last|latest) (?:few|five)")
+
     def test_none_when_nothing_is_unmarked(self) -> None:
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         self.assertNotIn("Not marked yet", out)
