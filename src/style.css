@@ -193,6 +193,8 @@
 .tl-card:focus-visible,
 .tl-card:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .tl-card.fixed .tl-title { font-weight: 600; }
+.tl-card.tight { padding-right: 2px; }
+.tl-card.tight .tl-title { font-size: 0.92em; }  /* side by side on a phone: two short lines beat a cut-off one */
 .tl-work-label { font-weight: 600; opacity: 0.55; }
 
 /* The Timeline's Month and Year tabs: a day of the month (a button that opens the day), a month of the year */

@@ -64,6 +64,8 @@ PIP = 8
 PIP_INSET = 11    # pips are right-justified: their centres this far from a card's right edge
 NOTCH = 10        # the dimples at a thirty boundary inside a card
 GRIP = 7          # a card's top and bottom edges, for resizing
+WRAP_LANE = 170   # a card narrower than this wraps its title at word boundaries (two lines) instead of cutting it
+BARE_LANE = 120   # narrower still, and its tick moves into the popover a tap opens, so the title keeps the room
 NIGHT_H = 30      # the folded night: a thin strip under the waking day (and, opened, the strip that folds it)
 
 # What a press on each kind of empty stretch offers
@@ -387,6 +389,7 @@ class CardWidget(Gtk.Box):
             text.append(self.caption)
         self.append(text)
         self.append(Gtk.Box(width_request=PIP_INSET + PIP))  # room for the pip column the canvas draws
+        self.fit = "roomy"
 
         from thirties_core.titles import title_of
         tip = [title_of(span.title), card.times]
@@ -413,6 +416,20 @@ class CardWidget(Gtk.Box):
         motion.connect("motion", self._hover)
         self.add_controller(motion)
         self._press = (0.0, 0.0)
+
+    def set_fit(self, fit: str) -> None:
+        """How much room the card has: roomy (one line, ellipsized past its end), tight (the title wraps at word
+        boundaries onto a second line) or bare (tight, and the tick lives in the card's popover instead)."""
+        if fit == self.fit:
+            return
+        self.fit = fit
+        tight = fit != "roomy"
+        self.title_label.set_wrap(tight)
+        self.title_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.title_label.set_lines(2 if tight else -1)
+        self.set_spacing(5 if tight else 8)
+        self.tick.set_visible(fit != "bare")
+        (self.add_css_class if tight else self.remove_css_class)("tight")
 
     def _pressed(self, _gesture, _n, x, y) -> None:
         self._press = (x, y)
@@ -529,6 +546,11 @@ class DayCanvas(Gtk.Widget):
             lbl.add_css_class("dim-label")
             box.append(lbl)
         pop = Gtk.Popover(child=box)
+        if w.fit == "bare" and card.tickable:  # its tick is hidden on the card: here it is
+            done = Gtk.Button(label="Done", halign=Gtk.Align.START, margin_top=4)
+            done.connect("clicked", lambda _b: (pop.popdown(), self.on_tick(card)))
+            box.append(done)
+            pop.done_button = done
         extra = self.extra_for(card)
         if extra is not None:
             box.append(Gtk.Separator(margin_top=4, margin_bottom=2))
@@ -644,7 +666,18 @@ class DayCanvas(Gtk.Widget):
         child.measure(Gtk.Orientation.VERTICAL, int(w))
         child.allocate(max(1, int(w)), max(1, int(h)), -1, Gsk.Transform().translate(Graphene.Point().init(x, y)))
 
+    @staticmethod
+    def fit_for(lane_w: float) -> str:
+        return "bare" if lane_w < BARE_LANE else "tight" if lane_w < WRAP_LANE else "roomy"
+
+    def _refit(self, width: float) -> None:
+        """Side by side on a phone, a card has little width: it wraps its title, or hands its tick to the popover."""
+        for w in self.cards:
+            w.set_fit(self.fit_for(self.lane_rect(width, w.card)[2]))
+
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
+        if any(w.fit != self.fit_for(self.lane_rect(width, w.card)[2]) for w in self.cards):
+            GLib.idle_add(lambda: self._refit(self.get_width()) or False)  # never reshape a child mid-allocation
         for w in self.cards:
             self._place(w, *self.lane_rect(width, w.card))
         for b, f in self.frees:

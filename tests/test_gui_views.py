@@ -629,6 +629,98 @@ class DaysAheadTests(unittest.TestCase):
                                                    "bed. A few that fit:\nWalk (30 min)"))
 
 
+@unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")
+class TimelineNarrowTests(unittest.TestCase):
+    """Items sharing a block sit side by side; on a phone each title must still be readable."""
+
+    TITLES = ["Water the plants", "Wash the car", "Call the dentist", "Pack the gym bag", "Sort the receipts"]
+
+    def setUp(self) -> None:
+        sched = make_scheduler([])
+        for sid, title, start, end in (("plants", self.TITLES[0], "09:00", "09:30"),
+                                       ("car", self.TITLES[1], "09:00", "09:30"),
+                                       ("dentist", self.TITLES[2], "10:00", "10:30"),
+                                       ("bag", self.TITLES[3], "10:00", "10:30"),
+                                       ("receipts", self.TITLES[4], "10:00", "10:30")):
+            _span(sched, sid, title, start, end)
+        self.plan, _ = sched.build_day_plan(DAY)
+        set_debug_time(at("08:00"))
+        self.calls = []
+
+    def tearDown(self) -> None:
+        set_debug_time(None)
+
+    def built(self):
+        """The Day tab with its cards, in no window: nothing depends on what size a compositor grants."""
+        view = DayView()
+        view.set_actions(lambda name, args: self.calls.append((name, args)) or "", None)
+        view.set_today(DAY)
+        view.refresh_plan(self.plan)
+        view.stack.set_visible_child_name("timeline")
+        view.timeline.stack.set_visible_child_name("day")
+        return view
+
+    def shown(self, width: int):
+        """The Day tab in a window `width` px wide (a clamp: the headless screen is bigger than a phone)."""
+        view = self.built()
+        win = Gtk.Window(child=Adw.Clamp(maximum_size=width, tightening_threshold=width, child=view),
+                         default_width=width, default_height=700)
+        win.present()
+        self.addCleanup(win.destroy)
+        canvas = view.timeline.canvas
+        _iterate_until(lambda: 0 < canvas.get_width() <= width, 5)
+        _iterate_until(lambda: all(w.fit == canvas.fit_for(canvas.lane_rect(canvas.get_width(), w.card)[2])
+                                   for w in canvas.cards), 5)
+        _iterate_until(lambda: False, 0.3)
+        return canvas
+
+    @staticmethod
+    def readable(card) -> bool:
+        """The whole title shows: not cut with an ellipsis, and no word broken in the middle."""
+        label = card.title_label
+        layout = label.get_layout()
+        if layout.is_ellipsized():
+            return False
+        widest_word = max(label.create_pango_layout(word).get_pixel_size()[0] for word in label.get_text().split())
+        return label.get_width() >= widest_word
+
+    def test_every_title_at_phone_width_shows_in_full_or_wraps_at_words(self) -> None:
+        canvas = self.shown(360)
+        self.assertEqual(sorted(w.title_label.get_text() for w in canvas.cards), sorted(self.TITLES))
+        for card in canvas.cards:
+            self.assertTrue(self.readable(card), f"{card.title_label.get_text()} is cut off")
+        rows = {w.card.span.title: w.card.row for w in canvas.cards}
+        self.assertEqual(rows["Wash the car"], rows["Water the plants"])  # still side by side, not hidden or merged
+        self.assertEqual(rows["Call the dentist"], rows["Pack the gym bag"])
+
+    def test_the_desktop_layout_is_unchanged(self) -> None:
+        canvas = self.built().timeline.canvas
+        canvas._refit(900)  # a desktop width, given directly
+        self.assertEqual(len(canvas.cards), len(self.TITLES))
+        for card in canvas.cards:
+            self.assertEqual(card.fit, "roomy")
+            self.assertFalse(card.title_label.get_wrap())
+            self.assertTrue(card.tick.get_visible())
+        canvas._refit(360)  # and the same cards narrow, then wide again: nothing is left over
+        self.assertEqual({c.fit for c in canvas.cards}, {"tight", "bare"})
+        canvas._refit(900)
+        self.assertEqual({c.fit for c in canvas.cards}, {"roomy"})
+        self.assertTrue(all(c.tick.get_visible() and not c.title_label.get_wrap() for c in canvas.cards))
+
+    def test_a_card_without_room_for_its_tick_keeps_it_in_its_popover(self) -> None:
+        canvas = self.shown(360)
+        card = next(w for w in canvas.cards if w.card.span.title == "Call the dentist")
+        self.assertEqual(card.fit, "bare")
+        self.assertFalse(card.tick.get_visible())
+        pop = canvas._open_card(card)
+        pop.done_button.emit("clicked")
+        self.assertEqual(self.calls[-1], ("log_outcome", {"event": "dentist", "status": "done"}))
+        two = next(w for w in canvas.cards if w.card.span.title == "Wash the car")
+        self.assertEqual(two.fit, "tight")
+        self.assertTrue(two.tick.get_visible())  # room enough beside one other: the tick stays on the card
+        self.assertFalse(hasattr(canvas._open_card(two), "done_button"))
+
+
 def _buttons(widget):
     from tests.test_gui import _rows_of_type
     return _rows_of_type(widget, Gtk.Button)
