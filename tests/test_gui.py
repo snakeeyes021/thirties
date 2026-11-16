@@ -192,6 +192,26 @@ class DayViewTests(unittest.TestCase):
         page.refresh(plan, at("19:20"))
         self.assertNotIn("calendar_unread", page.groups)
 
+    def test_done_today_shows_each_item_when_it_was_done(self) -> None:
+        # Pancakes planned 11:00, ticked at 11:40 with no time said: done in the 11:30 block, not at its plan. A time
+        # the user gave shows as given; with nothing known beyond the plan, its planned block
+        from thirties.views.agenda import AgendaPage
+        from thirties_core.models import SpanStatus
+        plan, _ = self.sched.build_day_plan(DAY)
+        plan.spans.append(EventSpan("pan", "Pancakes", at("11:00"), at("11:40"), SpanCategory.ACTIVITY,
+                                    status=SpanStatus.DONE, actual_start=at("11:00"), actual_end=at("11:40"),
+                                    planned_start=at("11:00"), planned_end=at("11:30"), time_source="estimated"))
+        plan.spans.append(EventSpan("kite", "Mend the kite", at("15:10"), at("15:40"), SpanCategory.ACTIVITY,
+                                    status=SpanStatus.DONE, actual_start=at("15:10"), actual_end=at("15:40"),
+                                    time_source="reported"))
+        plan.spans.append(EventSpan("socks", "Sort socks", at("09:00"), at("09:30"), SpanCategory.ACTIVITY,
+                                    status=SpanStatus.DONE, actual_start=at("09:00"), actual_end=at("09:30"),
+                                    time_source="planned"))
+        page = AgendaPage()
+        page.refresh(plan, at("19:20"))
+        self.assertEqual(_blocks(page.groups["done"]), [("9 AM", ["Sort socks"]), ("11:30 AM", ["Pancakes"]),
+                                                        ("3:40 PM", ["Mend the kite"])])
+
     def test_if_theres_time_comes_after_the_timed_items_with_its_actions(self) -> None:
         from thirties.views.agenda import AgendaPage
         plan, _ = self.sched.build_day_plan(DAY)
@@ -260,7 +280,7 @@ class DayViewTests(unittest.TestCase):
         # the calendar lunch, past with nothing said, waits here too (it used to vanish from the day)
         self.assertEqual(_blocks(groups["behind"]), [("12 PM", ["Lunch with Kim"]), ("6 PM", ["Dinner", "Audiobook"])])
         self.assertIn(("8 PM", ["Movie"]), _blocks(groups["next"]))
-        self.assertEqual(_blocks(groups["done"]), [("1 PM", ["Research"])])  # when it really happened
+        self.assertEqual(_blocks(groups["done"]), [("2 PM", ["Research"])])  # when it was done: it ended at 2:20
         early = []
 
         def find(w):
@@ -350,7 +370,7 @@ class DayViewTests(unittest.TestCase):
         view = DayView(self.plan)  # the timeline drew no card for a moot item before (KeyError)
         done = dict(self.action_rows(view.agenda.groups["done"]))
         self.assertEqual(done["Garden app dev"], "worked on")
-        self.assertIn(("1 PM", ["Garden app dev"]), _blocks(view.agenda.groups["done"]))
+        self.assertIn(("1:30 PM", ["Garden app dev"]), _blocks(view.agenda.groups["done"]))  # it ended at 2:00
         self.assertNotIn("Dinner", done)  # not done: it waits under "Not marked yet"
         self.assertIn("Dinner", dict(self.action_rows(view.agenda.groups["behind"])))
         now = self.action_rows(view.agenda.groups["now"])

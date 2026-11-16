@@ -38,6 +38,10 @@ DISCUSSION = r"can be added later|coming soon|not implemented|not supported yet"
 BANNED = re.compile(rf"\b(?:{HISTORY}|{INTERNAL}|{DISCUSSION})\b", re.IGNORECASE)
 # Internal ids and class names never reach a reply (a label may say "pipeline"; an id on its own may not)
 INTERNAL_IDS = re.compile(r"(?<![\w-])(?:frontier|slm)(?![\w-])|\b[A-Z][a-z]+(?:Engine|Brain)\b")
+# What the model is fed and never says: a tool's result as the prompt wraps it, the checks Python sends it, a
+# refusal, and a tool call written out ("CALL add_event {...}", "show_schedule {}")
+TOOL_TEXT = re.compile(r"\(\s*Result of\b|for the assistant only|\[System check|\bNOT_DONE\b|\b(?-i:CALL)\s+[a-z]+_\w*|"
+                       r"(?m:^\W*[a-z]+_[a-z_]+\s*(?:\(\s*)?\{)|\bid=[0-9a-f]{6,}", re.IGNORECASE)
 
 
 def _is_text(value: str) -> bool:
@@ -95,6 +99,12 @@ class TestUserText(unittest.TestCase):
         self.assertFalse(BANNED.search("Gemini (cloud, debug mode)"))  # an honest label for a real mode
         self.assertTrue(BANNED.search("Reminders are coming soon"))
         self.assertTrue(INTERNAL_IDS.search("Inference Backend: CliEngine"))
+        self.assertTrue(TOOL_TEXT.search("(Result of show_schedule, for the assistant only: You're in the 9:00 AM"))
+        self.assertTrue(TOOL_TEXT.search("Here you go.\nupdate_event {\"event\": \"a1\"}"))
+        self.assertTrue(TOOL_TEXT.search("CALL add_event {\"title\": \"Walk\"}"))
+        self.assertFalse(TOOL_TEXT.search("Call the landlord about the result of the inspection."))
+        self.assertFalse(TOOL_TEXT.search("Pressing today:\nCall the plumber\nCall the library about the fine"))
+        self.assertFalse(TOOL_TEXT.search("The ferns are at 5:00 PM, and the rest stays (until 6:00 PM)."))
 
 
 class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
@@ -122,6 +132,44 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
             plain = re.sub(r"`?/\w+`?", "", reply)
             self.assertFalse(INTERNAL_IDS.search(plain), reply)  # internal ids only
         self.assertIn("Choose one of: gemini", m.send_user_message("/brain gpt"))
+
+    def test_a_reply_never_echoes_what_the_model_was_fed(self):
+        """The prompt hands the model each tool's result as "(Result of …, for the assistant only: …)". A reply that
+        copies one back (all of it, across paragraphs, or cut off), or writes out a call or a check, reaches the
+        user without it, with every turn of the model repeating it and with the turn bookkeeping on or off."""
+        from tests.fixtures import DAY, at, make_scheduler
+        from tests.test_conversation import reply
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.models import EventSpan, SpanCategory
+        set_debug_time(at("09:10"))
+        self.addCleanup(set_debug_time, None)
+        echoed = ("(Result of show_schedule, for the assistant only: You're in the 9:00 AM block: Work.\n\n"
+                  "5:00 PM – Water the ferns (until 5:30 PM)\n\nOn today's list, no time yet:\nSort the recycling)\n\n"
+                  "The ferns are at 5:00 PM.")
+        cut_off = ("The ferns are at 5:00 PM.\n\n(Result of list_schedule, for the assistant only: Scheduled:\n"
+                   "5:00 PM – 5:30 PM: Water the ferns")
+        written_out = ("The ferns are at 5:00 PM.\nshow_schedule {}\n"
+                       "[System check, not from the user] Your reply was fine.")
+        for bookkeeping in (False, True):
+            for said in (echoed, cut_off, written_out):
+                sched = make_scheduler()
+                sched.config.assistant.turn_bookkeeping = bookkeeping
+                sched.state_db.upsert_span(EventSpan("ferns", "Water the ferns", at("17:00"), at("17:30"),
+                                                     SpanCategory.ACTIVITY))
+                plan, pending = sched.build_day_plan(DAY)
+                engine = MockInferenceEngine()
+                m = ConversationManager(plan, [], pending, sched, inference_engine=engine, active_notes=[])
+                engine.set_next_response(reply("CALL show_schedule {}"))
+                for _ in range(8):
+                    engine.set_next_response({"role": "assistant", "content": said, "tool_calls": []})
+                out = m.send_user_message("when are the ferns?")
+                where = f"bookkeeping={bookkeeping}:\n{out}"
+                self.assertFalse(TOOL_TEXT.search(out), where)
+                self.assertIn("The ferns are at 5:00 PM", out, where)
+                self.assertNotIn("Sort the recycling", out, where)  # the echo's own lines go with it
+                self.assertNotIn("5:30 PM: Water the ferns", out, where)
 
     def test_telegram_status_as_sent(self):
         import tempfile

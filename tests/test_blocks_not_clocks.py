@@ -134,6 +134,39 @@ class TestTheConversationAndMessages(GuardCase):
         self.assertBlocks(out, "a reply")
         self.assertIn("2:45 PM", out)  # the calendar's time stays
 
+    def test_an_item_started_now_shows_in_its_block_and_now_is_said_apart(self) -> None:
+        # "I need it right now": the item starts at this very minute under the hood, but that minute is the clock's,
+        # not a time the user gave it, so its row starts on the block's edge; the time now may still be said
+        set_debug_time(at("12:37"))
+        self.engine.set_next_response(reply('CALL add_event {"title": "Hot bath", "start": "12:37 PM", '
+                                            '"duration": "23 minutes"}\nCALL show_schedule {"whole_day": true}'))
+        self.engine.set_next_response(reply("It's 12:37, and the bath is on.\n\n12:37 PM – 1:00 PM Hot bath"))
+        out = self.manager.send_user_message("i need a hot bath right now")
+        bath = next(s for s in self.manager.day_plan.spans if s.title == "Hot bath")
+        self.assertEqual(bath.start_dt, at("12:37"))  # under the hood: when it really starts
+        self.assertIsNone(bath.given_start)
+        self.assertIn("It's 12:37", out)  # the time now, said as itself
+        self.assertNotIn("12:37 PM –", out)  # never a row's start
+        self.assertBlocks(out.replace("It's 12:37", ""), "a row starting now")
+        from thirties_core.messages import whole_day_lines
+        self.assertBlocks("\n".join(whole_day_lines(self.manager.day_plan)), "the whole day with it")
+
+    def test_a_placed_items_minute_said_by_python_or_the_model_becomes_its_block(self) -> None:
+        # Floss was packed at 7:41 by Thirties. Times in what Python told the model (the morning's facts, a check
+        # naming the plan's time) are not the user's, so a reply saying "Floss is at 7:41" says its block instead
+        self.manager.messages.append({"role": "user", "content": "The day so far: Floss 7:41 AM – 7:48 AM.",
+                                      "hidden": True})
+        self.engine.set_next_response(reply("Floss is at 7:41 AM."))
+        out = self.manager.send_user_message("when's floss?")
+        self.assertBlocks(out, "a reply after the morning's facts")
+        self.assertIn("in the 7:30 AM block", out)
+        # a wrong time, twice: Python's own line under it gives the plan's time, by its block
+        self.engine.set_next_response(reply("Floss is at 9:00 AM."))
+        self.engine.set_next_response(reply("Floss is at 9:00 AM."))
+        out = self.manager.send_user_message("and floss?")
+        self.assertBlocks(out, "Python's line with the plan's time")
+        self.assertIn("Floss is in the 7:30 AM block", out)
+
     def test_another_day_shows_the_same_way(self) -> None:
         from thirties_core.messages import render_schedule
         self.assertBlocks(render_schedule(self.manager.day_plan, None, label="Thursday"), "another day")
@@ -207,6 +240,39 @@ class TestTheAgendaAndTimeline(GuardCase):
             self.assertBlocks(" ".join(card.notes), f"the notes of {card.span.title}")
         ortho = next(c for c in layout.cards if c.span.title == "Orthodontist")
         self.assertEqual(ortho.times, "2:45 PM – 3:20 PM")  # the calendar's own time
+
+
+class TestDoneWhenItWasDone(GuardCase):
+    """What got done is listed by when it was done: the block it ended in, or the end the user gave. A tick with no
+    time said ends the item when it was said."""
+
+    def test_a_tick_after_the_plan_lists_it_when_ticked(self) -> None:
+        from thirties_core.shown_times import done_when
+        set_debug_time(at("11:40"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        sched.state_db.upsert_span(EventSpan("pan", "Pancakes", at("11:00"), at("11:30"), SpanCategory.ACTIVITY))
+        plan, pending = sched.build_day_plan(DAY)
+        manager = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(),
+                                      active_notes=[])
+        manager.tools.execute("log_outcome", {"event": "pan", "status": "done"})  # ticked now, no time said
+        pan = next(s for s in manager.day_plan.spans if s.id == "pan")
+        self.assertEqual(done_when(pan), at("11:30"))  # the 11:30 block, not its planned 11:00
+
+    def test_each_kind_of_done_time(self) -> None:
+        from thirties_core.shown_times import done_when
+        sched = make_scheduler()
+        invented_day(sched.state_db)
+        plan, _ = sched.build_day_plan(DAY)
+        by_id = {s.id: s for s in plan.spans}
+        self.assertEqual(done_when(by_id["d0"]), at("10:30"))  # estimated: its block
+        self.assertEqual(done_when(by_id["bike"]), at("13:40"))  # the user's own end, as said
+        socks = EventSpan("socks", "Sort socks", at("09:00"), at("09:30"), SpanCategory.ACTIVITY,
+                          status=SpanStatus.DONE, actual_start=at("09:00"), actual_end=at("09:30"),
+                          time_source="planned")
+        self.assertEqual(done_when(socks), at("09:00"))  # nothing known beyond the plan: its planned block
+        skipped = EventSpan("mop", "Mop", at("11:00"), at("11:30"), SpanCategory.ACTIVITY, status=SpanStatus.SKIPPED)
+        self.assertEqual(done_when(skipped), at("11:00"))
 
 
 class TestItemPaths(unittest.TestCase):

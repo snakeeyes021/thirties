@@ -3,8 +3,9 @@
 The plan is a sketch; this page shows where the day stands. What's past with
 nothing said comes first (not assumed done; being behind is common), with buttons
 to say what happened; now and next can be marked too (things get done early).
-What's done shows at the times it actually happened, greyed (a session on something
-ongoing reads "worked on"; what went moot unreported reads "not reported"). Replan
+What's done shows when it was done (the block it ended in, or the time the user
+gave), greyed (a session on something ongoing reads "worked on"; what went moot
+unreported reads "not reported"). Replan
 lays the rest of today out again (Python's redraw), with Undo. Someone else's
 calendar events ("show only") and unanswered invites are shown, dimmed, but never
 make the user busy. A routine due today can be skipped the three ways a
@@ -536,7 +537,8 @@ class AgendaPage(Gtk.ScrolledWindow):
             return
         group = self._group("done", "Done today", "What actually happened, and when.")
         entries = []
-        for s in sorted(done, key=lambda s: s.actual_start or s.start_dt):
+        from thirties_core.shown_times import done_when  # when it was done, by its block unless the user said
+        for s in sorted(done, key=done_when):
             note = ""
             if s.status == SpanStatus.SKIPPED:
                 note = "skipped"
@@ -547,7 +549,7 @@ class AgendaPage(Gtk.ScrolledWindow):
             row = self._item_row(s)
             row.set_subtitle(note)
             row.add_css_class("dim-label")
-            entries.append((thirty_of(s.actual_start or s.start_dt), row))
+            entries.append((done_when(s), row))
         self._add_blocks(group, entries)
 
     def _when(self, span: EventSpan) -> datetime:

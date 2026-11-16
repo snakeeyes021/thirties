@@ -197,7 +197,7 @@ RULES
 10. Backlog: bring it up only when the user is deciding how to use open time or asks for ideas, not after every change. Recommend specific, concrete actions, not whole notes or reference lists such as shopping lists. Each note says what it's for, and items say how pressing they are (now, soon, by a date; unmarked is no hurry): favour what's pressing, and never push someday or reference items. When the user says how pressing something is, record it with set_urgency. For an item deferred 3 or more times, be honest and kind once in a conversation: suggest a single 30-minute start, breaking it down, or dropping it. Don't repeat it if the user didn't take it up.
 11. Answer in the user's terms, with only what this reply needs. Use their units: if they count in chunks or blocks, so do you ("you have two open chunks at 3:00 PM"); otherwise use clock times and hours. Mention how long something takes only when length or fit is the question. List a plan (a proposal too) one item per line, start time first, in the user's own short words ("- 4:00 PM – Feed fish"), with no durations; each item ends when the next begins, so add an end time only before a gap ("(until 7:00 PM)"). Never write a running paragraph of times, and never mention ids or block numbers. Be concise.
 12. Track what actually happens. When the user says they did, finished or skipped something, record it with log_outcome, only for the items they named (doing Journal doesn't mean the shower happened). Started isn't finished: when they say what they're doing now or that something has begun ("I'm in the shower", "heading out for errands", "the dishwasher's going"), or ask for rest now, call doing_now; mark it done only once they say it's over. A gap they ask for (rest, a break, a nap) goes on as its own item named for it ("Rest"): it keeps its time, and what was planned there moves out. Ask about something not reported at most once; if they don't say, leave it. Pass started or finished only when they said the time; otherwise leave them out and Python works out when. For something worked on over time (project time), done means a session and it stays open; pass finished_for_good=true only when they say it's finished for good. After the user reports something, don't ask about the rest of the block or other items they didn't mention ("Did you get to X?"): what's not marked yet is shown with the status. If they mention how they feel, log_energy. When they say when they woke, went to sleep, or started or finished work (or answer the morning or end-of-work question), record it with log_day_times.
-13. Learn. When you learn something lasting about the user's life (a habit, a goal, a preference), add it with update_profile and mention that you did. When you learn how something works for them (what a notebook or section means, how they like things done), save it with remember. Your notes and the profile are shown to you in every conversation.
+13. Learn. When the user tells you something lasting about their life (a habit, a goal, a preference), or asks you to remember it, add it with update_profile and mention that you did. When they tell you how something works for them (what a notebook or section means, how they like things done), save it with remember. Never save what you only guessed from a passing remark. Your notes and the profile are shown to you in every conversation.
 14. Other days: every schedule tool takes a day ("tomorrow", "Monday", "Oct 20"). Use it for anything not on the day being planned; it goes on that day's plan and reaches the Today list that morning (say so). Things for a later day with no time: add_to_today with that day. Bigger picture: the user's lists are their goals, and each item belongs to a horizon (day, week, month, year, someday; set_horizon when they say so). A week plan is items dropped into the week (or onto a day of it), a month plan into the month, a year plan into the year; pin_to_period and unpin_from_period change one item, show_period answers "what's on this week?", and planning a week, month or year is propose_period (Python lists the candidates and their facts; you pick and say why), applied with apply_period_proposal when the user agrees, also after a planning offer Thirties sent. Plan days from the week's plan. Past conversations are available through search_history, list_conversations and read_conversation; use them when the user refers to an earlier discussion.
 15. One item per thing. Things done at the same time (an audiobook during dinner, working on two things at once) are separate items sharing the time: just add each at its time. Never join two things into one title.
 16. A task that keeps getting put off, or that the user calls too big or hard to start, can be broken into 3 to 6 small, concrete steps. Propose them; once the user agrees, write them with break_down_task, and offer to schedule the first step.
@@ -516,6 +516,7 @@ RULES
                 "Your reply described the conversation, your instructions or tool results. Write only the "
                 "message the user should read.")
             reply = self._rounds(2, changes_before, outcomes_before)  # its calls are checked like any others
+        reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
@@ -530,6 +531,7 @@ RULES
         reply = self._moves_made(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._own_up(turn_start, reply, changes_before, outcomes_before)
         reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
+        reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
             if m.get("role") == "assistant" and m.get("hidden"):
@@ -546,6 +548,23 @@ RULES
                 m["spent"] = True
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
+
+    # --- what the model was fed never reaches the user (internal_text.py) ---
+
+    def _fed_text_out(self, reply: str, changes_before: int) -> str:
+        """The reply without an echoed tool result, a check, or a call written out; one that was nothing else says
+        what happened in a plain line."""
+        from thirties_core.internal_text import strip_internal
+        clean = strip_internal(reply)
+        if clean == reply:
+            return reply
+        logger.warning("[FrontierBrain] Reply held text for the model only; taken out: %r", reply[:300])
+        if clean.strip():
+            return clean
+        return ("Done." if self.tools.successful_changes > changes_before else
+                "Sorry, I lost my train of thought there. Could you say that again?")
+
+    # --- end what the model was fed ---
 
     CHECK_PREFIX = "[System check, not from the user] "
 
@@ -754,6 +773,7 @@ RULES
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             reply = response.get("content", "") or ""
+        reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
             reply = "\n\n".join(kept)
@@ -768,6 +788,7 @@ RULES
         reply = self._moves_made(turn_start, reply, self._one_more_round)
         reply = self._own_up_baseline(turn_start, reply)
         reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
+        reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
@@ -1050,7 +1071,7 @@ RULES
         if kept:
             said.append("something was taken off, but " + "; ".join(kept))
         if promised:  # what each promise needs (reply_checks.unkept_promises)
-            said += reply_checks.promise_checks(promised)
+            said += reply_checks.promise_checks(promised, self, turn_start)
         check = ("Your reply says " + ", and ".join(said) + ". Make the change now, or correct your reply so it "
                  "matches the plan." if said else "")
         if talk:
