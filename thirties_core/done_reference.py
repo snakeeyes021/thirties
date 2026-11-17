@@ -3,7 +3,10 @@
 Marking something done ticks it off in the user's lists, so which item it is is never the model's guess. A done
 goes through when the user's words point at the item:
 
-- **Named in this message**: by its words ("walked the dog" for Walk the dog) or by its id.
+- **Named in this message**: by its words ("walked the dog" for Walk the dog), by everyday words for them ("dog
+  agility done" for Take the puppy to agility, "varnishing done" for Varnish: done_words.py) or by its id.
+- **Asked about, or asked for before**: the last message they saw asked whether they meant this one item, and the
+  reply isn't a no; or they asked for this done in an earlier message and it was refused (done_words.py).
 - **Pointed back to**, when this message names nothing: "that", "it", "yes", "done" for the one item the last
   message they saw named (or, if that named none, what they said just before); "both" for exactly two; "those"
   or "them" for up to MOST_POINTED of them.
@@ -64,10 +67,18 @@ def _titles(pt: "PlanTools") -> List[str]:
 
 
 def _named(text: str, title: str, others: Iterable[str]) -> bool:
+    from thirties_core.done_words import named as in_everyday_words
     from thirties_core.item_facts import referenced
     from thirties_core.started import _names
     return bool(text) and (referenced(text, title, others) or _names(text, title, list(others))
-                           or _by_initials(text, title, others))
+                           or _by_initials(text, title, others) or in_everyday_words(text, title, others))
+
+
+def _another_in_everyday_words(text: str, others: Iterable[str], titles: List[str]) -> bool:
+    """Another item is the one the words name, read loosely (done_words.py): "dog agility done" is the puppy's
+    class, never whichever agility item's time came."""
+    from thirties_core.done_words import named as in_everyday_words
+    return any(in_everyday_words(text, t, titles) for t in others)
 
 
 # --- a short form of an item's name: the first letters of its leading capitalised words ("HS" for Hardware Store:
@@ -260,10 +271,21 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if by_time is not None:
         return (None, message) if by_time else (refusal, message)
     # --- end picked by its time ---
-    if _the_one_whose_time_came(pt, message, title, titles):
+    if _the_one_whose_time_came(pt, message, title, titles) and not _another_in_everyday_words(message, others, titles):
         return None, message
     if any(_named(message, t, titles) for t in others):
         return refusal, message  # they're talking about other items
+    # --- a question about one item, and a done already asked for (done_words.py) ---
+    from thirties_core.done_words import NO_RE, asked_about
+    from thirties_core.item_facts import item_name
+    if not NO_RE.match(message):
+        asked = asked_about(shown, titles + _open_items_shown(pt, shown, titles), titles)
+        pending = {item_name(p) for p in getattr(pt, "pending_dones", None) or ()}
+        if asked == [title] or item_name(title) in pending:
+            return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
+    else:
+        return refusal, message  # a no points to nothing
+    # --- end a question about one item, and a done already asked for ---
     pointed = pointed_back(pt, titles)
     # --- "that" after a list of several (not a question asking which): the one the user had just named ---
     if len(set(pointed)) > 1 and POINTER_RE.search(message) and "?" not in shown and not (
