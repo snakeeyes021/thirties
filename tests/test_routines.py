@@ -17,7 +17,7 @@ from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.routines import Routine, RoutineBook, describe_repeat, is_due, next_due, parse_repeat
 from thirties_core.week import day_hours, describe_week, parse_days
 
-TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Morning Routine",
+TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Studio opening",
           "n_clean": "Deep Clean", "n_pack": "Packing List", "n_dev": "Thirties"}
 STEPS = ["Feed the fish", "Make coffee", "Pack lunch", "Water the plants", "Breakfast (w/ juice)", "Make bed", "Shower",
          "Journal"]
@@ -70,7 +70,7 @@ class RoutineCase(unittest.TestCase):
         return [s for s in tools.day_plan.spans if s.title == title]
 
     def place_the_users_way(self, tools=None):
-        out = (tools or self.t).execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = (tools or self.t).execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "9:00 AM", "items": FIRST}, {"start": "3:00 PM", "items": SECOND}]})
         self.assertFalse(out.startswith(NOT_DONE), out)
         return out
@@ -115,7 +115,7 @@ class TestRepeatSchedules(unittest.TestCase):
         self.assertTrue(is_due(Routine("n", "x", {"every": "days_off"}), DAY + timedelta(days=2), gen, None))
         self.assertFalse(is_due(Routine("n", "x", {"every": "weekdays", "days": ["mon"]}), DAY, gen, None))
         self.assertFalse(is_due(Routine("n", "Packing List"), DAY, gen, None))  # occasional by its name: on request
-        self.assertTrue(is_due(Routine("n", "Morning Routine"), DAY, gen, None))  # a routine is daily by default
+        self.assertTrue(is_due(Routine("n", "Studio opening"), DAY, gen, None))  # a routine is daily by default
 
 
 class TestTheMorningSetUp(RoutineCase):
@@ -130,14 +130,14 @@ class TestTheMorningSetUp(RoutineCase):
         set_debug_time(at("07:30", 1))  # the next morning, nothing said yet
         t2 = self.tools_for(TOMORROW)
         out = t2.assistant.routines.set_up_current()
-        self.assertIn("Morning Routine at 9:00 AM and 3:00 PM", out)
+        self.assertIn("Studio opening at 9:00 AM and 3:00 PM", out)
         self.assertEqual(self.spans(t2, "Feed the fish")[0].start_dt, at("09:00", 1))
         self.assertEqual(self.spans(t2, "Make bed")[0].start_dt, at("15:00", 1))
         self.assertEqual(len(self.spans(t2, "Brush teeth")), 1)  # the extra step comes along
         self.assertTrue(all(s.end_dt <= at("15:30", 1) for s in self.spans(t2, "Brush teeth")))
         work = self.spans(t2, "Work")[0]
         self.assertEqual((work.start_dt, work.end_dt), (at("08:30", 1), at("16:00", 1)))  # never moved
-        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n" + "".join(
+        self.assertEqual(self.body("n_today"), "- [ ] Studio opening\n" + "".join(
             f"    - [ ] {s}\n" for s in FIRST + SECOND))  # yesterday's group went, today's is one group
         self.assertEqual(self.body("n_routine"), self.routine_body)
         self.assertEqual(t2.assistant.routines.set_up_current(), "")  # once a day
@@ -149,7 +149,7 @@ class TestTheMorningSetUp(RoutineCase):
         t2 = self.tools_for(TOMORROW)
         t2.assistant.routines.set_up_current()
         t2.execute("remove_event", {"event": self.spans(t2, "Brush teeth")[0].id})
-        out = t2.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = t2.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "3:00 PM", "items": ["Brush teeth"]}]})
         self.assertNotIn("Ask the user", out)
 
@@ -162,12 +162,12 @@ class TestTheMorningSetUp(RoutineCase):
         self.sched.state_db.upsert_span(EventSpan("odd", "Shower", at("21:00", -1), at("21:10", -1),
                                                   SpanCategory.TASK))  # once in the evening: not the pattern
         out = self.t.assistant.routines.set_up_current()
-        self.assertIn("Morning Routine at 10:00 AM and 3:00 PM", out)
+        self.assertIn("Studio opening at 10:00 AM and 3:00 PM", out)
         self.assertEqual(self.spans(self.t, "Shower")[0].start_dt.hour, 15)
 
     def test_a_part_whose_time_has_passed_goes_in_the_first_free_thirty(self):
         set_debug_time(at("13:00"))
-        self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [
+        self.t.execute("set_routine", {"routine": "Studio opening", "parts": [
             {"start": "9:00 AM", "items": FIRST}, {"start": "3:00 PM", "items": SECOND}]})
         out = self.t.assistant.routines.set_up_current()
         self.assertEqual(self.spans(self.t, "Make bed")[0].start_dt, at("15:00"))  # still ahead: its usual time
@@ -177,17 +177,17 @@ class TestTheMorningSetUp(RoutineCase):
         line_with(out, "9:00 AM", "1:00 PM")  # its usual time has passed: where it went instead
 
     def test_planning_before_sunrise_sets_up_the_coming_day(self):
-        self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [{"start": "9:00 AM", "items": FIRST}]})
+        self.t.execute("set_routine", {"routine": "Studio opening", "parts": [{"start": "9:00 AM", "items": FIRST}]})
         set_debug_time(at("06:30"))  # dark: the diurnal date is still yesterday
         yesterday = self.tools_for(DAY - timedelta(days=1))
         self.assertEqual(yesterday.today(), DAY - timedelta(days=1))
         out = yesterday.assistant.routines.set_up_current()
-        self.assertIn("Morning Routine at 9:00 AM", out)
+        self.assertIn("Studio opening at 9:00 AM", out)
         self.assertEqual(self.spans(self.tools_for(DAY), "Feed the fish")[0].start_dt, at("09:00"))
         self.assertFalse(self.spans(yesterday, "Feed the fish"))  # yesterday's waking hours are over: not set up
 
     def test_a_routine_thats_not_due_stays_off(self):
-        self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [{"start": "9:00 AM", "items": FIRST}]})
+        self.t.execute("set_routine", {"routine": "Studio opening", "parts": [{"start": "9:00 AM", "items": FIRST}]})
         self.t.execute("set_routine", {"routine": "Deep Clean", "repeat": "every 12 days", "last_done": "Oct 10",
                                        "parts": [{"start": "6:00 PM", "items": ["Vacuum", "Mop"]}]})
         out = self.t.assistant.routines.set_up_current()
@@ -200,14 +200,14 @@ class TestTheMorningSetUp(RoutineCase):
         self.place_the_users_way()
         shower = self.spans(self.t, "Shower")[0]
         self.t.execute("update_event", {"event": shower.id, "start": "4:30 PM"})
-        out = self.t.execute("set_routine", {"routine": "morning", "confirm": True,
+        out = self.t.execute("set_routine", {"routine": "studio", "confirm": True,
                                              "fallback": "after work on work days"})
         self.assertIn("today's placement as the usual one", out)
         r = RoutineBook(self.sched.state_db).get("n_routine")
         self.assertEqual(r.placement_source, "user")
         self.assertIn({"items": ["Shower"], "at": "16:30", "fallback": "after work on work days"}, r.parts)
         t2 = self.tools_for(TOMORROW)  # a one-off placement another day doesn't change it
-        t2.execute("put_routine", {"routine": "Morning Routine", "start": "7:00 PM"})
+        t2.execute("put_routine", {"routine": "Studio opening", "start": "7:00 PM"})
         self.assertEqual(RoutineBook(self.sched.state_db).get("n_routine").parts, r.parts)
         self.assertIn("(if missed: after work on work days)", self.t.assistant.routines.prompt_section())
 
@@ -216,9 +216,9 @@ class TestTheMorningSetUp(RoutineCase):
         self.assertTrue(out.startswith("Put Deep Clean on the plan"), out)
         self.api.notes["n_pack"] = {"id": "n_pack", "body": "- [ ] Charger\n"}
         self.catalog.set_role("n_pack", "routine", "Packing List")
-        TITLES["n_routine"] = "Morning Routine"
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
-        self.assertTrue(out.startswith("Put Morning Routine on the plan"), out)
+        TITLES["n_routine"] = "Studio opening"
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "start": "9:00 AM"})
+        self.assertTrue(out.startswith("Put Studio opening on the plan"), out)
 
     def test_set_up_happens_before_the_first_write_to_today(self):
         self.t.execute("set_anchor", {"title": "Lunch", "time": "12:00 PM"})
@@ -230,14 +230,14 @@ class TestTheMorningSetUp(RoutineCase):
 
 class TestNoOpaqueRoutine(RoutineCase):
     def test_a_routine_never_goes_on_as_one_item(self):
-        for tool, args in (("add_event", {"title": "Morning Routine", "start": "9:00 AM", "duration": "1 hour"}),
+        for tool, args in (("add_event", {"title": "Studio opening", "start": "9:00 AM", "duration": "1 hour"}),
                            ("add_event", {"title": "Deep Clean", "start": "6:00 PM", "duration": "1 hour"}),
-                           ("add_task", {"title": "Morning Routine", "list": "Errands/Admin"})):
+                           ("add_task", {"title": "Studio opening", "list": "Errands/Admin"})):
             out = self.t.execute(tool, args)
             self.assertTrue(out.startswith(NOT_DONE), out)
             self.assertIn("put_routine", out)
-        self.assertFalse(self.spans(self.t, "Morning Routine"))
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        self.assertFalse(self.spans(self.t, "Studio opening"))
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "start": "9:00 AM"})
         self.assertFalse(out.startswith(NOT_DONE), out)  # the way it goes on: as its parts
 
 
@@ -260,7 +260,7 @@ class TestNaturalParts(RoutineCase):
         self.assertEqual(parts, [["Make bed", "Shower"], ["Journal"]])  # 35 minutes: two
 
     def test_a_start_alone_places_each_part_in_its_own_thirty(self):
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "9:00 AM"})
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "start": "9:00 AM"})
         self.assertIn("9:00 AM: " + ", ".join(STEPS[:4]), out)
         self.assertIn("9:30 AM: " + ", ".join(STEPS[4:]), out)
         from thirties_core.clock import thirty_of
@@ -442,11 +442,11 @@ class TestWeeklyPatterns(RoutineCase):
 
 
 class TestPlacedOnWaking(RoutineCase):
-    """10-30: the morning routine's parts belong right after waking; a late riser does the first chunk on
+    """10-30: the studio opening's parts belong right after waking; a late riser does the first chunk on
     waking and the second right after (or after work: their call)."""
 
     def test_parts_follow_waking(self):
-        out = self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+        out = self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
             {"start": "on waking", "items": ["Feed the fish", "Make coffee"]},
             {"start": "right after that", "items": ["Shower", "Journal"]}]})
         self.assertIn("on waking: Feed the fish, Make coffee", out)
@@ -472,7 +472,7 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
     9. The day is set up with the user's first message, and a part "on waking" goes in the thirty they're in."""
 
     def test_a_late_first_message_puts_the_waking_part_now_and_the_next_right_after(self):
-        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+        self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
             {"start": "on waking", "items": FIRST}, {"start": "right after that", "items": SECOND}]})
         set_debug_time(at("09:45"))  # in the middle of Work (8:30 to 4)
         self.t.assistant.routines.set_up_current()
@@ -485,7 +485,7 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
 
     def test_parts_whose_clock_times_passed_follow_each_other_from_now(self):
         # a stored placement of 6:30 and 7:00, and the user's first message at 9:45 (11-05)
-        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+        self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
             {"start": "6:30 AM", "items": FIRST}, {"start": "7:00 AM", "items": SECOND}]})
         set_debug_time(at("09:45"))
         self.t.assistant.routines.set_up_current()
@@ -493,15 +493,15 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
         self.assertEqual(self.spans(self.t, "Make bed")[0].start_dt, at("10:30"))
 
 class TestTheFallbackWhenTheDayIsCrunched(RoutineCase):
-    """The morning routine happens when the user actually wakes, even during Work; the
+    """The studio opening happens when the user actually wakes, even during Work; the
     shower group goes in the next block, or at its fallback (3 PM) when the day is crunched. The fallback was only
     shown to the model; now the morning set-up places by it."""
 
     def set_up(self, fallback, up="09:45"):
-        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+        self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
             {"start": "on waking", "items": FIRST}, {"start": "right after that", "items": SECOND}]})
         if fallback:
-            self.t.execute("set_routine", {"routine": "Morning Routine", "fallback": ["", fallback]})
+            self.t.execute("set_routine", {"routine": "Studio opening", "fallback": ["", fallback]})
         set_debug_time(at(up))
         summary = self.t.assistant.routines.set_up_current()
         return (self.spans(self.t, "Feed the fish")[0].start_dt, self.spans(self.t, "Make bed")[0].start_dt, summary)
@@ -538,11 +538,11 @@ class TestTheFallbackWhenTheDayIsCrunched(RoutineCase):
 
 
 class TestTheFirstBlockMustFit(RoutineCase):
-    """11-06: up at 9:25, the morning routine went in the 9:00 block with 5 minutes left. The current block only
+    """11-06: up at 9:25, the studio opening went in the 9:00 block with 5 minutes left. The current block only
     if the part fits in what's left of it (at most 5 minutes short); else the next one."""
 
     def place_at(self, hhmm):
-        self.t.execute("set_routine", {"routine": "Morning Routine", "confirm": True, "parts": [
+        self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
             {"start": "6:30 AM", "items": FIRST}, {"start": "7:00 AM", "items": SECOND}]})
         set_debug_time(at(hhmm))
         self.t.assistant.routines.set_up_current()
@@ -646,7 +646,7 @@ class TestTheMorningMessage(RoutineCase):
         self.svc.today = lambda: DAY
         self.svc._manager, self.svc._day = self.m, DAY
         self.m.tools.execute("set_anchor", {"title": "Lunch", "time": "12:00 PM"})
-        self.m.tools.execute("set_routine", {"routine": "Morning Routine", "parts": [
+        self.m.tools.execute("set_routine", {"routine": "Studio opening", "parts": [
             {"start": "9:00 AM", "items": FIRST}, {"start": "3:00 PM", "items": SECOND}]})
 
     def test_at_wake_the_day_is_set_up_then_proposed(self):
@@ -696,7 +696,7 @@ class TestTheMorningMessage(RoutineCase):
         self.engine.responses = [{"role": "assistant", "content": "Morning!"}]
         self.m.send_user_message("good morning")
         prompt = self.engine.call_history[0][0]["content"]
-        line_with(prompt, "Morning Routine", "9:00 AM", "3:00 PM", "Lunch", "12:00 PM")
+        line_with(prompt, "Studio opening", "9:00 AM", "3:00 PM", "Lunch", "12:00 PM")
         self.assertIn("DAY OPTIONS", prompt)
         self.assertIn("ROUTINES AND DAILY ANCHORS", prompt)
 
@@ -706,7 +706,7 @@ class TestSync(unittest.TestCase):
     def test_routines_and_anchors_sync_last_write_wins(self):
         a, b = make_scheduler().state_db, make_scheduler().state_db
         book_a, book_b = RoutineBook(a), RoutineBook(b)
-        book_a.save(Routine("n_routine", "Morning Routine", {"every": "days", "n": 2},
+        book_a.save(Routine("n_routine", "Studio opening", {"every": "days", "n": 2},
                             [{"items": ["Shower"], "at": "15:00", "fallback": ""}], "user"))
         from thirties_core.routines import Anchor
         book_a.save_anchor(Anchor("Lunch", "12:00"))

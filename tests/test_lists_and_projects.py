@@ -191,9 +191,9 @@ class TestDoneNote(LaneCase):
 
     def test_never_a_routine_note_even_if_set_behind_its_back(self):
         from thirties_core.list_settings import set_done_note
-        out = self.t.execute("set_list_settings", {"done_note": "Morning Routine"})
+        out = self.t.execute("set_list_settings", {"done_note": "Studio opening"})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        set_done_note(self.sched.state_db, "n_routine", "Morning Routine")  # say a synced setting points there
+        set_done_note(self.sched.state_db, "n_routine", "Studio opening")  # say a synced setting points there
         self.do_bank()
         self.assertEqual(self.body("n_routine"), self.before["n_routine"])  # routine notes are never written
         self.assertEqual(ListCatalog(self.sched.state_db).role("n_routine"), "routine")

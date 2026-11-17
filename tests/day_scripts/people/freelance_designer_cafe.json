@@ -36,8 +36,8 @@
   ],
   "truth": [
     {
-      "item": "Morning routine & walk to café",
-      "match": "morning|walk|cafe|café",
+      "item": "Studio opening & walk to café",
+      "match": "studio|walk|cafe|café",
       "start": "08:45",
       "end": "09:30"
     },

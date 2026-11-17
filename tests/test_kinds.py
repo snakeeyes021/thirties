@@ -82,10 +82,10 @@ class KindsTestCase(TodayTestCase):
         super().setUp()
         self.api.notes["n_dev"] = {"id": "n_dev", "body": "- [ ] Fix the sync bug\n"}
         self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [ ] Feed the fish\n- [ ] Shower\n- [ ] Journal\n"}
-        TITLES.update({"n_dev": "Garden app", "n_routine": "Morning Routine"})
+        TITLES.update({"n_dev": "Garden app", "n_routine": "Studio opening"})
         catalog = ListCatalog(self.sched.state_db)
         catalog.set_role("n_dev", "backlog", "Garden app")
-        catalog.set_role("n_routine", "routine", "Morning Routine")
+        catalog.set_role("n_routine", "routine", "Studio opening")
         self.services.tasks = catalog.apply(self.services.tasks + [item("t_bug", "Fix the sync bug", "n_dev")])
 
     def add(self, title, start, duration="30 min", day=None):

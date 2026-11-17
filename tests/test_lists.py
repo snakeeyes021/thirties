@@ -35,12 +35,12 @@ class TestCatalog(unittest.TestCase):
 
     def test_applying_roles_and_urgency_to_the_backlog(self):
         self.c.set_role("n_errands", "list", "Errands")
-        self.c.set_role("n_routine", "routine", "Morning routine")
+        self.c.set_role("n_routine", "routine", "Studio opening")
         self.c.set_role("n_junk", "ignore", "Cheat sheet")
         self.c.set_urgency("t_bank", "soon", due=date(2026, 10, 30))
         self.c.set_urgency("t_banjo", "someday")
         tasks = [item("t_bank", "Call the bank"), item("t_banjo", "Learn the banjo"),
-                 item("t_shower", "Shower", "n_routine", "Morning routine"), item("t_x", "Python", "n_junk", "Cheat sheet")]
+                 item("t_shower", "Shower", "n_routine", "Studio opening"), item("t_x", "Python", "n_junk", "Cheat sheet")]
         out = {t.id: t for t in self.c.apply(tasks)}
         self.assertNotIn("t_x", out)  # ignored notes aren't read
         self.assertEqual((out["t_bank"].urgency, out["t_bank"].due), ("soon", "2026-10-30"))
@@ -59,12 +59,12 @@ class TestCatalog(unittest.TestCase):
 
     def test_what_still_needs_a_guess(self):
         self.c.set_role("n_errands", "list", "Errands")
-        self.c.set_role("n_routine", "routine", "Morning routine")
+        self.c.set_role("n_routine", "routine", "Studio opening")
         self.c.set_urgency("t_bank", "soon")
         notes = [{"id": "n_errands"}, {"id": "n_routine"}, {"id": "n_new"}]
         self.assertEqual([n["id"] for n in self.c.notes_without_role(notes)], ["n_new"])
         tasks = [item("t_bank", "Call the bank"), item("t_stamps", "Buy stamps"),
-                 item("t_shower", "Shower", "n_routine", "Morning routine")]
+                 item("t_shower", "Shower", "n_routine", "Studio opening")]
         self.assertEqual({k: [t.id for t in v] for k, v in self.c.items_without_urgency(tasks).items()},
                          {"n_errands": ["t_stamps"]})  # routine items take their urgency from the role
 

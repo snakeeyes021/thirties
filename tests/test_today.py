@@ -12,7 +12,7 @@ from thirties_core.plan_tools import NOT_DONE, PlanTools
 from thirties_core.today import TodayLinks
 from thirties_core.assistant_tools import _checkbox_id
 
-TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Morning Routine"}
+TITLES = {"n_today": "Today To-Do", "n_errands": "Errands/Admin", "n_routine": "Studio opening"}
 
 
 def item(tid, title, note="n_errands"):
@@ -170,10 +170,10 @@ class TestBrains(TodayTestCase):
         self.t.execute("add_to_today", {"items": ["Call the bank"]})
         self.api.notes["n_today"]["body"] = "- [x] Call the bank\n- [ ] Rinse the tank filter\n"
         self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [ ] Journal\n"}
-        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Studio opening")
         notes = self.services.joplin.fetch_active_notes()
         text = FrontierBrain(self.t, None, tasks=self.services.tasks, active_notes=notes).build_backlog_summary()
-        today, routine = text.split("Today To-Do")[1].split("Morning Routine")
+        today, routine = text.split("Today To-Do")[1].split("Studio opening")
         line_with(today, "[done]", "Call the bank")
         self.assertNotIn("[done]", line_with(today, "Rinse the tank filter"))
         line_with(routine, "[done]", "Shower")
@@ -213,13 +213,13 @@ class TestSlmShortcuts(TodayTestCase):
         from thirties_core.brains.slm import SlmBrain
         from thirties_core.brains.slm.parse import Action
         self.api.notes["n_routine"] = {"id": "n_routine", "body": "- [ ] Feed the fish\n- [ ] Shower\n- [ ] Journal\n"}
-        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Studio opening")
         self.t.execute("remove_event", {"event": "Work"})  # a day off
         brain = SlmBrain(self.t, tasks=self.services.tasks)
-        out = brain._run_actions([Action("add", {"title": "morning routine", "duration": "30 minutes"}),
+        out = brain._run_actions([Action("add", {"title": "studio opening routine", "duration": "30 minutes"}),
                                   Action("add", {"title": "Recipe app dev", "duration": "1 hour"}),
                                   Action("add", {"title": "lunch"}), Action("add", {"title": "walk", "duration": "1 hour"})],
-                                 "put down my morning routine, recipe app dev, lunch and a walk, just figure it out")
+                                 "lay out the studio opening routine, recipe app dev, lunch and a walk, no times")
         self.assertTrue(out.startswith("Here's the day:"), out)
         titles = {s.title: s for s in self.t.day_plan.spans}
         self.assertTrue({"Feed the fish", "Shower", "Journal", "Recipe app dev", "Lunch", "Walk"} <= set(titles))  # routine as items
@@ -231,7 +231,7 @@ class TestSlmShortcuts(TodayTestCase):
 
 
 class TestRoutinesOnToday(TodayTestCase):
-    """10-26/27: asked to put the routine on the plan, it wrote a made-up "Morning Routine steps" line into the routine note and
+    """10-26/27: asked to put the routine on the plan, it wrote a made-up "Studio opening steps" line into the routine note and
     put only that on Today; the plan and the Today note had drifted apart."""
 
     STEPS = ["Feed the fish", "Make coffee", "Pack lunch", "Breakfast (w/ juice)", "Make bed", "Shower", "Journal"]
@@ -240,38 +240,38 @@ class TestRoutinesOnToday(TodayTestCase):
         super().setUp()
         self.routine = "".join(f"- [x] {s}\n" for s in self.STEPS)  # the user ticks it there; it's a template
         self.api.notes["n_routine"] = {"id": "n_routine", "body": self.routine}
-        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Studio opening")
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")  # this morning's reset ran
 
     def test_a_routine_goes_on_the_plan_as_its_steps_and_on_today_as_one_group(self):
-        out = self.t.execute("put_routine", {"routine": "morning routine", "parts": [
+        out = self.t.execute("put_routine", {"routine": "studio opening", "parts": [
             {"start": "10:00 AM", "items": ["Feed the fish", "Make coffee", "Pack lunch", "Breakfast (w/ juice)"]},
             {"start": "3:00 PM", "items": ["Make bed", "Shower", "Journal"]}]})
-        self.assertTrue(out.startswith("Put Morning Routine on the plan: 10:00 AM: Feed the fish, Make coffee, Pack "
+        self.assertTrue(out.startswith("Put Studio opening on the plan: 10:00 AM: Feed the fish, Make coffee, Pack "
                                        "lunch, Breakfast (w/ juice); 3:00 PM: Make bed, Shower, Journal."), out)
         steps = [s for s in self.t.day_plan.spans if s.title in self.STEPS]
         self.assertEqual(len(steps), 7)
         self.assertTrue(all(s.task_id for s in steps))
         shower = next(s for s in steps if s.title == "Shower")
         self.assertEqual((shower.start_dt, shower.end_dt), (at("15:10"), at("15:20")))
-        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n" + "".join(f"    - [ ] {s}\n" for s in self.STEPS))
+        self.assertEqual(self.body("n_today"), "- [ ] Studio opening\n" + "".join(f"    - [ ] {s}\n" for s in self.STEPS))
         self.assertEqual(self.body("n_routine"), self.routine)  # the template is never written to
-        again = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "6:00 PM"})
-        self.assertTrue(again.startswith("Moved Morning Routine: 6:00 PM: "), again)  # 11-03: placed, it moves
+        again = self.t.execute("put_routine", {"routine": "Studio opening", "start": "6:00 PM"})
+        self.assertTrue(again.startswith("Moved Studio opening: 6:00 PM: "), again)  # 11-03: placed, it moves
         steps = [s for s in self.t.day_plan.spans if s.title in self.STEPS]
         self.assertEqual(len(steps), 7)  # moved, not doubled
         self.assertTrue(all(s.start_dt >= at("18:00") for s in steps))
         self.assertEqual(self.body("n_routine"), self.routine)
 
     def test_moving_one_placed_part_moves_only_it_and_keeps_what_is_done(self):
-        self.t.execute("put_routine", {"routine": "morning routine", "parts": [
+        self.t.execute("put_routine", {"routine": "studio opening", "parts": [
             {"start": "10:00 AM", "items": ["Feed the fish", "Make coffee"]},
             {"start": "11:00 AM", "items": ["Make bed", "Shower", "Journal"]}]})
         fish = next(s for s in self.t.day_plan.spans if s.title == "Feed the fish")
         fish.status = SpanStatus.DONE
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "3:00 PM", "items": ["Feed the fish", "Shower"]}]})
-        self.assertTrue(out.startswith("Moved Morning Routine: 3:00 PM: Shower."), out)
+        self.assertTrue(out.startswith("Moved Studio opening: 3:00 PM: Shower."), out)
         self.assertIn("Already planned: Feed the fish", out)
         spans = {s.title: s for s in self.t.day_plan.spans if s.title in self.STEPS}
         self.assertEqual(spans["Shower"].start_dt, at("15:00"))
@@ -282,14 +282,14 @@ class TestRoutinesOnToday(TodayTestCase):
         self.assertEqual([s.start_dt for s in stored], [at("15:00")])  # the old one is gone from the database too
 
     def test_a_refused_move_leaves_the_routine_where_it_was(self):
-        self.t.execute("put_routine", {"routine": "morning routine", "start": "10:00 AM"})
+        self.t.execute("put_routine", {"routine": "studio opening", "start": "10:00 AM"})
         before = sorted((s.title, s.start_dt) for s in self.t.day_plan.spans if s.title in self.STEPS)
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "start": "half past never"})
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "start": "half past never"})
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertEqual(sorted((s.title, s.start_dt) for s in self.t.day_plan.spans if s.title in self.STEPS), before)
 
     def test_scheduling_a_routine_is_never_a_new_line_in_it(self):
-        out = self.t.execute("add_task", {"title": "Morning Routine steps", "list": "Morning Routine",
+        out = self.t.execute("add_task", {"title": "Studio opening steps", "list": "Studio opening",
                                           "start": "4:00 PM"})
         self.assertTrue(out.startswith(NOT_DONE) and "put_routine" in out, out)
         self.assertEqual(self.body("n_routine"), self.routine)
@@ -299,15 +299,15 @@ class TestRoutinesOnToday(TodayTestCase):
         self.t.execute("add_event", {"title": "Shower", "start": "3:00 PM", "duration": "30 min"})  # a routine step
         self.t.execute("add_event", {"title": "Garden app dev", "start": "8:00 PM", "duration": "1 hour",
                                      "day": "tomorrow"})
-        self.assertEqual(self.body("n_today"), "- [ ] Dinner\n- [ ] Morning Routine\n    - [ ] Shower\n")
+        self.assertEqual(self.body("n_today"), "- [ ] Dinner\n- [ ] Studio opening\n    - [ ] Shower\n")
 
     def test_the_routine_note_is_never_written_however_a_step_is_ticked(self):
         self.api.notes["n_routine"]["body"] = self.routine.replace("[x]", "[ ]")  # this morning: unticked
         self.services.tasks += [TaskItem(id=_checkbox_id("n_routine", s), source_notebook="1. Tasks", title=s,
-                                         is_checkbox_item=True, parent_note_title="Morning Routine",
+                                         is_checkbox_item=True, parent_note_title="Studio opening",
                                          parent_note_id="n_routine", list_role="routine") for s in self.STEPS]
         template = self.body("n_routine")
-        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        self.t.execute("put_routine", {"routine": "Studio opening", "start": "10:00 AM"})
         coffee = next(s for s in self.t.day_plan.spans if s.title == "Make coffee")
         self.t.execute("log_outcome", {"event": coffee.id, "status": "done"})  # said in chat
         self.api.notes["n_today"]["body"] = self.body("n_today").replace("- [ ] Shower", "- [x] Shower")  # by hand
@@ -317,7 +317,7 @@ class TestRoutinesOnToday(TodayTestCase):
 
     def test_an_extra_step_done_is_ticked_on_today(self):
         # 10-30 sim: Brush teeth (not in the routine note) was done, but its Today line stayed open
-        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "10:00 AM", "items": ["Shower", "Brush teeth"]}]})
         teeth = next(s for s in self.t.day_plan.spans if s.title == "Brush teeth")
         self.t.execute("log_outcome", {"event": teeth.id, "status": "done"})
@@ -332,18 +332,18 @@ class TestRoutinesOnToday(TodayTestCase):
     def test_planned_before_sunrise_the_group_survives_the_morning_reset(self):
         # 10-30 (sim): routine put on Today at 6:32 on a dark morning, then taken off at sunrise as "yesterday's"
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "")
-        self.api.notes["n_today"]["body"] = "- [ ] Morning Routine\n    - [ ] Shower\n- [x] Old done thing\n"  # yesterday
+        self.api.notes["n_today"]["body"] = "- [ ] Studio opening\n    - [ ] Shower\n- [x] Old done thing\n"  # yesterday
         set_debug_time(at("06:30"))
         # at 7:00, where today's plan starts (6:30 this morning is before it; on the plan it's tomorrow's 6:30)
-        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "7:00 AM", "parts": [
+        self.t.execute("put_routine", {"routine": "Studio opening", "start": "7:00 AM", "parts": [
             {"start": "7:00 AM", "items": ["Feed the fish", "Brush teeth"]}]})
         set_debug_time(at("08:00"))
         self.t.assistant.start_the_day()  # the sunrise duty: already done for today, so nothing more
-        self.assertEqual(self.body("n_today"), "- [ ] Morning Routine\n    - [ ] Feed the fish\n    - [ ] Brush teeth\n")
+        self.assertEqual(self.body("n_today"), "- [ ] Studio opening\n    - [ ] Feed the fish\n    - [ ] Brush teeth\n")
         self.assertNotIn("Brush teeth", self.body("n_routine"))  # an extra step is for today, not the template
 
     def test_a_done_step_ticks_todays_copy_and_the_group_leaves_the_next_morning(self):
-        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        self.t.execute("put_routine", {"routine": "Studio opening", "start": "10:00 AM"})
         shower = next(s for s in self.t.day_plan.spans if s.title == "Shower")
         self.t.execute("log_outcome", {"event": shower.id, "status": "done"})
         self.assertIn("    - [x] Shower\n", self.body("n_today"))
@@ -372,7 +372,7 @@ def morning_today(case) -> None:
     case.api.notes["n_today"]["body"] = "- [x] Feed the fish\n" + case.body("n_today")
     case.api.notes["n_routine"] = {"id": "n_routine", "body": "- [x] Shower\n- [x] Journal\n"}
     catalog = ListCatalog(case.sched.state_db)
-    catalog.set_role("n_routine", "routine", "Morning Routine")
+    catalog.set_role("n_routine", "routine", "Studio opening")
     catalog.set_urgency("t_stamps", "now")
     case.services.tasks = catalog.apply(case.services.tasks)
     with case.sched.state_db._get_connection() as conn:  # they went on the list on an earlier day

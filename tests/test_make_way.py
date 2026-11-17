@@ -316,7 +316,7 @@ class DoneByItselfKeepsJoplinTrue(test_today.TodayTestCase):
         from thirties_core.lists import ListCatalog
         self.routine = "".join(f"- [ ] {s}\n" for s in ("Feed the fish", "Make coffee", "Shower"))
         self.api.notes["n_routine"] = {"id": "n_routine", "body": self.routine}
-        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Morning Routine")
+        ListCatalog(self.sched.state_db).set_role("n_routine", "routine", "Studio opening")
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")
 
     def test_auto_done_list_item_is_ticked_once(self):
@@ -332,7 +332,7 @@ class DoneByItselfKeepsJoplinTrue(test_today.TodayTestCase):
 
     def test_auto_done_routine_step_never_writes_the_routine(self):
         template = self.body("n_routine")
-        self.t.execute("put_routine", {"routine": "Morning Routine", "start": "10:00 AM"})
+        self.t.execute("put_routine", {"routine": "Studio opening", "start": "10:00 AM"})
         coffee = next(s for s in self.t.day_plan.spans if s.title == "Make coffee")
         set_debug_time(at("10:05"))
         self.t.execute("still_doing", {"event": coffee.id, "length": "20 minutes", "auto_done": True})

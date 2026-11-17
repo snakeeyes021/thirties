@@ -289,7 +289,7 @@ class TestTheMorningHasTheWholeDayAndWhatWasAskedFor(RoutineCase):
         self.svc.today = lambda: DAY
         self.svc._manager, self.svc._day = self.m, DAY
         self.m.tools.execute("set_anchor", {"title": "Lunch", "time": "12:00 PM"})
-        self.m.tools.execute("set_routine", {"routine": "Morning Routine", "parts": [
+        self.m.tools.execute("set_routine", {"routine": "Studio opening", "parts": [
             {"start": "9:00 AM", "items": FIRST}, {"start": "3:00 PM", "items": SECOND}]})
 
     def test_a_morning_reply_without_the_routines_gets_them(self):

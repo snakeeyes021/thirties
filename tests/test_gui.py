@@ -1030,7 +1030,7 @@ class ProfileDialogTests(unittest.TestCase):
         catalog.set_role("n1", "list", "Errands", source="guess")
         catalog.set_urgency("t1", "soon", source="guess")
         notes = [{"id": "n1", "title": "Errands", "source_notebook": "Tasks", "body": ""},
-                 {"id": "n2", "title": "Morning routine", "source_notebook": "Tasks", "body": ""}]
+                 {"id": "n2", "title": "Studio opening", "source_notebook": "Tasks", "body": ""}]
         tasks = [TaskItem(id=t, source_notebook="Tasks", title=title, is_checkbox_item=True, parent_note_id="n1",
                           parent_note_title="Errands") for t, title in (("t1", "Call the bank"), ("t2", "Buy stamps"))]
         changes = []
@@ -1055,13 +1055,13 @@ class ProfileDialogTests(unittest.TestCase):
         case.setUp()
         self.addCleanup(case.doCleanups)
         routines = case.t.assistant.routines
-        routines.set_routine(routine="Morning Routine", parts=[{"start": "9:00 AM", "items": FIRST},
+        routines.set_routine(routine="Studio opening", parts=[{"start": "9:00 AM", "items": FIRST},
                                                                {"start": "3:00 PM", "items": SECOND}])
         changes = []
         dialog = ProfileMemoryDialog(None, None, on_changed=lambda: changes.append(1), routines=lambda: routines)
         page = dialog.routines_page
         page.reload()
-        morning = page.routine_rows["Morning Routine"]
+        morning = page.routine_rows["Studio opening"]
         self.assertEqual(morning.get_subtitle(), "Every day · 9:00 AM and 3:00 PM")
         self.assertEqual(morning.part_rows[1]["steps"].get_text(), ", ".join(SECOND))
         # every 12 days, through set_routine
@@ -1070,7 +1070,7 @@ class ProfileDialogTests(unittest.TestCase):
         _iterate_until(lambda: "every 12 days" in page.routine_rows["Deep Clean"].get_subtitle().lower())
         self.assertEqual(RoutineBook(case.sched.state_db).get("n_clean").repeat, {"every": "days", "n": 12})
         # a part's usual time and fallback
-        morning = page.routine_rows["Morning Routine"]
+        morning = page.routine_rows["Studio opening"]
         morning.part_rows[1]["time"].set_text("5:00 PM")
         morning.part_rows[1]["fallback"].set_text("after work")
         morning.part_rows[1]["time"].emit("apply")

@@ -702,10 +702,10 @@ class TestFromTheDaySim(unittest.TestCase):
 
 
 class ParityTestCase(SlmTestCase):
-    """Joplin with a Today note, an errands list and the user's morning routine (a template, ticked there)."""
+    """Joplin with a Today note, an errands list and the user's studio opening routine (a template, ticked there)."""
 
     STEPS = ["Feed the fish", "Make coffee", "Pack lunch", "Breakfast", "Make bed", "Shower", "Journal", "Brush teeth"]
-    TITLES = {"n_today": "Today To-Do", "n1": "Errands/Admin", "n_routine": "Morning Routine"}
+    TITLES = {"n_today": "Today To-Do", "n1": "Errands/Admin", "n_routine": "Studio opening"}
 
     def setUp(self):
         super().setUp()
@@ -724,7 +724,7 @@ class ParityTestCase(SlmTestCase):
         catalog = ListCatalog(self.sched.state_db)
         catalog.set_role("n_today", "today", "Today To-Do")
         catalog.set_role("n1", "list", "Errands/Admin")
-        catalog.set_role("n_routine", "routine", "Morning Routine")
+        catalog.set_role("n_routine", "routine", "Studio opening")
         self.sched.state_db.set_sync_meta(f"day_started:{DAY.isoformat()}", "done")  # this morning's reset ran
 
     def span(self, title):
@@ -794,20 +794,20 @@ class TestParityWithGemini(ParityTestCase):
         self.assertTrue(SpanFacts(self.sched.state_db).get(self.span("Fish food").id).anchored)
 
     def test_put_the_morning_routine_on_as_two_thirties(self):
-        out = self.say("put my morning routine on", {"type": "routine", "title": "Morning routine"})
-        self.assertTrue(out.startswith("Put Morning Routine on the plan: 5:00 PM: Feed the fish, Make coffee, Pack "
+        out = self.say("put my studio opening routine on", {"type": "routine", "title": "Studio opening routine"})
+        self.assertTrue(out.startswith("Put Studio opening on the plan: 5:00 PM: Feed the fish, Make coffee, Pack "
                                        "lunch, Breakfast; 5:30 PM: Make bed, Shower, Journal, Brush teeth."), out)
         self.assertIn("It's on today's list too.", out)
         self.assertEqual(len([s for s in self.m.day_plan.spans if s.title in self.STEPS]), 8)
-        self.assertTrue(self.api.notes["n_today"]["body"].startswith("- [ ] Morning Routine\n    - [ ] Feed the fish"))
+        self.assertTrue(self.api.notes["n_today"]["body"].startswith("- [ ] Studio opening\n    - [ ] Feed the fish"))
         self.assertEqual(self.api.notes["n_routine"]["body"], "".join(f"- [x] {s}\n" for s in self.STEPS))
 
     def test_a_routine_parsed_as_an_add_at_a_time(self):
-        out = self.say("morning routine at 7 tonight, I'm off schedule",
-                       {"type": "add", "title": "Morning routine", "start": "7"})
+        out = self.say("studio opening routine at 7 tonight, I'm off schedule",
+                       {"type": "add", "title": "Studio opening routine", "start": "7"})
         self.assertIn("7:00 PM: Feed the fish", out)
         self.assertIn("7:30 PM: Make bed", out)
-        self.assertNotIn("Morning routine", [s.title for s in self.m.day_plan.spans])  # never one item
+        self.assertNotIn("Studio opening routine", [s.title for s in self.m.day_plan.spans])  # never one item
 
     def test_the_routine_goes_on_the_way_it_did_last_time(self):
         from tests.fixtures import TZ
@@ -822,13 +822,13 @@ class TestParityWithGemini(ParityTestCase):
             self.sched.state_db.upsert_span(EventSpan(f"y{i}", title, start, start + timedelta(minutes=5),
                                                       SpanCategory.TASK))
         set_debug_time(at("08:10"))
-        self.say("morning routine now please", {"type": "routine", "title": "morning routine"})
+        self.say("studio opening routine now please", {"type": "routine", "title": "studio opening routine"})
         # the morning set-up (routines.py) may already have put it on: either way, it's on the way it went last time
         placed = {s.title: s.start_dt for s in self.m.day_plan.spans if s.title in layout}
         from thirties_core.clock import thirty_of
         self.assertEqual({t: thirty_of(d).strftime("%H:%M") for t, d in placed.items()}, layout)
         set_debug_time(at("10:10"))  # the morning's thirty has passed: after work on a work day (B3's fallback)
-        note = self.brain._routine_note("morning")
+        note = self.brain._routine_note("studio")
         parts = self.brain._routine_parts(note, self.STEPS, None)
         self.assertEqual([p["start"] for p in parts], ["4:00 PM", "4:30 PM"])
         self.m.tools.execute("remove_event", {"event": "Work"})  # a day off: the next free thirty, 3 PM kept
@@ -845,7 +845,7 @@ class TestGemmaLearnsRoutinePlacement(ParityTestCase):
         return RoutineBook(self.sched.state_db).get("n_routine")
 
     def test_placing_it_at_a_time_is_learned(self):
-        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        self.say("studio opening routine at 7 tonight", {"type": "add", "title": "Studio opening routine", "start": "7"})
         r = self.book()
         self.assertEqual([p["at"] for p in r.parts], ["19:00", "19:30"])
         self.assertEqual(r.placement_source, "learned")
@@ -853,14 +853,14 @@ class TestGemmaLearnsRoutinePlacement(ParityTestCase):
     def test_the_stored_placement_is_used_and_a_missed_part_isnt_learned_as_usual(self):
         from thirties_core.routines import RoutineBook
         book = RoutineBook(self.sched.state_db)
-        r = book.get("n_routine", "Morning Routine")
+        r = book.get("n_routine", "Studio opening")
         r.parts = [{"items": ["Feed the fish", "Make coffee"], "at": "09:00", "fallback": ""},
                    {"items": ["Pack lunch", "Breakfast", "Make bed", "Shower", "Journal", "Brush teeth"], "at": "20:00",
                     "fallback": ""}]
         r.placement_source = "learned"
         book.save(r)
         set_debug_time(at("10:10"))
-        note = self.brain._routine_note("morning")
+        note = self.brain._routine_note("studio")
         parts = self.brain._routine_parts(note, self.STEPS, None)
         self.assertEqual(parts[1], {"start": "8:00 PM", "items": r.parts[1]["items"]})  # its own grouping, its time
         self.assertTrue(self.brain._routine_shifted)  # 9:00 has passed: today's stand-in
@@ -868,7 +868,7 @@ class TestGemmaLearnsRoutinePlacement(ParityTestCase):
         self.assertEqual([p["at"] for p in self.book().parts], ["09:00", "20:00"])  # still where it usually goes
 
     def test_moving_a_step_by_itself_is_learned_but_not_inside_a_redraw(self):
-        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        self.say("studio opening routine at 7 tonight", {"type": "add", "title": "Studio opening routine", "start": "7"})
         self.m.tools.user_message = "move the shower to 9"
         self.m.tools.execute("update_event", {"event": self.span("Shower").id, "start": "9:00 PM"})
         parts = {p["at"]: p["items"] for p in self.book().parts}
@@ -881,7 +881,7 @@ class TestGemmaLearnsRoutinePlacement(ParityTestCase):
 
     def test_a_day_page_drag_is_learned(self):
         from thirties_core import plan_log
-        self.say("morning routine at 7 tonight", {"type": "add", "title": "Morning routine", "start": "7"})
+        self.say("studio opening routine at 7 tonight", {"type": "add", "title": "Studio opening routine", "start": "7"})
         with plan_log.caused_by("Day page"):
             self.m.execute_tool("update_event", {"event": self.span("Feed the fish").id, "start": "6:30 PM"})
         self.assertEqual({p["at"]: p["items"] for p in self.book().parts}["18:30"], ["Feed the fish"])

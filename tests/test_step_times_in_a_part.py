@@ -24,7 +24,7 @@ class StepTimesCase(RoutineCase):
         return spans[0].start_dt
 
     def put(self, parts):
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": parts})
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "parts": parts})
         self.assertFalse(out.startswith(NOT_DONE), out)
         return out
 

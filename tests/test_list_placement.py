@@ -19,7 +19,7 @@ NOTES = {
     "n_today": ("Today To-Do", "1. Tasks", "", "today"),
     "n_errands": ("Errands/Admin", "1. Tasks", ERRANDS, "list"),
     "n_home": ("Home", "1. Tasks", HOME, "list"),
-    "n_routine": ("Morning Routine", "1. Tasks", "- [ ] Feed the fish\n", "routine"),
+    "n_routine": ("Studio opening", "1. Tasks", "- [ ] Feed the fish\n", "routine"),
     "n_wish": ("Do I want?", "1. Tasks", "- [ ] A boat\n", "reference"),
     "n_quick": ("Quick Inbox", "Dev", "- [ ] Ask the vendor about the build id\n- [ ] Look into X\n- [ ] Rename Y\n",
                 "dropbox"),
@@ -113,7 +113,7 @@ class TestPlacement(ListsTestCase):
             self.assertTrue(out.startswith(NOT_DONE), (lst, out))
         self.assertIn("add_to_today", self.t.execute("add_task", {"title": "x", "list": "Today To-Do"}))
         self.t.user_message = "add buy milk somewhere"
-        self.assertTrue(self.t.execute("add_task", {"title": "Buy milk", "list": "Morning Routine"}).startswith(NOT_DONE))
+        self.assertTrue(self.t.execute("add_task", {"title": "Buy milk", "list": "Studio opening"}).startswith(NOT_DONE))
         self.assertEqual(self.body("n_wish"), "- [ ] A boat\n")
 
     def test_with_joplin_closed_it_still_never_lands_in_the_trailing_someday_section(self):

@@ -77,9 +77,9 @@ class TestStructure(ListsTestCase):
         self.t.user_message = "add that to my list"
         out = self.t.execute("edit_list_item", {"item": "Feed the fish", "add_under": ["Flakes", "Pellets"]})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.t.user_message = "in my morning routine, feeding the fish is flakes and pellets"
+        self.t.user_message = "in my studio opening, feeding the fish is flakes and pellets"
         out = self.t.execute("edit_list_item", {"item": "Feed the fish", "add_under": ["Flakes", "Pellets"]})
-        line_with(out, "'Feed the fish'", "Morning Routine")
+        line_with(out, "'Feed the fish'", "Studio opening")
         self.assertEqual(self.body("n_routine"), "- [ ] Feed the fish\n    - [ ] Flakes\n    - [ ] Pellets\n")
 
 

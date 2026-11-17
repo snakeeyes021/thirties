@@ -60,7 +60,7 @@ class TimedRoutineCase(RoutineCase):
 
 class TestPlacingATimedRoutine(TimedRoutineCase):
     def test_the_time_leaves_the_title_and_becomes_the_steps_time(self):
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "8:00 AM", "items": ["7:45 Water the plants", "Make coffee"]},
             {"start": "11:30 AM", "items": ["11:30 Stretch break"]}]})
         self.assertFalse(out.startswith(NOT_DONE), out)
@@ -76,7 +76,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
         self.assertEqual(self.body("n_routine"), self.routine_body)
 
     def test_named_without_its_time_its_still_the_step(self):
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "8:00 AM", "items": ["Water the plants", "Make coffee"]}]})
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertNotIn("isn't in the", out)  # not taken for an extra step
@@ -84,7 +84,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
         self.assertEqual(water[0].task_id, line_id(self.sched.state_db, "n_routine", "7:45 Water the plants"))
 
     def test_the_schedule_and_todays_list_show_one_time(self):
-        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "8:00 AM", "items": ["7:45 Water the plants", "Make coffee"]}]})
         shown = self.t.execute("show_schedule", {})
         self.assertIn("Water the plants", shown)
@@ -93,7 +93,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
         self.assertNotIn("7:45 Water", self.body("n_today"))
 
     def test_the_learned_placement_keeps_names_without_times(self):
-        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "8:00 AM", "items": ["7:45 Water the plants", "Make coffee"]}]})
         parts = self.routines.book().get("n_routine").parts
         items = [i for p in parts for i in p["items"]]
@@ -103,7 +103,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
 
     def test_a_time_before_the_day_starts_never_moves_it_to_the_next_morning(self):
         self.api.notes["n_routine"]["body"] = "- [ ] 6:20 Water the plants\n- [ ] Make coffee\n"
-        out = self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        out = self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "7:00 AM", "items": ["6:20 Water the plants", "Make coffee"]}]})
         self.assertFalse(out.startswith(NOT_DONE), out)
         water = self.spans(self.t, "Water the plants")
@@ -119,7 +119,7 @@ class TestPlacingATimedRoutine(TimedRoutineCase):
 class TestStoredTitlesAreCleaned(TimedRoutineCase):
     def test_old_copies_lose_their_leading_time_once_and_the_note_is_left_alone(self):
         book = self.routines.book()
-        book.save(Routine("n_routine", "Morning Routine", parts=[
+        book.save(Routine("n_routine", "Studio opening", parts=[
             {"items": ["7:45 Water the plants", "Make coffee"], "at": "07:30", "fallback": ""}]))
         book.save_anchor(Anchor("18:15 Feed the cat", "18:15"))
         old = EventSpan("old-water", "7:45 Water the plants", at("07:45"), at("08:00"), SpanCategory.TASK,

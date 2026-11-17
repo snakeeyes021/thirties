@@ -149,15 +149,15 @@ class TestDayLayout(ScheduleCase):
 
     def test_shared_time_is_one_card_with_work_shown_under_it(self):
         t = tools_for()
-        t.execute("add_event", {"title": "Morning routine", "start": "9:00 AM", "duration": "1 hour"})
+        t.execute("add_event", {"title": "Studio opening", "start": "9:00 AM", "duration": "1 hour"})
         t.execute("add_event", {"title": "Make coffee", "start": "9:30 AM", "duration": "10 min"})
         t.execute("add_event", {"title": "Garden app dev", "start": "5:00 PM", "duration": "1 hour"})
         t.execute("add_event", {"title": "Recipe app dev", "start": "5:00 PM", "duration": "1 hour"})
         plan = t.day_plan
         segs = build_segments(plan)
-        routine = next(s for s in segs if any(x.title == "Morning routine" for x in s.spans))
+        routine = next(s for s in segs if any(x.title == "Studio opening" for x in s.spans))
         self.assertEqual(len(routine.blocks), 2)  # one card, not three pieces around the nested item
-        self.assertEqual(segment_title(plan, routine), "Morning routine + Make coffee")
+        self.assertEqual(segment_title(plan, routine), "Studio opening + Make coffee")
         self.assertEqual(segment_context(routine), "during Work")  # T4: work isn't hidden under it
         work = [s for s in segs if s.is_envelope and s.spans[0].title == "Work"]
         self.assertEqual(len(work), 2)  # work runs on either side, each saying what it's part of

@@ -265,7 +265,7 @@ SCENARIOS: List[SimScenario] = [
     ),
     SimScenario(
         "sunday_planning", SUN, "10:15",
-        persona="Morgan: still in their morning routine, at the computer, a bit scattered. Gives several requests at "
+        persona="Morgan: still in their studio opening, at the computer, a bit scattered. Gives several requests at "
                 "once, changes order when they notice something, wants a clean overview at the end.",
         situation="Sunday 10:15 AM. Nothing scheduled yet. Grocery store closes around 10 PM.",
         goals=[

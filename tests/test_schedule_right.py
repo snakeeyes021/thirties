@@ -2,7 +2,7 @@
 
 About one schedule reply in five was followed straight away by a correction. Each class below is one kind of wrong
 schedule: meals or routines missing, list items with no time left out, someone else's events shown as the user's,
-done items as rows and ids as titles, duplicates, the morning routine placed after noon, items dropped that nobody asked
+done items as rows and ids as titles, duplicates, the studio opening placed after noon, items dropped that nobody asked
 to drop, and a reply saying something moved when it didn't.
 """
 
@@ -32,20 +32,20 @@ class TestOneFailureNeverKeepsTheDayOff(RoutineCase):
     def setUp(self):
         super().setUp()
         self.t.execute("set_anchor", {"title": "Lunch", "time": "12:00 PM"})
-        self.t.execute("set_routine", {"routine": "Morning Routine", "parts": [{"start": "9:00 AM", "items": FIRST}]})
+        self.t.execute("set_routine", {"routine": "Studio opening", "parts": [{"start": "9:00 AM", "items": FIRST}]})
         self.t.execute("set_routine", {"routine": "Deep Clean", "parts": [{"start": "6:00 PM", "items": ["Vacuum"]}]})
 
     def test_one_routine_that_fails_leaves_the_others_and_the_meals(self):
         real = AssistantTools.put_routine
 
         def put(assistant, routine="", **kw):
-            if routine == "Morning Routine":
+            if routine == "Studio opening":
                 raise ValueError("a stored part that can't be read")
             return real(assistant, routine=routine, **kw)
         with patch.object(AssistantTools, "put_routine", put):
             self.t.assistant.routines.set_up_current()
         self.assertEqual(starts(self.t, {"Lunch", "Vacuum"}), {"Lunch": at("12:00"), "Vacuum": at("18:00")})
-        self.assertIn("Morning Routine: couldn't be placed", self.t.assistant.routines.prompt_section())
+        self.assertIn("Studio opening: couldn't be placed", self.t.assistant.routines.prompt_section())
 
     def test_the_today_reset_failing_leaves_the_routines_and_the_meals(self):
         calls = []
@@ -183,12 +183,12 @@ class TestNoDuplicates(RoutineCase):
 
 
 class TestTheMorningRoutineStaysInTheMorning(RoutineCase):
-    """The morning routine at 3:30 PM: a step done late (moved to the afternoon after its morning time had gone by)
+    """The studio opening at 3:30 PM: a step done late (moved to the afternoon after its morning time had gone by)
     was learned as where it goes, and the next mornings put it there."""
 
     def setUp(self):
         super().setUp()
-        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "9:00 AM", "items": FIRST}, {"start": "9:30 AM", "items": SECOND}]})  # learned, not confirmed
 
     def next_morning(self):
@@ -208,8 +208,8 @@ class TestTheMorningRoutineStaysInTheMorning(RoutineCase):
         set_debug_time(at("15:10"))
         for s in [s for s in self.t.day_plan.spans if s.title in FIRST + SECOND]:
             self.t._drop(s)
-        self.t.user_message = "I skipped the morning routine, do it at 3:30"
-        self.t.execute("put_routine", {"routine": "Morning Routine", "parts": [
+        self.t.user_message = "I skipped the studio opening, do it at 3:30"
+        self.t.execute("put_routine", {"routine": "Studio opening", "parts": [
             {"start": "3:30 PM", "items": FIRST}, {"start": "4:00 PM", "items": SECOND}]})
         self.assertEqual(self.next_morning(), {"Feed the fish": at("09:00", 1), "Make bed": at("09:30", 1)})
 

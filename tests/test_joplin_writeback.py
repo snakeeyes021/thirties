@@ -176,21 +176,21 @@ class TestTools(unittest.TestCase):
         self.api.notes["r1"] = {"id": "r1", "body": routine}
         self.services.joplin.fetch_active_notes.return_value = [
             {"id": "n1", "title": "Errands", "body": BODY, "source_notebook": "Tasks"},
-            {"id": "r1", "title": "Morning routine", "body": routine, "source_notebook": "Routines"}]
+            {"id": "r1", "title": "Studio opening", "body": routine, "source_notebook": "Routines"}]
         out = self.t.execute("break_down_task", {"task": "shower", "steps": ["Shower", "Brush teeth"]})
         self.assertIn("Broke 'Shower' into 2 steps", out)
         self.assertEqual(self.api.notes["r1"]["body"],
                          "# Morning\n- [x] Feed the fish\n- [x] Shower\n    - [ ] Shower\n    - [ ] Brush teeth\n- [ ] Journal\n")
-        out = self.t.execute("add_task", {"title": "Stretch", "list": "morning routine"})
-        self.assertTrue(out.startswith("Added 'Stretch' to Morning routine"), out)
+        out = self.t.execute("add_task", {"title": "Stretch", "list": "studio opening"})
+        self.assertTrue(out.startswith("Added 'Stretch' to Studio opening"), out)
 
     def test_an_item_in_two_lists_needs_the_list_named(self):
         self.services.joplin.fetch_active_notes.return_value = [
             {"id": "n1", "title": "Errands", "body": "- [x] Shower\n"},
-            {"id": "r1", "title": "Morning routine", "body": "- [x] Shower\n"}]
+            {"id": "r1", "title": "Studio opening", "body": "- [x] Shower\n"}]
         self.api.notes["r1"] = {"id": "r1", "body": "- [x] Shower\n"}
         self.assertIn("more than one list", self.t.execute("break_down_task", {"task": "Shower", "steps": ["a", "b"]}))
-        out = self.t.execute("break_down_task", {"task": "Shower", "steps": ["a", "b"], "list": "routine"})
+        out = self.t.execute("break_down_task", {"task": "Shower", "steps": ["a", "b"], "list": "studio"})
         self.assertIn("Broke 'Shower'", out)
         self.assertIn("    - [ ] a", self.api.notes["r1"]["body"])
 

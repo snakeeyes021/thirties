@@ -13,11 +13,11 @@ class TestRoutineProfile(RoutineCase):
     def r(self):
         return self.t.assistant.routines
 
-    def row(self, title="Morning Routine"):
+    def row(self, title="Studio opening"):
         return next(x for x in rp.routine_rows(self.r()) if x["title"] == title)
 
     def test_rows_show_schedule_placement_and_skip(self):
-        self.r().set_routine(routine="Morning Routine", parts=[{"start": "9:00 AM", "items": FIRST},
+        self.r().set_routine(routine="Studio opening", parts=[{"start": "9:00 AM", "items": FIRST},
                                                                {"start": "3:00 PM", "items": SECOND}],
                              fallback="after work")
         row = self.row()
@@ -27,10 +27,10 @@ class TestRoutineProfile(RoutineCase):
         self.assertEqual(row["parts"][0]["fallback"], "after work")
         self.assertEqual(row["placement_text"], "Set by you")
         self.assertEqual(rp.summary(row), "Every day · 9:00 AM and 3:00 PM")
-        self.r().skip_routine(routine="Morning Routine", how="until", until="Oct 20")
+        self.r().skip_routine(routine="Studio opening", how="until", until="Oct 20")
         self.assertEqual(self.row()["skip"], "Skipped until Tue Oct 20")
         self.assertIn("Skipped until", rp.summary(self.row()))
-        rp.resume(self.r(), "Morning Routine")
+        rp.resume(self.r(), "Studio opening")
         self.assertEqual(self.row()["skip"], "")
         self.assertEqual(self.row()["placement_source"], "user")
 
@@ -45,7 +45,7 @@ class TestRoutineProfile(RoutineCase):
             rp.repeat_text("weekdays", days=[])
 
     def test_placement_edits_are_the_users(self):
-        rp.save_placement(self.r(), "Morning Routine", [
+        rp.save_placement(self.r(), "Studio opening", [
             {"time": "8:30 AM", "items": FIRST, "fallback": ""},
             {"time": "5:00 PM", "items": ["Make bed", "Shower", " "], "fallback": "after work"},
             {"time": "", "items": ["Journal"]}])  # an empty part row is dropped

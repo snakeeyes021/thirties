@@ -31,7 +31,7 @@ EXAMPLE = (REPO_ROOT / "tests" / "day_scripts" / "saturday_errands.json").read_t
 
 FORMAT = """A day script is a JSON object with exactly these fields (this example is synthetic):
 {example}
-- "life": the course of the day in time order, one beat per line, each starting with a 24-hour time: what the person asks the app for, what they actually do and for how long, what interrupts them, what they find out. Include what they want from the assistant in their own terms (e.g. "Ask to plan the morning routine as its separate items, about 2 thirties together").
+- "life": the course of the day in time order, one beat per line, each starting with a 24-hour time: what the person asks the app for, what they actually do and for how long, what interrupts them, what they find out. Include what they want from the assistant in their own terms (e.g. "Ask to plan the studio opening as its separate items, about 2 thirties together").
 - "constraints": facts the person knows but only says when they matter (e.g. "No errands until the car is back").
 - "truth": what the person really did, with real start and end times (24-hour), for scoring the app's record; "match" is |-separated words that would appear in the item's title; add "done": false for things planned but not done.
 - "work": [start, end] in 24-hour time, or null if no work that day.

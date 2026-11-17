@@ -36,7 +36,7 @@ GIVEN = {(2, 45), (3, 20), (1, 10), (1, 40), (4, 45)}
 def invented_day(db) -> None:
     """One day with every kind of minute time there is under the hood."""
     spans = []
-    # a morning routine's part: four steps packed into one thirty, and one running into the next
+    # a studio opening's part: four steps packed into one thirty, and one running into the next
     t = at("07:30")
     for title, minutes in (("Wake stretch", 4), ("Kettle on", 7), ("Floss", 7), ("Tidy desk", 8), ("Plan the day", 8)):
         spans.append(EventSpan(f"r-{title}", title, t, t + timedelta(minutes=minutes), SpanCategory.ACTIVITY,

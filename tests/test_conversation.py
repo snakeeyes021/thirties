@@ -148,10 +148,10 @@ class TestTurnLoop(ConversationTestCase):
         self.assertIsNone(occupant(self.manager.day_plan, "10:00"))
 
     def test_work_only_changes_when_the_user_talks_about_it(self) -> None:
-        # 10-27: placing the morning routine moved Work to 10:30, though the user never mentioned Work
+        # 10-27: placing the studio opening moved Work to 10:30, though the user never mentioned Work
         self.engine.set_next_response(reply('CALL update_event {"event": "Work", "start": "10:30 AM"}'))
         self.engine.set_next_response(reply("Your routine is on at 9:30."))
-        self.manager.send_user_message("put my morning routine on at 9:30")
+        self.manager.send_user_message("put my studio opening on at 9:30")
         work = next(s for s in self.manager.day_plan.spans if s.title == "Work")
         self.assertEqual(work.start_dt.strftime("%H:%M"), "08:30")
         tool = next(m for m in self.manager.messages if m.get("role") == "tool")

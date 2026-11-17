@@ -13,7 +13,7 @@
   "life": [
     "08:10 Wake up and text the app: need to get to campus by 09:30, spend the morning on Chapter 3 section 2, prep slides/questions for the 14:00 section, eat lunch, teach 14:00–15:00, hold office hours 15:00–16:00, and grade 18 short reading quizzes before evening.",
     "08:15 Eat oatmeal, shower, pack bag, and walk to the history department office, arriving at 09:30.",
-    "09:32 Tell the app morning routine and walk to campus are done. Start Chapter 3 writing block.",
+    "09:32 Tell the app studio opening and walk to campus are done. Start Chapter 3 writing block.",
     "10:15 Get sidetracked digging through a JSTOR rabbit hole for a footnote; realize at 11:15 you've only written 150 words and haven't prepped discussion questions for the 14:00 section yet.",
     "11:18 Text the app that writing is going slowly and ask to switch to section prep now (11:30–12:30), grab lunch at 12:30, and move the second Chapter 3 writing block to 16:30 after office hours.",
     "11:25 Prep discussion questions and print primary source handouts in the department lounge until 12:35.",
@@ -38,8 +38,8 @@
   ],
   "truth": [
     {
-      "item": "Morning routine & walk to campus",
-      "match": "morning|breakfast|shower|walk",
+      "item": "Studio opening & walk to campus",
+      "match": "studio|breakfast|shower|walk",
       "start": "08:15",
       "end": "09:30"
     },
