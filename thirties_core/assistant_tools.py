@@ -411,6 +411,10 @@ from thirties_core.extras import EXTRA_READ_ONLY, EXTRA_TOOL_SPECS, extra_handle
 ASSISTANT_TOOL_SPECS += EXTRA_TOOL_SPECS
 ASSISTANT_READ_ONLY |= EXTRA_READ_ONLY
 # --- end extras ---
+# --- on-site work for a day: nothing else during it, Thirties moves what's there (on_site.py) ---
+from thirties_core.on_site import ON_SITE_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += ON_SITE_TOOL_SPECS
+# --- end on-site work ---
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -2705,6 +2709,8 @@ class AssistantTools(KindTools):
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
             **__import__("thirties_core.holds", fromlist=["HoldTools"]).HoldTools(self).handlers(),  # holds.py
             **extra_handlers(self),  # beyond the plan (extras.py)
+            "work_on_site": lambda on_site=True, day=None, **_: __import__(
+                "thirties_core.on_site", fromlist=["tool"]).tool(self.pt, on_site, day),  # on_site.py
             **ProjectTools(self).handlers(),  # projects' parts, epics, estimates, new lists (project_tools.py)
             **__import__("thirties_core.planning_tools", fromlist=["handlers"]).handlers(self.pt),  # planning_tools.py
         }

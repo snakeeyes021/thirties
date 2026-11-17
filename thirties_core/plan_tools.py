@@ -712,6 +712,11 @@ class PlanTools:
         hard = self._conflicts(span)
         from thirties_core.traits import overlap_refusal  # an exclusive item takes up its time
         refused = None if span.is_envelope else overlap_refusal(self, span, alongside)
+        # --- on-site work today: nothing else goes inside it (on_site.py) ---
+        if not refused and not span.is_envelope:
+            from thirties_core.on_site import refusal as on_site_refusal
+            refused = on_site_refusal(self, span, alongside)
+        # --- end on-site work ---
         if refused:
             raise ToolError(refused)
         if span.is_envelope:
@@ -1097,6 +1102,10 @@ class PlanTools:
         self._save_plan_after_change()
         extra = f" ({'; '.join(lasting + notes)})" if lasting or notes else ""
         extra += kept
+        # --- work added on an on-site day: what's inside it moves out (on_site.py) ---
+        from thirties_core.on_site import after_work_change
+        extra += after_work_change(self, span)
+        # --- end on-site work ---
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
@@ -1285,8 +1294,13 @@ class PlanTools:
         notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
+        # --- new work hours on an on-site day: what's inside work moves out (on_site.py) ---
+        from thirties_core.on_site import after_work_change
+        moved_out = after_work_change(self, span)
+        # --- end on-site work ---
         from thirties_core.day_edges import day_note
-        return f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}{getattr(self, '_kept_note', '')}"
+        return (f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}"
+                f"{getattr(self, '_kept_note', '')}{moved_out}")
 
     def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any,
                      alongside: bool = False) -> str:
