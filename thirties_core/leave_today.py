@@ -153,9 +153,10 @@ def after_skip(pt: "PlanTools", span: "EventSpan") -> str:
     line = top_line(pt, span.title, span.task_id)
     if a is None or line is None:
         return ""
-    from thirties_core.due_today import is_due_today  # due today: a skip never takes it off (due_today.py)
-    if is_due_today(pt, line, span.task_id):
-        return f" ({line} is due today, so it stays on today's list)"
+    from thirties_core.due_today import held_due, list_stays_note  # due today or overdue: a skip never takes it off
+    held = held_due(pt, line, span.task_id)
+    if held is not None:
+        return list_stays_note(line, held, pt.today())
     done = skip_line(a, line)
     return f" (also {done})" if done else ""
 

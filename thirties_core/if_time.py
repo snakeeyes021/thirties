@@ -249,17 +249,18 @@ def _due_today_note(assistant, title: str, task, action: str) -> str:
     from thirties_core import due_today
     from thirties_core.assistant_tools import ToolError
     pt = assistant.pt
-    if action not in ("tomorrow", "week", "drop") or \
-            not due_today.is_due_today(pt, title, task.id if task is not None else None):
+    held = due_today.held_due(pt, title, task.id if task is not None else None) \
+        if action in ("tomorrow", "week", "drop") else None  # overdue too
+    if held is None:
         return ""
     others = due_today.others_on(pt, title)
     by_hand = bool(getattr(pt, "by_hand", False))
     if (action == "week" and not by_hand) or (action == "tomorrow" and not due_today.clear_move(pt, title, others)) \
             or (action == "drop" and not due_today.clear_ask(pt, title, others)):
-        raise ToolError(due_today.stays_line(title))
+        raise ToolError(due_today.stays_line(title, held, pt.today()))
     if action == "tomorrow":
-        return " " + due_today.moved_line(title, pt.today() + timedelta(days=1), pt.today())
-    return " " + due_today.moved_line(title, None, pt.today())
+        return " " + due_today.moved_line(title, pt.today() + timedelta(days=1), pt.today(), held)
+    return " " + due_today.moved_line(title, None, pt.today(), held)
 
 
 def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> str:

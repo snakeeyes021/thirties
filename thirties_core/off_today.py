@@ -142,11 +142,12 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     if line is None:
         return ""
     from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
-    if due_today.is_due_today(pt, line, span.task_id):
+    held = due_today.held_due(pt, line, span.task_id)  # overdue too
+    if held is not None:
         if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
-            return f" ({line} is due today, so it stays on today's list)"
+            return due_today.list_stays_note(line, held, pt.today())
         done = _off_list(pt, line, title)
-        return f" (also {done}; {due_today.moved_line(line, None, pt.today())})" if done else ""
+        return f" (also {done}; {due_today.moved_line(line, None, pt.today(), held)})" if done else ""
     done = _off_list(pt, line, title)
     return f" (also {done})" if done else ""
 
@@ -182,10 +183,11 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
                             "asks for that; ask them if it isn't clear.")
     from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
     deadline = ""
-    if due_today.is_due_today(pt, line, task.id if task is not None else None):
+    held = due_today.held_due(pt, line, task.id if task is not None else None)  # overdue too
+    if held is not None:
         if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
-            raise ToolError(due_today.stays_line(line))
-        deadline = " " + due_today.moved_line(line, None, pt.today())
+            raise ToolError(due_today.stays_line(line, held, pt.today()))
+        deadline = " " + due_today.moved_line(line, None, pt.today(), held)
     done = _off_list(pt, line, line)
     if not done:
         raise ToolError(f"{line} couldn't be taken off today's list just now.")
