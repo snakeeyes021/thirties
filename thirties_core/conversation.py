@@ -427,6 +427,7 @@ class ConversationManager:
             current_turn.reset(token)
             self.tools.user_message = None  # a drag in the Agenda later isn't judged by this message
             self.tools.prior_exchange = None
+            self.tools.pending_dones = None
 
     def _command(self, user_text: str, via: str) -> str:
         """Developer / runtime simulation slash commands: never reach a model."""
@@ -509,6 +510,8 @@ class ConversationManager:
         self.tools.user_message = merged
         from thirties_core.done_reference import prior_exchange  # what "that" or "both" can point back to
         self.tools.prior_exchange = prior_exchange(self.brain.messages)
+        from thirties_core.done_words import pending_dones  # a done asked for before and refused (done_words.py)
+        self.tools.pending_dones = pending_dones(self.brain.messages)
         self.tools.shown_schedule = None
         from thirties_core import whats_next
         self._plan_before = whats_next.snapshot(self.day_plan)  # what the turn moves, for what's next

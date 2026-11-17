@@ -91,8 +91,9 @@ def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, out
             return refuse_unasked_relax(pt, str(args.get("title") or ""))
     if pt.user_message is None or not outermost:
         return None
+    from thirties_core.done_words import earlier_request  # a done asked for before isn't held by a question
     if name not in read_only and name not in _ALWAYS_ALLOWED and is_question(pt.user_message) \
-            and not _building_the_day(pt):
+            and not _building_the_day(pt) and not (name == "log_outcome" and earlier_request(pt, args)):
         return ("The user asked a question; this turn changes nothing. Answer it from what's on the plan and in "
                 "your notes; if a change would help, say what you'd do and let them ask for it.")
     if name in ("add_event", "propose_day") and not _building_the_day(pt) and pt.is_current(pt.day_plan) \
