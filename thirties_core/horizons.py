@@ -1619,7 +1619,13 @@ def horizon_handlers(assistant) -> Dict[str, Callable[..., str]]:
                     minutes = 0
                 if not minutes:
                     raise ToolError(f"length is how long each session is ('1 hour', '90 min'), not '{length}'.")
+        # --- due today: a later period takes it off today only on a clear word (due_today.py) ---
+        from thirties_core.due_today import move_check
+        due = move_check(hp.pt, t.title, t.id, p.start, t.due) if p.start > hp.today() else ""
+        # --- end due today ---
         hp.pin(t, p, n, minutes)
+        if due:
+            return f"'{t.title}' is planned for {hp.label(p)}.{due}"
         if n:
             each = f" of {minutes} min" if minutes else ""
             return f"'{t.title}' is planned for {hp.label(p)}: {n} session{'s' if n != 1 else ''}{each}."

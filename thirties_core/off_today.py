@@ -141,6 +141,12 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     line = today_line(pt, span.title, span.task_id)
     if line is None:
         return ""
+    from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
+    if due_today.is_due_today(pt, line, span.task_id):
+        if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
+            return f" ({line} is due today, so it stays on today's list)"
+        done = _off_list(pt, line, title)
+        return f" (also {done}; {due_today.moved_line(line, None, pt.today())})" if done else ""
     done = _off_list(pt, line, title)
     return f" (also {done})" if done else ""
 
@@ -174,10 +180,16 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
         if held or not (asks_to_clear(pt.user_message, line) or asks_to_skip(pt.user_message)):
             raise ToolError(f"{line} is on today's list with no time. It comes off the list only when the user "
                             "asks for that; ask them if it isn't clear.")
+    from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
+    deadline = ""
+    if due_today.is_due_today(pt, line, task.id if task is not None else None):
+        if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
+            raise ToolError(due_today.stays_line(line))
+        deadline = " " + due_today.moved_line(line, None, pt.today())
     done = _off_list(pt, line, line)
     if not done:
         raise ToolError(f"{line} couldn't be taken off today's list just now.")
-    return f"Took {line} off today's list (it had no time on the schedule)."
+    return f"Took {line} off today's list (it had no time on the schedule).{deadline}"
 
 
 # a reply saying something is off today's list ("moved the towels off today's list", "cleared it from the list")

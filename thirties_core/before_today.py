@@ -252,6 +252,8 @@ class BeforeToday:
             h = rec.get("horizon") if rec.get("horizon") not in (DROPPED, SOMEDAY, "", None) else "week"
             window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
                                   self._week_start())
+        from thirties_core.due_today import window_check  # due today: only on a clear word (due_today.py)
+        note = (note + window_check(self.a.pt, title, rec.get("task_id") or None, window, rec.get("due"))).strip()
         pool.set(title, horizon=SOMEDAY if window["when"] == "someday" else (
                      "week" if window["end"] != self._today().isoformat() else "today"),
                  pending_drop=False, dropped_on="", dropped_by="", placed_by="user", settled=True, **window)

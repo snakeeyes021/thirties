@@ -188,6 +188,17 @@ class NoRoomTodayTest(InPersonBase):
         w = self.work(tomorrow)
         self.assertFalse(moved[0].start_dt < w.end_dt and w.start_dt < moved[0].end_dt)
 
+    def test_something_due_today_never_goes_to_tomorrow(self):
+        from thirties_core.lists import ListCatalog
+        ListCatalog(self.sched.state_db).set_urgency("line:canoe", "soon", due=DAY, title="Patch the canoe")
+        trim = self.put("Patch the canoe", at("10:00"), 120)
+        out = self.say("an office day for me", "work_on_site", {"on_site": True})
+        self.assertIn("Patch the canoe: due today and no free time outside work is left, so it stays at "
+                      "10:00 AM, during work.", out)
+        self.assertEqual((trim.start_dt, trim.status), (at("10:00"), SpanStatus.PLANNED))
+        tomorrow = self.t.plan_for(DAY + timedelta(days=1))
+        self.assertEqual([s for s in tomorrow.spans if s.title == "Patch the canoe"], [])
+
     def test_a_daily_thing_already_on_tomorrow_doesnt_happen_today(self):
         set_debug_time(at("08:30"))
         fish = self.put("Turn the compost", at("10:00"), 30)

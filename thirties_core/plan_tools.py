@@ -1208,7 +1208,12 @@ class PlanTools:
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
             self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
-            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
+            # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---
+            from thirties_core.due_today import move_check
+            due = move_check(self, span.title, span.task_id, parse_day(to_day, self.today())) \
+                if self.is_current(self.day_plan) and span.status == SpanStatus.PLANNED else ""
+            # --- end due today ---
+            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside)) + due
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
         was = (span.start_dt, span.end_dt)  # for a time the user stated, moved by a shift (given_times.py)
@@ -1754,6 +1759,11 @@ class PlanTools:
             if span.id in placed:
                 span.start_dt, span.end_dt = placed[span.id]
                 self._persist(span)
+        # --- due today: no room keeps it on today's plan where it was, never off today (due_today.py) ---
+        from thirties_core.due_today import is_due_today
+        due_kept = [s for s in no_room if is_due_today(self, s.title, s.task_id)]
+        no_room = [s for s in no_room if s not in due_kept]
+        # --- end due today ---
         waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
         for span in no_room:  # it can't stay where it was: something else may be there now
             self._drop(span)
@@ -1768,6 +1778,8 @@ class PlanTools:
                           if waiting and len(no_room) == 1 else
                           ". They wait for tomorrow (Before today), where each can be moved or dropped."
                           if waiting else ". It goes on another day, where there's room."))
+        out += [f"{s.title} doesn't fit before bedtime, but it's due today, so it stays on today's plan at "
+                f"{format_clock(s.start_dt)}." for s in due_kept]
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")

@@ -2005,11 +2005,21 @@ class AssistantTools(KindTools):
                 window = resolve_when(k.get("when") or "this week", day, week_start)
             except ValueError as e:
                 raise ToolError(f"{item['title']}: {e}")
+            # --- due today: Thirties' own proposal keeps it today (due_today.py) ---
+            from thirties_core.due_today import is_due_today
+            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+                window = resolve_when("today", day, week_start)
+            # --- end due today ---
             new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
             seen.add(item["title"].lower())
         for d in (drop if isinstance(drop, list) else []):
             d = d if isinstance(d, dict) else {"item": d}
             item = find(d.get("item") or d.get("title"))
+            # --- due today: never proposed for dropping by Thirties (due_today.py) ---
+            from thirties_core.due_today import is_due_today
+            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+                raise ToolError(f"{item['title']} is due today: keep it today, not as a drop.")
+            # --- end due today ---
             new_drop.append({**item, "why": str(d.get("why") or ""), "pending_drop": True})
             seen.add(item["title"].lower())
         missing = [p["title"] for p in pending if p["title"].lower() not in seen]
@@ -2127,6 +2137,12 @@ class AssistantTools(KindTools):
             raise ToolError(str(e))
         h = "someday" if window["when"] == "someday" else ("today" if window["end"] == self._today().isoformat()
                                                             else "window")
+        # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---
+        from thirties_core.due_today import window_check
+        waiting = pool.all().get(str(item).strip().lower()) or {}
+        due = window_check(self.pt, waiting.get("title") or str(item), waiting.get("task_id") or None, window,
+                           waiting.get("due")) if waiting else ""
+        # --- end due today ---
         rec = pool.place(str(item), h, window)
         if rec is None:
             raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
@@ -2141,7 +2157,7 @@ class AssistantTools(KindTools):
         elif rec.get("slot"):
             self.before.take_off_today(rec)  # not today's any more
         self._someday_in_joplin(rec, h == "someday")
-        return f"{rec['title']}: {window['when']}."
+        return f"{rec['title']}: {window['when']}.{due}"
 
     def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
         """A drop means "stop rolling it over" (decided 11-11): Thirties records that, and the item's home list in
