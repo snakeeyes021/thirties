@@ -214,7 +214,8 @@ class TestThirtiesTelegramBridge(BridgeCase):
         self.bridge.handle_message(chat_id=1001, text="/start")
         self.bridge.client.send_message.assert_called_once()
         args, kwargs = self.bridge.client.send_message.call_args
-        self.assertIn("Thirties Mobile Planning Assistant", args[1])
+        self.assertIn("/help: ", args[1])
+        self.assertIn("/now: ", args[1])
 
     def test_now_command(self):
         plan = self.bridge.conv_manager.day_plan
