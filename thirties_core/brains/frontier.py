@@ -1028,10 +1028,12 @@ Leaving today, and on-site days: something the user skips for today or puts on a
         return out
 
     def _wrong_times(self, reply: str) -> List[str]:
-        """Times the reply gives for a named item that aren't the item's on the plan after the turn ("meal prep is
-        set for 3:30" with meal prep at 4:00): "Meal prep is at 4:00 PM" per item. A part of a sentence is checked
-        only when none of its times is a time of what it names (start or end, as given or by its block, or when it
-        really happened); one about another day, a reminder or a delivery is left alone."""
+        """Times the reply gives for a named item that aren't the item's on the plan after the turn ("canoe club is
+        set for 2:30" with canoe club at 2:05): "Canoe club is at 2:05 PM" per item. Each time is judged by its role
+        (role_times.py): a start and an end said together ("11:15 AM Pottery class (until 12:40 PM)", "11:15 AM –
+        12:40 PM Pottery class") must be one item's start and its end, so a right end never covers a wrong start;
+        a time said alone passes when it's any time of what it names (start or end, as given or by its block, or
+        when it really happened). One about another day, a reminder or a delivery is left alone."""
         from thirties_core.clock import thirty_of
         from thirties_core.item_facts import mentions
         from thirties_core.shown_times import shown_end
@@ -1070,7 +1072,13 @@ Leaving today, and on-site days: something the user skips for today or puts on a
             ranges = [(a[0], b[0]) for a, b in ranges if a and b]
             bad_range = bool(ranges) and not all(any(a in starts[s.id] and b in ends[s.id] for s in named)
                                                  for a, b in ranges)
-            if bad_range or not any(c in known for c in said):
+            # --- a start beside an "(until ...)" end, each checked by its role (role_times.py) ---
+            from thirties_core.role_times import start_and_end
+            role_starts, role_ends = start_and_end(bare, self._CLOCK_RE, self._RANGE_RE, self._said_clocks)
+            bad_roles = bool(role_starts and role_ends) and not any(
+                set(role_starts) <= starts[s.id] and set(role_ends) <= ends[s.id] for s in named)
+            # --- end by role ---
+            if bad_roles or bad_range or not any(c in known for c in said):
                 out += [f"{titles[s.id]} is at {format_clock(s.start_dt)}" for s in named[:2]]
         return list(dict.fromkeys(out))
 
