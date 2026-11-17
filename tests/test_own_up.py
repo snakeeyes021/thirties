@@ -1,4 +1,4 @@
-"""What didn't happen is said once, plainly, and only when the reply doesn't already say it.
+"""What didn't happen is said once and plainly, as part of the answer, and only when the answer lacks it.
 
 A refused change used to add "(One part of that didn't go through, so it isn't recorded yet.)" under the reply,
 even when the reply already asked about the refused item, and in words that told the user nothing.
@@ -52,17 +52,17 @@ class OwnUpCase(ConversationTestCase):
         out = self.manager.send_user_message("drop the fern please")
         self.assertEqual(out, "The fern is off. Bake bread is still on at 5:00; say if it should go.")
 
-    def test_if_it_still_claims_it_the_line_names_the_item_in_plain_words(self):
+    def test_if_it_still_claims_it_the_claim_says_the_item_in_plain_words(self):
         self.engine.responses = [self.calls(), reply("Removed both."), reply("Removed both, all done.")]
         out = self.manager.send_user_message("drop the fern please")
-        self.assertTrue(out.endswith("(Bake bread is still on the plan.)"), out)
+        self.assertEqual(out, "Bake bread is still on the plan at 5:00 PM; I couldn't take it off.")  # in place
         for words in OLD_WORDS:
             self.assertNotIn(words, out)
 
     def test_all_fixed_over_a_refusal_is_caught_too(self):
         self.engine.responses = [self.calls(), reply("All fixed!"), reply("All fixed!")]
         out = self.manager.send_user_message("drop the fern please")
-        self.assertTrue(out.endswith("(Bake bread is still on the plan.)"), out)
+        self.assertEqual(out, "Bake bread is still on the plan at 5:00 PM; I couldn't take it off.")
 
     def test_a_change_that_was_already_so_is_no_failure(self):
         self.engine.responses = [

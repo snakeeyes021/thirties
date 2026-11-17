@@ -276,7 +276,7 @@ class TestAClaimedMoveIsChecked(ConversationTestCase):
         self.engine.set_next_response(reply("Shifted the laundry to right now."))
         out = self.manager.send_user_message("stretched; laundry now")
         self.assertEqual(self.laundry(), at("17:00"))
-        self.assertIn("That move didn't happen: Fold the laundry is still at 5:00 PM.", out)
+        self.assertEqual(out, "Fold the laundry is still at 5:00 PM; I couldn't move it.")  # in place of the claim
 
     def test_moved_it_with_nothing_moved(self):
         self.engine.set_next_response(reply('Done, and shifted it to right now.\n'
@@ -285,7 +285,7 @@ class TestAClaimedMoveIsChecked(ConversationTestCase):
         self.engine.set_next_response(reply("Shifted it to right now."))
         out = self.manager.send_user_message("stretched, and move the laundry to now")
         self.assertIn("nothing on the plan moved", self.engine.call_history[1][-1]["content"])
-        self.assertIn("Nothing has moved yet", out)
+        self.assertEqual(out, "I couldn't move that just now, so nothing has moved yet.")
 
     def test_a_real_move_passes(self):
         self.engine.set_next_response(reply('Moved the laundry to 10.\n'
@@ -306,7 +306,7 @@ class TestAClaimedMoveIsChecked(ConversationTestCase):
         self.engine.set_next_response(reply("Shifted the laundry to right now."))
         self.engine.set_next_response(reply("Shifted the laundry to right now."))
         out = self.manager.send_user_message("stretched; laundry now")
-        self.assertIn("That move didn't happen: Fold the laundry is still at 5:00 PM.", out)
+        self.assertEqual(out, "Fold the laundry is still at 5:00 PM; I couldn't move it.")
 
 
 class TestStartedIsNotDone(RoutineCase):
@@ -453,7 +453,7 @@ class TestAClaimedDoneIsChecked(ConversationTestCase):
         self.engine.set_next_response(reply("Stretch is marked done. Refill the bird feeder is done too."))
         self.engine.set_next_response(reply("Stretch is marked done. Refill the bird feeder is done too."))
         out = self.manager.send_user_message("stretched")
-        self.assertIn("(Refill the bird feeder isn't recorded as done.)", out)
+        self.assertEqual(out, "Stretch is marked done. Refill the bird feeder isn't marked done yet.")
 
     def test_started_and_replied_as_done(self):
         self.engine.set_next_response(reply('Stretch is marked done.\n'
@@ -545,7 +545,9 @@ class TestTheReplyMatchesThePlan(ConversationTestCase):
         for _ in range(3):
             self.engine.set_next_response(reply("Lentils wrap at 6:30, and the ukulele is at 6:35."))
         out = self.manager.send_user_message("what's later?")
-        self.assertIn("(On the plan, Practice the ukulele is at 6:30 PM.)", out)
+        self.assertIn("Practice the ukulele is at 6:30 PM.", out)
+        self.assertNotIn("6:35", out)
+        self.assertNotIn("(On the plan", out)
 
     def test_times_as_planned_and_other_times_pass(self):
         self.engine.set_next_response(reply("Lentils at 5:30 (until 6:30), then the ukulele at 6:30. The parcel is "
@@ -565,7 +567,7 @@ class TestTheReplyMatchesThePlan(ConversationTestCase):
         for _ in range(3):
             self.engine.set_next_response(reply("The ukulele is off the schedule."))
         out = self.manager.send_user_message("skip the ukulele tonight")
-        self.assertIn("(Practice the ukulele is still on the plan at 6:30 PM.)", out)
+        self.assertEqual(out, "Practice the ukulele is still on the plan at 6:30 PM; I couldn't take it off.")
 
 
 class TestNoCorrectionOfAnUnseenDraft(ConversationTestCase):
