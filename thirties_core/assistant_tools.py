@@ -1037,6 +1037,7 @@ class AssistantTools(KindTools):
                 names = part.get("items") or steps
                 extra += [step_times.clean_title(str(n)) for n in names if step_times.key(str(n)) not in by_text]
                 todo = [by_text.get(step_times.key(str(n)), str(n).strip()) for n in names]  # extras as said
+                typed = {step_times.key(str(n)): str(n) for n in names}  # a time typed before a step (stated_times.py)
                 learned.append({**part, "items": [step_times.clean_title(t) for t in todo]})
                 already += [step_times.clean_title(t) for t in todo if step_times.key(t) in on_plan]
                 todo = [t for t in todo if step_times.key(t) not in on_plan]
@@ -1055,7 +1056,7 @@ class AssistantTools(KindTools):
                 cursor, prev_end = first, None
                 for k, text in enumerate(todo):
                     length = at[k + 1] - at[k]
-                    mine = own_time(text, first)
+                    mine = own_time(typed.get(step_times.key(text), text), first) or own_time(text, first)
                     if mine is not None:
                         begin = mine
                     else:
@@ -1071,6 +1072,11 @@ class AssistantTools(KindTools):
                     out = self.pt.execute("add_event", args)
                     if out.startswith(NOT_DONE_PREFIX):
                         raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
+                    # --- a step's own time the user gave is theirs, shown as said (stated_times.py) ---
+                    if mine is not None:
+                        from thirties_core.stated_times import keep_step_time
+                        keep_step_time(self.pt, plan, args["title"], mine)
+                    # --- end a step's own time ---
                     placed.append(text)
                 lines.append(f"{format_clock(thirty_of(first))}: {', '.join(step_times.clean_title(t) for t in todo)}")
         finally:

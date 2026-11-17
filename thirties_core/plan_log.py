@@ -98,6 +98,26 @@ def outer_tool() -> str:
     return cause.tools[0] if cause and cause.tools else ""
 
 
+# --- a tool call the model made for the user's message, as opposed to Thirties' own code calling a tool (the
+# morning set-up, a carry-over): what the user's words are checked against (change_scope.py) ---
+_model_call: contextvars.ContextVar[bool] = contextvars.ContextVar("model_tool_call", default=False)
+
+
+@contextlib.contextmanager
+def model_call() -> Iterator[None]:
+    """The brain is running a tool call the model made."""
+    token = _model_call.set(True)
+    try:
+        yield
+    finally:
+        _model_call.reset(token)
+
+
+def is_model_call() -> bool:
+    return _model_call.get()
+# --- end a tool call the model made ---
+
+
 def _current() -> Tuple[str, str, str]:
     from thirties_core.joplin_writeback import current_turn
     cause = _cause.get() or _Cause()
@@ -251,5 +271,5 @@ def describe(row: Dict[str, Any], tz=None) -> str:
             + (f" ({'; '.join(detail)})" if detail else "") + f", caused by: {cause_text(row)}")
 
 
-__all__ = ["KEEP_DAYS", "caused_by", "tool_call", "outer_tool", "record_span_change", "stored_span", "changes_for", "cause_text",
+__all__ = ["KEEP_DAYS", "caused_by", "tool_call", "outer_tool", "model_call", "is_model_call", "record_span_change", "stored_span", "changes_for", "cause_text",
            "describe"]

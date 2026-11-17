@@ -8,7 +8,9 @@ nothing. Now:
 - a refusal that changes nothing anyway ("nothing to change": it was already so) is no failure;
 - a reply that names the item in a sentence that asks about it or says it's still as it was already handles it:
   nothing is added;
-- otherwise the line names the items in plain words ("Soup night is still on the plan.").
+- otherwise the reply is sent back once with the plain sentence to say, and if it still claims the change, that
+  claim says it in place ("Soup night is still on the plan at 6:00 PM; I couldn't take it off.": plain_admit.py);
+  nothing is ever added under the reply.
 """
 
 from __future__ import annotations
@@ -129,6 +131,37 @@ def own_up_line(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int,
     return plain_line(items, lagging) or None
 
 
+# --- said in the reply itself, never as a note under it (plain_admit.py) ---
+
+def _still_to_say(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int, read_only: Iterable[str],
+                  not_done: str, reply: str) -> Tuple[List[Tuple[str, str]], List[str]]:
+    """(the changes that didn't happen and the reply doesn't already say so, as (title, tool); the plan's titles)."""
+    from thirties_core.plain_admit import LISTS
+    items, lagging = failed_items(tools, messages, turn_start, read_only, not_done)
+    plan = getattr(tools, "day_plan", None)
+    others = [s.title for s in plan.spans] if plan is not None else []
+    todo = [i for i in items if not (i[0] and handled(reply, [i], others))]
+    return todo + ([("", LISTS)] if lagging else []), others
+
+
+def still_lines(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int, read_only: Iterable[str],
+                not_done: str, reply: str) -> List[str]:
+    """The plain sentences the reply should say ("Bake bread is still at 5:00 PM; I couldn't move it.")."""
+    from thirties_core.plain_admit import still_line
+    todo, _ = _still_to_say(tools, messages, turn_start, read_only, not_done, reply)
+    return list(dict.fromkeys(still_line(tools, t, tool) for t, tool in todo))
+
+
+def said_plainly(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int, read_only: Iterable[str],
+                 not_done: str, reply: str, claim_re: "re.Pattern") -> str:
+    """The reply with what didn't change said in place of the claim that it did (plain_admit.say_failed)."""
+    from thirties_core.plain_admit import say_failed
+    todo, others = _still_to_say(tools, messages, turn_start, read_only, not_done, reply)
+    return say_failed(tools, reply, todo, claim_re, others) if todo else reply
+
+# --- end said in the reply itself ---
+
+
 # "All fixed", "everything is back in place", "it's all exactly as you laid out": a claim about the whole plan that
 # names no change, so the usual claim patterns miss it
 BLANKET_RE = re.compile(
@@ -149,4 +182,5 @@ def claims_all_fixed(sentence: str) -> bool:
     return bool(BLANKET_RE.search(s)) and not s.rstrip().endswith("?") and not _ALREADY_RE.search(s)
 
 
-__all__ = ["failed_items", "handled", "plain_line", "own_up_line", "claims_all_fixed", "BLANKET_RE"]
+__all__ = ["failed_items", "handled", "plain_line", "own_up_line", "still_lines", "said_plainly",
+           "claims_all_fixed", "BLANKET_RE"]

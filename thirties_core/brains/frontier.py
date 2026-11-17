@@ -22,6 +22,7 @@ from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.messages import now_section
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS, TOOL_SPECS, PlanTools
+from thirties_core.plan_log import model_call  # the model's own tool calls (change_scope.py)
 from thirties_core.privacy import is_private_note
 
 logger = logging.getLogger(__name__)
@@ -589,7 +590,8 @@ RULES
             results = []
             for call in calls:
                 name, args = call.get("name"), call.get("arguments", {})
-                output = self.tools.execute(name, dict(args) if isinstance(args, dict) else args)
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(name, dict(args) if isinstance(args, dict) else args)
                 logger.info("[FrontierBrain] %s(%s) -> %s", name, args, output)
                 results.append(output)
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"), "name": name,
@@ -673,21 +675,21 @@ RULES
     def _own_up(self, turn_start: int, reply: str, changes_before: int = 0, outcomes_before: int = 0) -> str:
         """A reply that says a change happened, when the change failed, gets one more try with the failures
         named ("It is marked done now" over a failed write, "All set" over three refusals: 10-22, 10-24). If it
-        still claims it, a plain line is added; the model's tool wording never reaches the user."""
+        still claims it, the claim says what's still as it was, in place (plain_admit.py); nothing is added under it,
+        and the model's tool wording never reaches the user."""
         failed = self._failed_changes(turn_start)
         if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
             return reply
         if self._own_up_line(turn_start, reply) is None:  # it already says so, or nothing failed for real
             return reply
         logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
-        self._check("These didn't go through: " + " | ".join(failed) + ". Your reply says otherwise. Rewrite it so "
-                    "it's true: say plainly what didn't happen and what you'll do instead.")
+        self._check("These didn't go through: " + " | ".join(failed) + ". Your reply says otherwise. "
+                    + self._plain_check(turn_start, reply))
         fixed = self._rounds(2, changes_before, outcomes_before).strip()  # its calls are checked like any others
         if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes(turn_start)
                       or self._own_up_line(turn_start, fixed) is None):
             return fixed
-        line = self._own_up_line(turn_start, reply)
-        return reply.rstrip() + "\n\n" + line if line else reply
+        return self._said_plainly(turn_start, reply)
 
     # --- the turn as it was before the bookkeeping (the switch's "off") ---
 
@@ -717,7 +719,8 @@ RULES
             results = []
             for call in calls:
                 name, args = call.get("name"), call.get("arguments", {})
-                output = self.tools.execute(name, args)
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(name, args)
                 logger.info("[FrontierBrain] %s(%s) -> %s", name, args, output)
                 results.append(output)
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"), "name": name, "content": output})
@@ -769,7 +772,8 @@ RULES
             response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
             self.messages.append(response)
             for call in response.get("tool_calls", []) or []:
-                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(call.get("name"), call.get("arguments", {}))
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             reply = response.get("content", "") or ""
@@ -815,7 +819,8 @@ RULES
     def _own_up_baseline(self, turn_start: int, reply: str) -> str:
         """A reply that says a change happened, when the change failed, gets one more try with the failures
         named ("It is marked done now" over a failed write, "All set" over three refusals: 10-22, 10-24). If it
-        still claims it, a plain line is added; the model's tool wording never reaches the user."""
+        still claims it, the claim says what's still as it was, in place (plain_admit.py); nothing is added under it,
+        and the model's tool wording never reaches the user."""
         failed = self._failed_changes_baseline(turn_start)
         if not failed or self._ADMITS_RE.search(reply) or not self._CLAIMS_RE.search(reply):
             return reply
@@ -824,19 +829,19 @@ RULES
         logger.warning("[FrontierBrain] Reply claims a change that failed: %r (%s)", reply[:200], failed)
         self.messages.append({"role": "user", "content": (
             "[System check, not from the user] These didn't go through: " + " | ".join(failed) + ". Your reply "
-            "says otherwise. Rewrite it so it's true: say plainly what didn't happen and what you'll do instead.")})
+            "says otherwise. " + self._plain_check(turn_start, reply))})
         response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
         self.messages.append(response)
         for call in response.get("tool_calls", []) or []:
-            output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+            with model_call():  # the model's own call (change_scope.py)
+                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
             self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                   "name": call.get("name"), "content": output})
         fixed = str(response.get("content") or "").strip()
         if fixed and (self._ADMITS_RE.search(fixed) or not self._failed_changes_baseline(turn_start)
                       or self._own_up_line(turn_start, fixed) is None):
             return fixed
-        line = self._own_up_line(turn_start, reply)
-        return reply.rstrip() + "\n\n" + line if line else reply
+        return self._said_plainly(turn_start, reply)
 
     # --- what didn't happen, said plainly, only when the reply doesn't say it (own_up.py) ---
 
@@ -847,6 +852,30 @@ RULES
         except Exception as e:  # the check never costs the user their reply
             logger.debug("Couldn't read what didn't happen: %s", e)
             return None
+
+    # --- said in the reply itself, never as a note under it (plain_admit.py) ---
+
+    def _plain_check(self, turn_start: int, reply: str) -> str:
+        """The rewrite's instruction: the plain sentences to say, written fresh."""
+        from thirties_core.own_up import still_lines
+        from thirties_core.plain_admit import check_text
+        try:
+            lines = still_lines(self.tools, self.messages, turn_start, READ_ONLY_TOOLS, NOT_DONE, reply)
+        except Exception as e:  # the check never costs the user their reply
+            logger.debug("Couldn't word what didn't happen: %s", e)
+            lines = []
+        return check_text(lines) if lines else ("Rewrite it so it's true: say plainly what's still as it was. Write "
+                                                "it fresh: the user never saw this draft.")
+
+    def _said_plainly(self, turn_start: int, reply: str) -> str:
+        """A rewrite that still claims it: the false sentence says what's still as it was, in place."""
+        from thirties_core.own_up import BLANKET_RE, said_plainly
+        claim = re.compile(f"(?:{self._CLAIMS_RE.pattern})|(?:{BLANKET_RE.pattern})", re.IGNORECASE)
+        try:
+            return said_plainly(self.tools, self.messages, turn_start, READ_ONLY_TOOLS, NOT_DONE, reply, claim)
+        except Exception as e:  # the check never costs the user their reply
+            logger.debug("Couldn't say what didn't happen: %s", e)
+            return reply
 
     # --- end what didn't happen ---
 
@@ -1079,8 +1108,8 @@ RULES
         """After the brain's turn, before anything is sent: what the reply says happened is checked against what
         the tools did, claim by claim. Moves (the items it names moved; naming none, a move went through), dones (the
         items it names were marked), times it gives for an item (the plan's), and removals (the items are off). A
-        reply that disagrees is sent back once with the facts; if it still disagrees, a plain line with the plan's
-        facts is added. The words alone never pass for a change (a turn that logged a done and claimed a move it never
+        reply that disagrees is sent back once with the facts; if it still disagrees, each false sentence is replaced
+        with the plan's facts, in place (plain_admit.py): nothing is added under it. The words alone never pass for a change (a turn that logged a done and claimed a move it never
         made; "the dishwasher's going" replied to as done; "set for 3:30" over a plan at 4:00)."""
         # --- how it talks, too (reply_checks.py): the time now is fixed outright; the rest goes into the rewrite ---
         from thirties_core import reply_checks
@@ -1090,8 +1119,11 @@ RULES
             now = None
         reply = reply_checks.fix_now_time(reply, now)
 
+        from thirties_core.time_claims import unmade_time_claims  # "locked in" over a refusal (time_claims.py)
+
         def problems(text: str):
-            return (self._unmade_moves(turn_start, text), self._unmade_dones(text), self._wrong_times(text),
+            return (self._unmade_moves(turn_start, text) + unmade_time_claims(self, turn_start, text),
+                    self._unmade_dones(text), self._wrong_times(text),
                     self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
                     reply_checks.unkept_promises(self, turn_start, text))
         unmade, undone, wrong, kept, talk, promised = problems(reply)
@@ -1112,8 +1144,10 @@ RULES
             said.append("something was taken off, but " + "; ".join(kept))
         if promised:  # what each promise needs (reply_checks.unkept_promises)
             said += reply_checks.promise_checks(promised, self, turn_start)
-        check = ("Your reply says " + ", and ".join(said) + ". Make the change now, or correct your reply so it "
-                 "matches the plan." if said else "")
+        from thirties_core.plain_admit import check_text, from_fact  # said in the reply itself (plain_admit.py)
+        say = check_text(list(dict.fromkeys(from_fact(f) for f in unmade + undone + wrong + kept)))
+        check = ("Your reply says " + ", and ".join(said) + ". Make the change now, or " + say[0].lower() + say[1:]
+                 if said else "")
         if talk:
             check += (" " if check else "") + "Rewrite your reply: " + "; ".join(talk) + "."
         self._check(check)
@@ -1126,21 +1160,20 @@ RULES
             reply = reply_checks.morning_fill(self, turn_start, reply_checks.last_resort(reply))
         if not (unmade or undone or wrong or kept):
             return reply
-        lines = []
-        if unmade == ["nothing"]:
-            lines.append("(Nothing has moved yet, so the plan is as it was.)")
-        elif unmade:
-            lines.append("(That move didn't happen: " + "; ".join(u for u in unmade if u != "nothing") + ".)")
-        if undone:
-            lines.append("(" + "; ".join(undone) + ".)")
-        from thirties_core.plain_corrections import in_app_words, on_the_plan  # the app's names and times
-        if wrong:
-            lines.append(on_the_plan(wrong))
-        if kept:
-            lines.append("(" + "; ".join(kept) + ".)")
+        # --- the false sentence says what's true, in place; nothing is added under the reply (plain_admit.py) ---
+        from thirties_core.plain_admit import say_in_place
+        from thirties_core.time_claims import TIME_CLAIM_RE
+
+        def facts_of(sentence: str) -> List[str]:
+            return (self._unmade_moves(turn_start, sentence) + unmade_time_claims(self, turn_start, sentence)
+                    + self._unmade_dones(sentence) + self._wrong_times(sentence) + self._not_removed(sentence))
+        claim = re.compile("|".join(f"(?:{r.pattern})" for r in (self._MOVED_RE, TIME_CLAIM_RE, self._REMOVED_RE,
+                                                                  self._OUTCOME_CLAIM_RE, self._CLAIMS_RE)),
+                           re.IGNORECASE)
         plan = getattr(self.tools, "day_plan", None)
-        lines = in_app_words(lines, [self.tools._title(s) for s in plan.spans] if plan is not None else [])
-        return reply.rstrip() + "\n\n" + "\n".join(lines)
+        out, _ = say_in_place(reply, facts_of, claim, [self.tools._title(s) for s in plan.spans] if plan else [])
+        return out
+        # --- end in place ---
 
     def _no_unseen_correction(self, turn_start: int, reply: str, retry) -> str:
         """A reply that corrects a message the user never saw (a draft sent back this turn: "I need to correct my
@@ -1188,7 +1221,8 @@ RULES
             self.messages.append(response)
             calls = response.get("tool_calls", []) or []
             for call in calls:
-                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(call.get("name"), call.get("arguments", {}))
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             content = str(response.get("content") or "")
