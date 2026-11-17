@@ -132,7 +132,8 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     if getattr(pt, "by_hand", False) or message is None or span.source == "calendar" or span.is_envelope:
         return ""
     title = pt._title(span)
-    if not asks_to_clear(message, title):
+    from thirties_core.leave_today import asks_to_skip  # "skip it today" takes it off as well (leave_today.py)
+    if not asks_to_clear(message, title) and not asks_to_skip(message):
         return ""
     if any(s.id != span.id and (s.title == span.title or (span.task_id and s.task_id == span.task_id))
            for s in pt.day_plan.spans):
@@ -140,8 +141,18 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     line = today_line(pt, span.title, span.task_id)
     if line is None:
         return ""
-    done = take_off_list(pt, line)
+    done = _off_list(pt, line, title)
     return f" (also {done})" if done else ""
+
+
+def _off_list(pt: "PlanTools", line: str, title: str) -> str:
+    """Off today's list as the user put it: dropped on a clear ask (take_off_list), or just not today on a skip
+    (leave_today.skip_line: an item that lives only on Today waits for a day later this week)."""
+    from thirties_core.leave_today import skip_line
+    message = getattr(pt, "user_message", None)
+    if message is not None and not asks_to_clear(message, title) and _assistant(pt) is not None:
+        return skip_line(_assistant(pt), line)
+    return take_off_list(pt, line)
 
 
 def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
@@ -159,10 +170,11 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None:
         from thirties_core.done_reference import check
         held, _ = check(pt, line, [task.id] if task is not None else [])
-        if held or not asks_to_clear(pt.user_message, line):
+        from thirties_core.leave_today import asks_to_skip  # "skip it today" too (leave_today.py)
+        if held or not (asks_to_clear(pt.user_message, line) or asks_to_skip(pt.user_message)):
             raise ToolError(f"{line} is on today's list with no time. It comes off the list only when the user "
                             "asks for that; ask them if it isn't clear.")
-    done = take_off_list(pt, line)
+    done = _off_list(pt, line, line)
     if not done:
         raise ToolError(f"{line} couldn't be taken off today's list just now.")
     return f"Took {line} off today's list (it had no time on the schedule)."

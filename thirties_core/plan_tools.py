@@ -1333,9 +1333,11 @@ class PlanTools:
             self._persist(moved)
             if self.assistant and self.is_current(target_plan):
                 self.assistant.list_today(moved)
+            from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
+            off = after_move(self, moved, source_plan, target_plan)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
                     f"{format_clock(new_start)} – {format_clock(new_end)} "
-                    + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays)."))
+                    + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays).") + off)
         source_plan.spans = [s for s in source_plan.spans if s.id != span.id]
         span.title, span.start_dt, span.end_dt, span.source = moved.title, new_start, new_end, "user"
         target_plan.spans.append(span)
@@ -1344,6 +1346,8 @@ class PlanTools:
         listed = ""
         if self.assistant and self.is_current(target_plan):
             listed = self.assistant.list_today(span)
+        from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
+        listed = (listed + after_move(self, span, source_plan, target_plan)).strip()
         return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:

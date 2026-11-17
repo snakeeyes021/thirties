@@ -119,6 +119,11 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     spans = [s for s in plan.spans if _plannable(s) and s.status != SpanStatus.SKIPPED]
     titles = {s.title.strip().lower() for s in spans}
     task_ids = {s.task_id for s in spans if s.task_id}
+    # skipped today and planned nowhere else today: not happening today, so not "no time yet" either (its line
+    # leaves Today with the skip, leave_today.py; this covers the time before Joplin has the change)
+    skipped = [s for s in plan.spans if _plannable(s) and s.status == SpanStatus.SKIPPED]
+    routines |= {s.title.strip().lower() for s in skipped if s.title.strip().lower() not in titles}
+    task_ids |= {s.task_id for s in skipped if s.task_id}
     links = TodayLinks(db)
     out = []
     from thirties_core import if_time
@@ -171,8 +176,10 @@ def add_ahead(assistant, items: List[str]) -> str:
             added.append(title)
     if not added:
         return "Nothing to add."
+    from thirties_core.leave_today import after_ahead  # moved off today's list, it leaves it (leave_today.py)
+    off = [o for o in (after_ahead(assistant, t, plan.target_date) for t in added) if o]
     return (f"On {plan.target_date.strftime('%A')}'s list, no time yet: {', '.join(added)}. It goes on the Today "
-            "list that morning.")
+            "list that morning." + (" " + " ".join(off) if off else ""))
 
 
 def onto_today(assistant, day: date) -> List[str]:

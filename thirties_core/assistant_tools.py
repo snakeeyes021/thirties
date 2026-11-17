@@ -353,10 +353,11 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "if_there_is_time",
-        "description": "Act on an item under If there's time (today's things with no time): done; schedule (the next "
-                       "free time that fits, or the time the user names); tomorrow; week (later this week); or drop "
-                       "(it stops coming back; its own list is untouched).",
-        "parameters": {"item": "The item, as worded under If there's time.",
+        "description": "Act on any item on today's list (the Today note), under If there's time or not: done; "
+                       "schedule (the next free time that fits, or the time the user names); tomorrow; week (later "
+                       "this week); or drop (off today's list and today's plan; its own list is untouched). The way "
+                       "to take something off today's list that the user skips or puts off.",
+        "parameters": {"item": "The item, as worded on today's list.",
                        "action": "done, schedule, tomorrow, week or drop.",
                        "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
         "required": ["item", "action"],
@@ -1512,6 +1513,11 @@ class AssistantTools(KindTools):
         if st != SpanStatus.SKIPPED and meal_word(span.title) and self.pt.is_current(self.pt.day_plan):
             spaced = respace(self.pt)
             result += ("; " + "; ".join(spaced)) if spaced else ""
+        # --- skipped for today, it leaves today's list too (leave_today.py) ---
+        if st == SpanStatus.SKIPPED:
+            from thirties_core.leave_today import after_skip
+            result += after_skip(self.pt, span)
+        # --- end skipped for today ---
         return result + session + "." + (f" {credited}" if credited else "")
 
     def _said_times_only(self, start_dt, end_dt, duration):
