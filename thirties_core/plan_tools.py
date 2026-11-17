@@ -814,13 +814,21 @@ class PlanTools:
                    and s.start_dt > span.start_dt and s.status != SpanStatus.SKIPPED), default=self.day_plan.day_end)
         inside = sorted((s for s in self.day_plan.spans_overlapping(span.start_dt, span.end_dt)
                          if s.id != span.id and s.status == SpanStatus.PLANNED and self._movable(s)
-                         and not s.shown_only and not self._is_fixed(s) and s.end_dt > now),
+                         and not s.shown_only and not self._is_fixed(s) and s.end_dt > now
+                         and s.actual_start is None),  # one already under way is never moved off (change_scope.py)
                         key=lambda s: s.start_dt)
         notes = []
         for s in inside:
             length = s.end_dt - s.start_dt
             spot = next((a for a, b in self.open_windows(after=max(span.end_dt, now))
                          if b - a >= length and a + length <= bed), None)
+            # --- what it covers moves only nearby; further, it stays alongside (change_scope.py) ---
+            from thirties_core.change_scope import MAKE_ROOM_REACH
+            if spot is not None and spot - s.start_dt > MAKE_ROOM_REACH:
+                notes.append(f"{self._title(s)} stays at {format_clock(s.start_dt)}, alongside: the next free time "
+                             f"is {format_clock(spot)}; move it only if the user says so")
+                continue
+            # --- end only nearby ---
             if spot is None:
                 notes.append(f"{self._title(s)} stays at {format_clock(s.start_dt)}: no free time left for it today")
                 continue
@@ -990,6 +998,13 @@ class PlanTools:
             raise ToolError(f"Unknown category '{category}'. Use activity, task, work or sleep.")
         if cat == SpanCategory.CALENDAR:
             raise ToolError("Calendar events come from the user's calendar and can't be added here.")
+        # --- a new item needs the user's words for it (change_scope.py) ---
+        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            from thirties_core.change_scope import add_refused
+            why = add_refused(self, str(title))
+            if why:
+                raise ToolError(why)
+        # --- end a new item needs the user's words ---
         if not task_id and self.assistant is not None and cat == SpanCategory.ACTIVITY:
             same = self.assistant._exact_task(str(title))  # worded exactly as a list item: it's that item
             task_id = same.id if same is not None and not same.id.startswith("media:") else None
@@ -1183,6 +1198,7 @@ class PlanTools:
         if to_day not in (None, ""):
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
+            self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
             return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
@@ -1229,6 +1245,7 @@ class PlanTools:
             # --- end the time it has ---
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
+        self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
         kept = ""
         if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
             new_start, new_end, kept = self._constraints_kept(span.title, span.id, new_start, new_end)
@@ -1393,6 +1410,14 @@ class PlanTools:
                 and not mentions(self.user_message, span.title, [s.title for s in self.day_plan.spans]):
             raise ToolError(f"{span.title}'s window ends at {format_clock(w[1])} (meals stay in their window), so it "
                             "doesn't go later unless the user says so. Fit the rest around it, or ask the user.")
+
+    def _move_asked(self, span: EventSpan) -> None:
+        """A change to an item the user's message this turn doesn't refer to is refused, like a removal: the model
+        moved items nobody named to make room (change_scope.py)."""
+        from thirties_core.change_scope import move_refused
+        why = move_refused(self, span)
+        if why:
+            raise ToolError(why)
 
     def _envelope_ok(self, span: EventSpan) -> None:
         """Work and sleep change only when the user talks about them (10-27: placing the morning routine moved Work

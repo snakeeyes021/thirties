@@ -1341,6 +1341,14 @@ class RoutineTools:
             raise ToolError(str(e))
         if not (start is not None or end is not None or _true(no_work) or bed is not None or up is not None):
             raise ToolError("Say what's usual on those days: work_start and work_end, no_work, bedtime or wake.")
+        # --- only the hours the user talked about change (change_scope.py) ---
+        from thirties_core.change_scope import week_refused
+        work_said = start is not None or end is not None or _true(no_work)
+        sleep_said = bed is not None or up is not None
+        why = week_refused(self.pt, work_said, sleep_said)
+        if why:
+            raise ToolError(why)
+        # --- end only the hours talked about ---
         from thirties_core.settings import Settings
         settings = Settings(self.db)
         week = {k: dict(v) for k, v in (getattr(gen, "week", None) or {}).items()}
@@ -1371,13 +1379,14 @@ class RoutineTools:
         for key, value in changes.items():
             settings.set(key, value)
             setattr(gen, key.split(".", 1)[1], value)  # live, for everything holding this config
-        refreshed = self._refresh_envelopes()
+        refreshed = self._refresh_envelopes(kinds=tuple(k for k, said in (("work", work_said), ("sleep", sleep_said))
+                                                        if said))  # what wasn't talked about stays as it is
         return ("Noted the usual week:\n" + describe_week(gen)
                 + (f"\nWork and Sleep on the plan follow it from today ({refreshed} updated)." if refreshed else ""))
 
-    def _refresh_envelopes(self, days: int = 14) -> int:
+    def _refresh_envelopes(self, days: int = 14, kinds: tuple = ("work", "sleep")) -> int:
         """Default Work and Sleep spans nobody changed by hand follow the new pattern, from today on. One the user
-        moved (or removed) stays as it is."""
+        moved (or removed) stays as it is, and so does the kind whose hours didn't change (``kinds``)."""
         from thirties_core.models import EventSpan
         sched, db = self.pt.scheduler, self.db
         first = self.a._today()
@@ -1387,7 +1396,7 @@ class RoutineTools:
             if not db.get_day_meta(d).routines_applied:
                 continue  # not built yet: it's made from the new pattern when it is
             fresh = {s.id: s for s in sched.routine_spans(d)}
-            for kind in ("work", "sleep"):
+            for kind in kinds:
                 sid = f"routine-{d.isoformat()}-{kind}"
                 with db._get_connection() as conn:
                     row = conn.execute("SELECT data, deleted FROM spans WHERE id = ?", (sid,)).fetchone()

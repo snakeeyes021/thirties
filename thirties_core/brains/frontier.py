@@ -22,6 +22,7 @@ from thirties_core.lists import ListCatalog, urgency_label
 from thirties_core.messages import now_section
 from thirties_core.models import TaskItem
 from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS, TOOL_SPECS, PlanTools
+from thirties_core.plan_log import model_call  # the model's own tool calls (change_scope.py)
 from thirties_core.privacy import is_private_note
 
 logger = logging.getLogger(__name__)
@@ -589,7 +590,8 @@ RULES
             results = []
             for call in calls:
                 name, args = call.get("name"), call.get("arguments", {})
-                output = self.tools.execute(name, dict(args) if isinstance(args, dict) else args)
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(name, dict(args) if isinstance(args, dict) else args)
                 logger.info("[FrontierBrain] %s(%s) -> %s", name, args, output)
                 results.append(output)
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"), "name": name,
@@ -717,7 +719,8 @@ RULES
             results = []
             for call in calls:
                 name, args = call.get("name"), call.get("arguments", {})
-                output = self.tools.execute(name, args)
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(name, args)
                 logger.info("[FrontierBrain] %s(%s) -> %s", name, args, output)
                 results.append(output)
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"), "name": name, "content": output})
@@ -769,7 +772,8 @@ RULES
             response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
             self.messages.append(response)
             for call in response.get("tool_calls", []) or []:
-                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(call.get("name"), call.get("arguments", {}))
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             reply = response.get("content", "") or ""
@@ -828,7 +832,8 @@ RULES
         response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
         self.messages.append(response)
         for call in response.get("tool_calls", []) or []:
-            output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+            with model_call():  # the model's own call (change_scope.py)
+                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
             self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                   "name": call.get("name"), "content": output})
         fixed = str(response.get("content") or "").strip()
@@ -1191,7 +1196,8 @@ RULES
             self.messages.append(response)
             calls = response.get("tool_calls", []) or []
             for call in calls:
-                output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                with model_call():  # the model's own call (change_scope.py)
+                    output = self.tools.execute(call.get("name"), call.get("arguments", {}))
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             content = str(response.get("content") or "")
