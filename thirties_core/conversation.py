@@ -566,6 +566,8 @@ class ConversationManager:
         if self.tools.shown_schedule:
             from thirties_core.messages import place_schedule
             final = place_schedule(final, self.tools.shown_schedule)  # Python's layout, whatever the model made
+            from thirties_core import one_schedule  # and no listing of the model's own beside it
+            final = one_schedule.around(final, self.tools.shown_schedule, self.day_plan)
         said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"  # all day, the user's
                 and not m.get("hidden") and not str(m.get("content") or "").startswith("[System check")]  # not Python's
         keep = real_times(*said, merged, spans=self.day_plan.spans)  # real item times and the user's
@@ -699,6 +701,9 @@ class ConversationManager:
             from thirties_core.away import LastSentList  # the list as last sent (away.py)
             LastSentList(self.scheduler.state_db).mark(now, unmarked)
         from thirties_core.messages import join_sections
+        if part:  # one schedule per reply: Python's, never a listing of the model's own too (one_schedule.py)
+            from thirties_core import one_schedule
+            reply = one_schedule.tidy(reply, part, self.day_plan)
         return join_sections(reply, part) if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
