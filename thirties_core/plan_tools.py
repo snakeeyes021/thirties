@@ -1759,9 +1759,10 @@ class PlanTools:
             if span.id in placed:
                 span.start_dt, span.end_dt = placed[span.id]
                 self._persist(span)
-        # --- due today: no room keeps it on today's plan where it was, never off today (due_today.py) ---
-        from thirties_core.due_today import is_due_today
-        due_kept = [s for s in no_room if is_due_today(self, s.title, s.task_id)]
+        # --- due today: no room keeps it on today's plan where it was, never off today; overdue too (due_today.py) ---
+        from thirties_core.due_today import deadline_words, held_due
+        held = {s.id: held_due(self, s.title, s.task_id) for s in no_room}
+        due_kept = [s for s in no_room if held[s.id] is not None]
         no_room = [s for s in no_room if s not in due_kept]
         # --- end due today ---
         waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
@@ -1778,8 +1779,8 @@ class PlanTools:
                           if waiting and len(no_room) == 1 else
                           ". They wait for tomorrow (Before today), where each can be moved or dropped."
                           if waiting else ". It goes on another day, where there's room."))
-        out += [f"{s.title} doesn't fit before bedtime, but it's due today, so it stays on today's plan at "
-                f"{format_clock(s.start_dt)}." for s in due_kept]
+        out += [f"{s.title} doesn't fit before bedtime, but it's {deadline_words(held[s.id], self.today())}, so it "
+                f"stays on today's plan at {format_clock(s.start_dt)}." for s in due_kept]
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")

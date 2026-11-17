@@ -2005,9 +2005,9 @@ class AssistantTools(KindTools):
                 window = resolve_when(k.get("when") or "this week", day, week_start)
             except ValueError as e:
                 raise ToolError(f"{item['title']}: {e}")
-            # --- due today: Thirties' own proposal keeps it today (due_today.py) ---
-            from thirties_core.due_today import is_due_today
-            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+            # --- due today: Thirties' own proposal keeps it today, overdue too (due_today.py) ---
+            from thirties_core.due_today import must_stay
+            if must_stay(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
                 window = resolve_when("today", day, week_start)
             # --- end due today ---
             new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
@@ -2015,10 +2015,11 @@ class AssistantTools(KindTools):
         for d in (drop if isinstance(drop, list) else []):
             d = d if isinstance(d, dict) else {"item": d}
             item = find(d.get("item") or d.get("title"))
-            # --- due today: never proposed for dropping by Thirties (due_today.py) ---
-            from thirties_core.due_today import is_due_today
-            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
-                raise ToolError(f"{item['title']} is due today: keep it today, not as a drop.")
+            # --- due today: never proposed for dropping by Thirties, overdue too (due_today.py) ---
+            from thirties_core.due_today import deadline_words, held_due
+            held = held_due(self.pt, item["title"], item.get("task_id") or None, item.get("due"))
+            if held is not None:
+                raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not as a drop.")
             # --- end due today ---
             new_drop.append({**item, "why": str(d.get("why") or ""), "pending_drop": True})
             seen.add(item["title"].lower())

@@ -523,11 +523,12 @@ def out_of_work(tools: "PlanTools", plan: DayPlan, works: List[EventSpan]) -> Li
             side = "before work" if t + length <= min(w.start_dt for w in works) else "after work"
             lines.append(f"{names}: now {format_clock(t)}, {side}.")
             continue
-        # nothing fits today: tomorrow, except what's due today, which stays (due_today.py)
-        from thirties_core.due_today import is_due_today
-        due = [s for s in unit if is_due_today(tools, s.title, s.task_id)]
+        # nothing fits today: tomorrow, except what's due today or overdue, which stays (due_today.py)
+        from thirties_core.due_today import deadline_words, held_due
+        due = [d for d in (held_due(tools, s.title, s.task_id) for s in unit) if d is not None]
         if due:
-            lines.append(f"{names}: due today and no free time outside work is left, so it stays at "
+            lines.append(f"{names}: {deadline_words(min(due), tools.today())} and no free time outside work is "
+                         "left, so it stays at "
                          f"{format_clock(first)}, during work.")
             continue
         if tomorrow is None:

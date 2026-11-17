@@ -236,7 +236,6 @@ class BeforeToday:
         # keep / undrop: back into Keep with a proposed slot (Python's first guess, never someday); an applied
         # drop goes back to its list in Joplin first, where it was, open again
         from thirties_core.carry import default_when
-        note = self.a._undrop_in_joplin(rec) if rec.get("horizon") == DROPPED else ""
         if when:  # the user named where (chat: "keep X, next week")
             try:
                 window = resolve_when(when, self._today(), self._week_start())
@@ -252,8 +251,12 @@ class BeforeToday:
             h = rec.get("horizon") if rec.get("horizon") not in (DROPPED, SOMEDAY, "", None) else "week"
             window = default_when(h if h in ("today", "deadline") else "week", rec.get("due", ""), self._today(),
                                   self._week_start())
-        from thirties_core.due_today import window_check  # due today: only on a clear word (due_today.py)
-        note = (note + window_check(self.a.pt, title, rec.get("task_id") or None, window, rec.get("due"))).strip()
+        # due today or overdue: only on a clear word (due_today.py). Checked before the list in Joplin is touched,
+        # so a refused keep writes nothing.
+        from thirties_core.due_today import window_check
+        deadline = window_check(self.a.pt, title, rec.get("task_id") or None, window, rec.get("due"))
+        note = self.a._undrop_in_joplin(rec) if rec.get("horizon") == DROPPED else ""
+        note = (note + deadline).strip()
         pool.set(title, horizon=SOMEDAY if window["when"] == "someday" else (
                      "week" if window["end"] != self._today().isoformat() else "today"),
                  pending_drop=False, dropped_on="", dropped_by="", placed_by="user", settled=True, **window)
