@@ -1017,6 +1017,12 @@ class PlanTools:
             if now_this_morning(self, start_dt):  # what they're doing right now: recorded now, never refused
                 return self.doing_now(str(title).strip(), until=end, duration=duration)
             why = refuse_early(self, str(title).strip(), start_dt)
+            # --- a time still ahead this morning that the user gave goes there (stated_times.py) ---
+            from thirties_core.stated_times import this_morning_ahead
+            ahead = this_morning_ahead(self, str(title).strip(), start_dt) if why else None
+            if ahead is not None:
+                start_dt, why = ahead, None
+            # --- end still ahead this morning ---
             if why:
                 raise ToolError(why)
         # --- end early-morning time ---
@@ -1163,6 +1169,12 @@ class PlanTools:
                 self._save_plan_after_change()
                 return kept
             # --- end the user's own times ---
+            # --- the times it already has, as the user gave them: nothing to refuse (stated_times.py) ---
+            from thirties_core.stated_times import calendar_already
+            same = calendar_already(self, span, start, end) if shift in (None, "") and not title else None
+            if same:
+                return same
+            # --- end the times it already has ---
             raise ToolError(f"{span.title} comes from the user's calendar, so its times change only to a start or "
                             "end the user gives for it (kept on their plan; the calendar itself isn't changed).")
         if title:
@@ -1196,12 +1208,25 @@ class PlanTools:
             if (span.status == SpanStatus.PLANNED and not title and to_day in (None, "")
                     and day_edges.now_this_morning(self, new_start)):  # doing it right now: recorded now, not refused
                 return self.doing_now(span.id, until=end, duration=duration)
-            why = ((day_edges.refuse_early(self, span.title, new_start) if start not in (None, "") else None)
-                   or day_edges.refuse_off_the_day(self, span.title, new_start, new_end))
+            # --- a time still ahead this morning that the user gave goes there (stated_times.py) ---
+            from thirties_core.stated_times import this_morning_ahead
+            ahead = this_morning_ahead(self, span.title, new_start) if start not in (None, "") else None
+            if ahead is not None:
+                new_start, new_end = ahead, new_end - (new_start - ahead)
+            # --- end still ahead this morning ---
+            why = None if ahead is not None else (
+                (day_edges.refuse_early(self, span.title, new_start) if start not in (None, "") else None)
+                or day_edges.refuse_off_the_day(self, span.title, new_start, new_end))
             if why:
                 raise ToolError(why)
         # --- end early-morning time ---
         if new_start == span.start_dt and new_end == span.end_dt and not title:
+            # --- the time it has, given by the user: theirs now, shown as said (stated_times.py) ---
+            from thirties_core.stated_times import already_there
+            same = already_there(self, span, start not in (None, ""), end not in (None, ""))
+            if same:
+                return same
+            # --- end the time it has ---
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
         kept = ""

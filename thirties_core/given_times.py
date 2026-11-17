@@ -7,14 +7,16 @@ they named), it's stored and synced with the item, and every view shows it as sa
 
 Whether the user said it is read from their message this turn, as the done check reads it (done_reference.py):
 one clause of the message is about the item and gives that very time (facts.gave_time). A clause is about the item
-when it names it (item_facts.mentions; "the parcel and the letters at 4:45" names both), or points back to it alone
-("put it at 4:45" right after a message that named only that item). "Right now" names no time: the item starts at
-the current minute under the hood, and shows in its block like any time Thirties worked out; the time now is said
-apart ("It's 12:37"). A shift the user asks for ("an hour later") moves a stated time with the item: they
-anchored it. Everything else is a time Thirties chose and is never kept:
+when it names it (item_facts.mentions; "the parcel and the letters at 4:45" names both), has a word of its name and
+names no other item outright ("the afternoon stroll" for Stroll by the canal beside another stroll: stated_times.py),
+or points back to it alone ("put it at 4:45" right after a message that named only that item). "Right now" names
+no time: the item starts at the current minute under the hood, and shows in its block like any time Thirties worked
+out; the time now is said apart ("It's 12:37"). A shift the user asks for ("an hour later") moves a stated time
+with the item: they anchored it. Everything else is a time Thirties chose and is never kept:
 
 - a step put after another one, a routine's parts, a day proposal, a carried-over item, an estimate: any placing
-  that starts from another tool (put_routine, propose_day...), whatever the message says;
+  that starts from another tool (put_routine, propose_day...), whatever the message says, except a step's own time
+  the user gave for it this turn (stated_times.keep_step_time);
 - a change with nobody talking (the background, the app's own buttons);
 - a time moved off what the user said (a short item stacked after others in its thirty, a window kept).
 
@@ -61,13 +63,14 @@ def _clauses(message: str) -> List[str]:
     return out
 
 
-def _talking(pt: "PlanTools") -> Optional[str]:
-    """The user's message, when this change is the user's own placing of an item; else None."""
+def _talking(pt: "PlanTools", any_tool: bool = False) -> Optional[str]:
+    """The user's message, when this change is the user's own placing of an item (any_tool: whichever tool is
+    placing it, for a time the user gave that another tool applies, stated_times.py); else None."""
     message = getattr(pt, "user_message", None)
     if not message or getattr(pt, "by_hand", False):
         return None
     from thirties_core.plan_log import outer_tool
-    return message if outer_tool() in _PLACING else None
+    return message if any_tool or outer_tool() in _PLACING else None
 
 
 def _about(pt: "PlanTools", clause: str, title: str) -> bool:
@@ -78,15 +81,18 @@ def _about(pt: "PlanTools", clause: str, title: str) -> bool:
     titles = [s.title for s in pt.day_plan.spans if s.title]
     if mentions(clause, title, titles):
         return True
+    from thirties_core.stated_times import loosely_named  # "the afternoon stroll" beside another stroll
+    if loosely_named(clause, title, titles):
+        return True
     if not _ONE_RE.search(clause) or any(mentions(clause, t, titles) for t in titles if t != title):
         return False
     from thirties_core.done_reference import pointed_back
     return set(pointed_back(pt, titles)) == {title}
 
 
-def stated(pt: "PlanTools", title: str, dt: Optional[datetime]) -> bool:
+def stated(pt: "PlanTools", title: str, dt: Optional[datetime], any_tool: bool = False) -> bool:
     """Whether the user's message this turn gives this time for this item, in the same breath."""
-    message = _talking(pt)
+    message = _talking(pt, any_tool)
     if message is None or dt is None:
         return False
     from thirties_core.facts import gave_time

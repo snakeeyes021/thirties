@@ -1090,8 +1090,11 @@ RULES
             now = None
         reply = reply_checks.fix_now_time(reply, now)
 
+        from thirties_core.time_claims import unmade_time_claims  # "locked in" over a refusal (time_claims.py)
+
         def problems(text: str):
-            return (self._unmade_moves(turn_start, text), self._unmade_dones(text), self._wrong_times(text),
+            return (self._unmade_moves(turn_start, text) + unmade_time_claims(self, turn_start, text),
+                    self._unmade_dones(text), self._wrong_times(text),
                     self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
                     reply_checks.unkept_promises(self, turn_start, text))
         unmade, undone, wrong, kept, talk, promised = problems(reply)

@@ -133,9 +133,12 @@ def _morning_from(plan) -> datetime:
 
 def is_this_mornings(plan, span: "EventSpan") -> bool:
     """A record of this morning before the plan begins: something the user did, or is doing, between MORNING_FROM
-    and the plan's first block, on the plan's own date (never sleep, work or a calendar event)."""
-    from thirties_core.models import SpanCategory
-    return (span.actual_start is not None and span.source != "calendar"
+    and the plan's first block, on the plan's own date (never sleep, work or a calendar event); or something planned
+    there at a time the user gave for it (stated_times.this_morning_ahead)."""
+    from thirties_core.models import SpanCategory, SpanStatus
+    theirs = span.status == SpanStatus.PLANNED and span.given_start is not None and \
+        span.given_start.timestamp() == span.start_dt.timestamp()
+    return ((span.actual_start is not None or theirs) and span.source != "calendar"
             and span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
             and _morning_from(plan) <= span.start_dt < plan.day_start
             and span.end_dt.timestamp() <= plan.day_start.timestamp())
