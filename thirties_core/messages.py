@@ -212,14 +212,19 @@ def plain_rows(rows: List[str]) -> List[str]:
     return lines
 
 
-def whole_day_lines(plan: DayPlan) -> List[str]:
+def whole_day_lines(plan: DayPlan, now: Optional[datetime] = None) -> List[str]:
     """The whole day as a record, by blocks: one plain line per thirty that something starts in, with the block it
     starts in and the end of the last block it reaches ("9:00 AM – 9:30 AM Wake stretch, Kettle on, Floss, Tidy desk"),
     done items too (it's what the day held). Things one after another in the thirty are joined with ", ", things
     at the same time with " + "; one that runs past the others says its own end ("Podcast (until 4:00 PM)"). The
     minutes under the hood (a routine's steps, a done item's estimate, a placed item's length) are never shown: a
     time is a block edge, unless the user or a calendar gave it ("Dentist at 2:45 PM", "I did it 3:10 to 3:40").
-    Never a row per half hour, an empty time line with the items under it, or bullets."""
+    Never a row per half hour, an empty time line with the items under it, or bullets.
+
+    ``now`` (the day being lived): the block under way is its "Now:" row, each thing in it with its own end when it
+    runs past the block ("Now: Studio hours (until 4:00 PM) + Fix the latch"), never its start, which reads as
+    already past to someone who began a few minutes into it."""
+    current = thirty_of(now) if now is not None else None
     groups: List[List[EventSpan]] = []
     for s in sorted(_row_items(plan), key=lambda s: (s.start_dt.timestamp(), -s.end_dt.timestamp())):
         if groups and thirty_of(groups[-1][0].start_dt) == thirty_of(s.start_dt):
@@ -242,10 +247,23 @@ def whole_day_lines(plan: DayPlan) -> List[str]:
             if _note(s) and not one_note:
                 extras.append(_note(s))
             return _titled(s, first) + (f" ({', '.join(extras)})" if extras else "")  # a real time: "at 2:45 PM"
+        if block == current:
+            out.append(_now_row(group, block))
+            continue
         lines = slice_lines([(s.start_dt, s.end_dt, said(s)) for s in group])
         out.append(f"{format_clock(first)} – {format_clock(end)} " + ", ".join(lines)
                    + (f" (all {one_note})" if one_note else ""))
     return out
+
+
+def _now_row(group: List[EventSpan], block: datetime) -> str:
+    """The whole day's row for the block under way: "Now:" and what's in it, each with its own end when it runs
+    past the block, a real time inside the block kept ("Call the framer at 8:45 AM")."""
+    def said(s: EventSpan) -> str:
+        extras = [f"until {format_clock(shown_end(s))}"] if shown_end(s) > block + HALF else []
+        extras += [_note(s)] if _note(s) else []
+        return _titled(s, block) + (f" ({', '.join(extras)})" if extras else "")
+    return "Now: " + ", ".join(slice_lines([(s.start_dt, s.end_dt, said(s)) for s in group]))
 
 
 def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = False,
@@ -259,7 +277,7 @@ def render_schedule(plan: DayPlan, now: Optional[datetime], whole_day: bool = Fa
         head = f"Here's {label or plan.target_date.strftime('%A, %B %-d')}:"
         return "\n".join([head] + rows) if rows else f"Nothing is planned for {label or 'that day'} yet."
     block = thirty_of(now)
-    rows = whole_day_lines(plan) if whole_day else plain_rows(schedule_rows(plan, block + HALF))
+    rows = whole_day_lines(plan, now) if whole_day else plain_rows(schedule_rows(plan, block + HALF))
     upcoming = [s for s in _row_items(plan) if s.start_dt >= block + HALF]
     next_start = min((thirty_of(s.start_dt) for s in upcoming), default=None)
     missed = list(missed if missed is not None else missed_items(plan, now))
