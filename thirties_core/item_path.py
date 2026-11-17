@@ -37,6 +37,27 @@ def is_state_heading(name: Any) -> bool:
     return bool(text) and (section_state(text) != ("", "") or bool(_SORTING_HEADINGS.match(text)))
 
 
+# A line that tells the user what to do with the lines under it ("Pick one ... in 2.", "Choose a packet:") or asks
+# them something ("Which jar do I keep?"). It says nothing about what the items under it are.
+_INSTRUCTION = re.compile(r"^(pick|choose|select|decide)\s+(on|between|which|one|two|three|a|an|any|\d+|up to|the)\b",
+                          re.IGNORECASE)
+
+
+def is_instruction(name: Any) -> bool:
+    """A line that is an instruction or a question, not a name: never part of an item's path."""
+    text = re.sub(r"[*_#`]", "", str(name or "")).strip().rstrip(":").strip()
+    return bool(text) and (text.endswith("?") or bool(_INSTRUCTION.match(text)))
+
+
+def _routine_group(chain: List[str], by_id: Dict[str, Any]) -> bool:
+    """A line on Today's list under a routine's name: the copy of one of its steps, which is named by the routine
+    already."""
+    names = {str(getattr(t, "parent_note_title", "") or "").strip().lower() for t in by_id.values()
+             if getattr(t, "list_role", "") in NO_PATH_ROLES}
+    names.discard("")
+    return any(c.strip().lower() in names for c in chain)
+
+
 def _short(text: Any) -> str:
     from thirties_core.titles import title_of
     return title_of(str(text or "").strip())
@@ -69,10 +90,13 @@ def parents(task: Any, tasks: Optional[Iterable[Any]]) -> List[str]:
     path = [_short(p) for p in (getattr(task, "path", None) or [])]
     if len(path) > len(chain):  # a parent that isn't an item (ticked, or a condition): the line's own path says it
         chain = path
+    if getattr(task, "list_role", "") == "today" and _routine_group(chain, by_id):
+        return []  # a routine's step on Today's list reads as the step, as it does in the routine's own note
     section = str(getattr(cur, "section", "") or getattr(task, "section", "") or "").strip()
-    if section and getattr(task, "list_role", "") not in NO_HEADING_ROLES and not is_state_heading(section):
+    if section and getattr(task, "list_role", "") not in NO_HEADING_ROLES and not is_state_heading(section) \
+            and not is_instruction(section):
         chain.insert(0, _short(section))  # a heading that only says where things stand isn't a parent
-    chain = [c for c in chain if c]
+    chain = [c for c in chain if c and not is_instruction(c)]  # nor is a line that only gives an instruction
     return chain[-MAX_PARENTS:]
 
 
@@ -187,5 +211,5 @@ def resolve(ref: Any, tasks: Optional[Iterable[Any]]) -> Optional[Any]:
     return found[0] if len(found) == 1 else None
 
 
-__all__ = ["SEP", "MAX_PARENTS", "is_state_heading", "parents", "label", "span_label", "labelled", "labelled_plan", "named", "tasks_of",
+__all__ = ["SEP", "MAX_PARENTS", "is_state_heading", "is_instruction", "parents", "label", "span_label", "labelled", "labelled_plan", "named", "tasks_of",
            "leaf", "resolve"]
