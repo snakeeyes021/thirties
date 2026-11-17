@@ -166,14 +166,27 @@ class TestCommandsAndYeses(OneConversationCase):
         self.assertEqual([t for r, t, _ in stored if r == "user"], ["/now", "/day", "/sync"])
         self.assertSymmetric()
 
-    def test_help_and_status_are_kept_as_one_compact_line(self):
-        self.svc.bridge.handle_updates([self.update("/help", 210), self.update("/status", 211)])
-        self.assertEqual([t for r, t, _ in self.stored() if r == "user"], ["/help", "/status"])
-        help_line, status_line = self.said()
-        self.assertEqual(help_line, "The list of Telegram commands is on your phone.")
+    def test_status_is_kept_as_one_compact_line(self):
+        self.svc.bridge.handle_updates([self.update("/status", 211)])
+        self.assertEqual([t for r, t, _ in self.stored() if r == "user"], ["/status"])
+        status_line, = self.said()
         self.assertTrue(status_line.startswith("Status: "), status_line)
-        self.assertEqual(len(self.phone.got), 2)
+        self.assertEqual(len(self.phone.got), 1)
         self.assertNotIn("\n", status_line)
+
+    def test_help_names_each_menu_command_on_its_own_line(self):
+        from thirties_core.telegram_bridge import MENU_COMMANDS
+        self.svc.bridge.handle_updates([self.update("/help", 210)])
+        self.assertEqual([t for r, t, _ in self.stored() if r == "user"], ["/help"])
+        help_text, = self.said()
+        lines = help_text.split("\n")
+        for entry in MENU_COMMANDS:
+            found = [ln for ln in lines if ln.startswith("/" + entry["command"] + ": ")]
+            self.assertEqual(len(found), 1, (entry["command"], help_text))
+            self.assertGreater(len(found[0].split(": ", 1)[1].strip()), 8)
+        self.assertFalse(any(ln.lstrip().startswith(("-", "•", "*")) for ln in lines), help_text)
+        self.assertNotIn("on your phone", help_text)
+        self.assertSymmetric()  # the phone and the chat got the same words
 
     def test_a_new_conversation_is_kept_at_the_end_of_the_one_it_closes(self):
         self.svc.bridge.handle_updates([self.update("bins are out", 220)])

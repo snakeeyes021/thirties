@@ -82,6 +82,22 @@ MENU_COMMANDS = [
     {"command": "status", "description": "How Thirties is set up"},
     {"command": "help", "description": "What I can do"},
 ]
+# One plain line for each command in the menu, as /help says it.
+HELP_LINES = {
+    "now": "What's on now and what comes next.",
+    "day": "Today's schedule.",
+    "new": "Start a new conversation. The desktop app continues the same one.",
+    "sync": "Sync with your notes now.",
+    "status": "How Thirties is set up.",
+    "help": "Shows these commands.",
+}
+
+
+def help_text() -> str:
+    """The /help text: each menu command on its own line with a plain description, then how to just write to me."""
+    lines = [f"/{c['command']}: {HELP_LINES.get(c['command'], c['description'])}" for c in MENU_COMMANDS]
+    return ("Commands:\n" + "\n".join(lines)
+            + "\n\nOr just write to me, as in \"Plan my evening after 7\" or \"Move the workout to 3:30\".")
 
 
 def is_button(text: str) -> bool:
@@ -644,24 +660,9 @@ class ThirtiesTelegramBridge:
             logger.warning("Couldn't keep a Telegram command in the conversation: %s", e)
 
     def _cmd_help(self, chat_id: int) -> tuple:
-        msg = (
-            "🤖 *Thirties Mobile Planning Assistant*\n\n"
-            "Powered by Gemini & your Joplin backlog.\n\n"
-            "📋 *Commands*:\n"
-            "• `/now` – What's next\n"
-            "• `/day` – Today's schedule\n"
-            "• `/sync` – Push/pull sync with Joplin cross-device state\n"
-            "• `/new` – Start a new conversation (the desktop app continues the same one)\n"
-            "• `/status` – System, model, and sync status\n"
-            "• `/brain` – Which assistant answers, and how to switch\n"
-            "• `/help` – Show this guide\n\n"
-            "💬 *Conversation*:\n"
-            "Simply send natural messages to schedule and plan:\n"
-            "• _\"Plan my evening after 7pm\"_\n"
-            "• _\"Move my workout to 3:30pm\"_\n"
-            "• _\"What do I have remaining in my backlog?\"_\n"
-        )
-        return msg, "The list of Telegram commands is on your phone."
+        """The commands in Telegram's menu, one plain line each; the same text goes to the phone and the chat."""
+        msg = help_text()
+        return msg, msg
 
     def _cmd_now(self, chat_id: int) -> tuple:
         """What's next (whats_next.py): what's on now, the rest of today, open stretches, what's on today's list
