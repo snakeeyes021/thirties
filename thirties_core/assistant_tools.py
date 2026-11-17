@@ -353,10 +353,11 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "if_there_is_time",
-        "description": "Act on an item under If there's time (today's things with no time): done; schedule (the next "
-                       "free time that fits, or the time the user names); tomorrow; week (later this week); or drop "
-                       "(it stops coming back; its own list is untouched).",
-        "parameters": {"item": "The item, as worded under If there's time.",
+        "description": "Act on any item on today's list (the Today note), under If there's time or not: done; "
+                       "schedule (the next free time that fits, or the time the user names); tomorrow; week (later "
+                       "this week); or drop (off today's list and today's plan; its own list is untouched). The way "
+                       "to take something off today's list that the user skips or puts off.",
+        "parameters": {"item": "The item, as worded on today's list.",
                        "action": "done, schedule, tomorrow, week or drop.",
                        "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
         "required": ["item", "action"],
@@ -410,6 +411,10 @@ from thirties_core.extras import EXTRA_READ_ONLY, EXTRA_TOOL_SPECS, extra_handle
 ASSISTANT_TOOL_SPECS += EXTRA_TOOL_SPECS
 ASSISTANT_READ_ONLY |= EXTRA_READ_ONLY
 # --- end extras ---
+# --- on-site work for a day: nothing else during it, Thirties moves what's there (on_site.py) ---
+from thirties_core.on_site import ON_SITE_TOOL_SPECS  # noqa: E402
+ASSISTANT_TOOL_SPECS += ON_SITE_TOOL_SPECS
+# --- end on-site work ---
 
 
 _STOPWORDS = {"the", "a", "an", "and", "of", "to", "for", "on", "in", "with", "my", "some", "at", "about",
@@ -1512,6 +1517,11 @@ class AssistantTools(KindTools):
         if st != SpanStatus.SKIPPED and meal_word(span.title) and self.pt.is_current(self.pt.day_plan):
             spaced = respace(self.pt)
             result += ("; " + "; ".join(spaced)) if spaced else ""
+        # --- skipped for today, it leaves today's list too (leave_today.py) ---
+        if st == SpanStatus.SKIPPED:
+            from thirties_core.leave_today import after_skip
+            result += after_skip(self.pt, span)
+        # --- end skipped for today ---
         return result + session + "." + (f" {credited}" if credited else "")
 
     def _said_times_only(self, start_dt, end_dt, duration):
@@ -1995,11 +2005,21 @@ class AssistantTools(KindTools):
                 window = resolve_when(k.get("when") or "this week", day, week_start)
             except ValueError as e:
                 raise ToolError(f"{item['title']}: {e}")
+            # --- due today: Thirties' own proposal keeps it today (due_today.py) ---
+            from thirties_core.due_today import is_due_today
+            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+                window = resolve_when("today", day, week_start)
+            # --- end due today ---
             new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
             seen.add(item["title"].lower())
         for d in (drop if isinstance(drop, list) else []):
             d = d if isinstance(d, dict) else {"item": d}
             item = find(d.get("item") or d.get("title"))
+            # --- due today: never proposed for dropping by Thirties (due_today.py) ---
+            from thirties_core.due_today import is_due_today
+            if is_due_today(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+                raise ToolError(f"{item['title']} is due today: keep it today, not as a drop.")
+            # --- end due today ---
             new_drop.append({**item, "why": str(d.get("why") or ""), "pending_drop": True})
             seen.add(item["title"].lower())
         missing = [p["title"] for p in pending if p["title"].lower() not in seen]
@@ -2117,6 +2137,12 @@ class AssistantTools(KindTools):
             raise ToolError(str(e))
         h = "someday" if window["when"] == "someday" else ("today" if window["end"] == self._today().isoformat()
                                                             else "window")
+        # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---
+        from thirties_core.due_today import window_check
+        waiting = pool.all().get(str(item).strip().lower()) or {}
+        due = window_check(self.pt, waiting.get("title") or str(item), waiting.get("task_id") or None, window,
+                           waiting.get("due")) if waiting else ""
+        # --- end due today ---
         rec = pool.place(str(item), h, window)
         if rec is None:
             raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
@@ -2131,7 +2157,7 @@ class AssistantTools(KindTools):
         elif rec.get("slot"):
             self.before.take_off_today(rec)  # not today's any more
         self._someday_in_joplin(rec, h == "someday")
-        return f"{rec['title']}: {window['when']}."
+        return f"{rec['title']}: {window['when']}.{due}"
 
     def _drop_leftovers(self, items: List[Dict[str, Any]]) -> List[str]:
         """A drop means "stop rolling it over" (decided 11-11): Thirties records that, and the item's home list in
@@ -2699,6 +2725,8 @@ class AssistantTools(KindTools):
             **self.lists.handlers(),  # list structure, drop box, done items, triage, pencilled in (list_tools.py)
             **__import__("thirties_core.holds", fromlist=["HoldTools"]).HoldTools(self).handlers(),  # holds.py
             **extra_handlers(self),  # beyond the plan (extras.py)
+            "work_on_site": lambda on_site=True, day=None, **_: __import__(
+                "thirties_core.on_site", fromlist=["tool"]).tool(self.pt, on_site, day),  # on_site.py
             **ProjectTools(self).handlers(),  # projects' parts, epics, estimates, new lists (project_tools.py)
             **__import__("thirties_core.planning_tools", fromlist=["handlers"]).handlers(self.pt),  # planning_tools.py
         }

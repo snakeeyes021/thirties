@@ -313,6 +313,8 @@ class SyncEngine:
             "horizon_plans": HorizonPlans(self.state_db),
             "project_facts": ProjectFacts(self.state_db),  # parts of projects, epics, the user's estimates
             "people": People(self.state_db),  # people to keep in touch with, and each contact (people.py)
+            "work_on_site": __import__("thirties_core.on_site", fromlist=["OnSiteDays"]).OnSiteDays(
+                self.state_db),  # on-site days (on_site.py)
         }
 
     def _merge_legacy_schedules(self, schedules: Dict[str, Any]) -> int:

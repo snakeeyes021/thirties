@@ -119,6 +119,13 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     spans = [s for s in plan.spans if _plannable(s) and s.status != SpanStatus.SKIPPED]
     titles = {s.title.strip().lower() for s in spans}
     task_ids = {s.task_id for s in spans if s.task_id}
+    # skipped today and planned nowhere else today: not happening today, so not "no time yet" either (its line
+    # leaves Today with the skip, leave_today.py; this covers the time before Joplin has the change)
+    from thirties_core.due_today import is_due_today  # due today, it stays "no time yet" (due_today.py)
+    skipped = [s for s in plan.spans if _plannable(s) and s.status == SpanStatus.SKIPPED
+               and not is_due_today(pt, s.title, s.task_id)]
+    routines |= {s.title.strip().lower() for s in skipped if s.title.strip().lower() not in titles}
+    task_ids |= {s.task_id for s in skipped if s.task_id}
     links = TodayLinks(db)
     out = []
     from thirties_core import if_time
@@ -162,17 +169,23 @@ def add_ahead(assistant, items: List[str]) -> str:
     """Things for a later day's list, with no time: kept until that morning."""
     plan = assistant.pt.day_plan
     store = AheadLists(assistant._db)
-    added = []
+    added, deadlines = [], []
+    from thirties_core.due_today import move_check  # due today: only on a clear word (due_today.py)
     for name in items:
         task = assistant._exact_task(str(name))
         title = task.title if task is not None else str(name).strip()
         if title:
+            deadlines.append(move_check(assistant.pt, title, task.id if task is not None else None,
+                                        plan.target_date).strip())
             store.add(plan.target_date, title, task)
             added.append(title)
     if not added:
         return "Nothing to add."
+    deadlines = [d for d in deadlines if d]
+    from thirties_core.leave_today import after_ahead  # moved off today's list, it leaves it (leave_today.py)
+    off = [o for o in (after_ahead(assistant, t, plan.target_date) for t in added) if o]
     return (f"On {plan.target_date.strftime('%A')}'s list, no time yet: {', '.join(added)}. It goes on the Today "
-            "list that morning.")
+            "list that morning." + (" " + " ".join(off) if off else "") + (" " + " ".join(deadlines) if deadlines else ""))
 
 
 def onto_today(assistant, day: date) -> List[str]:

@@ -712,6 +712,11 @@ class PlanTools:
         hard = self._conflicts(span)
         from thirties_core.traits import overlap_refusal  # an exclusive item takes up its time
         refused = None if span.is_envelope else overlap_refusal(self, span, alongside)
+        # --- on-site work today: nothing else goes inside it (on_site.py) ---
+        if not refused and not span.is_envelope:
+            from thirties_core.on_site import refusal as on_site_refusal
+            refused = on_site_refusal(self, span, alongside)
+        # --- end on-site work ---
         if refused:
             raise ToolError(refused)
         if span.is_envelope:
@@ -1097,6 +1102,10 @@ class PlanTools:
         self._save_plan_after_change()
         extra = f" ({'; '.join(lasting + notes)})" if lasting or notes else ""
         extra += kept
+        # --- work added on an on-site day: what's inside it moves out (on_site.py) ---
+        from thirties_core.on_site import after_work_change
+        extra += after_work_change(self, span)
+        # --- end on-site work ---
         weather = self.assistant.weather_warning(span) if self.assistant else None
         if weather:
             extra += f" Weather heads-up: {weather}."
@@ -1199,7 +1208,12 @@ class PlanTools:
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
             self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
-            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside))
+            # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---
+            from thirties_core.due_today import move_check
+            due = move_check(self, span.title, span.task_id, parse_day(to_day, self.today())) \
+                if self.is_current(self.day_plan) and span.status == SpanStatus.PLANNED else ""
+            # --- end due today ---
+            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside)) + due
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
         was = (span.start_dt, span.end_dt)  # for a time the user stated, moved by a shift (given_times.py)
@@ -1285,8 +1299,13 @@ class PlanTools:
         notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
+        # --- new work hours on an on-site day: what's inside work moves out (on_site.py) ---
+        from thirties_core.on_site import after_work_change
+        moved_out = after_work_change(self, span)
+        # --- end on-site work ---
         from thirties_core.day_edges import day_note
-        return f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}{getattr(self, '_kept_note', '')}"
+        return (f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}"
+                f"{getattr(self, '_kept_note', '')}{moved_out}")
 
     def _move_to_day(self, span: EventSpan, to_day: Any, start: Any, end: Any, duration: Any, title: Any,
                      alongside: bool = False) -> str:
@@ -1333,9 +1352,11 @@ class PlanTools:
             self._persist(moved)
             if self.assistant and self.is_current(target_plan):
                 self.assistant.list_today(moved)
+            from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
+            off = after_move(self, moved, source_plan, target_plan)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
                     f"{format_clock(new_start)} – {format_clock(new_end)} "
-                    + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays)."))
+                    + ("(the earlier one is marked skipped)." if auto_skipped else "(today's record stays).") + off)
         source_plan.spans = [s for s in source_plan.spans if s.id != span.id]
         span.title, span.start_dt, span.end_dt, span.source = moved.title, new_start, new_end, "user"
         target_plan.spans.append(span)
@@ -1344,6 +1365,8 @@ class PlanTools:
         listed = ""
         if self.assistant and self.is_current(target_plan):
             listed = self.assistant.list_today(span)
+        from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
+        listed = (listed + after_move(self, span, source_plan, target_plan)).strip()
         return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:
@@ -1736,6 +1759,11 @@ class PlanTools:
             if span.id in placed:
                 span.start_dt, span.end_dt = placed[span.id]
                 self._persist(span)
+        # --- due today: no room keeps it on today's plan where it was, never off today (due_today.py) ---
+        from thirties_core.due_today import is_due_today
+        due_kept = [s for s in no_room if is_due_today(self, s.title, s.task_id)]
+        no_room = [s for s in no_room if s not in due_kept]
+        # --- end due today ---
         waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
         for span in no_room:  # it can't stay where it was: something else may be there now
             self._drop(span)
@@ -1750,6 +1778,8 @@ class PlanTools:
                           if waiting and len(no_room) == 1 else
                           ". They wait for tomorrow (Before today), where each can be moved or dropped."
                           if waiting else ". It goes on another day, where there's room."))
+        out += [f"{s.title} doesn't fit before bedtime, but it's due today, so it stays on today's plan at "
+                f"{format_clock(s.start_dt)}." for s in due_kept]
         unreported = [s.title for s in movable if s.id in behind and s.id in placed]
         if unreported:
             out.append("Not reported, so kept as still to do: " + ", ".join(unreported) + ".")

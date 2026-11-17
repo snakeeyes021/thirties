@@ -535,6 +535,12 @@ class ConversationManager:
             self.brain.messages.append({"role": "user", "content": engineer_notes.hidden_instruction(kept),
                                         "hidden": True})
         # --- end notes to the engineers ---
+        # --- on-site work today, from the user's words: what's inside work moves out first (on_site.py) ---
+        from thirties_core import on_site
+        moved_out = on_site.at_turn_start(self.tools, merged)
+        if moved_out:
+            self.brain.messages.append({"role": "user", "content": moved_out, "hidden": True})
+        # --- end on-site work ---
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:

@@ -409,3 +409,160 @@ def early_tick_times(plan: DayPlan, span: EventSpan, now: datetime) -> Tuple[dat
             return start, end
         end = min(s.start_dt for s in taken)
     return end - length, end
+
+
+# --- out of work: on an on-site day, what Thirties placed inside work moves out by itself (on_site.py) ---
+
+def _routine_name(tools: "PlanTools", span: EventSpan) -> str:
+    """The routine a planned step belongs to ("" for anything else)."""
+    a = getattr(tools, "assistant", None)
+    if a is not None:
+        try:
+            found = a._routine_of(span.title)
+        except Exception:
+            found = None
+        if found is not None:
+            return found[0]["title"]
+    return "routine" if span.source == "routine" else ""
+
+
+def _placed_by_thirties(tools: "PlanTools", span: EventSpan) -> bool:
+    """A planned item whose time Thirties chose: not a calendar event, not fixed or timed by someone else, not a
+    time the user stated for it."""
+    from thirties_core.traits import time_set_by
+    return (span.status == SpanStatus.PLANNED and span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
+            and span.source != "calendar" and not span.tentative and not span.is_firm and not span.shown_only
+            and span.given_start is None and not tools._is_fixed(span) and not time_set_by(tools, span))
+
+
+def _units(tools: "PlanTools", plan: DayPlan, works: List[EventSpan], now: datetime) -> Tuple[List[List[EventSpan]], List[EventSpan]]:
+    """What has to come out of work, as units that move together (a routine's steps back to back are one unit), and
+    what stays though it's inside work because its time isn't Thirties' to change."""
+    from thirties_core.meals import meal_word
+
+    def inside(s: EventSpan) -> bool:
+        return any(w.start_dt < s.end_dt and s.start_dt < w.end_dt for w in works)
+
+    def going(s: EventSpan) -> bool:  # still ahead, and not what the user is doing right now before work
+        if s.end_dt <= now:
+            return False
+        return s.start_dt >= now or any(w.start_dt <= now < w.end_dt for w in works)
+
+    ahead = sorted((s for s in plan.spans if s.status == SpanStatus.PLANNED and not s.is_envelope and going(s)
+                    and meal_word(s.title) is None and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)),
+                   key=lambda s: s.start_dt)
+    kept = [s for s in ahead if inside(s) and s.source != "calendar" and not _placed_by_thirties(tools, s)]
+    movable = [s for s in ahead if _placed_by_thirties(tools, s)]
+    chains: List[List[EventSpan]] = []
+    for s in movable:
+        name = _routine_name(tools, s)
+        last = chains[-1] if chains else None
+        if (name and last and _routine_name(tools, last[0]) == name
+                and s.start_dt <= max(x.end_dt for x in last)):
+            last.append(s)  # the next step of the same routine, back to back: they go together
+        else:
+            chains.append([s])
+    return [c for c in chains if any(inside(s) for s in c)], kept
+
+
+def _free_start(plan: DayPlan, busy: List[Tuple[datetime, datetime]], length: timedelta, near: datetime,
+                lo: datetime, hi: datetime, daylight: bool) -> Optional[datetime]:
+    """The free start on a thirty nearest ``near`` where ``length`` fits between ``lo`` and ``hi`` with nothing in
+    ``busy`` (in daylight when it needs it)."""
+    best = None
+    t = thirty_ceil(lo)
+    while t + length <= hi:
+        end = t + length
+        ok = not any(a < end and t < b for a, b in busy)
+        if ok and daylight:
+            ok = plan.sunrise <= t and end <= plan.sunset
+        if ok and (best is None or abs(t - near) < abs(best - near)):
+            best = t
+        t += THIRTY
+    return best
+
+
+def _busy(plan: DayPlan, leaving: set, after: datetime) -> List[Tuple[datetime, datetime]]:
+    return [(s.start_dt, s.end_dt) for s in plan.spans if s.id not in leaving and s.status != SpanStatus.SKIPPED
+            and not s.shown_only and s.end_dt > after]
+
+
+def out_of_work(tools: "PlanTools", plan: DayPlan, works: List[EventSpan]) -> List[str]:
+    """An on-site day: move what Thirties placed inside work out, by itself (no asking). Each unit (one item, or a
+    routine's steps back to back) goes to the free time nearest where it was, before or after work, keeping its
+    length, its order inside and the thirties; with no room left today, tomorrow (where a daily thing already has
+    its own time tomorrow, today's simply doesn't happen). What the user timed, fixed things and meals stay. One plain
+    line for each, saying where it went."""
+    from thirties_core.if_time import _waking_end
+    from thirties_core.replan import outdoors as needs_daylight  # by its wording, or the user said so
+    now = tools._now()
+    live = plan.day_start <= now < plan.day_end
+    lo = max(plan.day_start, now) if live else plan.day_start
+    units, kept = _units(tools, plan, works, now if live else plan.day_start)
+    lines: List[str] = []
+    if not units and not kept:
+        return lines
+    leaving = {s.id for u in units for s in u}
+    busy = _busy(plan, leaving, lo)
+    hi = _waking_end(plan)
+    changed = False
+    tomorrow = None
+    for unit in units:
+        first, last = unit[0].start_dt, max(s.end_dt for s in unit)
+        length = last - first
+        names = ", ".join(s.title for s in unit)
+        daylight = any(needs_daylight(s.title, tools) for s in unit)
+        t = _free_start(plan, busy, length, first, lo, hi, daylight)
+        if t is not None:
+            shift = t - first
+            for s in unit:
+                s.start_dt, s.end_dt = s.start_dt + shift, s.end_dt + shift
+                tools._persist(s)
+                busy.append((s.start_dt, s.end_dt))
+            changed = True
+            side = "before work" if t + length <= min(w.start_dt for w in works) else "after work"
+            lines.append(f"{names}: now {format_clock(t)}, {side}.")
+            continue
+        # nothing fits today: tomorrow, except what's due today, which stays (due_today.py)
+        from thirties_core.due_today import is_due_today
+        due = [s for s in unit if is_due_today(tools, s.title, s.task_id)]
+        if due:
+            lines.append(f"{names}: due today and no free time outside work is left, so it stays at "
+                         f"{format_clock(first)}, during work.")
+            continue
+        if tomorrow is None:
+            tomorrow = tools.plan_for(plan.target_date + timedelta(days=1))
+        there = [s for s in unit if any(o.status == SpanStatus.PLANNED and o.title.strip().lower() ==
+                                        s.title.strip().lower() for o in tomorrow.spans)]
+        if len(there) == len(unit):  # a daily thing: tomorrow has its own
+            for s in unit:
+                s.status = SpanStatus.SKIPPED
+                tools._persist(s)
+            changed = True
+            lines.append(f"{names}: no free time outside work today, so not today; it's on tomorrow's plan as usual.")
+            continue
+        t2 = _free_start(tomorrow, _busy(tomorrow, set(), tomorrow.day_start), length, first + timedelta(days=1),
+                         tomorrow.day_start, _waking_end(tomorrow), daylight)
+        if t2 is None:
+            lines.append(f"{names}: no free time outside work today or tomorrow, so it stays where it was.")
+            continue
+        try:
+            for s in unit:
+                tools._move_to_day(s, tomorrow.target_date.isoformat(), format_clock(t2 + (s.start_dt - first)),
+                                   None, f"{int((s.end_dt - s.start_dt).total_seconds() // 60)} minutes", None)
+        except Exception:
+            lines.append(f"{names}: no free time outside work today, and it couldn't go on tomorrow, so it stays "
+                         "where it was.")
+            continue
+        changed = True
+        lines.append(f"{names}: no free time outside work today, so tomorrow at {format_clock(t2)}.")
+    from thirties_core.traits import time_set_by
+    for s in kept:
+        who = time_set_by(tools, s)
+        why = "you gave it that time" if s.given_start is not None else f"{who} sets its time" if who else \
+            "it stays put"
+        lines.append(f"{s.title} stays at {format_clock(s.start_dt)}, during work: {why}.")
+    if changed:
+        plan.spans.sort(key=lambda s: s.start_dt)
+        tools._save_plan_after_change()
+    return lines

@@ -198,9 +198,12 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
     note = assistant._today_note()
     title = next((t for t in items(note) if t.strip().lower() == str(item).strip().lower()), None)
     if title is None:
-        raise ToolError(f"{item} isn't under If there's time.")
+        # --- any other item on today's list: the same actions take it off today (leave_today.py) ---
+        return _act_on_listed(assistant, item, action, time)
+        # --- end any other item ---
     writer = assistant._writer()
     task = assistant._exact_task(title)
+    due = _due_today_note(assistant, title, task, action)  # due today: it goes only on a clear word (due_today.py)
     if action == "schedule":
         if time:
             args = {"title": title, "start": str(time), "duration": "30 minutes"}
@@ -226,17 +229,111 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
         from thirties_core.day_lists import AheadLists
         AheadLists(assistant._db).add(assistant._today() + timedelta(days=1), title, task)
         _remove(writer, note, title)
-        return f"{title} is on tomorrow's list; it goes on Today in the morning."
+        return f"{title} is on tomorrow's list; it goes on Today in the morning." + due
     from thirties_core.carry import DROPPED, WEEK, OpenPool
     pool = OpenPool(assistant._db)
     pool.add([{"title": title, "task_id": task.id if task is not None else "", "horizon": WEEK}], assistant._today())
     if action == "week":
         pool.place(title, WEEK)
         _remove(writer, note, title)
-        return f"{title} waits for a day later this week."
+        return f"{title} waits for a day later this week." + due
     pool.place(title, DROPPED)  # drop: it stops coming back; its own list (if it has one) is untouched
     _remove(writer, note, title)
-    return f"Dropped {title} from today: it won't come back by itself (it's in Before today's archive)."
+    return f"Dropped {title} from today: it won't come back by itself (it's in Before today's archive)." + due
+
+
+def _due_today_note(assistant, title: str, task, action: str) -> str:
+    """An item due today taken off today (tomorrow, week, drop): a vague word keeps it (refused, saying it's due
+    today); a clear one naming the item and a day (or a drop naming it) goes ahead, and the answer names the
+    deadline. "" when the item isn't due today or the action keeps it today."""
+    from thirties_core import due_today
+    from thirties_core.assistant_tools import ToolError
+    pt = assistant.pt
+    if action not in ("tomorrow", "week", "drop") or \
+            not due_today.is_due_today(pt, title, task.id if task is not None else None):
+        return ""
+    others = due_today.others_on(pt, title)
+    by_hand = bool(getattr(pt, "by_hand", False))
+    if (action == "week" and not by_hand) or (action == "tomorrow" and not due_today.clear_move(pt, title, others)) \
+            or (action == "drop" and not due_today.clear_ask(pt, title, others)):
+        raise ToolError(due_today.stays_line(title))
+    if action == "tomorrow":
+        return " " + due_today.moved_line(title, pt.today() + timedelta(days=1), pt.today())
+    return " " + due_today.moved_line(title, None, pt.today())
+
+
+def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> str:
+    """The actions on an item on today's list that isn't under If there's time (a line with a time on the plan, or
+    one with none yet). Taking it off today (tomorrow, week, drop) takes it off the plan today as well; its home list
+    line is untouched, and nothing is ticked. A dropped item that lives only on Today is filed in the month's Dropped
+    note; one for tomorrow goes on tomorrow's Today list; one for later this week waits in Before today's pool."""
+    from thirties_core.assistant_tools import ToolError
+    from thirties_core.clock import format_clock
+    from thirties_core.leave_today import has_home, remove_copy, top_line
+    from thirties_core.models import SpanStatus
+    pt = assistant.pt
+    task = assistant._exact_task(str(item)) or next((t for t in assistant.s.tasks if t.id == str(item)), None)
+    line = top_line(pt, task.title if task is not None else str(item), task.id if task is not None else None)
+    if line is None:
+        raise ToolError(f"{item} isn't on today's list.")
+    from thirties_core.today import TodayLinks
+    link = TodayLinks(assistant._db).home_of(line) if assistant._db is not None else None
+    task = next((t for t in assistant.s.tasks if link and t.id == link["home_id"]), None) or \
+        assistant._exact_task(line) or task
+    due = _due_today_note(assistant, line, task, action)  # due today: it goes only on a clear word (due_today.py)
+    ahead = [s for s in pt.day_plan.spans if s.status == SpanStatus.PLANNED and s.end_dt > pt._now()
+             and not s.is_envelope and s.source != "calendar"
+             and (s.title.strip().lower() == line.strip().lower() or (task is not None and s.task_id == task.id))]
+    if action == "done":
+        if ahead:
+            return assistant.log_outcome(event=ahead[0].id, status="done")
+        _tick(assistant._writer(), assistant._today_note(), line)
+        if task is not None and assistant._db is not None:
+            pt.scheduler.state_db.record_task_completed(task.id, assistant._today())
+        return f"Done: {line}."
+    if action == "schedule":
+        if time:
+            args = {"title": line, "start": str(time), "duration": "30 minutes"}
+            if ahead:
+                return pt.execute("update_event", {"event": ahead[0].id, "start": str(time)})
+            if task is not None:
+                args.update(task_id=task.id, category="task")
+            out = pt.execute("add_event", args)
+            return out if out.startswith("NOT_DONE") else f"{line} is on the plan at {time}."
+        if ahead:
+            return f"{line} is already on the plan at {format_clock(ahead[0].start_dt)}."
+        spot, doubled = place(assistant, line, task)
+        if spot is None:
+            return f"There's no time left today for {line}, even alongside something else; it stays on the list."
+        return f"{line} is on the plan at {format_clock(spot)}" + (" (alongside another item)." if doubled else ".")
+    homed = has_home(assistant, line)
+    if action == "drop" and not homed:
+        from thirties_core.off_today import take_off_list
+        if not take_off_list(pt, line):
+            raise ToolError(f"{line} couldn't be taken off today's list just now.")
+        said = f"Dropped {line}: it's filed in this month's Dropped note."
+    else:
+        if not remove_copy(assistant, line):
+            raise ToolError(f"{line} couldn't be taken off today's list just now.")
+        if action == "tomorrow":
+            from thirties_core.day_lists import AheadLists
+            AheadLists(assistant._db).add(assistant._today() + timedelta(days=1), line,
+                                          task if homed else None)
+            said = f"{line} is on tomorrow's list; it goes on Today in the morning."
+        elif action == "week":
+            from thirties_core.carry import WEEK, OpenPool
+            pool = OpenPool(assistant._db)
+            pool.add([{"title": line, "task_id": task.id if homed and task is not None else "", "horizon": WEEK}],
+                     assistant._today())
+            pool.place(line, WEEK)
+            said = f"{line} waits for a day later this week."
+        else:
+            said = f"Took {line} off today's list; it stays on its own list."
+    for s in ahead:  # not today: off today's plan too
+        pt._drop(s)
+    if ahead:
+        pt._save_plan_after_change()
+    return said + due
 
 
 def _remove(writer, note, title: str) -> None:
