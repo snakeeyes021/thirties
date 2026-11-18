@@ -230,6 +230,7 @@ class TaskItem:
     urgency: str = ""                     # now / soon / whenever / someday (lists.URGENCIES), once known
     due: str = ""                         # ISO date it's due by, if the user gave one
     horizon: str = ""                     # day / week / month / year / someday (horizons.HORIZONS), once known
+    guessed: bool = False                 # that urgency / horizon is only a guess (horizons.HorizonCatalog.guessed)
     occurrence: int = 0                   # which copy of the same text in its note (0 = the first open one)
     # How its line reads (list_reading.py). ``title`` stays the whole line: it's the item's link to its note.
     line_kind: str = ""                   # entry / group / question / link ("" for items not from a checklist)

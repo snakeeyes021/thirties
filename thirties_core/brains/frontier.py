@@ -365,6 +365,8 @@ Leaving today, and on-site days: something the user skips for today or puts on a
                         maybe = " [someday]" if t.someday and not t.section else ""
                         pressing = urgency_label(t) if t.urgency in ("now", "soon") or t.due else (
                             "this month" if t.horizon == "month" else "")  # the horizon urgency can't say
+                        if getattr(t, "guessed", False) and not t.due:
+                            pressing = ""  # only Thirties' own guess: unmarked, never pressing
                         pressing = f" [{pressing}]" if pressing and t.list_role not in ("today", "routine") else ""
                         # a nested item: how it's named to the user (item_path.py)
                         named = label(t, by_task) if parents(t, by_task) else ""
