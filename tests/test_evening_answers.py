@@ -68,7 +68,8 @@ class TestTheEveningAnswer(ServiceCase):
         self.assertEqual(len(tonight), 1)  # it can't wait and there's room tonight
         self.assertGreaterEqual(tonight[0].start_dt, at("19:10"))
         results = [str(m.get("content")) for m in self.svc.manager().brain.messages if m.get("role") == "tool"]
-        self.assertTrue(any("goes back to its list, for a day later this week" in r for r in results), results)
+        # a later day this week, never tomorrow by itself (not_today.py)
+        self.assertTrue(any("goes back to its list, for Saturday, later this week" in r for r in results), results)
         self.assertTrue(any("can't wait, so it's on tonight at" in r for r in results), results)
 
 

@@ -311,7 +311,8 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         if self.state.proposal_kind == "breakdown":
             return f"whether to add these steps to Joplin under {self.state.proposal[0]['title']}"
         if self.state.proposal_kind == "lighten":
-            return "whether to move these to tomorrow: " + "; ".join(p["title"] for p in self.state.proposal)
+            when = self.state.proposal[0].get("when") or "another day"
+            return f"whether to move these to {when}: " + "; ".join(p["title"] for p in self.state.proposal)
         if self.state.proposal_kind in ("urgency", "horizon"):
             return f"whether they mean {self.state.proposal[0]['title']}"
         items = "; ".join(f"{p['title']} at {p['start']}" if p.get("start") else p["title"] for p in self.state.proposal)

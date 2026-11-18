@@ -10,7 +10,8 @@ Today note goes too, and nothing is ever ticked:
   - moved to a later day's plan: that day's morning puts it back on Today (day_lists.onto_today), so the line
     just goes;
   - put on a later day's list with no time: it waits for that day's list (day_lists.AheadLists);
-  - skipped for today: it waits in Before today's pool for a day later this week, so it isn't lost;
+  - skipped for today: a to-do waits for a later day this week (never tomorrow unless the user names it), and a
+    meal, routine step or appointment simply ends (not_today.py);
   - dropped (taken off on the user's clear ask): filed in the month's Dropped note (off_today.take_off_list).
 
 A routine's group on Today stays (its steps come and go with the routine), and so does a line while another planned
@@ -125,22 +126,14 @@ def _talking_or_hand(pt: "PlanTools") -> bool:
 
 
 def skip_line(a: Any, line: str) -> str:
-    """Take a line off today's list because it isn't happening today: its copy only when it has a home list; an
-    item that lives only on Today waits in Before today's pool for a day later this week. What happened, in a few
-    words ("" when nothing changed)."""
+    """Take a line off today's list because it isn't happening today (not_today.skipped_off): it ends, is
+    dropped on the user's drop words, or waits for a later day (with a home list, the line there is untouched).
+    What happened, in a few words ("" when nothing changed)."""
     try:
-        homed = has_home(a, line)
-        if not remove_copy(a, line):
-            return ""
-        if not homed:
-            from thirties_core.carry import WEEK, OpenPool
-            pool = OpenPool(a._db)
-            pool.add([{"title": line, "task_id": "", "horizon": WEEK}], a._today())
-            pool.place(line, WEEK)
+        from thirties_core.not_today import skipped_off
+        return skipped_off(a, line, line)
     except Exception:
         return ""
-    return "off today's list; it stays on its own list" if homed else \
-        "off today's list; it waits for a day later this week"
 
 
 def after_skip(pt: "PlanTools", span: "EventSpan") -> str:
@@ -158,15 +151,23 @@ def after_skip(pt: "PlanTools", span: "EventSpan") -> str:
     if held is not None and line is not None:  # held on today: a new block, never an untimed line (today_times)
         from thirties_core.today_times import retime_held
         return retime_held(a, line, span.task_id, span.end_dt, held) or list_stays_note(line, held, pt.today())
-    # --- it didn't happen (its time is past): back to its list, fitted where it makes sense (catch_up.refit) ---
-    from thirties_core.catch_up import refit
-    back = refit(pt, span, line)
-    if back is not None:
-        return back
-    # --- end didn't happen ---
-    if line is None:
-        return ""
-    done = skip_line(a, line)
+    # --- not today: it ends, it's dropped on the user's drop words, or it waits for a later day (not_today.py) ---
+    from thirties_core.not_today import ends_when_skipped, skipped_off
+    from thirties_core.write_guard import asks_to_drop
+    if not (asks_to_drop(getattr(pt, "user_message", None)) or ends_when_skipped(a, span.title, span)):
+        # --- it didn't happen (its time is past): back to its list, fitted where it makes sense (catch_up.refit) ---
+        from thirties_core.catch_up import refit
+        # a skip (the word, or the app's skip button) never puts it back on today; only "didn't happen" may
+        message = getattr(pt, "user_message", None)
+        back = refit(pt, span, line, tonight=message is not None and not asks_to_skip(message))
+        if back is not None:
+            return back
+        # --- end didn't happen ---
+    try:
+        done = skipped_off(a, span.title, line, span)
+    except Exception:
+        done = ""
+    # --- end not today ---
     return f" (also {done})" if done else ""
 
 

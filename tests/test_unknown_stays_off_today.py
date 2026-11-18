@@ -153,7 +153,8 @@ class TestPuttingOnToday(StudioCase):
         finally:
             self.t.user_message = None
         pool = OpenPool(self.db).all()
-        self.assertEqual(pool["order a bag of porcelain"]["start"], (DAY + timedelta(days=1)).isoformat())
+        # off today, and never tomorrow by itself: a later day this week (not_today.py)
+        self.assertEqual(pool["order a bag of porcelain"]["start"], (DAY + timedelta(days=2)).isoformat())
         self.assertEqual(pool["renew the kiln permit"]["start"], DAY.isoformat())  # due today: it stays
         on_plan = [s.title for s in self.t.day_plan.spans if s.start_dt.date() == DAY]
         self.assertNotIn("Order a bag of porcelain", on_plan)

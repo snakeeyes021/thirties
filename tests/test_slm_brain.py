@@ -944,15 +944,16 @@ class TestHelpersForGemma(ParityTestCase):
                                         "duration": "1 hour"})
         self.say("call mom at 8:30", {"type": "add", "title": "Call mom", "start": "8:30", "duration": "30 min"})
         out = self.say("ugh I'm wiped", {"type": "energy", "level": 1})
+        # a later day this week by fit, never tomorrow by itself (not_today.py)
         self.assertEqual(out, "Noted that you're low on energy. For a lighter rest of today, I'd move these to "
-                              "tomorrow:\n- Write the grant report (7:00 PM)\nOkay?")
+                              "Saturday:\n- Write the grant report (7:00 PM)\nOkay?")
         out = self.say("sure", {"type": "chat"})
-        self.assertTrue(out.startswith("Moved to tomorrow: Write the grant report. Go easy on yourself."), out)
+        self.assertTrue(out.startswith("Moved to Saturday: Write the grant report. Go easy on yourself."), out)
         titles = [s.title for s in self.m.day_plan.spans]
         self.assertNotIn("Write the grant report", titles)
         self.assertIn("Call mom", titles)
-        tomorrow = self.m.tools.plan_for("tomorrow")
-        self.assertIn("Write the grant report", [s.title for s in tomorrow.spans])
+        later = self.m.tools.plan_for("saturday")
+        self.assertIn("Write the grant report", [s.title for s in later.spans])
 
     def easy_task(self):
         bank = TaskItem(id="t7", source_notebook="1. Tasks", title="Call the bank", parent_note_title="Errands/Admin",

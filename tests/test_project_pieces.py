@@ -84,15 +84,15 @@ class TestOverruns(ProjectCase):
         settle(self.t.assistant, DAY + timedelta(days=1))
         self.assertIsNone(MissStreaks(self.sched.state_db).get("Fit the door"))  # not counted for the back-off
 
-    def test_with_no_room_today_it_waits_first_for_tomorrow(self):
+    def test_with_no_room_today_it_waits_first_for_a_later_day(self):
         from thirties_core.carry import OpenPool
         self.put("Pottery class", "4:00 PM", 7 * 60, fixed=True)  # the rest of the evening is taken
         out = self.t.execute("log_outcome", {"event": self.timber.id, "status": "done", "started": "2:00 PM",
                                              "finished": "3:40 PM"})
-        self.assertIn("Fit the door, first thing in tomorrow's plan", out)
+        self.assertIn("Fit the door, first thing in Saturday's plan", out)  # never tomorrow by itself (not_today.py)
         self.assertNotIn("Fit the door", [s.title for s in self.t.day_plan.spans])
         rec = OpenPool(self.sched.state_db).all()["fit the door"]
-        self.assertEqual(rec["start"], (DAY + timedelta(days=1)).isoformat())
+        self.assertEqual(rec["start"], (DAY + timedelta(days=2)).isoformat())
 
     def test_an_unrelated_item_displaced_isnt_missed_either(self):
         self.t.execute("remove_event", {"event": self.door.id})

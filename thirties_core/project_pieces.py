@@ -430,7 +430,8 @@ def credit_overrun(assistant, span, planned_end: datetime) -> str:
 
 def _replace_displaced(assistant, spans: List[Any], after: datetime) -> List[str]:
     """Each displaced item: later today where it fits (from the end of the overrun), else off today and first
-    among what's meant for the next day (the open pool). Returns how each one went."""
+    among what's meant for a later day (the open pool; never tomorrow by itself, not_today.py). Returns how each
+    one went."""
     from thirties_core.carry import TODAY, OpenPool
     from thirties_core.clock import first_fitting_thirty, format_clock
     pt = assistant.pt
@@ -460,16 +461,20 @@ def _replace_displaced(assistant, spans: List[Any], after: datetime) -> List[str
         plan.spans = saved  # never lose one: the plan as it was
         raise
     if later:
-        nxt = (plan.target_date + timedelta(days=1)).isoformat()
+        from thirties_core.not_today import day_words, where_to
         for s in later:
             if pt._state_db is not None:
                 pt._state_db.delete_span(s.id)
+        # a later day this week by fit, or the day the user named; never tomorrow by itself (not_today.py)
+        days = {s.id: where_to(pt, s.title, int((s.end_dt - s.start_dt).total_seconds() // 60),
+                               plan.target_date)[0] for s in later}
         if pt._state_db is not None:
             OpenPool(pt._state_db).add([{"title": s.title, "task_id": s.task_id or "", "horizon": TODAY,
-                                         "when": "tomorrow", "start": nxt, "end": nxt,
+                                         "when": days[s.id].strftime("%A"),
+                                         "start": days[s.id].isoformat(), "end": days[s.id].isoformat(),
                                          "why": "displaced when an earlier piece ran long"} for s in later],
                                        plan.target_date)
-        out += [f"{s.title}, first thing in tomorrow's plan" for s in later]
+        out += [f"{s.title}, first thing in {day_words(days[s.id], plan.target_date)}'s plan" for s in later]
     plan.spans.sort(key=lambda s: s.start_dt)
     keep_together(pt, plan)
     return out

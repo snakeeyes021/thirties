@@ -177,11 +177,21 @@ class NoRoomTodayTest(InPersonBase):
         self.t.execute("add_event", {"title": "Pottery class", "start": "4:00 PM", "duration": "2 hours",
                                      "fixed": True})
 
-    def test_a_one_off_goes_to_tomorrow(self):
+    def test_a_one_off_goes_to_a_later_day_this_week_never_tomorrow_by_itself(self):
         trim = self.put("Patch the canoe", at("10:00"), 120)
         out = self.say("an office day for me", "work_on_site", {"on_site": True})
-        self.assertIn("Patch the canoe: no free time outside work today, so tomorrow at", out)
+        self.assertIn("Patch the canoe: no free time outside work today, so Saturday at", out)
         self.assertNotIn(trim.id, [s.id for s in self.t.day_plan.spans if s.status == SpanStatus.PLANNED])
+        tomorrow = self.t.plan_for(DAY + timedelta(days=1))
+        self.assertEqual([s for s in tomorrow.spans if s.title == "Patch the canoe"], [])  # never tomorrow by itself
+        later = self.t.plan_for(DAY + timedelta(days=2))
+        moved = [s for s in later.spans if s.title == "Patch the canoe"]
+        self.assertEqual(len(moved), 1)
+
+    def test_a_one_off_goes_to_the_day_the_user_named(self):
+        self.put("Patch the canoe", at("10:00"), 120)
+        out = self.say("an office day for me, the canoe can wait till tomorrow", "work_on_site", {"on_site": True})
+        self.assertIn("Patch the canoe: no free time outside work today, so tomorrow at", out)
         tomorrow = self.t.plan_for(DAY + timedelta(days=1))
         moved = [s for s in tomorrow.spans if s.title == "Patch the canoe"]
         self.assertEqual(len(moved), 1)

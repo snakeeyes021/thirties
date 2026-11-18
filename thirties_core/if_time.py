@@ -232,25 +232,36 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
         if task is not None and assistant._db is not None:
             assistant.pt.scheduler.state_db.record_task_completed(task.id, assistant._today())
         return f"Done: {title}."
+    # --- tomorrow only on the user's word: otherwise a later day this week, by fit (not_today.py) ---
+    from thirties_core.not_today import tomorrow_unasked
+    if action == "tomorrow" and tomorrow_unasked(assistant.pt, assistant._today() + timedelta(days=1)):
+        action = "week"
+    # --- end tomorrow ---
     if action == "tomorrow":
         from thirties_core.day_lists import AheadLists
         AheadLists(assistant._db).add(assistant._today() + timedelta(days=1), title, task)
         _remove(writer, note, title)
         return f"{title} is on tomorrow's list; it goes on Today in the morning." + due
+    if action == "week" or not drop_said(assistant.pt):  # not today, not dropped: it waits for a later day
+        when = _set_aside(assistant, title, task)
+        _remove(writer, note, title)
+        return (f"{title} waits for {when}." if action == "week" else f"{title} is off today; it waits for {when}.") \
+            + due
     from thirties_core.carry import DROPPED, WEEK, OpenPool
     pool = OpenPool(assistant._db)
     pool.add([{"title": title, "task_id": task.id if task is not None else "", "horizon": WEEK}], assistant._today())
-    if action == "week":
-        pool.place(title, WEEK)
-        _remove(writer, note, title)
-        return f"{title} waits for a day later this week." + due
-    if not drop_said(assistant.pt):  # taken off today, not dropped: it waits for a day later this week
-        pool.place(title, WEEK)
-        _remove(writer, note, title)
-        return f"{title} is off today; it waits for a day later this week." + due
     pool.place(title, DROPPED)  # drop: it stops coming back; its own list (if it has one) is untouched
     _remove(writer, note, title)
     return f"Dropped {title} from today: it won't come back by itself (it's in Before today's archive)." + due
+
+
+def _set_aside(assistant, title: str, task) -> str:
+    """Not today and not dropped: it waits for a later day this week, picked by fit, or the day the user named
+    (not_today.py). The day, as the answer says it."""
+    from thirties_core.not_today import minutes_for, set_aside, when_words, where_to
+    day, named = where_to(assistant.pt, title, minutes_for(assistant, title, task))
+    set_aside(assistant, title, task, day, named)
+    return when_words(assistant.pt, day, named)
 
 
 def _due_today_note(assistant, title: str, task, action: str) -> str:
@@ -327,18 +338,18 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
     else:
         if not remove_copy(assistant, line):
             raise ToolError(f"{line} couldn't be taken off today's list just now.")
+        # --- tomorrow only on the user's word: otherwise a later day this week, by fit (not_today.py) ---
+        from thirties_core.not_today import tomorrow_unasked
+        if action == "tomorrow" and tomorrow_unasked(pt, assistant._today() + timedelta(days=1)):
+            action = "week"
+        # --- end tomorrow ---
         if action == "tomorrow":
             from thirties_core.day_lists import AheadLists
             AheadLists(assistant._db).add(assistant._today() + timedelta(days=1), line,
                                           task if homed else None)
             said = f"{line} is on tomorrow's list; it goes on Today in the morning."
         elif action == "week" or (action == "drop" and not homed):  # off today without a drop word: still to do
-            from thirties_core.carry import WEEK, OpenPool
-            pool = OpenPool(assistant._db)
-            pool.add([{"title": line, "task_id": task.id if homed and task is not None else "", "horizon": WEEK}],
-                     assistant._today())
-            pool.place(line, WEEK)
-            said = f"{line} waits for a day later this week."
+            said = f"{line} waits for {_set_aside(assistant, line, task if homed else None)}."
         else:
             said = f"Took {line} off today's list; it stays on its own list."
     for s in ahead:  # not today: off today's plan too

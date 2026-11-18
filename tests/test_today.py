@@ -520,9 +520,10 @@ class TestMorning(TodayTestCase):
             "keep": [{"item": "Call the bank", "when": "tomorrow", "why": "the branch is closed today"},
                      {"item": "rinse the tank filter", "when": "this weekend"}],
             "drop": [{"item": "Watch the comet", "why": "it was last night"}]})
-        self.assertIn("Keep:\nCall the bank – tomorrow\nRinse the tank filter – this weekend\nDrop:\nWatch the comet", out)  # golden: exact text the user reads
+        # the model's own "tomorrow", with no day in the user's words: a later day this week instead (not_today.py)
+        self.assertIn("Keep:\nCall the bank – Saturday\nRinse the tank filter – this weekend\nDrop:\nWatch the comet", out)  # golden: exact text the user reads
         pool = OpenPool(self.sched.state_db).all()
-        self.assertEqual(pool["call the bank"]["start"], (DAY + timedelta(days=1)).isoformat())  # waits there now
+        self.assertEqual(pool["call the bank"]["start"], (DAY + timedelta(days=2)).isoformat())  # waits there now
         self.assertTrue(pool["watch the comet"]["pending_drop"])  # dropped only on a yes
         cands = {c["title"] for c in self.t.assistant.proposals.candidates(self.t.day_plan)}
         self.assertNotIn("Call the bank", cands)  # tomorrow: not offered today

@@ -7,7 +7,8 @@ yes to wait for. The answer is the user's own report, acted on through the usual
 
 - what happened is recorded as done;
 - what didn't happen goes back to its list, to be fitted where it makes sense, and the answer says so in a line
-  (``refit``): tonight only when it can't wait and there's room, otherwise a day later this week.
+  (``refit``): tonight only when it can't wait and there's room (never for a skip, which means not today),
+  otherwise a later day this week (never tomorrow unless the user names it).
 
 Only one-off items are ever in it (``behind``). Some things never roll: meals, routines and their steps,
 appointments, and anything tied to a time that has passed (a calendar event, a fixed time, a time the user
@@ -94,34 +95,35 @@ def can_wait(assistant, span: EventSpan) -> bool:
     return not ((task is not None and task.urgency == "now") or ASAP_RE.search(span.title or ""))
 
 
-def refit(pt, span: EventSpan, line: Optional[str]) -> Optional[str]:
+def refit(pt, span: EventSpan, line: Optional[str], tonight: bool = True) -> Optional[str]:
     """An item from earlier today the user says didn't happen: back to its list, fitted where it makes sense.
-    Tonight only when it can't wait and there's room; otherwise it waits for a day later this week (the open pool,
-    tied to its home item). Its copy on Today goes. The note for the tool's answer; None when this isn't such an
-    item (it's still ahead, or it never rolls)."""
+    Tonight only when it can't wait, there's room and ``tonight`` allows it (a skip never does: skip means not
+    today, not_today.py); otherwise it waits for a later day this week, never tomorrow unless the user names it.
+    Its copy on Today goes. The note for the tool's answer; None when this isn't such an item (it's still ahead,
+    or it never rolls)."""
     if span.end_dt > pt._now() or not rolls(pt, span):
         return None
     a = getattr(pt, "assistant", None)
     if a is None or getattr(a, "_db", None) is None:
         return None
     title = line or span.title
-    if not can_wait(a, span):
+    if tonight and not can_wait(a, span):
         from thirties_core.today_times import retime_held
         tonight = retime_held(a, title, span.task_id, pt._now(), said="can't wait, so it's on tonight at")
         if tonight:
             return tonight
-    from thirties_core.carry import WEEK, OpenPool
     from thirties_core.leave_today import remove_copy
-    try:
-        pool = OpenPool(a._db)
-        pool.add([{"title": span.title, "task_id": span.task_id or "", "horizon": WEEK}], a._today())
-        pool.place(span.title, WEEK)
+    from thirties_core.not_today import home_task, minutes_for, set_aside, when_words, where_to
+    try:  # a later day this week, never tomorrow unless the user names it (not_today.py)
+        task = home_task(a, span.title, span.task_id)
+        day, named = where_to(pt, span.title, minutes_for(a, span.title, task))
+        set_aside(a, span.title, task, day, named)
         if line is not None:
             remove_copy(a, line)
     except Exception as e:
         logger.warning("Couldn't put %r back for this week: %s", span.title, e)
         return None
-    return f" ({span.title} goes back to its list, for a day later this week)"
+    return f" ({span.title} goes back to its list, for {when_words(pt, day, named)})"
 
 
 __all__ = ["KEY", "rolls", "behind", "due", "question", "mark", "can_wait", "refit"]

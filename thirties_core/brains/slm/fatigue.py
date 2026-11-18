@@ -1,8 +1,8 @@
 """Decision fatigue: when the user is low on energy, Thirties proposes one lighter plan and applies it on "sure"
 (ROADMAP "After 0.1", item 2). One yes/no question, never a menu: choosing is the thing they're short of.
 
-- Low energy (an energy level of 1-2, or "I'm wiped"): the heavy items still ahead today go to tomorrow; the light
-  ones stay. Python decides what's heavy (``steps.effort_of``: a rough effort per item from its wording, length and
+- Low energy (an energy level of 1-2, or "I'm wiped"): the heavy items still ahead today go to a later day this
+  week that Python picks by fit (never tomorrow by itself, not_today.py); the light ones stay. Python decides what's heavy (``steps.effort_of``: a rough effort per item from its wording, length and
   how often it was put off); the user only says yes or no.
 - "You pick" while tired: the suggestions are easy items only, fewer and shorter (see ``SlmBrain._do_suggest``).
 
@@ -76,9 +76,14 @@ class TiredDay:
         heavy = self._heavy_ahead()
         if not heavy:
             return "Noted that you're low on energy. What's left today is already light, so I'll leave it as it is.", False
-        self.state.proposal = [{"event": s.id, "title": s.title, "to_day": "tomorrow"} for s in heavy]
+        from thirties_core.not_today import day_words, later_day
+        minutes = sum(int((s.end_dt - s.start_dt).total_seconds() // 60) for s in heavy)
+        day = later_day(self.tools, heavy[0].title, minutes)  # a later day by fit, never tomorrow by itself
+        when = day_words(day, self.tools.today())
+        self.state.proposal = [{"event": s.id, "title": s.title, "to_day": day.isoformat(), "when": when}
+                               for s in heavy]
         self.state.proposal_kind = "lighten"
-        lines = ["Noted that you're low on energy. For a lighter rest of today, I'd move these to tomorrow:"]
+        lines = [f"Noted that you're low on energy. For a lighter rest of today, I'd move these to {when}:"]
         lines += [f"- {s.title} ({format_clock(thirty_of(s.start_dt))})" for s in heavy]
         lines.append("Okay?")
         return "\n".join(lines), False
@@ -86,12 +91,13 @@ class TiredDay:
     def _apply_lighter_day(self, items: List[Dict[str, Any]]) -> Tuple[str, bool]:
         moved, failed = [], []
         for p in items:
-            ok, out = self._run("update_event", {"event": p["event"], "to_day": p.get("to_day") or "tomorrow"})
+            ok, out = self._run("update_event", {"event": p["event"], "to_day": p.get("to_day")})
             (moved if ok else failed).append(p["title"])
+        when = next((p.get("when") for p in items if p.get("when")), "another day")
         self.state.proposal, self.state.proposal_kind = [], ""
         lines = []
         if moved:
-            lines.append("Moved to tomorrow: " + ", ".join(moved) + ". Go easy on yourself.")
+            lines.append(f"Moved to {when}: " + ", ".join(moved) + ". Go easy on yourself.")
         if failed:
             lines.append("Couldn't move " + ", ".join(failed) + ".")
         return "\n".join(lines), bool(moved)

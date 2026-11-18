@@ -36,10 +36,10 @@ class TestRedraw(unittest.TestCase):
         self.assertTrue(at("19:00") > self.t.day_plan.sunset)       # (the walk can't fit in daylight after the shower)
         self.assertEqual(times["Shower"], ("5:30 PM", "6:00 PM"))   # behind: the next free thirty from now
         self.assertNotIn("Walk", times)                              # after the shower is after sunset: off the plan
-        line_with(out, "Walk", "tomorrow")  # where it went is said
+        line_with(out, "Walk", "Saturday")  # where it went is said: a later day, never tomorrow by itself
         from thirties_core.carry import OpenPool
-        waiting = OpenPool(self.sched.state_db).all()["walk"]  # never lost: in the open pool, for tomorrow
-        self.assertEqual(waiting["when"], "tomorrow")
+        waiting = OpenPool(self.sched.state_db).all()["walk"]  # never lost: in the open pool, for that day
+        self.assertEqual(waiting["when"], "Saturday")
         self.assertEqual(times["Glass"], ("6:30 PM", "7:00 PM"))    # never earlier than planned; before the dinner
         self.assertEqual(times["Dinner with Kim"], ("7:00 PM", "8:00 PM"))
         self.assertEqual(times["Snack"], ("8:00 PM", "8:30 PM"))    # stays put

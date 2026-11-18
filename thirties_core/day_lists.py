@@ -219,6 +219,14 @@ def onto_today(assistant, day: date) -> List[str]:
             assistant._routine_on_today(note, steps)
             done.append(f"put {note['title']} on Today")
         waiting = AheadLists(assistant._db).for_day(day)
+        # --- dropped since it was set aside for this day: it doesn't come back (not_today.py) ---
+        from thirties_core.carry import DROPPED, OpenPool
+        pool = OpenPool(assistant._db).all()
+        gone = [r for r in waiting if (pool.get(r["title"].strip().lower()) or {}).get("horizon") == DROPPED]
+        for r in gone:
+            AheadLists(assistant._db).set_state(day, r["title"], "dropped")
+        waiting = [r for r in waiting if r not in gone]
+        # --- end dropped ---
         known = {t.id for t in assistant.s.tasks}  # linked by its id while its list item is still there
         names = singles + [r["home_id"] if r["home_id"] in known else r["title"] for r in waiting]
         if names:
