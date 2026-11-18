@@ -42,37 +42,35 @@ class TestTheCatchUpWhileAway(CatchUpCase):
         gate.sent()
         self.assertTrue(gate.paused())
         self.svc.evening_catch_up(at("19:10"))
-        self.assertEqual(self.kinds("catch_up"), [])
-        from thirties_core import catch_up
-        self.assertIsNone(catch_up.pending(self.svc.manager().tools, at("19:10")))  # never offered unseen
+        self.assertEqual(self.kinds("checkin"), [])  # never asked unseen
 
     def test_the_list_it_carried_isnt_repeated_under_the_next_bell(self):
         self.svc.evening_catch_up(at("19:10"))
-        self.assertIn("Water the ferns", self.kinds("catch_up")[-1])
+        self.assertIn("Water the ferns", self.kinds("checkin")[-1])
         self.svc.starts(at("20:00"))
         bell = self.kinds("start")[-1]
         self.assertTrue(bell.startswith("🔔 8:00 PM: Film night"), bell)
-        self.assertNotIn("Water the ferns", bell)  # already carried by the offer: not repeated
+        self.assertNotIn("Water the ferns", bell)  # already asked about: not repeated
 
 
 class TestACheckInThatNeverArrived(ServiceCase):
 
     def test_dropped_undelivered_it_doesnt_count(self):
         self.svc.bridge.broadcast.return_value = False  # the phone is out of reach
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         gate = UnansweredCheckins(self.sched.state_db)
         self.assertEqual(gate.count(), 0)  # waiting for the phone: not seen yet
-        self.assertTrue(self.svc.dropped_stale("Just checking in"))  # its moment passed: dropped
+        self.assertTrue(self.svc.dropped_stale("How did it go"))  # its moment passed: dropped
         self.assertEqual(gate.count(), 0)
 
     def test_delivered_late_it_counts(self):
         self.svc.bridge.broadcast.return_value = False
-        self.svc.check_ins(at("18:15"))
-        self.assertTrue(self.svc.delivered_late("Just checking in"))
+        self.svc.check_ins(at("19:15"))
+        self.assertTrue(self.svc.delivered_late("How did it go"))
         self.assertEqual(UnansweredCheckins(self.sched.state_db).count(), 1)
 
     def test_delivered_at_once_it_counts(self):
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         self.assertEqual(UnansweredCheckins(self.sched.state_db).count(), 1)
 
 

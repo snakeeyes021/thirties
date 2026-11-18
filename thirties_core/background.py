@@ -11,7 +11,7 @@ window closed. Every few seconds it:
 - lists what's not marked yet only when that list changed, and after two check-ins with no reply sends no
   more until the user writes again (away.py),
 - tells the phone what was ticked in the app's day panel, with what's next,
-- offers once an evening to move what's still not marked to tonight (catch_up.py),
+- asks once an evening, in one question, about what's still not marked (catch_up.py),
 - holds every message while the user asked for quiet, until they say it's over (holds.py),
 - delivers queued changes to Joplin, and syncs if sync is on.
 
@@ -53,7 +53,7 @@ def phone_text(text: str, emphasis: Sequence[str] = ()) -> str:
 
 
 from thirties_core.holds import PASSES as HOLD_PASSES  # noqa: E402 (what a hold lets through)
-YES_KINDS = ("rollover", "catch_up")  # messages that ask for a yes: a 👍 reaction on Telegram answers them
+YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
 CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
@@ -84,6 +84,22 @@ def day_stretches(plan) -> List[tuple]:
             end = b if b - t < step + timedelta(minutes=30) else t + step
             out.append((t, end))
             t = end
+    return out
+
+
+def back_to_back(spans) -> dict:
+    """Each item's run of back-to-back items (one starting by the time the one before ends), as {id: the run's
+    end}. Status is asked about once, when the run is over, for everything in it: never a question per block."""
+    out: dict = {}
+    run: list = []
+    end = None
+    for s in sorted(spans, key=lambda s: (s.start_dt, s.end_dt)):
+        if run and s.start_dt > end:
+            out.update({x.id: end for x in run})
+            run = []
+        run.append(s)
+        end = s.end_dt if len(run) == 1 else max(end, s.end_dt)
+    out.update({x.id: end for x in run})
     return out
 
 
@@ -593,8 +609,8 @@ class BackgroundService:
         return built is not None and thirty_of(span.start_dt) + timedelta(minutes=15) <= built
 
     def check_ins(self, now: datetime) -> None:
-        """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
-        have no outcome: never twice about an item, never about one already reported or muted. Each goes out at
+        """Heavy: once a stretch of back-to-back items is over (plus the grace period), ask in one message about
+        the items in it that have no outcome (back_to_back: never a question per block per item): never twice about an item, never about one already reported or muted. Each goes out at
         its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
         late day build never pushes check-ins later or sends one for a block that was half over by then."""
         cfg = self.config.assistant
@@ -611,10 +627,14 @@ class BackgroundService:
         def thirty_end(span):  # an item is over when the thirty it ends in is over
             end = thirty_of(span.end_dt - timedelta(seconds=1)) + timedelta(minutes=30)
             return max(end, span.end_dt)
+        runs = back_to_back(s for s in plan.active_spans() if self._plannable(s) and not s.tentative)
+
+        def over(span):  # the run of back-to-back items it's in is over: one batched question, never per block
+            return max(thirty_end(span), runs.get(span.id, span.end_dt))
         due = [s for s in plan.active_spans()
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
-               and thirty_end(s) + grace <= now < thirty_end(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
-        late = [s for s in due if now >= thirty_end(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
+               and over(s) + grace <= now < over(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
+        late = [s for s in due if now >= over(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
         if late:  # its moment passed (the user was talking then), or the day was built too late for it: never sent
             for s in late:
                 asked[s.id] = now.date().isoformat()
@@ -807,22 +827,30 @@ class BackgroundService:
         self.send(join_sections(said, part), "panel", now=now, desktop=False)
 
     def evening_catch_up(self, now: datetime) -> None:
-        """Once an evening, when two or more of today's things are still not marked and there's room tonight:
-        "Move these 5 to tonight?" (catch_up.py). A yes, in the app or on the phone, or a 👍 there, moves them."""
+        """Once an evening: what's still unmarked from today and nobody has asked about yet goes into the one
+        batched status question, worded like a check-in (catch_up.py). Nothing moves by itself: unmarked is
+        unknown, and the user's answer is acted on as their report."""
         if self.level() in ("off", "light") or self._quiet(now) or self._talking(now) or self._turn_running() \
-                or self._held(now) or self._checkins_paused():  # a question too: none while nobody answers
+                or self._held(now) or self._checkins_paused():  # a question: none while nobody answers
             return
         from thirties_core import catch_up
         from thirties_core.messages import missed_for
         tools = self.manager().tools
-        missed = missed_for(tools, now)
-        if not catch_up.due(tools, now, missed):
+        asked = self._remembered("checkins_asked")
+        items = [s for s in catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
+                 if s.id not in asked]  # a check-in asked about it already: once
+        if not catch_up.due(tools, now, items):
             return
-        self.send(catch_up.offer(tools, now, missed), "catch_up", now=now)
+        catch_up.mark(tools, now, items)
+        for s in items:
+            asked[s.id] = now.date().isoformat()
+        self._remember("checkins_asked", asked, now)
+        titles = [s.title for s in sorted(items, key=lambda s: s.start_dt)]
+        names = [self._name(s) for s in sorted(items, key=lambda s: s.start_dt)]
+        self._asked(now, titles)
         from thirties_core.away import LastSentList  # the list it carried counts as sent (away.py)
-        from thirties_core.messages import MissedTracker
-        MissedTracker(self.scheduler.state_db).mark(now, missed)
-        LastSentList(self.scheduler.state_db).mark(now, missed)
+        LastSentList(self.scheduler.state_db).mark(now, items)
+        self.send(catch_up.question(names), "checkin", now=now, expires=now + timedelta(minutes=30))
 
     # --- the people and tickets duties. Each runs inside the tick's own try/except, so one failing
     # never stops the service. ---
@@ -1022,28 +1050,6 @@ class BackgroundService:
             self.send(TEXT[key], "sun", now=now, expires=now + WINDOW * 6)  # in the chat too: the app and the
             # phone show one conversation (the user's parity rule, 10-30)
 
-    def horizon_session(self, now: datetime) -> None:
-        """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short
-        planning session (one proposal, applied on "yes"; horizons.HorizonPlanner.offer_session)."""
-        manager = self.manager()
-        assistant = manager.tools.assistant
-        day = manager.day_plan.target_date
-        if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
-            return
-        try:  # not on top of the morning's message (11-06 replay: two messages a minute apart)
-            sent = self.scheduler.state_db.get_sync_meta("morning_sent_at")
-            if sent and timedelta(0) <= now - datetime.fromisoformat(sent) < timedelta(hours=3):
-                return
-        except ValueError:
-            pass
-        if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
-                or assistant.proposals.pending():  # the morning's leftovers need no answer any more (11-06)
-            return  # one offer at a time: the day's proposal is answered first
-        from thirties_core.horizons import HorizonPlanner
-        text = HorizonPlanner(manager.tools).offer_session()
-        if text:
-            self.send("📅 " + text, "horizon", now=now)
-
     def horizon_review(self, now: datetime) -> None:
         """Keep the longer plans current, quietly: when something that matters changes, and lightly each week or
         month, pull work forward where a plan has room (horizons.HorizonPlanner.review). The next morning says
@@ -1173,10 +1179,10 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
-        waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+        waits = {self.model_fit, self.heads_up, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence, self.panel_ticks,
                  self.evening_catch_up, self.people_nudge, self.rush_tickets}  # nothing to say before the user is up
-        for duty in (self.hold_check, self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
+        for duty in (self.hold_check, self.model_fit, self.moot, self.morning_hello, self.rollover,
                      self.horizon_review, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.panel_ticks, self.evening_catch_up,
                      self.contextual, self.day_times, self.sun, self.today_sync, self.people_nudge, self.rush_tickets,

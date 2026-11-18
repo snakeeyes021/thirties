@@ -62,8 +62,9 @@ class TestTheListOnlyWhenItChanged(AwayCase):
 class TestTwoUnansweredCheckinsThenNone(AwayCase):
 
     def test_the_third_check_in_waits_until_the_user_writes(self):
-        self.svc.check_ins(at("18:15"))  # about Sort the receipts
-        self.svc.check_ins(at("19:15"))  # about Dinner
+        self.add("old", "Oil the hinges", "16:00", "16:15")
+        self.svc.check_ins(at("16:45"))  # about Oil the hinges
+        self.svc.check_ins(at("19:15"))  # about Sort the receipts and Dinner, back to back: one question
         self.assertEqual(len(self.kinds("checkin")), 2)
         self.svc.check_ins(at("21:45"))  # about Film night: two went unanswered
         self.assertEqual(len(self.kinds("checkin")), 2)
@@ -75,17 +76,19 @@ class TestTwoUnansweredCheckinsThenNone(AwayCase):
 
     def test_start_notices_still_go_out_short(self):
         self.add("old", "Oil the hinges", "16:00", "16:15")
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("16:45"))
         self.svc.check_ins(at("19:15"))
         self.svc.starts(at("20:00"))
         self.assertEqual(self.last("start"), "🔔 8:00 PM: Film night")  # no what's next, no list
 
     def test_a_reply_in_between_keeps_them_coming(self):
         self.user_writes("16:30")  # the day's first message builds the day: before the items it asks about
-        self.svc.check_ins(at("18:15"))
-        self.user_writes("18:20")
         self.svc.check_ins(at("19:15"))
+        self.user_writes("19:20")
         self.svc.check_ins(at("21:45"))
+        self.add("tea", "Brew the tea", "22:00", "22:15")
+        self.user_writes("21:50")
+        self.svc.check_ins(at("22:40"))
         self.assertEqual(len(self.kinds("checkin")), 3)  # never two in a row unanswered
 
     def test_the_rule_in_numbers(self):

@@ -1174,32 +1174,15 @@ class HorizonPlanner:
         return "\n".join(lines), picks
 
     def session_text(self, p: Period, picks: List[Candidate]) -> str:
-        """The offer at the natural moment, in the user's words: short, one proposal."""
-        opening = {"week": "A new week", "month": f"A new month ({p.start.strftime('%B')})",
-                   "year": f"A new year ({p.start.year})"}[p.level]
+        """What a planning session put in the period, as one line: a notice, never a question. The schedule just
+        is the schedule: the plan applies at once and the user corrects it if it's wrong."""
         from thirties_core.on_track import track_line
         before = previous_period(p, self.week_start)
         last = track_line(self, before, {"week": "last week", "month": before.start.strftime("%B"),
                                          "year": str(before.start.year)}[p.level])  # how the last one went (C2)
-        lines = [f"{opening}." + (f" {last}" if last else "") + f" For {self.label(p)} I'd plan:"]
-        # one plain line per item, a nested one with its parents; what comes from a longer plan under one heading
-        # that says so once, not after every line
-        loose: List[str] = []
-        groups: Dict[str, List[str]] = {}
-        for c in picks:
-            m = _FROM_PLAN_RE.match(c.why or "")
-            if m is None:
-                why = c.facts()
-                loose.append(self.named(c) + (f" ({why})" if why else ""))
-                continue
-            rest = f"ends {m.group('ends')}" if m.group("ends") else (m.group("left") or "")
-            why = c.facts(why=rest)
-            groups.setdefault(m.group("plan"), []).append(self.named(c) + (f" ({why})" if why else ""))
-        lines += loose
-        for plan, items in groups.items():
-            lines += [from_plan_heading(plan)] + items
-        lines.append(f"Want {self.label(p)} like that?")
-        return "\n".join(lines)
+        names = [self.named(c) for c in picks]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
+        return (f"{last} " if last else "") + f"{_upper_first(self.label(p))}: {listed}."
 
     def named(self, c: "Candidate") -> str:
         """A candidate as the user reads it: a nested list item with its parents (item_path.py), else its short
@@ -1392,17 +1375,20 @@ class HorizonPlanner:
         return None
 
     def offer_session(self) -> Optional[str]:
-        """Called by the background service each tick in the morning: the text to send, once, or None. A period
-        with nothing to plan is marked offered and skipped silently."""
+        """Plan a new period once, at its start: the picks are applied at once, and the one-line notice of what
+        went in is returned (or None). A period with nothing to plan is marked done and skipped silently."""
         p = self.session_due()
         if p is None:
             return None
         self.db.set_sync_meta(f"horizon_session:{p.key}", self.pt._now().isoformat())
-        _, picks = self.propose(p)  # remembered: a "yes" applies exactly this
+        _, picks = self.propose(p)
         if not picks:
             return None
+        self.session_names = [self.named(c) for c in picks]
+        text = self.session_text(p, picks)  # how the last period went, before this one's picks move in
+        self.apply(p)  # at once: no approval step (the user corrects the plan if it's wrong)
         self.db.set_sync_meta("horizon_session_day", self.today().isoformat())
-        return self.session_text(p, picks)
+        return text
 
     # --- for the Frontier prompt ---
 

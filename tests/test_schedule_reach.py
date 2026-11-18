@@ -93,10 +93,9 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts")
 
     def test_the_check_in_ends_with_whats_next_without_asking_twice(self):
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         text = self.last("checkin")
-        self.assertTrue(text.startswith("👋 Just checking in: have you started Dinner yet, or are you still on Sort "
-                                        "the receipts?\n\nThe rest of today:\n"), text)  # it names what's on now: no "Now" line
+        self.assertTrue(text.startswith("👋 How did it go? Did you get to Sort the receipts and Dinner?\n\n"), text)
         self.assertNotIn("Not marked yet", text)  # what it asks about isn't listed under it again
         self.assertIn("8:00 PM – Film night", lines(text))
 
@@ -217,48 +216,30 @@ class TestTheEveningCatchUp(ServiceCase):
 
     def offer(self):
         self.svc.evening_catch_up(at("19:10"))
-        return self.last("catch_up")
+        return self.last("checkin")
 
-    def test_offered_once_with_one_line(self):
+    def test_once_as_the_batched_status_question(self):
         self.svc.evening_catch_up(at("17:30"))  # not before the evening
         self.assertEqual(self.desktop, [])
         text = self.offer()
-        self.assertEqual(text, "Not marked yet:\n10:00 AM – Water the ferns\n10:30 AM – Post the parcel\n"
-                               "4:00 PM – Pump the bike tyres\n\nMove these 3 to tonight?")
+        self.assertTrue(text.startswith("👋 How did it go? Did you get to Water the ferns, Post the parcel and Pump "
+                                        "the bike tyres?"), text)
         self.svc.evening_catch_up(at("19:20"))
         self.assertEqual(len(self.desktop), 1)
 
-    def test_a_yes_moves_them_to_tonight_and_says_whats_next(self):
+    def test_nothing_moves_by_itself(self):
+        before = {s.id: (s.start_dt, s.status) for s in self.svc.manager().day_plan.spans}
         self.offer()
-        out = self.svc.manager().send_user_message("yes", via="telegram")
-        self.assertTrue(out.startswith("Moved to tonight: Water the ferns, Post the parcel and Pump the bike tyres."),
-                        out)
-        plan = self.svc.manager().day_plan
-        moved = {s.id: s for s in plan.spans if s.id in ("fern", "mail", "bike")}
-        self.assertTrue(all(s.start_dt >= at("19:30") and s.status == SpanStatus.PLANNED for s in moved.values()))
-        self.assertTrue(all(s.start_dt.minute in (0, 15, 30, 45) for s in moved.values()))  # block times, stacked
-        self.assertFalse(any(moved[a].start_dt < moved[b].end_dt and moved[b].start_dt < moved[a].end_dt
-                             for a in moved for b in moved if a < b))  # one after another, never on top
-        self.assertIn("The rest of today:", out)
-        stored = [m["content"] for m in self.svc.manager().history()]
-        self.assertEqual(stored[-2:], ["yes", out])  # in the conversation, as on the phone
-        from thirties_core import catch_up
-        self.assertIsNone(catch_up.pending(self.svc.manager().tools, at("19:11")))  # answered: a later yes isn't it
+        after = {s.id: (s.start_dt, s.status) for s in self.svc.manager().day_plan.spans}
+        for sid in ("fern", "mail", "bike"):
+            self.assertEqual(after[sid], before[sid])  # unmarked is unknown: never moved, never marked
+        self.assertNotIn("tonight", self.last("checkin").split("\n\n")[0])
 
-    def test_anything_else_lets_it_go(self):
-        self.offer()
-        from thirties_core import catch_up
-        self.assertEqual(catch_up.answer(self.svc.manager(), "hmm, maybe later", "app"), "")
-        catch_up.let_go(self.svc.manager())  # as every message that isn't the yes does (conversation)
-        self.assertEqual(catch_up.answer(self.svc.manager(), "yes", "app"), "")  # that yes is about something else
-        self.assertIsNone(catch_up.pending(self.svc.manager().tools, at("19:12")))
-
-    def test_a_thumbs_up_is_a_yes(self):
-        from thirties_core import catch_up
-        from thirties_core.background import YES_KINDS
-        self.assertIn("catch_up", YES_KINDS)  # a 👍 reaction on the offer comes in as "👍"
-        self.assertTrue(catch_up.YES_RE.match("👍"))
-        self.assertFalse(catch_up.YES_RE.match("yes but not the parcel"))
+    def test_what_a_check_in_asked_isnt_asked_again(self):
+        self.svc._remember("checkins_asked", {"fern": "x", "mail": "x"}, at("19:00"))
+        text = self.offer()
+        self.assertTrue(text.startswith("👋 How did it go? Did you get to Pump the bike tyres?"), text)
+        self.assertNotIn("Water the ferns", text.split("\n\n")[0])
 
 
 class TestOneTapOnThePhone(OneConversationCase):

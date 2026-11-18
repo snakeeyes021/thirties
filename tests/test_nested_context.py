@@ -251,17 +251,13 @@ class TestPeriodProposal(unittest.TestCase):
         for title, under in (("Harbor Water", ""), ("final reading", "Gas account")):
             self.hp.pin(find(self.tasks, title, under), month)
 
-    def test_where_they_come_from_is_said_once(self):
+    def test_nested_items_are_named_with_their_parents_in_one_line(self):
         text = self.hp.offer_session()
-        lines = text.splitlines()
-        self.assertEqual(text.count("From this month's plan:"), 1, text)
+        self.assertEqual(len(text.splitlines()), 1, text)  # a notice: one line, no question
         self.assertNotIn("from the plan for", text)
-        at_heading = lines.index("From this month's plan:")
-        under = lines[at_heading + 1:-1]
-        self.assertIn("Utility accounts › Harbor Water", under)
-        self.assertIn("Moving out › Gas account › final reading", under)
-        self.assertFalse(any(line.startswith("- ") for line in lines))  # plain lines
-        self.assertTrue(lines[-1].startswith("Want this week"))
+        self.assertIn("Utility accounts › Harbor Water", text)
+        self.assertIn("Moving out › Gas account › final reading", text)
+        self.assertNotIn("?", text)
 
 
 class TestTheMorningReply(unittest.TestCase):

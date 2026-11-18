@@ -92,12 +92,12 @@ class HeldPaths:
         self.assertIn(f"{KILN} was {self.was()}; it's on tomorrow now.", out)
         self.assertEqual(self.planned(KILN), [])
 
-    def test_a_skip_keeps_it_on_todays_list(self):
+    def test_a_skip_gives_it_a_new_block_today(self):
         span = self.kiln_today()
         out = self.say("skip the kiln permit today", "log_outcome", {"event": span.id, "status": "skipped"})
-        self.assertIn(f"{KILN} is {self.words()}, so it stays on today's list", out)
+        self.assertIn(f"{KILN} is {self.words()}, so it's on today's plan again at ", out)
         self.assertIn(f"- [ ] {KILN}", self.body("n_today"))
-        self.assertIn(KILN, pencilled_in(self.a))
+        self.assertNotIn(KILN, pencilled_in(self.a))  # anything for today has a time
 
     def test_move_to_another_day(self):
         span = self.kiln_today()
@@ -122,7 +122,7 @@ class HeldPaths:
     def test_remove_and_clear(self):
         span = self.kiln_today()
         out = self.say("skip the kiln permit today", "remove_event", {"event": span.id})
-        self.assertIn(f"{KILN} is {self.words()}, so it stays on today's list", out)
+        self.assertIn(f"{KILN} is {self.words()}, so it's on today's plan again at ", out)
         self.assertIn(f"- [ ] {KILN}", self.body("n_today"))
         self.due("Wax the canoe hull")  # a line that lives only on Today
         self.api.notes["n_today"]["body"] += "- [ ] Wax the canoe hull\n"

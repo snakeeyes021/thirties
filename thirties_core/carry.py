@@ -16,7 +16,8 @@ The rules, applied once a day when the day is built (after the user's first repl
    - today: it can't wait (urgency "now", or its horizon is today/tomorrow), it's due today or tomorrow, or
      it's quick (15 minutes or less, as the user said);
    - by its deadline: a due date further off;
-   - someday: the user put it there (someday, a someday section, a pick-from menu list);
+   - someday: the user put it there (someday, a someday section, their own horizon for it); never because
+     it sits on a pick-from list or was missed once;
    - this week: everything else; when unsure, this week, never today.
    The morning model revises it (propose_leftovers): drops what has gone moot (a one-time event whose day is
    gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
@@ -274,6 +275,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     displaced = displaced_ids(db, yesterday.target_date)  # an overrun used their time: never a miss
     off_today: List[str] = []
     seen = set()
+    pooled_ids: set = set()  # the home items already kept: never a second record under other words
 
     def never_rolls(title: str, kind_src) -> bool:
         low = title.strip().lower()
@@ -288,7 +290,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
 
     def rollable_item(title: str, low: str) -> Dict[str, str]:
         home = home_of(title)
-        task = tasks.get((home or {}).get("home_id", "")) or listed.get(low)
+        task = tasks.get((home or {}).get("home_id", "")) or listed.get(low) or home_by_label(assistant, title)
         horizon = WEEK if low in untimed_left else choose_horizon(assistant, task, title, day)  # If there's time: this week
         return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else ""),
                 "horizon": horizon, "due": (task.due or "")[:10] if task else ""}
@@ -319,9 +321,13 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
                     ongoing_missed.append({"title": s.title, "due": until.isoformat(), "level": level,
                                            "minutes": int((s.end_dt - s.start_dt).total_seconds() // 60)})
             continue
+        item = rollable_item(s.title, low)
+        if item["task_id"] and item["task_id"] in pooled_ids:
+            continue  # the same item under other words: one record per item
+        pooled_ids.add(item["task_id"])
         if low not in asked_before:
             ask.append(s.title)
-        pool_items.append(rollable_item(s.title, low))
+        pool_items.append(item)
         if s.id not in displaced:
             missed.append(_miss(s, pool_items[-1].get("task_id") or "", tasks))
 
@@ -358,7 +364,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             continue
         link = home_of(title)  # leaves Today only if its home item is really still open on its list
         has_home = bool(link and link.get("home_id") in tasks and tasks[link["home_id"]].list_role != "today") \
-            or low in listed
+            or low in listed or home_by_label(assistant, title) is not None  # "Parent: item" on Today is that item
         if low in done_titles:
             off_today.append(title)  # done on the plan: the morning reset takes it off
             continue
@@ -373,12 +379,39 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low in seen:
             continue
         seen.add(low)
+        item = rollable_item(title, low)
+        if item["task_id"] and item["task_id"] in pooled_ids:
+            if title not in off_today and item["task_id"] in tasks:
+                off_today.append(title)  # a Today copy of an item already kept: it waits on its own list
+            continue  # one record per item, tied to its home list
+        pooled_ids.add(item["task_id"])
         if low not in asked_before:
             ask.append(title)
-        pool_items.append(rollable_item(title, low))
+        pool_items.append(item)
     return {"ask": ask, "off_today": off_today, "ended": ended,
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed,
             "missed": missed, "done": done_items}
+
+
+def home_by_label(assistant, title: str):
+    """The list item a Today line stands for when it's written with its parents, "Parent › item" or "Parent: item"
+    (item_path.label), and no link says so: its home item (never a Today copy). None when it names no single one."""
+    from thirties_core.item_path import SEP, resolve
+    raw = str(title or "").strip()
+    if not raw:
+        return None
+    tasks = [t for t in assistant.s.tasks if getattr(t, "list_role", "") != "today"]
+    for ref in dict.fromkeys((raw, re.sub(r"\s*:\s+", SEP, raw, count=1))):
+        found = resolve(ref, tasks)
+        if found is not None:
+            return found
+    if ":" in raw:  # "Heading: item" where the item has no parents of its own: its list or heading and its words
+        head, own = (x.strip().lower() for x in raw.split(":", 1))
+        same = [t for t in tasks if t.title.strip().lower() == own
+                and head in {str(t.parent_note_title or "").strip().lower(), str(t.section or "").strip().lower()}]
+        if len(same) == 1:
+            return same[0]
+    return None
 
 
 def _miss(span, task_id: str, tasks: Dict[str, Any]) -> Dict[str, str]:
@@ -503,8 +536,10 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
         except Exception:
             minutes = None
     from thirties_core.list_reading import live
-    if task is not None and (task.someday or task.list_role in ("menu", "backlog") or not live(task)) \
-            or horizon == "someday":
+    # someday only by the user's own word (a someday heading, their horizon or urgency for it) or when the item
+    # isn't live any more; a pick-from list or a guessed someday isn't it: an item the plan held yesterday and
+    # missed once waits for this week (when unsure, this week). Long neglect has its own rule (backoff.py: park).
+    if task is not None and (task.someday or not live(task) or user_said_someday(assistant, task)):
         return SOMEDAY
     if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
             or ASAP_RE.search(title or "") \
@@ -513,6 +548,22 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
     if due is not None:
         return DEADLINE
     return WEEK
+
+
+def user_said_someday(assistant, task) -> bool:
+    """The user put this item at someday themselves: their horizon for it, or their urgency for it."""
+    db = getattr(assistant, "_db", None)
+    if db is None or task is None:
+        return False
+    try:
+        from thirties_core.horizons import HorizonCatalog, _urgencies
+        mark = HorizonCatalog(db).items().get(task.id)
+        if mark and mark.get("source") == "user":
+            return mark.get("horizon") == "someday"
+        u = _urgencies(db).get(task.id)
+        return bool(u and u.get("source") == "user" and u.get("urgency") == "someday")
+    except Exception:
+        return False
 
 
 def weekday(day: Optional[date]) -> str:

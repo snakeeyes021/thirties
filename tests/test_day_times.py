@@ -103,19 +103,22 @@ class TestRecording(DayTimesCase):
 
 
 class TestAsking(DayTimesCase):
-    def test_the_morning_question_waits_for_work_to_start(self):
+    def test_no_start_question_of_its_own(self):
         plan, history = self.fresh(), self.history()
-        self.assertIsNone(due_question(plan, at("08:30"), {}, history))
-        key, text = due_question(plan, at("09:00"), {}, history)
-        self.assertEqual(text, "💼 For the record: when did you start work?")  # waking isn't asked (10-31)
-        self.assertIsNone(due_question(plan, at("09:05"), {key: "x"}, history))  # once a day
+        for t in ("08:30", "09:00", "09:30", "12:00"):
+            self.assertIsNone(due_question(plan, at(t), {}, history))  # start and end are asked together, once
+
+    def test_start_and_end_in_one_question_at_works_end(self):
+        key, text = due_question(self.fresh(), at("16:00"), {}, self.history())
+        self.assertEqual(key, "work_end:2026-10-15")
+        self.assertEqual(text, "💼 Done with work? If so, when did you start and finish? (It was planned "
+                               "8:30 AM – 4:00 PM.)")
+        self.assertIsNone(due_question(self.fresh(), at("16:05"), {key: "x"}, self.history()))  # once a day
 
     def test_what_is_known_isnt_asked(self):
-        self.t.execute("log_day_times", {"woke": "7:10 AM"})
-        _, text = due_question(self.fresh(), at("09:00"), {}, self.history())
-        self.assertEqual(text, "💼 For the record: when did you start work?")
-        self.t.execute("log_day_times", {"work_started": "8:30 AM"})
-        self.assertIsNone(due_question(self.fresh(), at("09:00"), {}, self.history()))
+        self.t.execute("log_day_times", {"work_started": "8:45 AM"})
+        _, text = due_question(self.fresh(), at("16:00"), {}, self.history())
+        self.assertEqual(text, "💼 Done with work? If so, when did you finish? (It was planned until 4:00 PM.)")
 
     def test_done_with_work_at_its_planned_end(self):
         plan = self.fresh()
@@ -143,10 +146,14 @@ class TestAsking(DayTimesCase):
         svc.rollover(at("08:50"))
         self.assertEqual(sent, [])  # the morning offer waits for half an hour after the recorded wake
         svc.day_times(at("09:00"))
-        svc.day_times(at("09:15"))
-        self.assertEqual(len(sent), 1)
-        self.sched.config.assistant.message_level = "light"
+        self.assertEqual(sent, [])  # no start question of its own in the morning
         svc.day_times(at("16:00"))
+        svc.day_times(at("16:15"))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("when did you start and finish?", sent[0])
+        self.sched.config.assistant.message_level = "light"
+        self.sched.state_db.set_sync_meta("bg:day_times_asked", "{}")
+        svc.day_times(at("16:20"))
         self.assertEqual(len(sent), 1)  # light is only heads-ups before calendar events
 
 

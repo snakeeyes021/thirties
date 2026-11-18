@@ -68,6 +68,16 @@ _PLANNING_WORDS_RE = re.compile(r"\b(?:put|move|schedule|plan|slot|start|fit|pla
                                 r"before|after|tonight|today|tomorrow|morning|afternoon|evening|\d{1,2}(?::\d{2})?)\b",
                                 re.IGNORECASE)
 
+# asking leave for a change Thirties could just make: "Would you like me to move it?", "Want this week like that?".
+# The schedule just is the schedule: the change is made and said; the only question is when something can't fit.
+_PERIOD_RE = re.compile(r"\b(?:week|weekend|month|year)\b", re.IGNORECASE)
+_THING = r"(?:it|them|that|those|these|this(?: \w+)?|the \w+(?: \w+)?)(?: \d+)?"
+ASKS_LEAVE_RE = re.compile(r"\b(?:would you like me to|do you want me to|want me to|should I|shall I|is it ok(?:ay)? if I|"
+                           r"(?:would you like|do you want|want) " + _THING + r" (?:like that|moved|to move|put|on|at|"
+                           r"for|tonight|today|tomorrow|there)|"
+                           r"(?:move|put|plan|schedule|shift|push) " + _THING + r" (?:to|for|at|on|into) [^?]*\?$)",
+                           re.IGNORECASE)
+
 DROP_OFFER_RE = re.compile(r"\b(?:drop|let (?:it|them|that|those) go|skip (?:it|them|that|those)|remove (?:it|them|"
                            r"that|those)|take (?:it|them|that|those) off|cut (?:it|them|that|those)|leave (?:it|them) "
                            r"off)\b", re.IGNORECASE)
@@ -354,6 +364,12 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     if asked_to_decide and any(hands_back(s) for s in lines) and not _changed(brain, turn_start):
         out.append("it hands the user a choice to make: choose for them, make the change, and say in a "
                    "line what you chose and why")
+    elif any(s.rstrip().endswith("?") and ASKS_LEAVE_RE.search(s) and (_PLANNING_WORDS_RE.search(s) or _PERIOD_RE.search(s))
+             for s in lines) \
+            and not FIT_RE.search(reply) and not (said and is_question(said)):
+        out.append("it waits on a yes for a change you can make: the schedule just is the schedule, so make the change "
+                   "and say in one line what you did, with no question (ask only when something meant for today "
+                   "can't fit)")
     if said is not None and not USER_DROP_RE.search(said or ""):
         if any(DROP_OFFER_RE.search(s) and FIT_RE.search(s) for s in lines):
             out.append("it offers to drop something because today is full; the day's end is no reason to drop "
