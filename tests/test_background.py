@@ -304,9 +304,9 @@ class TestMessageLevels(unittest.TestCase):
         self.sched.state_db.set_sync_meta("last_user_message_at", at("17:30").isoformat())
         self.svc.check_ins(at("17:45"))  # Shower's thirty ended at 5:00: but the user just wrote
         self.assertEqual(self.sent, [])
-        self.svc.check_ins(at("18:12"))  # Food's (until 6) is due at 6:10, its own time: the talk is over
-        self.assertEqual([(k, "Food" in t, "Shower" in t) for k, t in self.sent], [("checkin", True, False)])  # 11-06:
-        # Shower's moment passed while the user was talking: never sent late
+        self.svc.check_ins(at("18:12"))  # the earlier item runs straight into the next (until 6): one question at 6:10
+        self.assertEqual([(k, "Food" in t, "Shower" in t) for k, t in self.sent], [("checkin", True, True)])  # the
+        # run of back-to-back items is asked about once, when it's over: never per block
         self.sched.state_db.upsert_span(EventSpan("x", "Errand", at("15:00"), at("15:20"), SpanCategory.ACTIVITY))
         before = len(self.sent)
         self.svc.starts(at("15:00"))  # during the dentist: quiet

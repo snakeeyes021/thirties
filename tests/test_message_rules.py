@@ -190,23 +190,28 @@ class TestHold(ServiceCase):
 
 
 class TestStartedOrStillOn(ServiceCase):
-    """A check-in asks whether the next item has started, or the user is still on the one before."""
+    """A check-in asks once, when a run of back-to-back items is over, about all of them: never per block."""
 
-    def test_paired_with_whats_on_now(self):
-        self.svc.check_ins(at("18:15"))
+    def test_not_asked_while_the_run_goes_on(self):
+        self.svc.check_ins(at("18:15"))  # Sort the receipts is over, but Dinner follows straight on
+        self.assertEqual([k for k, _ in self.desktop if k == "checkin"], [])
+        self.svc.check_ins(at("19:15"))
         self.assertTrue(self.last("checkin").startswith(
-            "👋 Just checking in: have you started Dinner yet, or are you still on Sort the receipts?"))
+            "👋 How did it go? Did you get to Sort the receipts and Dinner?"), self.last("checkin"))
+        self.assertEqual(len([k for k, _ in self.desktop if k == "checkin"]), 1)
 
     def test_with_nothing_on_now_as_before(self):
         self.svc.check_ins(at("21:45"))  # Film night ended; nothing on now
         self.assertTrue(self.last("checkin").startswith(
             "👋 Just checking in: did you get to Film night, or are you still on it?"))
 
-    def test_several_finished_and_one_on_now(self):
+    def test_everything_in_the_run_in_one_question(self):
         self.add("pot", "Water the pots", "17:30", "17:45")
         self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         self.assertTrue(self.last("checkin").startswith(
-            "👋 How did it go? Did you get to Sort the receipts and Water the pots? And have you started Dinner yet?"))
+            "👋 How did it go? Did you get to Sort the receipts, Water the pots and Dinner?"), self.last("checkin"))
+        self.assertEqual(len([k for k, _ in self.desktop if k == "checkin"]), 1)
 
 
 if __name__ == "__main__":

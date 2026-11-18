@@ -87,6 +87,22 @@ def day_stretches(plan) -> List[tuple]:
     return out
 
 
+def back_to_back(spans) -> dict:
+    """Each item's run of back-to-back items (one starting by the time the one before ends), as {id: the run's
+    end}. Status is asked about once, when the run is over, for everything in it: never a question per block."""
+    out: dict = {}
+    run: list = []
+    end = None
+    for s in sorted(spans, key=lambda s: (s.start_dt, s.end_dt)):
+        if run and s.start_dt > end:
+            out.update({x.id: end for x in run})
+            run = []
+        run.append(s)
+        end = s.end_dt if len(run) == 1 else max(end, s.end_dt)
+    out.update({x.id: end for x in run})
+    return out
+
+
 class BackgroundService:
     TICK_SECONDS = 15
     OUTBOX_EVERY = 60
@@ -593,8 +609,8 @@ class BackgroundService:
         return built is not None and thirty_of(span.start_dt) + timedelta(minutes=15) <= built
 
     def check_ins(self, now: datetime) -> None:
-        """Heavy: once a thirty is over (plus the grace period), ask in one message about the items in it that
-        have no outcome: never twice about an item, never about one already reported or muted. Each goes out at
+        """Heavy: once a stretch of back-to-back items is over (plus the grace period), ask in one message about
+        the items in it that have no outcome (back_to_back: never a question per block per item): never twice about an item, never about one already reported or muted. Each goes out at
         its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
         late day build never pushes check-ins later or sends one for a block that was half over by then."""
         cfg = self.config.assistant
@@ -611,10 +627,14 @@ class BackgroundService:
         def thirty_end(span):  # an item is over when the thirty it ends in is over
             end = thirty_of(span.end_dt - timedelta(seconds=1)) + timedelta(minutes=30)
             return max(end, span.end_dt)
+        runs = back_to_back(s for s in plan.active_spans() if self._plannable(s) and not s.tentative)
+
+        def over(span):  # the run of back-to-back items it's in is over: one batched question, never per block
+            return max(thirty_end(span), runs.get(span.id, span.end_dt))
         due = [s for s in plan.active_spans()
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
-               and thirty_end(s) + grace <= now < thirty_end(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
-        late = [s for s in due if now >= thirty_end(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
+               and over(s) + grace <= now < over(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
+        late = [s for s in due if now >= over(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
         if late:  # its moment passed (the user was talking then), or the day was built too late for it: never sent
             for s in late:
                 asked[s.id] = now.date().isoformat()

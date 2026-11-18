@@ -58,20 +58,20 @@ class TestACheckInThatNeverArrived(ServiceCase):
 
     def test_dropped_undelivered_it_doesnt_count(self):
         self.svc.bridge.broadcast.return_value = False  # the phone is out of reach
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         gate = UnansweredCheckins(self.sched.state_db)
         self.assertEqual(gate.count(), 0)  # waiting for the phone: not seen yet
-        self.assertTrue(self.svc.dropped_stale("Just checking in"))  # its moment passed: dropped
+        self.assertTrue(self.svc.dropped_stale("How did it go"))  # its moment passed: dropped
         self.assertEqual(gate.count(), 0)
 
     def test_delivered_late_it_counts(self):
         self.svc.bridge.broadcast.return_value = False
-        self.svc.check_ins(at("18:15"))
-        self.assertTrue(self.svc.delivered_late("Just checking in"))
+        self.svc.check_ins(at("19:15"))
+        self.assertTrue(self.svc.delivered_late("How did it go"))
         self.assertEqual(UnansweredCheckins(self.sched.state_db).count(), 1)
 
     def test_delivered_at_once_it_counts(self):
-        self.svc.check_ins(at("18:15"))
+        self.svc.check_ins(at("19:15"))
         self.assertEqual(UnansweredCheckins(self.sched.state_db).count(), 1)
 
 

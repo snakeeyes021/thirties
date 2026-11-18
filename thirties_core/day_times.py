@@ -253,27 +253,15 @@ def due_question(plan: DayPlan, now: datetime, asked: Dict[str, str],
     wake = (sleep.planned_end or sleep.end_dt) if sleep else plan.day_start
     work_start = (work.planned_start or work.start_dt) if work else None
 
-    key = f"morning:{day}"
-    ask_at = wake + MORNING_ASK_AFTER_WAKE
-    if work_start and work_start - wake <= WORK_START_NEAR_WAKE:
-        ask_at = max(ask_at, work_start + MORNING_ASK_AFTER_WORK_START)
-    need_wake = False  # not asked (10-31: asking for the wake time was unwanted); told, or from
-    # a tracker (0.3), it's used
-    need_start = work is not None and work_start is not None and not _known(work, end=False) \
-        and work_start <= ask_at
-    if key not in asked and (need_wake or need_start) and ask_at <= now < ask_at + ASK_WINDOW:
-        if need_wake and need_start:
-            text = "☀️ For the record: when did you wake up, and when did you start work?"
-        elif need_wake:
-            text = "☀️ For the record: when did you wake up?"
-        else:
-            text = "💼 For the record: when did you start work?"
-        return key, text
-
+    # Work's start and end are asked together, once, at work's end: never a start question of its own in the
+    # morning (ask about status once, batched). Waking isn't asked at all (10-31): told, or from a tracker.
     key = f"work_end:{day}"
     if work is not None and key not in asked and not _known(work, end=True):
         end = work.planned_end or work.end_dt
         if end <= now < end + ASK_WINDOW and work.start_dt < now:
+            if work_start is not None and not _known(work, end=False):
+                return key, (f"💼 Done with work? If so, when did you start and finish? (It was planned "
+                             f"{format_clock(work_start)} – {format_clock(end)}.)")
             return key, f"💼 Done with work? If so, when did you finish? (It was planned until {format_clock(end)}.)"
     return None
 
