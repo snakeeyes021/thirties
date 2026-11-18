@@ -203,6 +203,13 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
         # --- end any other item ---
     writer = assistant._writer()
     task = assistant._exact_task(title)
+    # --- also on today's plan: the line here is a leftover; the planned one stays (relations.py) ---
+    planned = on_plan_today(assistant.pt, title, task)
+    if planned is not None and action in ("tomorrow", "week", "drop") and not drop_said(assistant.pt):
+        _remove(writer, note, title)
+        return (f"{title} stays on today's plan at {format_clock(planned.start_dt)}, so it's off "
+                f"{HEADING}.")
+    # --- end also on today's plan ---
     due = _due_today_note(assistant, title, task, action)  # due today: it goes only on a clear word (due_today.py)
     if action == "schedule":
         if time:
@@ -369,6 +376,17 @@ def drop_said(pt) -> bool:
         return True
     from thirties_core.write_guard import asks_to_drop
     return asks_to_drop(message)
+
+
+def planned_out(assistant, title: str) -> bool:
+    """An item now on the plan another way (a follow-up named like it): its line leaves the heading, as when it's
+    scheduled from here. True when it was there."""
+    note = assistant._today_note()
+    line = next((t for t in items(note) if t.strip().lower() == str(title).strip().lower()), None)
+    if line is None:
+        return False
+    _move_out(assistant._writer(), note, line)
+    return True
 
 
 def _move_out(writer, note, title: str) -> None:

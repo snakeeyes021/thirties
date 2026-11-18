@@ -367,9 +367,12 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     elif any(s.rstrip().endswith("?") and ASKS_LEAVE_RE.search(s) and (_PLANNING_WORDS_RE.search(s) or _PERIOD_RE.search(s))
              for s in lines) \
             and not FIT_RE.search(reply) and not (said and is_question(said)):
-        out.append("it waits on a yes for a change you can make: the schedule just is the schedule, so make the change "
-                   "and say in one line what you did, with no question (ask only when something meant for today "
-                   "can't fit)")
+        # a change the user didn't ask for isn't made to drop the question: they hear the fact instead (a rewrite
+        # once moved an item under way to the afternoon, unasked, to answer when it would end)
+        out.append("it waits on a yes for a change you can make: the schedule just is the schedule. If the user asked "
+                   "for that change, make it and say in one line what you did; if they didn't, don't make it: say "
+                   "the fact plainly (when it ends, what it runs into) and leave the plan as it is. No question "
+                   "either way (ask only when something meant for today can't fit)")
     if said is not None and not USER_DROP_RE.search(said or ""):
         if any(DROP_OFFER_RE.search(s) and FIT_RE.search(s) for s in lines):
             out.append("it offers to drop something because today is full; the day's end is no reason to drop "
