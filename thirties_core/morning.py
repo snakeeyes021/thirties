@@ -74,6 +74,10 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
         except Exception as e:
             logger.warning("Couldn't say what the plans pulled forward: %s", e)
     week = week_line(manager) if assistant is not None and db is not None else ""
+    # --- the leftovers said from the plan as it stands once every placement is made (leftover_facts.py) ---
+    from thirties_core.leftover_facts import restate
+    text = restate(assistant, text)
+    # --- end as it stands ---
     facts = "\n\n".join(t for t in (holiday, unread, invites, ahead if level != "off" or text else "", text, pulled,
                                     week) if t)
     brief = assistant.leftover_brief() if assistant is not None else ""

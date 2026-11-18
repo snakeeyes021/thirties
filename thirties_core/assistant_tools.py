@@ -1975,20 +1975,10 @@ class AssistantTools(KindTools):
 
     def leftover_notice(self) -> str:
         """The morning's word on the leftovers, as Python says it (the model says it in its own words)."""
-        import json
-        from thirties_core.carry import notice_text
-        from thirties_core.messages import carried_where
-        raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
-        data = json.loads(raw) if raw else {}
-        lo = data.get("leftovers") or {}
-        today = self._today().isoformat()
-        on_today = [k for k in lo.get("keep", []) if k.get("end") and k["end"] <= today
-                    and k["title"] not in data.get("overflow", [])]
-        from thirties_core.item_path import named  # a nested list item with its parents
-        return notice_text(len(lo.get("keep", [])), len(on_today), len(lo.get("drop", [])),
-                           [named(self.s.tasks, t) for t in data.get("overflow", [])],
-                           [(named(self.s.tasks, k["title"], k.get("task_id")), carried_where(self.pt.day_plan, k))
-                            for k in lo.get("keep", []) if k.get("when")])
+        # --- from the plan as it stands, never from the windows the items were kept for (leftover_facts.py) ---
+        from thirties_core.leftover_facts import notice
+        return notice(self)
+        # --- end from the plan ---
 
     def leftover_brief(self) -> str:
         """For the morning model: each leftover as proposed, with what it carries, and what doesn't fit today."""
@@ -2005,23 +1995,28 @@ class AssistantTools(KindTools):
             return ask
         tasks = {t.id: t for t in self.s.tasks}
         lines = []
+        from thirties_core import leftover_facts  # where each one is now, on the plan (leftover_facts.py)
+        now_facts = leftover_facts.facts(self)
+        where = leftover_facts.where_now(now_facts)
         for k in lo.get("keep", []):
             t = tasks.get(k.get("task_id") or "")
-            facts = [f"kept: {k.get('when')}"] + ([f"due {t.due[:10]}"] if t is not None and t.due else []) + (
+            facts = [f"kept: {where.get(k['title'].lower()) or k.get('when')}"] + ([f"due {t.due[:10]}"] if t is not None and t.due else []) + (
                 [f"urgency {t.urgency}"] if t is not None and t.urgency else []) + (
                 [f"list {t.parent_note_title}"] if t is not None and t.parent_note_title else ["no list"]) + (
-                ["DOESN'T FIT TODAY"] if k["title"] in data.get("overflow", []) else [])
+                ["DOESN'T FIT TODAY"] if k["title"] in data.get("overflow", [])
+                and leftover_facts.span_of(self.pt.day_plan, k) is None else [])
             from thirties_core.item_path import named  # a nested list item with its parents
             lines.append(f"- {named(tasks, k['title'], k.get('task_id'), 200)} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
-        return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; today's "
-                "are on the plan):\n" + "\n".join(lines) + ("\n" + ask if ask else ""))
+        return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; where each "
+                "one is now):\n" + "\n".join(lines) + "\nAS THE PLAN STANDS NOW (say these counts): "
+                + leftover_facts.summary(now_facts, names=False) + ("\n" + ask if ask else ""))
 
     def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python
         works out the days) or dropped. Kept items wait there at once; drops wait for the user's yes."""
         import json
-        from thirties_core.carry import OpenPool, proposal_lines, resolve_when
+        from thirties_core.carry import OpenPool, resolve_when
         raw = self._db.get_sync_meta(self._rollover_key()) if self._db else None
         data = json.loads(raw) if raw else {}
         pending = (data.get("leftovers") or {}).get("keep", []) + (data.get("leftovers") or {}).get("drop", [])
@@ -2089,11 +2084,10 @@ class AssistantTools(KindTools):
         data["leftovers"] = {"keep": new_keep, "drop": new_drop}
         data["overflow"] = [o["title"] for o in overflow]
         self._db.set_sync_meta(self._rollover_key(), json.dumps(data))
-        return ("In effect now, no approval needed: today's Keeps are on the plan" +
-                (", except what doesn't fit: " + ", ".join(data["overflow"]) if data["overflow"] else "") +
-                "; the rest wait at their horizon; drops are applied by themselves after today unless the user says "
-                "otherwise. Say it as a short notice (see Before today), not a question:\n" +
-                proposal_lines(new_keep, new_drop, _short))
+        # --- what's in effect, read from the plan after these placements (leftover_facts.py) ---
+        from thirties_core.leftover_facts import tool_result
+        return tool_result(self)
+        # --- end in effect ---
 
     def apply_rollover(self, skip: Any = None, **_: Any) -> str:
         """Apply the last rollover proposal; items in ``skip`` (titles or words) go back to the lists (and off the
