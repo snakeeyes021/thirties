@@ -153,11 +153,13 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
 
 
 def _off_list(pt: "PlanTools", line: str, title: str) -> str:
-    """Off today's list as the user put it: dropped on a clear ask (take_off_list), or just not today on a skip
-    (leave_today.skip_line: an item that lives only on Today waits for a day later this week)."""
+    """Off today's list as the user put it: dropped only on a drop word (take_off_list; write_guard.asks_to_drop),
+    else just not today (leave_today.skip_line: an item that lives only on Today waits for a day later this week).
+    "Take it off" is about today: the item stays to do."""
     from thirties_core.leave_today import skip_line
+    from thirties_core.write_guard import asks_to_drop
     message = getattr(pt, "user_message", None)
-    if message is not None and not asks_to_clear(message, title) and _assistant(pt) is not None:
+    if message is not None and not asks_to_drop(message) and _assistant(pt) is not None:
         return skip_line(_assistant(pt), line)
     return take_off_list(pt, line)
 

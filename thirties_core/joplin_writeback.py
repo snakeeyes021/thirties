@@ -437,6 +437,18 @@ class JoplinWriter:
             if found:
                 return "failed", (f"not written: the text still holds a hidden detail ({found}) where the real "
                                   "wording goes; ask the user how it should read.")
+        # --- the user's words have to say it: dropped for good, or done (write_guard.py) ---
+        if current_turn.get():
+            from thirties_core.write_guard import refused as unsaid
+            why = unsaid(op, current_turn.get(), self.db)
+            if why:
+                logger.info("Refused a Joplin change the user's words don't ask for: %s", op.get("op"))
+                try:
+                    WriteLog(self.db).record(op, str(op.get("title") or ""), False, why, "", "")
+                except Exception as e:  # the log must never stop the refusal
+                    logger.warning("Couldn't log the refused change: %s", e)
+                return "failed", why
+        # --- end the user's words ---
         if current_turn.get() and "_turn" not in op:
             op = {**op, "_turn": current_turn.get()[:500]}
         if self.api.ping() and not self._held(op):
