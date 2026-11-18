@@ -356,7 +356,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Act on any item on today's list (the Today note), under If there's time or not: done; "
                        "schedule (the next free time that fits, or the time the user names); tomorrow; week (later "
                        "this week); or drop (off today's list and today's plan; its own list is untouched). The way "
-                       "to take something off today's list that the user skips or puts off.",
+                       "to take something off today's list that the user skips or puts off. Drop only on the user's "
+                       "drop words ('drop it', 'not doing it', 'forget it', 'for good'); 'take it off' is week or "
+                       "tomorrow, and it stays to do. If they say it happened (done, paid, sent), it's done.",
         "parameters": {"item": "The item, as worded on today's list.",
                        "action": "done, schedule, tomorrow, week or drop.",
                        "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
@@ -671,13 +673,14 @@ class AssistantTools(KindTools):
                 self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
                     # (a wishlist item), or nothing to write (a routine is a template)
-                    writer.submit(complete_op(home))
+                    writer.submit({**complete_op(home), "_twin": True})  # judged with its twin (write_guard.py)
                 self._took_off(lambda t: t.id == home.id)
             return
         title = links.today_title_of(task.id)
         exact = next((text for text, ticked in note_items(today) if title and text.lower() == title and not ticked), None)
         if exact:
-            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
+            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact,
+                           "_twin": True})  # judged with its twin (write_guard.py)
             self._took_off(lambda t: t.parent_note_id == today["id"] and t.title == exact)
 
     def _took_off(self, gone) -> None:
@@ -1361,6 +1364,12 @@ class AssistantTools(KindTools):
                                 "Record it with doing_now; mark it done when they say it's over.")
             if said == "not":
                 raise ToolError(f"The user said {name} hasn't happened, so it isn't done. Leave it as it is.")
+            # --- going, on or fine is no done, however loosely the words point to it (write_guard.py) ---
+            from thirties_core.write_guard import state_not_done
+            going = state_not_done(words, name, others)
+            if going:
+                raise ToolError(going)
+            # --- end going or fine ---
         if span is None and task is None and st == SpanStatus.DONE and not ITEM_ID.fullmatch(str(event).strip()):
             # --- a done that's an open item on the user's lists ticks that item, never a new one (done_on_lists.py) ---
             from thirties_core.done_on_lists import on_the_lists
@@ -2231,6 +2240,8 @@ class AssistantTools(KindTools):
                     pool.set(t, filed_key=op["key"])
                     self.s.tasks = [x for x in self.s.tasks if not (home is not None and x.id == home.id)]
                     done.append(t)
+                else:
+                    continue  # not filed: nothing else about it is written, so its Today line stays too
             if note is not None and t in open_today and (op is None or op["note_id"] != note["id"]):
                 writer.submit({"op": "remove", "note_id": note["id"], "title": t})  # its Today copy
                 self.s.tasks = [x for x in self.s.tasks if not (x.parent_note_id == note["id"] and x.title == t)]

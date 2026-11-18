@@ -13,6 +13,11 @@ clear an item from the list was also read as the item being finished. Now:
 
 A move said with such words (dropping it to a later time instead) isn't a clear ask; neither is a title that is
 itself the verb (an item whose own name starts with clear or drop).
+
+Taking something off today isn't dropping it: without a drop word (write_guard.asks_to_drop) the item stays to do,
+on its own list or, when Today is its only place, in Before today's pool. And when the user says it happened as
+well ("the rent's paid, take it off"), taking it off is the done: it is ticked done, never filed as dropped, and
+its line is never taken away before the tick (done_instead).
 """
 
 from __future__ import annotations
@@ -72,12 +77,55 @@ def clear_not_done(pt: "PlanTools", title: str) -> Optional[str]:
         return None
     if not asks_to_clear(message, title) or _DONE_RE.search(message):
         return None
+    from thirties_core.write_guard import says_done  # "paid", "sent": it happened, said with the take-off
+    if says_done(message, title, _other_titles(pt, title), strict=True):
+        return None
     return (f"The user asked to take {title} off, not that it's finished, so it isn't marked done (clearing isn't "
             "finishing). Take it off with remove_event; if they finished it, they'll say so.")
 
 
 def _assistant(pt: "PlanTools") -> Any:
     return getattr(pt, "assistant", None)
+
+
+def _other_titles(pt: "PlanTools", title: str) -> List[str]:
+    """The day's other items: the plan's and the lines on today's list."""
+    titles = []
+    for s in pt.day_plan.spans:
+        try:
+            titles.append(pt._title(s))
+        except Exception:
+            titles.append(s.title)
+    a = _assistant(pt)
+    if a is not None:
+        try:
+            from thirties_core.today import note_items
+            titles += [t for t, _ in note_items(a._today_note())]
+        except Exception:
+            pass
+    low = title.strip().lower()
+    return list(dict.fromkeys(t for t in titles if t and t.strip().lower() != low))
+
+
+def said_done_too(pt: "PlanTools", title: str) -> bool:
+    """The user asks to take the item off and says it happened ("the rent's paid, take it off"), with no drop word:
+    the take-off is a done."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or message is None:
+        return False
+    from thirties_core.write_guard import asks_to_drop, says_done
+    return not asks_to_drop(message) and says_done(message, title, _other_titles(pt, title), strict=True)
+
+
+def done_instead(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
+    """remove_event for an item the user says happened: it is marked done instead (ticked in Joplin, filed as done,
+    never dropped); nothing is taken off before the tick. A refused or failed done raises, so nothing else is
+    written about the item. None when the user didn't say it happened."""
+    a = _assistant(pt)
+    if a is None or span.source == "calendar" or span.is_envelope or not said_done_too(pt, pt._title(span)):
+        return None
+    out = a.log_outcome(event=span.id, status="done")
+    return f"Marked {pt._title(span)} done instead of taking it off (the user said it happened): {out}"
 
 
 def today_line(pt: "PlanTools", title: str, task_id: Optional[str] = None) -> Optional[str]:
@@ -176,6 +224,9 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     line = today_line(pt, task.title if task is not None else name, task.id if task is not None else None)
     if line is None:
         return None
+    if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
+        from thirties_core.if_time import act
+        return act(a, line, "done")
     if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None:
         from thirties_core.done_reference import check
         held, _ = check(pt, line, [task.id] if task is not None else [])

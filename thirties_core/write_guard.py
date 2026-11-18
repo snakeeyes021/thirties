@@ -43,7 +43,8 @@ YES_RE = re.compile(r"^\W*(?:yes|yep|yeah|yup|yea|correct|right|exactly|that one
 # under way, or merely all right: never a done
 STATE_RE = re.compile(
     r"\b(?:running|going|firing|started|starting|underway|under way|in progress|on its way|heating|warming|"
-    r"cooling|soaking|drying|loading|working|fine|ok|okay|alright|all right|good|on|still)\b", re.IGNORECASE)
+    r"cooling|soaking|drying|loading|working|fine|ok|okay|alright|all right|good)\b|"
+    r"\bon\s*$", re.IGNORECASE)  # "the kiln is on", said at the end; "worked on the railing" is something else
 _NOT_DONE_RE = re.compile(r"\b(?:not|never|haven'?t|hasn'?t|didn'?t|isn'?t|wasn'?t|yet to)\b|n't\b", re.IGNORECASE)
 _CLAUSE_RE = re.compile(r"[.;!?\n,]+|\b(?:and|but|so|then|while)\b", re.IGNORECASE)
 # past tenses that aren't the thing happening
@@ -51,7 +52,7 @@ _NOT_PAST = {"started", "scheduled", "planned", "needed", "wanted", "supposed", 
              "asked", "wondered", "guessed", "worried", "listed", "added", "moved", "pushed", "postponed"}
 _IRREGULAR = {"buy": "bought", "make": "made", "write": "wrote", "take": "took", "get": "got", "do": "did",
               "go": "went", "send": "sent", "pay": "paid", "bring": "brought", "throw": "threw", "find": "found",
-              "sell": "sold", "tell": "told", "pick": "picked", "put": "put", "set": "set", "run": "ran"}
+              "sell": "sold", "tell": "told", "sweep": "swept", "build": "built", "lend": "lent", "spend": "spent", "hang": "hung", "wind": "wound", "drive": "drove", "give": "gave", "ring": "rang", "throw": "threw", "pick": "picked", "put": "put", "set": "set", "run": "ran"}
 
 
 def _said(turn: str) -> str:
@@ -81,19 +82,58 @@ def _past_of_title(message: str, title: str) -> bool:
     return False
 
 
-def says_done(message: Optional[str], title: str, others=()) -> bool:
-    """Whether the user's words say this item happened: a done word, its verb in the past, or a plain yes; and no
-    clause about it says it's only under way, merely all right, or not done."""
+def _about(clause: str, title: str, others: list) -> bool:
+    """The clause names the item: as started reads it, or loosely (done_words.named). Loose words only point."""
+    from thirties_core.done_words import named
+    from thirties_core.started import _names
+    return _names(clause, title, others) or named(clause, title, others)
+
+
+def _done_in(clause: str, title: str) -> bool:
+    return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
+
+
+def state_not_done(message: Optional[str], title: str, others=()) -> str:
+    """Why the user's words say this item isn't finished: what they say about it is that it's under way, merely all
+    right, or not done ("the kiln is firing", "the glaze is fine", "kiln's on"). When no clause names it (a reply
+    like "it's running" to a question about it), the clauses that name no other item are about it. "" when no
+    such thing is said. However loosely the words point to the item, they never make a done of these."""
+    if not message:
+        return ""
+    from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
+    others = [o for o in others if o and o != title]
+    # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
+    told = " ".join(t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t))
+    clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip()]
+    about = [c for c in clauses if _about(c, title, others)]
+    if not about:
+        about = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
+    for c in about:
+        if not _done_in(c, title) and (STATE_RE.search(c) or _NOT_DONE_RE.search(c)):
+            return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
+                    "Leave it open; it's done when they say it is.")
+    return ""
+
+
+def says_done(message: Optional[str], title: str, others=(), strict: bool = False) -> bool:
+    """Whether the user's words say this item happened: a done word or its verb in the past, said about it (or in a
+    clause naming no other item), or a plain yes; and nothing about it says it's only under way, merely all right,
+    or not done. ``strict``: only done words and the item's own verb count (any past tense about the item counts
+    otherwise), and a question says nothing ("how come the rent got moved?")."""
     if not message:
         return False
-    from thirties_core.started import _names, not_finished
-    if not_finished(message, title, list(others)) in ("begun", "not"):
+    from thirties_core.started import FINISHED_RE, _SENTENCE_RE, _asks, not_finished
+    others = [o for o in others if o and o != title]
+    if not_finished(message, title, others) in ("begun", "not") or state_not_done(message, title, others):
         return False
-    for clause in _CLAUSE_RE.split(message):
-        if clause.strip() and _names(clause, title, list(others)) and not DONE_WORDS_RE.search(clause) \
-                and not _past_of_title(clause, title) and (STATE_RE.search(clause) or _NOT_DONE_RE.search(clause)):
-            return False  # "the kiln is firing", "the glaze is fine": about it, and not a done
-    return bool(DONE_WORDS_RE.search(message) or _past_of_title(message, title) or YES_RE.match(message))
+    if strict:
+        message = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
+    clauses = [c for c in _CLAUSE_RE.split(message) if c and c.strip()]
+    if any(_about(c, title, others) and (_done_in(c, title) or (not strict and FINISHED_RE.search(c)))
+           for c in clauses):
+        return True
+    free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
+    return any(_done_in(c, title) for c in free) or bool(YES_RE.match(message))
 
 
 def _is_today(db: Any, note_id: str) -> bool:
@@ -106,8 +146,8 @@ def _is_today(db: Any, note_id: str) -> bool:
 
 def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     """Why this change can't be written on the user's words this turn; "" when it can (or isn't judged here)."""
-    if not turn or op.get("valid_until"):
-        return ""  # outside a turn, or this morning's housekeeping
+    if not turn or op.get("valid_until") or op.get("_twin"):
+        return ""  # outside a turn, this morning's housekeeping, or the twin of a tick that went through
     message = _said(turn)
     kind = op.get("op")
     title = str(op.get("title") or "")
@@ -124,4 +164,4 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     return ""
 
 
-__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "STATE_RE", "asks_to_drop", "says_done", "refused"]
+__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "STATE_RE", "asks_to_drop", "says_done", "state_not_done", "refused"]
