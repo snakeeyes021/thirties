@@ -881,6 +881,10 @@ class PlanTools:
                 span = found
         except ToolError:
             span = None
+            # --- given by its list line's id, a planned copy moves to now, never a second one (duplicates.py) ---
+            from thirties_core.duplicates import planned_copy
+            span = planned_copy(self, item)
+            # --- end given by its list line's id ---
         if span is None and self.assistant is not None:
             self.assistant.refuse_routine_as_item(str(item))
         title = span.title if span is not None else self._words_for(str(item).strip())[0]
@@ -1307,6 +1311,10 @@ class PlanTools:
                    was if shift not in (None, "") else None)
         # --- end a time the user stated ---
         self._persist(span)
+        # --- stretched over its own copy, it's one item (duplicates.py) ---
+        from thirties_core.duplicates import merge_covered
+        notes = list(notes or []) + merge_covered(self, span)
+        # --- end stretched over its own copy ---
         notes = self._if_doing_now(span, notes)
         self._save_plan_after_change()
         extra = f" ({'; '.join(notes)})" if notes else ""
@@ -1497,6 +1505,13 @@ class PlanTools:
             if instead is not None:
                 return instead
         # --- end said it happened ---
+        # --- the plan's own duplicate of an item comes off: covered by its copy, or said to be there twice ---
+        from thirties_core.duplicates import extra_copy
+        if not span.is_envelope and outer_tool() == "remove_event" and extra_copy(self, span):
+            self._drop(span)
+            self._save_plan_after_change()
+            return f"Removed {self.describe(span)}; its other copy stays on the plan."
+        # --- end the plan's own duplicate ---
         if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
                 and self.user_message is not None
                 and not REMOVE_WORDS_RE.search(self.user_message)
