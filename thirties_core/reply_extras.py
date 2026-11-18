@@ -50,9 +50,19 @@ _ABOUT = re.compile(
     r"(?:re)?send(?:ing)? (?:me )?the list|the list (?:at|on) the (?:end|bottom)|"
     r"(?:extra|added) (?:lines|stuff|bits)|lines? (?:at|on) the (?:end|bottom)|"
     r"(?:half[- ]hour|block)\b[^.?!\n]{0,24}\bat the top|"
-    r"\b(?:stop|no|drop|skip|quit|lose|cut)\s+(?:the |those |these |all the )?(?:lists?|lines)\b", re.IGNORECASE)
+    r"\b(?:stop|no|drop|skip|quit|lose|cut)\s+(?:the |those |these |all the )?(?:lists?|lines)\b|"
+    # the lists added to replies, said the many ways people say it: "the reminder lists", "no more lists", "stop
+    # sending me those lists" (plural, or named as reminders: "take X off the list" is about the schedule, not this)
+    r"\breminder lists?\b|\bno (?:more )?lists?\b|"
+    r"\b(?:stop|quit|drop|skip|lose|cut|enough)\s+(?:\w+\s+){0,4}lists\b|"
+    r"\b(?:don'?t|dont|do not)\s+(?:need|want)\s+(?:\w+\s+){0,2}lists?\b|"
+    # the schedule laid out in blocks: "no time blocks", "without the blocks", "just the items"
+    r"\b(?:no|without|stop|drop|skip|lose|cut)\s+(?:the |those |these |any )?(?:time |half[- ]hour )?blocks\b|"
+    r"\bjust the (?:items|tasks|things)\b", re.IGNORECASE)
 _STOP = re.compile(r"\b(?:stop|don'?t|dont|no more|no need|quit|leave (?:it|them|that) out|without|turn (?:it |them )?off|"
-                   r"hide|drop|skip|remove|delete|cut|lose|get rid|no (?:the )?(?:lists?|lines))\b", re.IGNORECASE)
+                   r"hide|drop|skip|remove|delete|cut|lose|get rid|no (?:the )?(?:lists?|lines)|"
+                   r"(?:don'?t|dont|do not) (?:need|want)|enough|no (?:more |time |half[- ]hour )?(?:lists?|blocks)|"
+                   r"just the (?:items|tasks|things))\b", re.IGNORECASE)
 _BACK = re.compile(r"\b(?:again|back|turn (?:it |them )?on|start (?:showing|sending)|i want (?:the|it|them))\b",
                    re.IGNORECASE)
 # Asking for less or more of what's next: "just the next few things after a change", "the whole rest of the day
