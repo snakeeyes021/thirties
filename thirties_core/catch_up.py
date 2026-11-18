@@ -1,6 +1,11 @@
 """The evening catch-up: when things from today are still not marked in the evening, one offer to move them to
 tonight ("Move these 5 to tonight?"), and a plain yes (or a 👍 on Telegram) that does it.
 
+Only one-off items that could still happen tonight are ever in it (``behind``). Some things never roll: meals,
+routines and their steps, appointments, and anything tied to a time that has passed (a calendar event, a fixed
+time, a time the user stated). And an unmarked item's outcome is unknown: it may well have happened, so the offer
+never calls it "not done"; it only puts it on tonight in case it hasn't.
+
 Listing what's behind isn't help on its own (11-14: five items listed under "Nothing else is planned today", and
 the user had to ask what about them). The background service makes the offer once an evening (``due``, ``offer``),
 when there's room tonight; the yes is answered here, by Python, from either the app or the phone (``answer``),
@@ -41,6 +46,34 @@ def _load(db) -> dict:
 def _save(db, data: dict) -> None:
     if db is not None:
         db.set_sync_meta(KEY, json.dumps(data))
+
+
+def rolls(tools, span: EventSpan) -> bool:
+    """Whether an unmarked item from earlier today may go on tonight: a one-off with no time of its own. Meals,
+    routines and routine steps, daily things, appointments and calendar events, and anything set at a time (fixed,
+    or a time the user gave) stay where they were: their moment is over."""
+    from thirties_core import kinds
+    from thirties_core.models import SpanCategory
+    if span.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or span.source in ("calendar", "routine") \
+            or span.tentative or span.shown_only or span.is_firm or span.given_start or span.given_end:
+        return False
+    if kinds.is_meal(span.title) or kinds.kind_by_wording(span.title) == kinds.DAILY:
+        return False
+    try:
+        if tools._is_fixed(span) or tools._is_routine(span):
+            return False
+        assistant = getattr(tools, "assistant", None)
+        if assistant is not None and not kinds.rolls_over(assistant.kind_of(span)):
+            return False  # a routine step, a daily item or project time comes round again anyway
+    except Exception as e:  # never put something on tonight that might not belong there
+        logger.warning("Couldn't tell whether %r rolls: %s", span.title, e)
+        return False
+    return True
+
+
+def behind(tools, missed: List[EventSpan]) -> List[EventSpan]:
+    """What the evening catch-up may carry: the unmarked items that roll (``rolls``), nothing else."""
+    return [s for s in missed if rolls(tools, s)]
 
 
 def placements(tools, items: List[EventSpan], now: datetime) -> Tuple[List[Tuple[EventSpan, datetime]], List[EventSpan]]:
@@ -184,4 +217,4 @@ def answer(manager, text: str, via: str) -> str:
     return reply
 
 
-__all__ = ["KEY", "YES_RE", "due", "offer", "pending", "apply", "answer", "placements"]
+__all__ = ["KEY", "YES_RE", "rolls", "behind", "due", "offer", "pending", "apply", "answer", "placements"]

@@ -815,7 +815,7 @@ class BackgroundService:
         from thirties_core import catch_up
         from thirties_core.messages import missed_for
         tools = self.manager().tools
-        missed = missed_for(tools, now)
+        missed = catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
         if not catch_up.due(tools, now, missed):
             return
         self.send(catch_up.offer(tools, now, missed), "catch_up", now=now)
