@@ -47,7 +47,17 @@ def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if not REMOVE_WORDS_RE.search(message) and COMPLAINT_RE.search(message):
         return (f"The user talked about {title} but didn't ask for it to come off, so it stays on the plan. If "
                 "they want it somewhere else, move it there; if it isn't clear, ask.")
+    # --- "not yet" is about when, not whether: it stays (a simulated day lost an item the user said wasn't due yet) ---
+    if not REMOVE_WORDS_RE.search(message) and NOT_YET_RE.search(message):
+        return (f"The user said it isn't time for {title} yet, not that it's off, so it stays on the plan. Leave it "
+                "where it is, or move it later if they say when.")
+    # --- end "not yet" ---
     return None
+
+
+# the item's time hasn't come: "the kiln run isn't yet", "not time for the paddle yet", "not now, later"
+NOT_YET_RE = re.compile(r"\bnot (?:\w+ ){0,3}yet\b|\b(?:isn'?t|is not|aren'?t|are not) (?:\w+ ){0,3}yet\b|"
+                        r"\bnot (?:right )?now\b|\bnot time (?:for|to)\b|\btoo (?:early|soon) for\b", re.IGNORECASE)
 
 
 __all__ = ["removal_refused", "COMPLAINT_RE"]

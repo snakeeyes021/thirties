@@ -826,6 +826,12 @@ class PlanTools:
                         key=lambda s: s.start_dt)
         notes = []
         for s in inside:
+            # --- where the user put it, it stays: alongside, and said (user_placed.py) ---
+            from thirties_core.user_placed import placed, stays_line
+            if placed(self, s):
+                notes.append(stays_line(self, s))
+                continue
+            # --- end where the user put it ---
             length = s.end_dt - s.start_dt
             spot = next((a for a, b in self.open_windows(after=max(span.end_dt, now))
                          if b - a >= length and a + length <= bed), None)
@@ -1280,6 +1286,12 @@ class PlanTools:
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
         self._lasting_ok(span, new_start, new_end)
         self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
+        # --- an item under way keeps its start unless the user gives it another (user_placed.py) ---
+        from thirties_core.user_placed import start_refused
+        why = start_refused(self, span, new_start)
+        if why:
+            raise ToolError(why)
+        # --- end an item under way ---
         kept = ""
         if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
             new_start, new_end, kept = self._constraints_kept(span.title, span.id, new_start, new_end)
@@ -1316,6 +1328,10 @@ class PlanTools:
                    was if shift not in (None, "") else None)
         # --- end a time the user stated ---
         self._persist(span)
+        # --- moved where the user asked: theirs now, nothing Thirties does by itself moves it (user_placed.py) ---
+        from thirties_core.user_placed import note as note_placed
+        note_placed(self, span, "update_event")
+        # --- end moved where the user asked ---
         # --- stretched over its own copy, it's one item (duplicates.py) ---
         from thirties_core.duplicates import merge_covered
         notes = list(notes or []) + merge_covered(self, span)
