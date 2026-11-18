@@ -1119,6 +1119,11 @@ class PlanTools:
         self._persist(span)
         from thirties_core.turn_guards import after_add
         after_add(self, span)  # rest is never checked in on
+        # --- a place given by another item is kept as that tie (relations.py) ---
+        from thirties_core.relations import keep as keep_tie
+        tie = keep_tie(self, span)
+        notes = list(notes or []) + ([tie] if tie else [])
+        # --- end tie ---
         if is_fixed and not span.is_envelope and self._state_db is not None:
             self._set_fixed(span, True)
         if rest and not _as_bool(alongside):  # what was planned in the gap moves out of it
@@ -1214,10 +1219,15 @@ class PlanTools:
         if span.source == "calendar":
             # --- the user's own start or end for a calendar event, kept on the plan (calendar_times.py) ---
             from thirties_core.calendar_times import own_times
+            old_end = span.end_dt
             kept = own_times(self, span, start, end, duration) if shift in (None, "") and not title else None
             if kept:
+                # --- what's tied right after it moves along (relations.py) ---
+                from thirties_core.relations import follow
+                moved = follow(self, span, old_end)
+                # --- end tied ---
                 self._save_plan_after_change()
-                return kept
+                return kept + (f" ({'; '.join(moved)})" if moved else "")
             # --- end the user's own times ---
             # --- the times it already has, as the user gave them: nothing to refuse (stated_times.py) ---
             from thirties_core.stated_times import calendar_already
@@ -1332,6 +1342,10 @@ class PlanTools:
         from thirties_core.user_placed import note as note_placed
         note_placed(self, span, "update_event")
         # --- end moved where the user asked ---
+        # --- a place given by another item is kept as that tie; what's tied right after it moves along (relations.py) ---
+        from thirties_core.relations import follow, keep as keep_tie
+        notes = list(notes or []) + [n for n in [keep_tie(self, span)] if n] + follow(self, span, was[1])
+        # --- end ties ---
         # --- stretched over its own copy, it's one item (duplicates.py) ---
         from thirties_core.duplicates import merge_covered
         notes = list(notes or []) + merge_covered(self, span)

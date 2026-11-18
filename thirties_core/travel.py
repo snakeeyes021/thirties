@@ -144,8 +144,55 @@ def follow_up(tools: "PlanTools", event: Any = None, title: Any = None, after: A
         raise ToolError("Say what the follow-up is.")
     gap = timedelta(minutes=parse_duration_minutes(after)) if after not in (None, "") else timedelta(0)
     minutes = parse_duration_minutes(duration) if duration not in (None, "") else 0
+    # --- named like an item already on today: that item, moved right after it, never a second copy ---
+    same = _same_item(tools, lead, name)
+    if same is not None:
+        return _move_after(tools, lead, same, gap, minutes)
+    # --- end already on today ---
     span = _place_follow_up(tools, lead, name, gap, minutes)
+    # --- an item from the user's lists keeps its identity (relations.py) ---
+    task = tools.assistant._exact_task(name) if getattr(tools, "assistant", None) is not None else None
+    if task is not None and not task.id.startswith("media:") and not span.task_id:
+        span.task_id, span.category = task.id, SpanCategory.TASK
+        tools._persist(span)
+        tools._save_plan_after_change()
+    if getattr(tools, "assistant", None) is not None and tools.is_current(tools.day_plan):
+        from thirties_core.if_time import planned_out
+        planned_out(tools.assistant, name)  # on the plan now: no longer under "If there's time"
+    # --- end identity ---
     return f"Added {name} at {format_clock(span.start_dt)}, after {lead.title} [id {span.id}]."
+
+
+def _same_item(tools: "PlanTools", lead: EventSpan, name: str) -> Optional[EventSpan]:
+    """The planned item today that a follow-up called ``name`` already is (same title, or the same list item)."""
+    low = name.strip().lower()
+    task = tools.assistant._exact_task(name) if getattr(tools, "assistant", None) is not None else None
+    for s in tools.day_plan.spans:
+        if s.id == lead.id or s.status != SpanStatus.PLANNED or s.is_envelope or s.source == "calendar":
+            continue
+        if s.title.strip().lower() == low or (task is not None and s.task_id and s.task_id == task.id):
+            return s
+    return None
+
+
+def _move_after(tools: "PlanTools", lead: EventSpan, span: EventSpan, gap: timedelta, minutes: int) -> str:
+    """The item already on today, put right after ``lead`` (keeping its length unless one is given) and tied to it."""
+    length = timedelta(minutes=minutes) if minutes else span.end_dt - span.start_dt
+    ended = (lead.actual_end if lead.status in (SpanStatus.DONE, SpanStatus.PARTIAL) and lead.actual_end
+             else lead.end_dt)
+    start = max(ended + gap, thirty_of(tools._now()))
+    start, end = tools._snap(start, start + length)
+    span.start_dt, span.end_dt = start, end
+    span.given_start = span.given_end = None
+    tools.day_plan.spans.sort(key=lambda s: s.start_dt)
+    tools._persist(span)
+    if tools._state_db is not None:
+        store = tools._facts()
+        facts = store.get(span.id)
+        facts.after = sorted(set(facts.after) | {lead.id})
+        store.set(span.id, facts)
+    tools._save_plan_after_change()
+    return f"Moved {span.title} to {format_clock(start)}, after {lead.title}; it moves with it [id {span.id}]."
 
 
 def _place_follow_up(tools: "PlanTools", lead: EventSpan, name: str, gap: timedelta, minutes: int = 0,

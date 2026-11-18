@@ -539,6 +539,13 @@ class ListTools:
                 span = None
             if span is not None and (span.is_envelope or span.source == "calendar"):
                 raise ToolError(f"{span.title} can't be pencilled in.")
+            # --- tied by the user to another item: it stays on the plan (relations.py) ---
+            if span is not None and span.status == SpanStatus.PLANNED and self.pt.user_message is not None:
+                from thirties_core.relations import pencil_refused
+                why = pencil_refused(self.pt, span)
+                if why:
+                    raise ToolError(why)
+            # --- end tied ---
             if span is not None and span.status == SpanStatus.PLANNED:
                 task = next((t for t in self.a.s.tasks if span.task_id and t.id == span.task_id), None)
                 keep.append(task.id if task is not None else span.title)
