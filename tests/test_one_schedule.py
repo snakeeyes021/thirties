@@ -202,7 +202,9 @@ class TestTheBlockUnderWay(unittest.TestCase):
         self.assertIn("9:00 AM – 9:30 AM Answer two letters", lines)  # and later ones
         self.assertIn("Now: Work (until 4:00 PM) + Prime the canvas", lines)
         self.assertFalse(any(line.startswith("8:30 AM") for line in lines), lines)
-        self.assertIn("8:30 AM – 4:00 PM Work + Prime the canvas", whole_day_lines(self.plan))  # a record: as it was
+        record = whole_day_lines(self.plan)  # a record: as it was, work on a row of its own
+        self.assertIn("8:30 AM – 4:00 PM Work", record)
+        self.assertIn("8:30 AM – 9:00 AM Prime the canvas", record)
 
     def test_the_schedule_and_whats_next_never_show_it_as_past(self) -> None:
         from thirties_core.messages import render_schedule

@@ -227,7 +227,10 @@ def whole_day_lines(plan: DayPlan, now: Optional[datetime] = None) -> List[str]:
     current = thirty_of(now) if now is not None else None
     groups: List[List[EventSpan]] = []
     for s in sorted(_row_items(plan), key=lambda s: (s.start_dt.timestamp(), -s.end_dt.timestamp())):
-        if groups and thirty_of(groups[-1][0].start_dt) == thirty_of(s.start_dt):
+        # work starting with an item has its own row ("11:00 AM – 6:00 PM Work + Wedge the clay" read as the clay
+        # lasting until 6); the block under way stays one "Now:" row, each with its own end
+        apart = thirty_of(s.start_dt) != current and (s.is_envelope or (groups and groups[-1][0].is_envelope))
+        if groups and thirty_of(groups[-1][0].start_dt) == thirty_of(s.start_dt) and not apart:
             groups[-1].append(s)
         else:
             groups.append([s])
