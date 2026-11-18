@@ -886,10 +886,15 @@ class PlanTools:
         title = span.title if span is not None else self._words_for(str(item).strip())[0]
         if not title.strip():
             raise ToolError("Say what they're doing.")
+        # --- begun a while ago, as said ("started 20 minutes ago", "since 2"): from then (relative_times.py) ---
+        from thirties_core.relative_times import begun_at
+        began = begun_at(self, title) or now
+        start = thirty_of(began)
+        # --- end begun a while ago ---
         if until not in (None, ""):
             end = self._end(until, now)
         elif duration not in (None, ""):
-            end = now + timedelta(minutes=parse_duration_minutes(duration))
+            end = max(began + timedelta(minutes=parse_duration_minutes(duration)), now + timedelta(minutes=5))
         elif span is not None:
             end = start + (span.end_dt - span.start_dt)
         else:
@@ -910,7 +915,7 @@ class PlanTools:
             if span.source == "routine":
                 span.source = "user"
             added = False
-        span.actual_start = now
+        span.actual_start = began
         plan.spans.sort(key=lambda s: s.start_dt)
         self._persist(span)
         from thirties_core.turn_guards import after_add
@@ -920,7 +925,7 @@ class PlanTools:
         if added and self.assistant is not None:
             listed = self.assistant.list_today(span)
             notes += [listed.strip("()")] if listed else []
-        said = (f"{self._title(span)} started at {format_clock(now)}" + ("" if _as_bool(by_itself) else
+        said = (f"{self._title(span)} started at {format_clock(began)}" + ("" if _as_bool(by_itself) else
                 f", on the plan {format_clock(start)} – {format_clock(end)}"))
         if early:  # this morning, before the plan begins: on today's record, the plan's start unchanged
             said += f" (this morning, before today's plan begins at {format_clock(plan.day_start)}; on today's record)"

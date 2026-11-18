@@ -126,7 +126,8 @@ def still_doing(tools: "PlanTools", event: Any = None, until: Any = None, length
         raise ToolError("Say when it's done by itself: until (a time) or length.")
     _keep_plan(span)
     if span.actual_start is None:
-        span.actual_start = span.start_dt
+        from thirties_core.relative_times import begun_at  # "since 2", "started an hour ago": as said
+        span.actual_start = begun_at(tools, span.title) or span.start_dt
     span.time_source = AUTO_DONE if finish else RUNNING
     end = _expected_end(tools, span, now, until, length)
     moved, flow = ([], None)
@@ -147,9 +148,11 @@ def start_now(tools: "PlanTools", span: EventSpan, until: Any = None, length: An
     finish = str(auto_done).strip().lower() in ("true", "yes", "1") if isinstance(auto_done, str) else bool(auto_done)
     _keep_plan(span)
     was = (span.start_dt, span.end_dt)
-    span.start_dt = now
-    span.actual_start = now
-    span.end_dt = now + (was[1] - was[0])
+    from thirties_core.relative_times import begun_at  # "started 20 minutes ago": it began then, not now
+    began = begun_at(tools, span.title) or now
+    span.start_dt = began
+    span.actual_start = began
+    span.end_dt = max(began + (was[1] - was[0]), now + timedelta(minutes=5))
     span.end_dt = _expected_end(tools, span, now, until, length) if (until or length) else span.end_dt
     span.time_source = AUTO_DONE if finish else RUNNING
     chain = sorted((s for s in plan.active_spans() if s.id != span.id and not is_running(s)

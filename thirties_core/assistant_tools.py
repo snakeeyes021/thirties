@@ -731,6 +731,11 @@ class AssistantTools(KindTools):
         start = self.pt._start(started) if started not in (None, "") else None
         end = self.pt._end(finished, start or self.pt.day_plan.day_start) if finished not in (None, "") else None
         minutes = parse_duration_minutes(duration) if duration not in (None, "") else 30
+        # --- times said relative to now ("75 minutes ago", "since 2:15"): Python works them out (relative_times.py) ---
+        from thirties_core.relative_times import outcome_times
+        start, end, started, finished = outcome_times(self.pt, title, start, end, started, finished, duration,
+                                                      timedelta(minutes=minutes))
+        # --- end times said relative to now ---
         end = end or (start + timedelta(minutes=minutes) if start else now)
         start = start or end - timedelta(minutes=minutes)
         self._not_in_future(start, end)
@@ -1410,6 +1415,14 @@ class AssistantTools(KindTools):
             # times the user never said ("this morning" given as 11:15 – 11:30): they're dropped, and so is the length
             # that came with them, and nothing is labelled as said; Python works out when instead
             started = finished = duration = None
+        # --- times said relative to now ("75 minutes ago", "since 2:15"): Python works them out (relative_times.py) ---
+        if st != SpanStatus.SKIPPED:
+            from thirties_core.relative_times import outcome_times
+            named = span.title if span is not None else (task.title if task is not None else str(event))
+            start_dt, end_dt, started, finished = outcome_times(
+                self.pt, named, start_dt, end_dt, started, finished, duration,
+                (span.end_dt - span.start_dt) if span is not None else None)
+        # --- end times said relative to now ---
         if st != SpanStatus.SKIPPED:
             self._not_in_future(start_dt, end_dt)
         # --- working on it isn't finishing it (work_sessions.py) ---
@@ -1431,9 +1444,11 @@ class AssistantTools(KindTools):
             # Said with no time ("fish are fed", a tick in the Agenda): it finished when it was said, as an
             # estimate (10-25: fed at 10:44, stored at the planned 10:00). Long after its time, nobody knows when:
             # the planned times stay, marked as planned. Ticked before its time, Thirties picks the times: on
-            # blocks, and back to back with other early ticks (soak 3).
+            # blocks, and back to back with other early ticks (soak 3); on the day being lived that's however early
+            # it's ticked, since something done is never recorded later than now.
             now = self.pt._now()
-            if now < span.start_dt and now >= span.start_dt - timedelta(hours=3) and not span.is_envelope:
+            soon = now >= span.start_dt - timedelta(hours=3) or self.pt.is_current(self.pt.day_plan)  # never ahead
+            if now < span.start_dt and soon and not span.is_envelope:
                 from thirties_core.placement import early_tick_times
                 start_dt, end_dt = early_tick_times(self.pt.day_plan, span, now)
             elif span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
@@ -1593,6 +1608,12 @@ class AssistantTools(KindTools):
         from thirties_core.day_times import replan_after_work, work_span  # the day follows work
         work = work_span(plan)
         work_was = (work.start_dt, work.end_dt) if work is not None else None
+        # --- times said relative to now ("got up an hour ago"): Python works them out (relative_times.py) ---
+        from thirties_core.relative_times import day_times
+        said_now = day_times(self.pt, {"woke": woke, "slept": slept, "work_started": work_started,
+                                       "work_ended": work_ended})
+        woke, slept, work_started, work_ended = (said_now[k] for k in ("woke", "slept", "work_started", "work_ended"))
+        # --- end times said relative to now ---
         try:
             changed, said = record_day_times(plan, self.pt._now(), woke=woke, slept=slept, work_started=work_started,
                                              work_ended=work_ended, source="estimated" if guessed else "reported",
