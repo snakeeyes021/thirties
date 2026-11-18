@@ -1384,6 +1384,7 @@ class HorizonPlanner:
         _, picks = self.propose(p)
         if not picks:
             return None
+        self.session_names = [self.named(c) for c in picks]
         text = self.session_text(p, picks)  # how the last period went, before this one's picks move in
         self.apply(p)  # at once: no approval step (the user corrects the plan if it's wrong)
         self.db.set_sync_meta("horizon_session_day", self.today().isoformat())

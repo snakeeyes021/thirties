@@ -73,10 +73,44 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
             pulled = HorizonPlanner(manager.tools).pulled_text(datetime.fromisoformat(last) if last else None)
         except Exception as e:
             logger.warning("Couldn't say what the plans pulled forward: %s", e)
-    facts = "\n\n".join(t for t in (holiday, unread, invites, ahead if level != "off" or text else "", text, pulled)
-                         if t)
+    week = week_line(manager) if assistant is not None and db is not None else ""
+    facts = "\n\n".join(t for t in (holiday, unread, invites, ahead if level != "off" or text else "", text, pulled,
+                                    week) if t)
     brief = assistant.leftover_brief() if assistant is not None else ""
     return facts, brief
+
+
+WEEK_KEY = "week_notice:{day}"
+
+
+def week_line(manager) -> str:
+    """A new week, month or year: its plan is made now, while the day is built, and applied at once (no approval
+    step). Returns the one line that says what went in, kept for the morning reply, which carries it: there's
+    never a separate message for it (one morning message)."""
+    db = manager.scheduler.state_db
+    day = manager.day_plan.target_date
+    try:
+        from thirties_core.horizons import HorizonPlanner
+        planner = HorizonPlanner(manager.tools)
+        line = planner.offer_session() or ""
+    except Exception as e:
+        logger.warning("Planning the new period failed: %s", e)
+        return ""
+    if line:
+        import json
+        db.set_sync_meta(WEEK_KEY.format(day=day.isoformat()),
+                         json.dumps({"line": line, "names": getattr(planner, "session_names", [])}))
+    return line
+
+
+def week_notice(db, day) -> Tuple[str, list]:
+    """The new period's line made this morning, and the names in it ("" and [] when there's none)."""
+    import json
+    try:
+        data = json.loads(db.get_sync_meta(WEEK_KEY.format(day=day.isoformat())) or "{}") if db is not None else {}
+    except ValueError:
+        data = {}
+    return str(data.get("line") or ""), list(data.get("names") or [])
 
 
 def invites_text(plan) -> str:
@@ -99,4 +133,5 @@ def in_turn_instruction(facts: str, brief: str) -> str:
             "message): " + body + (MORNING_FACTS.format(facts=facts) if facts else "") + ("\n" + brief if brief else ""))
 
 
-__all__ = ["POLICY", "done_key", "is_done", "mark_done", "prepare", "in_turn_instruction"]
+__all__ = ["POLICY", "done_key", "is_done", "mark_done", "prepare", "week_line", "week_notice",
+           "in_turn_instruction"]

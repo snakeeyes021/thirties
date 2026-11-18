@@ -596,7 +596,7 @@ class TestSessions(PlannerCase):
         self.build()
         self.assertTrue(self.hp.offer_session().startswith("This week: "))
 
-    def test_the_background_offers_it_after_the_days_own_offer(self):
+    def test_the_background_morning_carries_it_and_sends_nothing_else(self):
         from thirties_core.background import BackgroundService
         from thirties_core.inference import MockInferenceEngine
         joplin = MagicMock()
@@ -607,27 +607,13 @@ class TestSessions(PlannerCase):
                                 joplin_engine=joplin, inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
         svc.today = lambda: self.when.date()
         svc.bridge = MagicMock()
-        svc.horizon_session(self.when)
-        self.assertEqual(sent, [])  # the morning hasn't happened yet
         from tests.fixtures import mark_up
         mark_up(self.sched.state_db, self.when)  # the user's first message of the day
-        svc.rollover(self.when)  # nothing from yesterday; the day's own proposal may go out
-        sent[:] = [x for x in sent if x[0] != "rollover"]
-        assistant = svc.manager().tools.assistant
-        if assistant.proposals.pending():
-            svc.horizon_session(self.when)
-            self.assertEqual(sent, [])  # one offer at a time
-            assistant.proposals.decline()
-        svc.horizon_session(self.when)
-        # 11-06: the day's plan is applied at once; if it already put the week's only item on today, the week has
-        # nothing left to plan and the session stays quiet
-        on_today = {s.task_id for s in svc.manager().day_plan.spans if s.task_id}
-        if "tax" in on_today:
-            self.assertEqual(sent, [])
-            return
-        self.assertEqual([k for k, _ in sent], ["horizon"])
-        self.assertTrue(sent[0][1].startswith("📅 This week: "))
-        self.assertIn("This week: ", svc.manager().history()[-1]["content"])
+        svc.rollover(self.when)  # the morning, when no turn built it
+        self.assertNotIn("horizon", [k for k, _ in sent])  # one morning message (never a separate week one)
+        morning = [b for k, b in sent if k == "rollover"]
+        self.assertEqual(len(morning), 1)
+        self.assertIn("This week: ", morning[0])
 
 
 class TestSlmAnswersTheOffer(unittest.TestCase):

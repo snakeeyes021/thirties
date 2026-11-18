@@ -1027,28 +1027,6 @@ class BackgroundService:
             self.send(TEXT[key], "sun", now=now, expires=now + WINDOW * 6)  # in the chat too: the app and the
             # phone show one conversation (the user's parity rule, 10-30)
 
-    def horizon_session(self, now: datetime) -> None:
-        """A new week, month or year: once, on its first morning, after the day's own offer is settled, a short
-        planning session (one proposal, applied on "yes"; horizons.HorizonPlanner.offer_session)."""
-        manager = self.manager()
-        assistant = manager.tools.assistant
-        day = manager.day_plan.target_date
-        if self._quiet(now):  # 11-04 replay: "A new week" at 6:00, while asleep
-            return
-        try:  # not on top of the morning's message (11-06 replay: two messages a minute apart)
-            sent = self.scheduler.state_db.get_sync_meta("morning_sent_at")
-            if sent and timedelta(0) <= now - datetime.fromisoformat(sent) < timedelta(hours=3):
-                return
-        except ValueError:
-            pass
-        if assistant is None or not self.scheduler.state_db.get_sync_meta(f"rollover_offered:{day.isoformat()}") \
-                or assistant.proposals.pending():  # the morning's leftovers need no answer any more (11-06)
-            return  # one offer at a time: the day's proposal is answered first
-        from thirties_core.horizons import HorizonPlanner
-        text = HorizonPlanner(manager.tools).offer_session()
-        if text:
-            self.send("📅 " + text, "horizon", now=now)
-
     def horizon_review(self, now: datetime) -> None:
         """Keep the longer plans current, quietly: when something that matters changes, and lightly each week or
         month, pull work forward where a plan has room (horizons.HorizonPlanner.review). The next morning says
@@ -1178,10 +1156,10 @@ class BackgroundService:
         except Exception as e:
             logger.warning("Checking whether the user is up failed: %s", e)
             up = True
-        waits = {self.model_fit, self.heads_up, self.horizon_session, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
+        waits = {self.model_fit, self.heads_up, self.stretches, self.wrap_up, self.check_ins, self.starts, self.contextual,
                  self.day_times, self.dropbox, self.joplin_presence, self.panel_ticks,
                  self.evening_catch_up, self.people_nudge, self.rush_tickets}  # nothing to say before the user is up
-        for duty in (self.hold_check, self.model_fit, self.moot, self.morning_hello, self.rollover, self.horizon_session,
+        for duty in (self.hold_check, self.model_fit, self.moot, self.morning_hello, self.rollover,
                      self.horizon_review, self.reminders, self.heads_up, self.stretches,
                      self.wrap_up, self.check_ins, self.starts, self.panel_ticks, self.evening_catch_up,
                      self.contextual, self.day_times, self.sun, self.today_sync, self.people_nudge, self.rush_tickets,
