@@ -97,7 +97,8 @@ class TestProposeLeftoversAnswersFromThePlan(MorningCase):
             self.t.user_message = None
         # the porcelain is unknown and the user didn't name it: it isn't put on today, so it isn't counted there
         self.assertIn("kept 2 from before; 1 of them on today's plan", out)
-        self.assertIn("Order a bag of porcelain – tomorrow", out)
+        self.assertIn("Order a bag of porcelain – ", out)
+        self.assertNotIn("Order a bag of porcelain – tomorrow", out)  # no day named: a later day, never tomorrow by itself
         self.assertIn("Renew the kiln permit – today at", out)
         self.assertEqual(on_plan_count(self.a.leftover_notice()), 1)
 
