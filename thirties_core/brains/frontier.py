@@ -519,6 +519,7 @@ Leaving today, and on-site days: something the user skips for today or puts on a
                 "Your reply described the conversation, your instructions or tool results. Write only the "
                 "message the user should read.")
             reply = self._rounds(2, changes_before, outcomes_before)  # its calls are checked like any others
+        reply = self._plain_words(reply, lambda: self._rounds(2, changes_before, outcomes_before))  # internal_text.py
         reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
@@ -554,6 +555,19 @@ Leaving today, and on-site days: something the user skips for today or puts on a
 
     # --- what the model was fed never reaches the user (internal_text.py) ---
 
+    def _plain_words(self, reply: str, retry) -> str:
+        """A reply that talks about the app's own workings (CALL lines, tools, commands) goes back once for plain
+        words; what a second try still says about them is taken out after (_fed_text_out)."""
+        from thirties_core.internal_text import talks_internals
+        if not talks_internals(reply):
+            return reply
+        logger.warning("[FrontierBrain] Reply talked about the app's workings; asking again: %r", reply[:300])
+        self._check("Your reply talks about calls, tools or commands, which the user never sees and can't act on. "
+                    "Write it again for the user in plain words: what changed on their plan, what didn't and why "
+                    "in their terms, or the one thing you need from them.")
+        fresh = (retry() or "").strip()
+        return fresh if fresh and not talks_internals(fresh) else reply
+
     def _fed_text_out(self, reply: str, changes_before: int) -> str:
         """The reply without an echoed tool result, a check, or a call written out; one that was nothing else says
         what happened in a plain line."""
@@ -564,7 +578,10 @@ Leaving today, and on-site days: something the user skips for today or puts on a
         logger.warning("[FrontierBrain] Reply held text for the model only; taken out: %r", reply[:300])
         if clean.strip():
             return clean
-        return ("Done." if self.tools.successful_changes > changes_before else
+        if self.tools.successful_changes > changes_before:
+            return "Done."
+        from thirties_core.internal_text import talks_internals  # a refusal in the app's terms: say it plainly
+        return (self.UNCHANGED_LINE if talks_internals(reply) else
                 "Sorry, I lost my train of thought there. Could you say that again?")
 
     # --- end what the model was fed ---
@@ -779,6 +796,7 @@ Leaving today, and on-site days: something the user skips for today or puts on a
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
             reply = response.get("content", "") or ""
+        reply = self._plain_words(reply, self._one_more_round)  # no talk of calls or tools (internal_text.py)
         reply = self._fed_text_out(reply, changes_before)  # an echoed result goes whole (internal_text.py)
         if self._is_meta(reply):
             kept = [p for p in re.split(r"\n\s*\n", reply) if not self._is_meta(p)]
