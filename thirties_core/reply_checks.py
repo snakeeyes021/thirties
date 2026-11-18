@@ -384,6 +384,10 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
             out.append("it's the morning's message and leaves part of the day out (" + ", ".join(missing[:4])
                        + "): list the whole day as Python lists it, each routine part with its steps and the meals, "
                        "then what you put on")
+    # --- what it says about the leftovers from before: the plan's counts and places (leftover_facts.py) ---
+    from thirties_core import leftover_facts
+    out += leftover_facts.problems(brain, turn_start, reply)
+    # --- end leftovers ---
     moon = moon_wrong(reply, now)
     if moon:
         out.append(f"the moon tonight is a {moon}, as computed; say that, or nothing about the moon")
@@ -391,7 +395,10 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
-    """A morning reply that still omits routine steps or anchors gets Python's lines for the day under it."""
+    """A morning reply that still omits routine steps or anchors gets Python's lines for the day under it. One that
+    still miscounts the leftovers gets Python's notice in place of those sentences (leftover_facts.py)."""
+    from thirties_core.leftover_facts import set_straight
+    reply = set_straight(brain, turn_start, reply)
     from thirties_core import morning_day
     if not morning_day.is_morning_turn(brain, turn_start) or not morning_day.left_out(brain, reply):
         return reply
