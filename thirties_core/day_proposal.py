@@ -229,6 +229,8 @@ class DayProposal:
         from thirties_core.carry import OpenPool, weekday
         pool = OpenPool(self.db).all(day) if self.db is not None else {}  # left open on an earlier day (carry.py)
         pool_ids = {v.get("task_id"): k for k, v in pool.items() if v.get("task_id")}
+        from thirties_core.carry import cant_wait, sorted_this_morning
+        sorted_now = sorted_this_morning(self.db, day)
 
         def left_open(t) -> Optional[Dict[str, str]]:
             key = t.title.strip().lower()
@@ -253,11 +255,20 @@ class DayProposal:
             h = (left or {}).get("horizon", "")
             if left and (left.get("pending_drop") or h == "dropped"):
                 left, h = None, ""  # dropped means "don't roll it over": it's an ordinary list item again (11-11)
+            # --- unmarked is unknown: what was sorted this morning stays off today unless it's due today or overdue,
+            # or the user said it can't wait or put it here; a day Python guessed for it is never "meant for today" ---
+            users = bool(left) and left.get("placed_by") == "user"
+            if left and not users and left["title"].strip().lower() in sorted_now \
+                    and not (due_in is not None and due_in <= 0) and not cant_wait(self.a, t, left["title"]):
+                continue  # asked about this morning, status unknown: it waits on its list
+            # --- end unmarked is unknown ---
             if left and left.get("start") and h != "someday":  # a window of days (carry.resolve_when)
                 start, end = date.fromisoformat(left["start"]), date.fromisoformat(left["end"])
                 if start > day:
                     continue  # not yet: it waits for its window
-                h = "today" if end <= day else "week"
+                h = "today" if end <= day and users else "week"
+                if not users:
+                    left = {**left, "when": "this week"}  # the day guessed for it came: an option this week
             elif h == "today" and left.get("placed_by") != "user" and \
                     date.fromisoformat(left["since"]) < day - timedelta(days=1):
                 h = "week"  # "today" was for the day after; now it's an option this week (a due date or
@@ -286,7 +297,8 @@ class DayProposal:
             if low not in out or rank < out[low]["rank"]:
                 out[low] = {"rank": rank, "task": t, "title": title, "why": why,
                             "where": t.parent_note_title or t.source_notebook or "",
-                            "minutes": usual_minutes(self.a, t, title)}
+                            "minutes": usual_minutes(self.a, t, title),
+                            "unknown": bool(left) and not users}  # left unmarked: its status isn't known
         found = sorted(out.values(), key=lambda c: (c["rank"], c["title"].lower()))
         menus = [c for c in found if c["rank"][0] == 5][:2]
         found = [c for c in found if c["rank"][0] < 5][:MAX_CANDIDATES - len(menus)] + menus
@@ -381,7 +393,8 @@ class DayProposal:
         out = []
         low = low_energy(self.a, plan)  # a low day: fewer, lighter, more room
         cands = [c for c in self.candidates(plan) if c["title"].strip().lower() not in (skip or set())
-                 and not (ahead and c.get("task") is not None and c["task"].list_role == "today")]
+                 and not (ahead and c.get("task") is not None and c["task"].list_role == "today")
+                 and not (c.get("unknown") and c["rank"][0] >= 2)]  # Python never puts an unknown on by itself
         if low:
             from thirties_core.energy import is_due
             cands = [c for c in cands if is_light(c) or is_due(c, plan.target_date)]

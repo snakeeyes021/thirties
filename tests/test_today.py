@@ -469,10 +469,15 @@ class TestMorning(TodayTestCase):
         def task(title, **kw):
             return TaskItem(id="t_" + title[:4], source_notebook="1. Tasks", title=title, is_checkbox_item=True,
                             parent_note_title="Errands/Admin", parent_note_id="n_errands", **kw)
+        # today only by a date or the user's own word: a guessed "now", being due tomorrow or being quick isn't it
+        self.assertEqual(choose_horizon(a, task("Renew passport", urgency="now"), "Renew passport", DAY), "week")
+        from thirties_core.lists import ListCatalog
+        ListCatalog(a._db).set_urgency("t_Rene", "now", source="user", title="Renew passport")
         self.assertEqual(choose_horizon(a, task("Renew passport", urgency="now"), "Renew passport", DAY), "today")
+        self.assertEqual(choose_horizon(a, task("Pay the bill", due=DAY.isoformat()), "Pay the bill", DAY), "today")
         self.assertEqual(choose_horizon(a, task("Pay the bill", due=(DAY + timedelta(days=1)).isoformat()),
-                                        "Pay the bill", DAY), "today")  # due very soon
-        self.assertEqual(choose_horizon(a, task("Text Kim"), "Text Kim", DAY, said_minutes=5), "today")  # quick
+                                        "Pay the bill", DAY), "deadline")  # by its day, not today
+        self.assertEqual(choose_horizon(a, task("Text Kim"), "Text Kim", DAY, said_minutes=5), "week")  # quick
         self.assertEqual(choose_horizon(a, task("File taxes", due=(DAY + timedelta(days=20)).isoformat()),
                                         "File taxes", DAY), "deadline")
         self.assertEqual(choose_horizon(a, task("Learn the harp", someday=True), "Learn the harp", DAY), "someday")

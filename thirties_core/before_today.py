@@ -67,6 +67,8 @@ class BeforeToday:
         for item in items:
             if not item.get("end") or item["end"] > day.isoformat() or item.get("start", "") > day.isoformat():
                 continue  # not today's
+            if item["end"] < day.isoformat() and item.get("placed_by") != "user":
+                continue  # a day guessed for it went by: it waits on its list, never today by itself (carry.py)
             task = next((t for t in self.a.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
             if streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
                             or (task.due if task is not None else ""),

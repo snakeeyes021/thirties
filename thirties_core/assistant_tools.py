@@ -2048,6 +2048,10 @@ class AssistantTools(KindTools):
             if must_stay(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
                 window = resolve_when("today", day, week_start)
             # --- end due today ---
+            # --- unmarked is unknown: today only on the user's word (carry.not_today_unasked) ---
+            from thirties_core.carry import not_today_unasked
+            window = not_today_unasked(self, item, window, day)
+            # --- end unmarked is unknown ---
             new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
             seen.add(item["title"].lower())
         for d in (drop if isinstance(drop, list) else []):

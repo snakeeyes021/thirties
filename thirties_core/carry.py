@@ -13,8 +13,8 @@ The rules, applied once a day when the day is built (after the user's first repl
 3. Each one-off left over is in one morning proposal, after the user is up, and never again: keep it at a
    natural horizon (today, tomorrow, this week, this weekend, before <day>, by <day>, next week, next month,
    someday), or drop it. Python makes the first guess, from what the item carries (first match wins):
-   - today: it can't wait (urgency "now", or its horizon is today/tomorrow), it's due today or tomorrow, or
-     it's quick (15 minutes or less, as the user said);
+   - today: it's due today or overdue, or the user said it can't wait (their urgency "now", their horizon
+     "day", "as soon as possible" in its words); never because it's quick, or a guessed urgency or horizon;
    - by its deadline: a due date further off;
    - someday: the user put it there (someday, a someday section, their own horizon for it); never because
      it sits on a pick-from list or was missed once;
@@ -52,7 +52,6 @@ POOL_KEY = "open_pool"          # {title lower: {"title", "task_id", "since", "h
 TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED = "today", "week", "deadline", "someday", "dropped"
 POOL_HORIZONS = (TODAY, WEEK, DEADLINE, SOMEDAY, DROPPED)
 SAID = {TODAY: "today", WEEK: "this week", DEADLINE: "by its deadline", SOMEDAY: "someday", DROPPED: "dropped"}
-QUICK_MINUTES = 15
 # can't wait, by its own wording: as soon as possible means today if it fits
 ASAP_RE = re.compile(r"\b(asap|a\.s\.a\.p\.?|as soon as (?:possible|i can)|urgent(?:ly)?|right away)(?!\w)", re.I)
 DEADLINE_PULL_DAYS = 7
@@ -225,6 +224,15 @@ def settle(assistant, day: date) -> Dict[str, Any]:
     return out
 
 
+def sorted_this_morning(db, day: date) -> set:
+    """The leftovers sorted this morning (settle), lowercased: their status is unknown until the user says."""
+    try:
+        left = json.loads(db.get_sync_meta(f"leftovers:{day.isoformat()}") or "{}") if db is not None else {}
+    except ValueError:
+        left = {}
+    return {str(t).strip().lower() for t in (left.get("pooled") or [])} if isinstance(left, dict) else set()
+
+
 def _done_titles(assistant, day: date) -> List[str]:
     from thirties_core.models import SpanStatus
     out = []
@@ -380,17 +388,32 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             continue
         seen.add(low)
         item = rollable_item(title, low)
+        # --- a label isn't an item: a Today line with none of its home item's words (the heading above it) is
+        # kept and asked about by the item's own name ---
+        home_task = tasks.get(item["task_id"] or "")
+        if home_task is not None and not names_item(title, home_task.title):
+            item["title"] = home_task.title.strip()
+        # --- end a label isn't an item ---
         if item["task_id"] and item["task_id"] in pooled_ids:
             if title not in off_today and item["task_id"] in tasks:
                 off_today.append(title)  # a Today copy of an item already kept: it waits on its own list
             continue  # one record per item, tied to its home list
         pooled_ids.add(item["task_id"])
-        if low not in asked_before:
-            ask.append(title)
+        if item["title"].lower() not in asked_before:
+            ask.append(item["title"])
         pool_items.append(item)
     return {"ask": ask, "off_today": off_today, "ended": ended,
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed,
             "missed": missed, "done": done_items}
+
+
+def names_item(line: str, title: str) -> bool:
+    """A Today line names its home item when it shares a word with the item's name ("Studio: Glaze the tiles" or
+    "Glaze tiles" for Glaze the test tiles); a line with none of its words ("Shop chores", the heading above it) is
+    only a label."""
+    from thirties_core.item_facts import name_words
+    mine = name_words(title)
+    return not mine or bool(mine & name_words(line))
 
 
 def home_by_label(assistant, title: str):
@@ -515,39 +538,67 @@ def where_text(items: List[Dict[str, str]], short=lambda t: t) -> str:
 
 def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optional[int] = None) -> str:
     """The pool horizon for an item not done (rules above, first match wins), from what it already carries:
-    its urgency and horizon, its due date, its length as the user gave it, its list."""
+    its due date, what the user said about it, its list. ``said_minutes`` is kept for callers: how long it takes
+    never makes it today's."""
     due = None
     if task is not None and task.due:
         try:
             due = date.fromisoformat(task.due[:10])
         except ValueError:
             due = None
-    horizon = ""
-    if task is not None:
-        try:
-            from thirties_core.horizons import HorizonPlanner
-            horizon = HorizonPlanner(assistant.pt).horizon_of(task) or ""
-        except Exception:
-            horizon = ""
-    minutes = said_minutes
-    if minutes is None:
-        try:
-            minutes = assistant.lasting_facts(task.title if task is not None else title).minutes
-        except Exception:
-            minutes = None
     from thirties_core.list_reading import live
     # someday only by the user's own word (a someday heading, their horizon or urgency for it) or when the item
     # isn't live any more; a pick-from list or a guessed someday isn't it: an item the plan held yesterday and
     # missed once waits for this week (when unsure, this week). Long neglect has its own rule (backoff.py: park).
     if task is not None and (task.someday or not live(task) or user_said_someday(assistant, task)):
         return SOMEDAY
-    if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
-            or ASAP_RE.search(title or "") \
-            or (minutes is not None and 0 < minutes <= QUICK_MINUTES):
+    # --- today only on the user's word or a date: unmarked is unknown (rule 1), so being quick, a guessed
+    # urgency or a guessed horizon never puts it on today; it's due today or overdue, or the user said it can't wait
+    # or is for today ---
+    if (due is not None and (due - day).days <= 0) or cant_wait(assistant, task, title):
         return TODAY
+    # --- end today only on the user's word or a date ---
     if due is not None:
         return DEADLINE
     return WEEK
+
+
+def cant_wait(assistant, task, title: str) -> bool:
+    """The user said this one is for today or can't wait: their urgency "now" or their horizon "day" for it (never a
+    guess), or "as soon as possible" in its own words (backoff.stated_cant_wait)."""
+    db = getattr(assistant, "_db", None)
+    from thirties_core.backoff import stated_cant_wait
+    if stated_cant_wait(db, task, title):
+        return True
+    if db is None or task is None:
+        return False
+    try:
+        from thirties_core.horizons import HorizonCatalog
+        mark = HorizonCatalog(db).items().get(task.id)
+    except Exception:
+        return False
+    return bool(mark and mark.get("source") == "user" and mark.get("horizon") == "day")
+
+
+def not_today_unasked(assistant, item: Dict[str, Any], window: Dict[str, str], day: date) -> Dict[str, str]:
+    """A leftover's window as the morning model proposed it, kept off today unless the item may go there: it's due
+    today or overdue, the user said it can't wait, or their message this turn names it. Otherwise the window starts
+    tomorrow (a today-only window becomes tomorrow): unmarked is unknown, and never moves into today by itself."""
+    if not window.get("start") or window["start"] > day.isoformat():
+        return window
+    task = next((t for t in assistant.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
+    due = (item.get("due") or (task.due if task is not None else "") or "")[:10]
+    if (due and due <= day.isoformat()) or cant_wait(assistant, task, item["title"]):
+        return window
+    said = getattr(assistant.pt, "user_message", None)
+    if said:
+        from thirties_core.done_reference import _named
+        if _named(said, item["title"], []) or (task is not None and _named(said, task.title, [])):
+            return window
+    nxt = (day + timedelta(days=1)).isoformat()
+    if window.get("end", "") <= day.isoformat():
+        return {**window, "when": "tomorrow", "start": nxt, "end": nxt}
+    return {**window, "start": nxt}
 
 
 def user_said_someday(assistant, task) -> bool:
