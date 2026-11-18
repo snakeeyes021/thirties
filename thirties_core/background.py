@@ -6,10 +6,12 @@ window closed. Every few seconds it:
 
 - asks about planned items that ended with no outcome (once each, unless muted),
 - delivers reminders the user asked for,
-- says when a planned item starts,
+- says when a run of planned items starts (once a run, never for routine steps alone, never mid-conversation,
+  and not at all with telegram.notify_block_transitions off: fewer_messages.py),
 - ends a start notice or a check-in with what's next, when that says something new (whats_next.SentSummaries),
-- lists what's not marked yet only when that list changed, and after two check-ins with no reply sends no
-  more until the user writes again (away.py),
+- asks about each item once, whichever question asks, never lists what's not marked yet under a notice, never
+  sends the same words twice in a day, and after two check-ins with no reply sends no more until the user
+  writes again (away.py),
 - tells the phone what was ticked in the app's day panel, with what's next,
 - asks once an evening, in one question, about what's still not marked (catch_up.py),
 - holds every message while the user asked for quiet, until they say it's over (holds.py),
@@ -208,6 +210,13 @@ class BackgroundService:
         if kind not in HOLD_PASSES and self._held(now or self.now()):
             logger.info("Held (the user asked for quiet): %r", text[:80])
             return
+        # --- the same words never twice in a day (fewer_messages.py) ---
+        from thirties_core.fewer_messages import UNASKED_KINDS, Repeats
+        said, said_on = text, day or (now or self.now()).date()
+        if kind in UNASKED_KINDS and Repeats(self.scheduler.state_db).seen(said, said_on):
+            logger.info("Not sent (said already today): %r", text[:80])
+            return
+        # --- end the same words never twice ---
         # --- quiet while the user is away (away.py): two check-ins with no reply, then none until they write ---
         if kind == "checkin":
             from thirties_core.away import UnansweredCheckins
@@ -268,6 +277,8 @@ class BackgroundService:
                 waiting = True
         if kind == "checkin" and delivered:  # it reached the user (or there's no phone to wait for): asked
             self._count_checkin()
+        if kind in UNASKED_KINDS and delivered:  # said: never these words again today (one that didn't get
+            Repeats(self.scheduler.state_db).mark(said, said_on)  # through may go out again)
         if to_conversation and not waiting:  # after delivery: this waits for a turn under way (Telegram) to finish
             self._keep(text, kind, day, undelivered=not delivered)
             if not delivered:  # its mark comes off if it gets there late
@@ -390,33 +401,25 @@ class BackgroundService:
         """A notice that ends with what's next (whats_next.py), when that says something new since the user was
         last shown it (whats_next.SentSummaries: nothing shown yet today, the plan changed, the last one ran out,
         or two hours passed): a bell or a check-in then says where the day stands, so coming back to the phone
-        needs no "what's on now?". Otherwise the notice as before (_with_missed). What's not
-        marked yet is in the slice (not what the check-in itself asks about, or what's muted)."""
+        needs no "what's on now?". Otherwise the notice alone."""
         from thirties_core import whats_next
-        from thirties_core.messages import MISSED_HEADING, MissedTracker, join_sections, missed_for
+        from thirties_core.messages import join_sections
         if self._held(now):
             return status  # it won't go out: nothing counts as shown
-        from thirties_core.away import LastSentList, UnansweredCheckins
+        from thirties_core.away import UnansweredCheckins
         if UnansweredCheckins(self.scheduler.state_db).paused():
             return status  # nobody is answering: the notice alone, short (away.py)
         manager = self.manager()
         plan = manager.day_plan
         sent = whats_next.SentSummaries(self.scheduler.state_db)
         if not (plan.day_start <= now < plan.day_end) or not sent.due(plan, now):
-            return self._with_missed(status, now) if not asked else status
-        skip = {t.strip().lower() for t in asked}
-        everything = missed_for(manager.tools, now)
-        last_sent = LastSentList(self.scheduler.state_db)
-        unmarked = [] if last_sent.same(now, everything) else \
-            [s for s in everything if s.title.strip().lower() not in skip]  # the list again only once it changed
-        # as the person wants it (render with no mode: reply_extras.py): off, no Not marked yet, no "Now" line
-        part = whats_next.summary(manager.tools, now, unmarked=unmarked, with_now=with_now)
+            return status
+        # No Not marked yet list under a notice: each item is asked about once, in its own check-in, and a list
+        # that grows block after block is nagging (fewer_messages.py). A reply the user asks for still shows it.
+        part = whats_next.summary(manager.tools, now, unmarked=[], with_now=with_now)
         if not part:
-            return self._with_missed(status, now) if not asked else status
+            return status
         sent.mark(plan, now)
-        if unmarked and MISSED_HEADING in part:
-            MissedTracker(self.scheduler.state_db).mark(now, unmarked)
-            last_sent.mark(now, everything)
         return join_sections(status, part)
 
     def _count_checkin(self) -> None:
@@ -543,8 +546,10 @@ class BackgroundService:
                        and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))]
         started, asked = self._remembered("stretch_started"), self._remembered("stretch_asked")
         grace = timedelta(minutes=self.config.assistant.checkin_after_minutes)
+        from thirties_core.fewer_messages import AskedOnce, block_notices_on, is_routine_step
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
+        once = AskedOnce(self.scheduler.state_db)
         for a, b in day_stretches(plan):
             key = a.isoformat()
             items = sorted((s for s in plan.active_spans() if self._unreported(s) and a <= s.start_dt < b),
@@ -552,10 +557,12 @@ class BackgroundService:
             if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
                 started[key] = now.date().isoformat()
                 self._remember("stretch_started", started, now)
-                self.send(self._with_missed(f"🗓 Until {format_clock(b)}: "
-                                            + ", then ".join(self._name(s) for s in items)
-                                            + ".", now), "start", now=now, expires=thirty_of(now) + timedelta(minutes=30))
-            open_items = [s for s in items if not mutes.is_muted(s.id, now)]
+                # only when start notices are on, and not for a stretch of routine steps alone (fewer_messages.py)
+                if block_notices_on(self.config) and not all(is_routine_step(s) for s in items) \
+                        and not self._turn_running():
+                    self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(self._name(s) for s in items) + ".",
+                              "start", now=now, expires=thirty_of(now) + timedelta(minutes=30))
+            open_items = [s for s in items if not mutes.is_muted(s.id, now) and not once.asked(s.id)]
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
                 ask_at = b - timedelta(minutes=15)  # it ends at bedtime (or a long event): ask just before
@@ -564,9 +571,10 @@ class BackgroundService:
                 self._remember("stretch_asked", asked, now)
                 continue
             if (ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items
-                    and not self._talking(now) and not self._checkins_paused()):
+                    and not self._talking(now) and not self._checkins_paused() and not self._turn_running()):
                 asked[key] = now.date().isoformat()
                 self._remember("stretch_asked", asked, now)
+                once.mark((s.id for s in open_items), now)  # asked: no other duty asks about these again today
                 titles = [s.title for s in open_items]
                 names = [self._name(s) for s in open_items]
                 listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
@@ -585,14 +593,18 @@ class BackgroundService:
         key = f"wrap_up:{plan.target_date.isoformat()}"
         if bed is None or not (bed - timedelta(minutes=45) <= now < bed) or self.scheduler.state_db.get_sync_meta(key):
             return
+        from thirties_core.fewer_messages import AskedOnce
         from thirties_core.memory import CheckinMutes
         mutes = CheckinMutes(self.scheduler.state_db)
+        once = AskedOnce(self.scheduler.state_db)
+        # everything left before bed, asked about once (the last stretch's own question would come minutes later)
         spans = [s for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
-                 if self._unreported(s) and s.end_dt <= now and not mutes.is_muted(s.id, now)]
+                 if self._unreported(s) and s.end_dt <= bed and not mutes.is_muted(s.id, now) and not once.asked(s.id)]
         open_items = [s.title for s in spans]
         names = [self._name(s) for s in spans]
         self.scheduler.state_db.set_sync_meta(key, "1")
         if open_items:
+            once.mark((s.id for s in spans), now)
             listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
             self._asked(now, open_items)
             self.send(f"🌙 Before bed: did {listed} happen? Just say which (or none).", "checkin", now=now,
@@ -640,7 +652,7 @@ class BackgroundService:
                 asked[s.id] = now.date().isoformat()
             self._remember("checkins_asked", asked, now)
             due = [s for s in due if s not in late]
-        if not due or self._talking(now):
+        if not due or self._talking(now) or self._turn_running():  # mid-conversation: it knows already
             return
         for s in due:
             asked[s.id] = now.date().isoformat()
@@ -682,7 +694,9 @@ class BackgroundService:
             span = None
             if rem.span_id:  # about a planned item: not if it's done, gone, or already announced by its start
                 span = next((s for s in self.manager().day_plan.spans if s.id == rem.span_id), None)
-                if span is None or span.status != SpanStatus.PLANNED or self.level() == "heavy":
+                from thirties_core.fewer_messages import block_notices_on  # at heavy its bell is its ping
+                if span is None or span.status != SpanStatus.PLANNED or (
+                        self.level() == "heavy" and block_notices_on(self.config)):
                     continue
             if now - rem.due > timedelta(hours=12):
                 text = f"⏰ Reminder (from {rem.due.astimezone(now.tzinfo).strftime('%a')} " \
@@ -707,8 +721,13 @@ class BackgroundService:
 
     def starts(self, now: datetime) -> None:
         """Heavy: at the start of a thirty, one message for what's planned to start in it; each item is
-        announced at most once (moving it doesn't announce it again), and times are told in thirties."""
-        if self.level() != "heavy" or self._quiet(now):
+        announced at most once (moving it doesn't announce it again), and times are told in thirties.
+
+        One message for a run of back-to-back items, at its start, naming what follows in it: never one per block
+        for a stretch the user is already in. None for a run of routine steps alone, none while the user is in a
+        conversation with the assistant, and none when start notices are switched off (fewer_messages.py)."""
+        from thirties_core.fewer_messages import block_notices_on
+        if self.level() != "heavy" or self._quiet(now) or not block_notices_on(self.config):
             return
         plan = self.manager().day_plan
         block = thirty_of(now)
@@ -748,13 +767,14 @@ class BackgroundService:
             pass
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
+        from thirties_core.memory import ReminderStore
+        pinged = {r["span_id"] for r in ReminderStore(self.scheduler.state_db).all_records() if r.get("span_id")}
+        rest = self._worth_a_bell(plan, rest, pinged, block, now)
         if rest:
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
             said = [f"{self._name(s)} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s)
                     else self._name(s) for s in rest]
             bell = f"🔔 {format_clock(block)}: " + ", ".join(said)
-            from thirties_core.memory import ReminderStore
-            pinged = {r["span_id"] for r in ReminderStore(self.scheduler.state_db).all_records() if r.get("span_id")}
             details = [(self._name(s), self._details(s.title, s.task_id or "")) for s in rest if s.id in pinged]
             details = [(t, d) for t, d in details if d]
             if details:  # a reminder's details: at heavy the bell is its ping
@@ -764,6 +784,26 @@ class BackgroundService:
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now,
                       expires=block + timedelta(minutes=30))
+
+    def _worth_a_bell(self, plan, starting, pinged: set, block: datetime, now: datetime) -> list:
+        """Which of the items starting in this thirty get a bell (what follows in their run is in the what's next
+        under it). Left out: an item in a run of back-to-back items that began in an earlier thirty (the user is
+        already in that stretch), a run of routine steps alone, and anything while the user is in a conversation
+        with the assistant. An item with a reminder on it always rings: the bell is its reminder."""
+        from thirties_core.fewer_messages import is_routine_step, runs_of
+        quiet_now = self._talking(now) or self._turn_running()
+        kinds = (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR)
+        runs = runs_of(s for s in plan.active_spans() if not s.tentative and s.category in kinds
+                       and s.status != SpanStatus.SKIPPED)
+        run_of = {s.id: run for run in runs for s in run}
+        ids = {s.id for s in starting}
+        ring = []
+        for s in starting:
+            run = run_of.get(s.id, [s])
+            if s.id in pinged or not (quiet_now or thirty_of(run[0].start_dt) < block
+                                      or all(is_routine_step(x) for x in run)):
+                ring.append(s)
+        return ring
 
     def panel_ticks(self, now: datetime) -> None:
         """What was ticked done or skipped in the app's day panel reaches the phone, with what's next: one message
@@ -837,8 +877,11 @@ class BackgroundService:
         from thirties_core.messages import missed_for
         tools = self.manager().tools
         asked = self._remembered("checkins_asked")
+        grace = timedelta(minutes=self.config.assistant.checkin_after_minutes)
+        runs = back_to_back(s for s in tools.day_plan.active_spans() if self._plannable(s) and not s.tentative)
         items = [s for s in catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
-                 if s.id not in asked]  # a check-in asked about it already: once
+                 if s.id not in asked  # a check-in asked about it already: once
+                 and runs.get(s.id, s.end_dt) + grace <= now]  # its run's own question is still to come
         if not catch_up.due(tools, now, items):
             return
         catch_up.mark(tools, now, items)
@@ -979,6 +1022,7 @@ class BackgroundService:
             return said if said != s.title else _short(s.title)
         out = [name(s) for s in sorted(plan.active_spans(), key=lambda s: s.start_dt)
                if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
+               and s.source != "routine"
                and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
         if assistant is not None:
             day = plan.target_date.isoformat()

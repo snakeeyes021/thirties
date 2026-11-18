@@ -29,10 +29,10 @@ class AwayCase(ServiceCase):
 
 class TestTheListOnlyWhenItChanged(AwayCase):
 
-    def test_an_unchanged_list_isnt_sent_again_under_the_next_bell(self):
+    def test_no_list_under_a_bell(self):
         self.add("old", "Oil the hinges", "16:00", "16:15")
         self.svc.starts(at("17:00"))
-        self.assertIn("Not marked yet:\n4:00 PM – Oil the hinges", self.last("start"))
+        self.assertNotIn("Not marked yet", self.last("start"))  # asked about once, in its check-in
         self.mark("tx")
         self.mark("din")  # the plan changed, so the next bell says what's next again
         self.svc.starts(at("20:00"))
@@ -41,14 +41,15 @@ class TestTheListOnlyWhenItChanged(AwayCase):
         self.assertNotIn("Not marked yet", bell)  # the same one item as last time: not again
         self.assertNotIn("Oil the hinges", bell)
 
-    def test_a_changed_list_is_sent_again_whole(self):
+    def test_nor_once_more_has_fallen_behind(self):
         self.add("old", "Oil the hinges", "16:00", "16:15")
         self.svc.starts(at("17:00"))
         self.mark("tx")
         self.mark("din")
         self.add("lamp", "Fix the lamp", "19:00", "19:15")  # fell behind since: the list changed
         self.svc.starts(at("20:00"))
-        self.assertIn("Not marked yet:\n4:00 PM – Oil the hinges\n7:00 PM – Fix the lamp", self.last("start"))
+        self.assertNotIn("Not marked yet", self.last("start"))
+        self.assertNotIn("Fix the lamp", self.last("start"))
 
     def test_a_reply_that_listed_it_counts_as_sent(self):
         from thirties_core.away import LastSentList

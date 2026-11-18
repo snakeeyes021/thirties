@@ -62,10 +62,12 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.assertNotIn("Now:", self.last("start"))  # the bell says what's on now itself
 
     def test_not_repeated_every_half_hour_while_nothing_changed(self):
+        self.add("bat", "Wipe the bats", "19:15", "19:30")
         self.svc.starts(at("17:00"))
-        self.svc.starts(at("18:00"))
-        self.assertEqual(self.last("start").split("\n\n")[0], f"🔔 {format_clock(at('18:00'))}: Dinner")  # the 5:00 one still holds
-        self.assertNotIn("The rest of today:", self.last("start"))  # just the bell, and what fell behind since (as before)
+        self.svc.starts(at("18:00"))  # Dinner follows straight on: no bell of its own
+        self.assertEqual(len(self.desktop), 1, self.desktop)
+        self.svc.starts(at("19:00"))  # an item after a gap rings again
+        self.assertEqual(self.last("start").split("\n\n")[0], f"🔔 {format_clock(at('19:00'))}: Wipe the bats")
 
     def test_again_once_the_plan_changes(self):
         self.svc.starts(at("17:00"))
@@ -78,7 +80,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.svc.starts(at("20:00"))
         self.assertTrue(self.last("start").startswith("🔔 8:00 PM: Film night\n\nNothing else is planned today.\n"
                                                       "Free 9:30 PM – 11:00 PM"), self.last("start"))  # it ran out: anew
-        self.assertIn("Not marked yet:\n5:00 PM – Sort the receipts\n6:00 PM – Dinner", self.last("start"))
+        self.assertNotIn("Not marked yet", self.last("start"))  # asked about in check-ins, never listed under a bell
         from thirties_core.whats_next import SentSummaries
         plan = self.svc.manager().day_plan
         sent = SentSummaries(self.sched.state_db)
@@ -108,7 +110,7 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.add("old", "Water the ferns", "16:00", "16:15")
         self.svc.starts(at("17:00"))
         self.assertFalse(any(line.startswith("- ") for line in lines(self.last("start"))))
-        self.assertIn("4:00 PM – Water the ferns", lines(self.last("start")))  # under Not marked yet
+        self.assertNotIn("4:00 PM – Water the ferns", lines(self.last("start")))  # no Not marked yet under a bell
 
 
 class TestTheUsersSayOverIt(ServiceCase):
@@ -133,11 +135,11 @@ class TestTheUsersSayOverIt(ServiceCase):
         self.svc.starts(at("17:00"))
         self.assertIn("The rest of today:", self.last("start"))
         self.assertNotIn("Water the ferns", self.last("start"))
-        self.add("call", "Call the plumber", "18:00", "18:15")
+        self.add("call", "Call the plumber", "19:30", "19:45")
         from thirties_core.whats_next import SentSummaries
-        SentSummaries(self.sched.state_db).mark(self.svc.manager().day_plan, at("17:59"))
-        self.svc.starts(at("18:00"))  # just the bell: no list under it either
-        self.assertEqual(self.last("start"), "🔔 6:00 PM: Call the plumber, Dinner")
+        SentSummaries(self.sched.state_db).mark(self.svc.manager().day_plan, at("19:29"))
+        self.svc.starts(at("19:30"))  # just the bell: no list under it either
+        self.assertEqual(self.last("start"), "🔔 7:30 PM: Call the plumber")
 
     def test_block_line_off_means_no_now_line_in_a_check_in(self):
         self.extras("status_line", "off")

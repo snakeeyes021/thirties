@@ -137,27 +137,22 @@ class TestBackground(unittest.TestCase):
         self.svc.starts(at("22:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00 PM: Brush teeth")  # the first was done: new
 
-    def test_whats_behind_is_listed_under_the_status_when_something_new_falls_behind(self):
-        for sid, title, start in (("k", "Feed the fish", "11:00"), ("c", "Make coffee", "11:10"), ("s", "Shower", "11:30")):
+    def test_a_bell_carries_no_list_of_whats_behind_and_rings_once_for_a_run(self):
+        for sid, title, start in (("k", "Rinse the brushes", "11:00"), ("c", "Label the glazes", "11:10")):
             self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(start) + timedelta(minutes=15),
                                                       SpanCategory.ACTIVITY))
-        self.sched.state_db.upsert_span(EventSpan("s2", "Shower", at("11:45"), at("11:55"), SpanCategory.ACTIVITY))
-        self.sched.state_db.upsert_span(EventSpan("w", "Walk", at("12:00"), at("12:30"), SpanCategory.ACTIVITY))
-        self.sched.state_db.upsert_span(EventSpan("l", "Lunch", at("12:30"), at("13:00"), SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("w", "Walk to the river", at("12:00"), at("12:30"),
+                                                  SpanCategory.ACTIVITY))
+        self.sched.state_db.upsert_span(EventSpan("l", "Glue the handles", at("12:30"), at("13:00"),
+                                                  SpanCategory.ACTIVITY))
         self.svc._manager = None
         self.svc.starts(at("12:00"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk\n\nNot marked yet:\nFeed the fish\n"
-                                                      "Make coffee\nShower"))  # one per line, once each, no times
-        self.svc.starts(at("12:30"))
-        self.assertEqual(self.desktop[-1][1].split(": ", 1)[1], "Lunch\n\nNot marked yet:\nFeed the fish\n"
-                                                               "Make coffee\nShower\nWalk")  # Walk fell behind
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk to the river"))  # each item is asked about
+        self.svc.starts(at("12:30"))  # once, in its check-in: never a growing list under every bell
+        self.assertEqual(len(self.desktop), 1)  # the handles follow straight on: the user is already in that stretch
         self.svc.starts(at("17:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00 PM: Taxes")
-        self.assertIn("\nLunch", self.desktop[-1][1])
-        self.sched.state_db.upsert_span(EventSpan("x", "Stretch", at("17:30"), at("18:00"), SpanCategory.ACTIVITY))
-        self.svc._manager = None
-        self.svc.starts(at("17:30"))
-        self.assertEqual(self.desktop[-1], ("start", "🔔 5:30 PM: Stretch"))  # nothing new behind: not repeated
+        self.assertNotIn("Not marked yet", self.desktop[-1][1])
 
     def test_start_notices_are_in_the_conversation(self):
         self.svc.starts(at("17:00"))
