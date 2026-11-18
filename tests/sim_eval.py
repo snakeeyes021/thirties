@@ -677,6 +677,7 @@ class SimJoplin:
 
 def build_manager(scn: SimScenario, brain: str, tasks: List[TaskItem], notes: List[Dict], engine) -> Tuple[Any, Any]:
     cfg = load_config()
+    cfg.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
     cfg.assistant.brain = brain
     cfg.assistant.offer_gemma = True  # evals test every brain, offered to users or not
     cfg.sync.enabled = False
@@ -778,6 +779,7 @@ def choose_scenarios(args) -> List[SimScenario]:
 def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Run (scenario, brain, repeat) jobs in this process. Returns results and a quota message if agy ran out."""
     cfg = load_config()
+    cfg.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp()) / "s.sqlite"), MockCalendarEngine([]))
     tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)
     print(f"Backlog: {len(tasks)} tasks from {len(notes)} notes; {len(jobs)} conversations", flush=True)

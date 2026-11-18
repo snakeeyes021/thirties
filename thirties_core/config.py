@@ -23,8 +23,9 @@ class GeneralConfig:
     work_end_thirty: int = 31     # last work thirty starts 3:30 PM, so work ends 4:00 PM
     sleep_start_thirty: int = 46  # 11:00 PM
     sleep_end_thirty: int = 14    # 07:00 AM (exclusive: sleep ends at this time)
-    # Days that get default work (mon..sun). Other days start with no work.
-    work_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    # Days that get default work (mon..sun), as the user said them (Preferences, or set_week). None until they do: a
+    # guessed week put Work on days the user was off (work_pattern.py).
+    work_days: List[str] = field(default_factory=list)
     # What's different on some weekdays, e.g. {"sat": {"sleep_end_thirty": 18}} (thirties_core/week.py).
     week: Dict[str, Dict[str, int]] = field(default_factory=dict)
     week_start: str = "mon"  # the first day of the user's week: week plans and the week's planning session

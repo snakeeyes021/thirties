@@ -622,6 +622,7 @@ def requests_met(judge: Dict[str, Any]) -> Optional[float]:
 
 def run_jobs(args, jobs) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     cfg = load_config()
+    cfg.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
     sched = DeterministicScheduler(cfg, StateDatabase(Path(__import__("tempfile").mkdtemp()) / "s.sqlite"),
                                    MockCalendarEngine([]))
     tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)

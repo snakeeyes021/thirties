@@ -273,6 +273,7 @@ class InteractiveEvaluator:
         s_dir.mkdir(parents=True, exist_ok=True)
 
         config = ThirtiesConfig()
+        config.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
         state_db = StateDatabase(db_path=s_dir / "plan_eval.sqlite")
         scheduler = DeterministicScheduler(config=config, state_db=state_db, calendar_engine=MockCalendarEngine())
 
@@ -320,6 +321,7 @@ class InteractiveEvaluator:
         engine: Optional[Any] = None,
     ) -> TurnRecord:
         config = ThirtiesConfig()
+        config.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
         state_db = StateDatabase(db_path=session.db_path)
         scheduler = DeterministicScheduler(config=config, state_db=state_db, calendar_engine=MockCalendarEngine())
 
