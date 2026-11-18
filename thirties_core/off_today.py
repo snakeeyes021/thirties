@@ -193,7 +193,9 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     held = due_today.held_due(pt, line, span.task_id)  # overdue too
     if held is not None:
         if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
-            return due_today.list_stays_note(line, held, pt.today())
+            from thirties_core.today_times import retime_held  # held on today: a new block, never untimed
+            return retime_held(_assistant(pt), line, span.task_id, span.end_dt, held) or \
+                due_today.list_stays_note(line, held, pt.today())
         done = _off_list(pt, line, title)
         return f" (also {done}; {due_today.moved_line(line, None, pt.today(), held)})" if done else ""
     done = _off_list(pt, line, title)
