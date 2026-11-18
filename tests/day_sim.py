@@ -439,7 +439,9 @@ def live_day(run: DayRun, sim, max_moves: int = MAX_MOVES) -> None:
 CLOCK_RE = re.compile(r"\b(1[0-2]|0?[1-9]):([0-5]\d)\b")
 EXACT_ASKED_RE = re.compile(r"exact|minute|precise|to the min", re.IGNORECASE)
 LEAK_RE = re.compile(r"\bCALL [a-z_]+ ?\{|(?i:NOT_DONE|\bid[= ][0-9a-f]{6}|\[id |for the assistant only|\[System check|"
-                     r"tool result|the (previous|last) turn|conversation history)")  # "Call the landlord" is fine
+                     r"tool result|the (previous|last) turn|conversation history)"  # "Call the landlord" is fine
+                     r"|(?-i:\bCALL) (?i:commands?|lines?|syntax)|(?i:\b(?:tool|function)[ -]?calls?\b|"
+                     r"\b(?:commands?|calls?) in (?:plain )?text\b|\bmy (?:tools?|functions?|commands?)\b)")
 JOINED_RE = re.compile(r"\s/\s|\s&\s")
 
 

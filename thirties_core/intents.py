@@ -108,6 +108,10 @@ def explicit(intent: str, said: Optional[str]) -> bool:
         return bool(EXPLICIT_HIDE.search(said) and EXPLICIT_CALENDAR.search(said))
     pattern = {"archive": EXPLICIT_REMOVAL, "forget": EXPLICIT_FORGET, "list_restructure": EXPLICIT_RESTRUCTURE,
                "triage": EXPLICIT_YES, "profile_rewrite": EXPLICIT_REWRITE, "mute_all": EXPLICIT_MUTE}.get(intent)
+    if intent == "mute_all":  # a clear ask to be left alone asks for it too (quiet_asks.py)
+        from thirties_core.quiet_asks import asks_quiet
+        if asks_quiet(said):
+            return True
     return bool(pattern is not None and pattern.search(said))
 
 

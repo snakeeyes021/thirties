@@ -207,7 +207,7 @@ class BackgroundService:
         desktop). ``phone_chats``: only these chats get it (with ``reply_markup``, which only the one-time removal
         of an old keyboard uses)."""
         from thirties_core.clock import real_times, to_thirties
-        if kind not in HOLD_PASSES and self._held(now or self.now()):
+        if kind not in HOLD_PASSES and self._held(now or self.now(), kind):
             logger.info("Held (the user asked for quiet): %r", text[:80])
             return
         # --- the same words never twice in a day (fewer_messages.py) ---
@@ -286,10 +286,12 @@ class BackgroundService:
                 with self._lock:
                     self._marked[plain_lists(rendered)] = day
 
-    def _held(self, now: datetime) -> bool:
+    def _held(self, now: datetime, kind: str = "") -> bool:
+        """Whether a hold keeps this kind of message back now (any kind, when none is given)."""
         from thirties_core import holds
         try:
-            return holds.active(self.scheduler.state_db, now) is not None
+            data = holds.active(self.scheduler.state_db, now)
+            return data is not None and (not kind or not holds.lets_through(data, kind))
         except Exception as e:
             logger.warning("Couldn't read the hold on messages: %s", e)
             return False
@@ -686,8 +688,9 @@ class BackgroundService:
 
     def reminders(self, now: datetime) -> None:
         from thirties_core.memory import ReminderStore
-        if self._held(now):
+        if self._held(now, "reminder"):
             return  # kept: they go out once the hold ends
+        bells_held = self._held(now, "start")  # a quiet the user asked for: their reminder rings, its bell doesn't
         store = ReminderStore(self.scheduler.state_db)
         for rem in store.due(now):
             store.set_state(rem.id, "sent")  # first, so a crash can't repeat it forever
@@ -696,7 +699,7 @@ class BackgroundService:
                 span = next((s for s in self.manager().day_plan.spans if s.id == rem.span_id), None)
                 from thirties_core.fewer_messages import block_notices_on  # at heavy its bell is its ping
                 if span is None or span.status != SpanStatus.PLANNED or (
-                        self.level() == "heavy" and block_notices_on(self.config)):
+                        self.level() == "heavy" and block_notices_on(self.config) and not bells_held):
                     continue
             if now - rem.due > timedelta(hours=12):
                 text = f"⏰ Reminder (from {rem.due.astimezone(now.tzinfo).strftime('%a')} " \
