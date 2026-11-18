@@ -346,6 +346,11 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
                 or never_rolls(s.title, s) or any(m["title"].strip().lower() == low for m in missed) \
                 or s.id in displaced:
             continue
+        # --- skipped for a day the user named: their move, not a miss (not_today.py) ---
+        from thirties_core.not_today import named_skip
+        if db is not None and named_skip(db, s.title, yesterday.target_date):
+            continue
+        # --- end named day ---
         task = tasks.get(s.task_id or "") or listed.get(low)
         missed.append(_miss(s, s.task_id or (task.id if task is not None else ""), tasks))
     done_items = [{"title": s.title, "task_id": s.task_id or ""} for s in yesterday.spans
@@ -583,7 +588,8 @@ def cant_wait(assistant, task, title: str) -> bool:
 def not_today_unasked(assistant, item: Dict[str, Any], window: Dict[str, str], day: date) -> Dict[str, str]:
     """A leftover's window as the morning model proposed it, kept off today unless the item may go there: it's due
     today or overdue, the user said it can't wait, or their message this turn names it. Otherwise the window starts
-    tomorrow (a today-only window becomes tomorrow): unmarked is unknown, and never moves into today by itself."""
+    tomorrow, and a today-only window becomes a later day this week (never tomorrow by itself, not_today.py):
+    unmarked is unknown, and never moves into today by itself."""
     if not window.get("start") or window["start"] > day.isoformat():
         return window
     task = next((t for t in assistant.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
@@ -597,7 +603,11 @@ def not_today_unasked(assistant, item: Dict[str, Any], window: Dict[str, str], d
             return window
     nxt = (day + timedelta(days=1)).isoformat()
     if window.get("end", "") <= day.isoformat():
-        return {**window, "when": "tomorrow", "start": nxt, "end": nxt}
+        # --- never tomorrow by itself: a later day this week, by fit (not_today.py) ---
+        from thirties_core.not_today import later_day
+        later = later_day(assistant.pt, item["title"], 30, day)
+        return {**window, "when": later.strftime("%A"), "start": later.isoformat(), "end": later.isoformat()}
+        # --- end never tomorrow ---
     return {**window, "start": nxt}
 
 

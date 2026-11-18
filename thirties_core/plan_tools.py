@@ -1244,6 +1244,10 @@ class PlanTools:
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
                 self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
             self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
+            # --- tomorrow only on the user's word: otherwise a later day this week, by fit (not_today.py) ---
+            from thirties_core.not_today import moved_day
+            to_day = moved_day(self, span, to_day)
+            # --- end tomorrow ---
             # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---
             from thirties_core.due_today import move_check
             due = move_check(self, span.title, span.task_id, parse_day(to_day, self.today())) \
@@ -1862,9 +1866,9 @@ class PlanTools:
         out = ["Redrew the rest of today:" if lines else "Nothing to redraw: nothing flexible is left today."] + lines
         if no_room:
             out.append("Doesn't fit before bedtime, so it's off today's plan: " + ", ".join(s.title for s in no_room)
-                       + (". It waits for tomorrow (Before today), where it can be moved or dropped."
+                       + (f". It waits for {waiting} (Before today), where it can be moved or dropped."
                           if waiting and len(no_room) == 1 else
-                          ". They wait for tomorrow (Before today), where each can be moved or dropped."
+                          f". They wait for {waiting} (Before today), where each can be moved or dropped."
                           if waiting else ". It goes on another day, where there's room."))
         out += [f"{s.title} doesn't fit before bedtime, but it's {deadline_words(held[s.id], self.today())}, so it "
                 f"stays on today's plan at {format_clock(s.start_dt)}." for s in due_kept]
@@ -1874,18 +1878,27 @@ class PlanTools:
         out += late
         return "\n".join(out)
 
-    def _wait_for_tomorrow(self, spans: List[EventSpan]) -> bool:
-        """Items a redraw couldn't fit, put in the open pool for tomorrow (carry.py), so nothing it takes off the
-        plan is lost. False without the app's storage."""
+    def _wait_for_tomorrow(self, spans: List[EventSpan]) -> str:
+        """Items a redraw couldn't fit, put in the open pool for a later day (carry.py), so nothing it takes off the
+        plan is lost: the day the user named, else a later day this week by fit, never tomorrow by itself
+        (not_today.py). When they wait, as the answer says it; "" without the app's storage."""
         if self._state_db is None or not spans:
-            return False
+            return ""
         from thirties_core.carry import TODAY, OpenPool
+        from thirties_core.not_today import when_words, where_to
         day = self.day_plan.target_date
-        tomorrow = (day + timedelta(days=1)).isoformat()
-        OpenPool(self._state_db).add([{"title": s.title, "task_id": s.task_id or "", "horizon": TODAY,
-                                       "when": "tomorrow", "start": tomorrow, "end": tomorrow,
-                                       "why": "didn't fit when the day was redrawn"} for s in spans], day)
-        return True
+        recs, days = [], set()
+        for s in spans:
+            later, named = where_to(self, s.title, int((s.end_dt - s.start_dt).total_seconds() // 60), day)
+            days.add((later, named))
+            recs.append({"title": s.title, "task_id": s.task_id or "", "horizon": TODAY,
+                         "when": later.strftime("%A"), "start": later.isoformat(), "end": later.isoformat(),
+                         "why": "didn't fit when the day was redrawn"})
+        OpenPool(self._state_db).add(recs, day)
+        if len(days) == 1:
+            later, named = days.pop()
+            return when_words(self, later, named)
+        return "later days this week"
 
     @staticmethod
     def _in_fact_order(spans: List[EventSpan], facts) -> List[EventSpan]:
@@ -1914,7 +1927,7 @@ class PlanTools:
                 self._persist(span)
                 restored.append(span.title)
                 back_on.append(span.title)
-        if back_on and self._state_db is not None:  # back on today's plan: no longer waiting for tomorrow
+        if back_on and self._state_db is not None:  # back on today's plan: no longer waiting for a later day
             from thirties_core.carry import OpenPool
             OpenPool(self._state_db).drop(back_on)
         self.day_plan.spans.sort(key=lambda s: s.start_dt)

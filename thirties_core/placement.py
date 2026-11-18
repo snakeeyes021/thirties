@@ -351,7 +351,8 @@ def flow_lines(flow: Flow, moved: List[EventSpan]) -> List[str]:
     out += flow.late
     if flow.no_room:
         out.append("Would run into bedtime, so it stays where it was: " + ", ".join(s.title for s in flow.no_room)
-                   + (". Plan it tomorrow, or let it go?" if len(flow.no_room) == 1 else ". Plan them tomorrow, or let them go?"))
+                   + (". Plan it for another day, or let it go?" if len(flow.no_room) == 1 else
+                      ". Plan them for another day, or let them go?"))
     return out
 
 
@@ -490,8 +491,9 @@ def _busy(plan: DayPlan, leaving: set, after: datetime) -> List[Tuple[datetime, 
 def out_of_work(tools: "PlanTools", plan: DayPlan, works: List[EventSpan]) -> List[str]:
     """An on-site day: move what Thirties placed inside work out, by itself (no asking). Each unit (one item, or a
     routine's steps back to back) goes to the free time nearest where it was, before or after work, keeping its
-    length, its order inside and the thirties; with no room left today, tomorrow (where a daily thing already has
-    its own time tomorrow, today's simply doesn't happen). What the user timed, fixed things and meals stay. One plain
+    length, its order inside and the thirties; with no room left today, a later day this week by fit, never
+    tomorrow by itself (not_today.py; where a daily thing already has its own time tomorrow, today's simply doesn't
+    happen). What the user timed, fixed things and meals stay. One plain
     line for each, saying where it went."""
     from thirties_core.if_time import _waking_end
     from thirties_core.replan import outdoors as needs_daylight  # by its wording, or the user said so
@@ -523,7 +525,7 @@ def out_of_work(tools: "PlanTools", plan: DayPlan, works: List[EventSpan]) -> Li
             side = "before work" if t + length <= min(w.start_dt for w in works) else "after work"
             lines.append(f"{names}: now {format_clock(t)}, {side}.")
             continue
-        # nothing fits today: tomorrow, except what's due today or overdue, which stays (due_today.py)
+        # nothing fits today: a later day, except what's due today or overdue, which stays (due_today.py)
         from thirties_core.due_today import deadline_words, held_due
         due = [d for d in (held_due(tools, s.title, s.task_id) for s in unit) if d is not None]
         if due:
@@ -542,21 +544,28 @@ def out_of_work(tools: "PlanTools", plan: DayPlan, works: List[EventSpan]) -> Li
             changed = True
             lines.append(f"{names}: no free time outside work today, so not today; it's on tomorrow's plan as usual.")
             continue
-        t2 = _free_start(tomorrow, _busy(tomorrow, set(), tomorrow.day_start), length, first + timedelta(days=1),
-                         tomorrow.day_start, _waking_end(tomorrow), daylight)
+        # --- a later day this week by fit, or the day the user named; never tomorrow by itself (not_today.py) ---
+        from thirties_core.not_today import day_words, where_to
+        day, _ = where_to(tools, unit[0].title, int(length.total_seconds() // 60), plan.target_date)
+        later = tools.plan_for(day)
+        when = day_words(day, plan.target_date)
+        # --- end later day ---
+        t2 = _free_start(later, _busy(later, set(), later.day_start), length,
+                         first + timedelta(days=(day - plan.target_date).days),
+                         later.day_start, _waking_end(later), daylight)
         if t2 is None:
-            lines.append(f"{names}: no free time outside work today or tomorrow, so it stays where it was.")
+            lines.append(f"{names}: no free time outside work today or {when}, so it stays where it was.")
             continue
         try:
             for s in unit:
-                tools._move_to_day(s, tomorrow.target_date.isoformat(), format_clock(t2 + (s.start_dt - first)),
+                tools._move_to_day(s, later.target_date.isoformat(), format_clock(t2 + (s.start_dt - first)),
                                    None, f"{int((s.end_dt - s.start_dt).total_seconds() // 60)} minutes", None)
         except Exception:
-            lines.append(f"{names}: no free time outside work today, and it couldn't go on tomorrow, so it stays "
+            lines.append(f"{names}: no free time outside work today, and it couldn't go on {when}, so it stays "
                          "where it was.")
             continue
         changed = True
-        lines.append(f"{names}: no free time outside work today, so tomorrow at {format_clock(t2)}.")
+        lines.append(f"{names}: no free time outside work today, so {when} at {format_clock(t2)}.")
     from thirties_core.traits import time_set_by
     for s in kept:
         who = time_set_by(tools, s)
