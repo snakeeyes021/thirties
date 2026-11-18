@@ -15,8 +15,8 @@ out; the time now is said apart ("It's 12:37"). A shift the user asks for ("an h
 with the item: they anchored it. Everything else is a time Thirties chose and is never kept:
 
 - a step put after another one, a routine's parts, a day proposal, a carried-over item, an estimate: any placing
-  that starts from another tool (put_routine, propose_day...), whatever the message says, except a step's own time
-  the user gave for it this turn (stated_times.keep_step_time);
+  that starts from another tool (put_routine, propose_day...), except where the user gave that item its time, this
+  turn or earlier today: that time goes first and is theirs (routine_times.py);
 - a change with nobody talking (the background, the app's own buttons);
 - a time moved off what the user said (a short item stacked after others in its thirty, a window kept).
 

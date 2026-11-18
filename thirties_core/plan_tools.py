@@ -1076,6 +1076,13 @@ class PlanTools:
         kept = ""
         if not is_fixed and cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
             start_dt, end_dt, kept = self._constraints_kept(str(title).strip(), None, start_dt, end_dt)
+        # --- Thirties placing it: a time the user gave for it goes first (routine_times.py) ---
+        said_at = None
+        if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
+            from thirties_core.routine_times import placing_at
+            start_dt, end_dt, said = placing_at(self, str(title).strip(), start_dt, end_dt)
+            said_at = start_dt if said else None
+        # --- end a time the user gave ---
         span = EventSpan(new_span_id(), str(title).strip(), start_dt, end_dt, cat, task_id=task_id)
         if self._push_wanted(span, push_later, alongside) and not span.is_envelope and not _as_bool(alongside):
             self._push_asked()
@@ -1091,6 +1098,8 @@ class PlanTools:
         # --- a time the user stated for it is kept, to be shown as said (given_times.py) ---
         from thirties_core.given_times import keep as keep_given
         keep_given(self, span, True, end not in (None, ""))
+        if said_at is not None and span.start_dt == said_at:  # placed by Thirties at the user's time (routine_times.py)
+            span.given_start = said_at
         # --- end a time the user stated ---
         self._persist(span)
         from thirties_core.turn_guards import after_add
@@ -1353,7 +1362,7 @@ class PlanTools:
             target_plan.spans.sort(key=lambda s: s.start_dt)
             self._persist(moved)
             if self.assistant and self.is_current(target_plan):
-                self.assistant.list_today(moved)
+                self._list_today_on(target_plan, moved)
             from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
             off = after_move(self, moved, source_plan, target_plan)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
@@ -1366,10 +1375,21 @@ class PlanTools:
         self._persist(span)
         listed = ""
         if self.assistant and self.is_current(target_plan):
-            listed = self.assistant.list_today(span)
+            listed = self._list_today_on(target_plan, span)
         from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
         listed = (listed + after_move(self, span, source_plan, target_plan)).strip()
         return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
+
+    def _list_today_on(self, plan: DayPlan, span: EventSpan) -> str:
+        """The Today copy of an item moved onto ``plan`` from another day, written as that day's: while the tool still
+        had the day it came from loaded, a list item moved from a later day went on that day's list instead, and
+        never reached the Today note."""
+        was = self.day_plan
+        self.day_plan = plan
+        try:
+            return self.assistant.list_today(span)
+        finally:
+            self.day_plan = was
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:
         a, b = self._find_span(first), self._find_span(second)

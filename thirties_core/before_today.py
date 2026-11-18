@@ -93,7 +93,9 @@ class BeforeToday:
             args = {"title": item["title"], "start": format_clock(spot), "duration": f"{minutes} minutes"}
             if task is not None:
                 args.update(task_id=task.id, category="task")
-            out = pt.execute("add_event", args)
+            from thirties_core.routine_times import own_placing  # a time the user gave goes first (routine_times.py)
+            with own_placing():
+                out = pt.execute("add_event", args)
             if out.startswith(NOT_DONE):
                 overflow.append({**item, "minutes": minutes})
                 continue

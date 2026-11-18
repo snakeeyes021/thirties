@@ -1131,8 +1131,11 @@ Leaving today, and on-site days: something the user skips for today or puts on a
 
         from thirties_core.time_claims import unmade_time_claims  # "locked in" over a refusal (time_claims.py)
 
+        from thirties_core.unasked import mark as unasked  # a move nobody asked for isn't announced (unasked.py)
+
         def problems(text: str):
-            return (self._unmade_moves(turn_start, text) + unmade_time_claims(self, turn_start, text),
+            return (unasked(self, turn_start, self._unmade_moves(turn_start, text)
+                            + unmade_time_claims(self, turn_start, text)),
                     self._unmade_dones(text), self._wrong_times(text),
                     self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
                     reply_checks.unkept_promises(self, turn_start, text))
@@ -1175,7 +1178,8 @@ Leaving today, and on-site days: something the user skips for today or puts on a
         from thirties_core.time_claims import TIME_CLAIM_RE
 
         def facts_of(sentence: str) -> List[str]:
-            return (self._unmade_moves(turn_start, sentence) + unmade_time_claims(self, turn_start, sentence)
+            return (unasked(self, turn_start, self._unmade_moves(turn_start, sentence)
+                            + unmade_time_claims(self, turn_start, sentence))
                     + self._unmade_dones(sentence) + self._wrong_times(sentence) + self._not_removed(sentence))
         claim = re.compile("|".join(f"(?:{r.pattern})" for r in (self._MOVED_RE, TIME_CLAIM_RE, self._REMOVED_RE,
                                                                   self._OUTCOME_CLAIM_RE, self._CLAIMS_RE)),

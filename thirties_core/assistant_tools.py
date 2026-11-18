@@ -1065,6 +1065,12 @@ class AssistantTools(KindTools):
                 for k, text in enumerate(todo):
                     length = at[k + 1] - at[k]
                     mine = own_time(typed.get(step_times.key(text), text), first) or own_time(text, first)
+                    # --- a time the user gave for the step goes first (routine_times.py) ---
+                    if mine is None:
+                        from thirties_core.routine_times import said_time
+                        mine = said_time(self.pt, plan, step_times.clean_title(text), first,
+                                         [note["title"]] + [step_times.clean_title(s) for s in steps])
+                    # --- end a time the user gave ---
                     if mine is not None:
                         begin = mine
                     else:
@@ -1077,7 +1083,9 @@ class AssistantTools(KindTools):
                         args.update(category="task", task_id=line_id(self._db, note["id"], text))
                     if day not in (None, ""):
                         args["day"] = day
-                    out = self.pt.execute("add_event", args)
+                    from thirties_core.routine_times import alongside as said_with, own_placing
+                    with own_placing(), said_with([note["title"]] + [step_times.clean_title(s) for s in steps]):
+                        out = self.pt.execute("add_event", args)
                     if out.startswith(NOT_DONE_PREFIX):
                         raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
                     # --- a step's own time the user gave is theirs, shown as said (stated_times.py) ---

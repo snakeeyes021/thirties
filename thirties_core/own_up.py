@@ -65,6 +65,11 @@ def failed_items(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int
         title = _title(tools, args)
         key = title.lower() or f"<{name}>"
         if out.startswith(not_done):
+            # --- a move nobody asked for, refused: not news to the user (unasked.py) ---
+            from thirties_core.unasked import skip as unasked
+            if unasked(tools, title, out):
+                continue
+            # --- end a move nobody asked for ---
             if not _NO_OP_RE.search(out[len(not_done):].lstrip(": ")):
                 failed[key] = (title, name)
         else:
