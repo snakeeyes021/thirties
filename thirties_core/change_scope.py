@@ -106,9 +106,10 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     title = pt._title(span)
     if _referred_to(pt, message, title, (span.id, span.task_id)):
         return None
+    from thirties_core.unasked import refusal_note  # never announced as a failed move (unasked.py)
     return (f"The user's message doesn't name {title}, so it stays where it is: change only what they asked about. "
             f"If what they named needs this time, put it alongside (alongside=true), or ask them before moving "
-            f"{title}.")
+            f"{title}." + refusal_note(title))
 
 
 def add_refused(pt: "PlanTools", title: str) -> Optional[str]:

@@ -79,7 +79,10 @@ def still_line(tools: Any, title: str, tool: str) -> str:
 
 def from_fact(fact: str) -> str:
     """A check's fact about an item ("Bake bread is still at 5:00 PM", "Soup isn't recorded as done") as the plain
-    sentence the reply should say."""
+    sentence the reply should say. A fact about a move the user didn't ask for says nothing (unasked.py)."""
+    from thirties_core.unasked import NOT_ASKED
+    if str(fact or "").rstrip().endswith(NOT_ASKED):
+        return ""
     fact = _ASIDE_RE.sub("", fact or "").strip().rstrip(".")
     if not fact or fact == "nothing":
         return "I couldn't move that just now, so nothing has moved yet."
@@ -144,7 +147,7 @@ def say_in_place(reply: str, facts_of: Callable[[str], List[str]], claim_re: "re
         facts = facts_of(sentence)
         if not facts:
             return None
-        lines = list(dict.fromkeys(in_app_words([from_fact(f) for f in facts], titles)))
+        lines = list(dict.fromkeys(in_app_words([x for x in (from_fact(f) for f in facts) if x], titles)))
         keep = _true_part(sentence, [_title_of(f) for f in facts], titles, claim_re)
         return " ".join(([keep] if keep else []) + lines)
     return replace_sentences(reply, new_for)
@@ -191,6 +194,10 @@ def say_failed(tools: Any, reply: str, items: Sequence[Tuple[str, str]], claim_r
 
 def check_text(lines: Sequence[str]) -> str:
     """The rewrite's instruction: the plain sentences to say, and that the draft was never seen."""
+    lines = [line for line in lines if line]
+    if not lines:  # only moves nobody asked for (unasked.py)
+        return ("Leave out the moves the user didn't ask for; say nothing about them. Write the reply fresh: the "
+                "user never saw this draft, so don't correct anything or mention an earlier message.")
     said = " ".join(f'"{line}"' for line in lines)
     return (f"Say it in your reply, plainly, as the plan has it: {said} Write the reply fresh: the user never saw "
             "this draft, so don't correct anything or mention an earlier message.")
