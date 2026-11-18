@@ -610,6 +610,8 @@ class ConversationManager:
         # --- end promise of quiet ---
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
         final = clean_message(final, self.tools, merged)
+        from thirties_core import repeat_lines  # an item's time said once a day, and never after "stop" (repeat_lines.py)
+        final = repeat_lines.after_reply(self, final, merged, before)
         from thirties_core import fallback  # said once: a simpler assistant is answering, or the usual one is back
         final = fallback.with_notice(self, final)
         if final != reply:

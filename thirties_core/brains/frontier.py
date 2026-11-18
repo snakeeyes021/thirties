@@ -1073,6 +1073,12 @@ Leaving today, and on-site days: something the user skips for today or puts on a
             named = [s for s in spans if mentions(part, titles[s.id], titles.values())]
             if not named:
                 continue
+            # --- a time from the item's own title ("Return the key by 4:30 PM") is its name, never its time ---
+            own = {c for s in named for c in self._said_clocks(titles[s.id])}
+            said = [c for c in said if c not in own]
+            if not said:
+                continue
+            # --- end its own title ---
             known, starts, ends = set(), {}, {}
             for s in named:
                 st = {self._clock_key(dt) for dt in (s.start_dt, thirty_of(s.start_dt), s.actual_start, s.planned_start)
