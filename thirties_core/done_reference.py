@@ -13,6 +13,8 @@ goes through when the user's words point at the item:
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
 - **An answer to "which one?"**: "the first one", "the last one" for that one of the items the question listed, in
   the order it listed them (open list items it named count too, planned or not).
+- **The one just listed**: when the words fit several items equally and the last message the user was shown listed
+  exactly one of them ("Not marked yet: Glaze run" beside a Glaze run review call), it's that one.
 - **The one whose time has come**: when the words fit several items equally ("the walk's done" with three walks),
   or the item has copies under one name, it's the one still to do that began last (or is due within the half
   hour: a done is often said a little early); before any has begun, the next one. A copy named by its start time
@@ -146,6 +148,15 @@ def _the_one_whose_time_came(pt: "PlanTools", message: str, title: str, titles: 
     return all(s.title == title for s in last)
 
 
+def _the_one_listed(message: str, shown: str, title: str, titles: List[str]) -> bool:
+    """When the message's words fit this item and others equally ("the glaze run is done" beside Glaze run and
+    Glaze run review call), the last message the user was shown picks it: it listed this one in full and none of
+    the others ("Not marked yet: Glaze run"). What they were just shown is what they're answering."""
+    from thirties_core.item_facts import tied_with
+    tied = tied_with(message, title, [t for t in titles if t != title])
+    return bool(tied) and _listed(shown, title) and not any(_listed(shown, t) for t in tied)
+
+
 def _picked_by_time(pt: "PlanTools", message: str, title: str, titles: List[str]) -> Optional[bool]:
     """When the message's words fit this item and others equally, a time it gives picks the one that starts then:
     True for this item, False for another, None when no time it gives tells them apart."""
@@ -271,6 +282,8 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if by_time is not None:
         return (None, message) if by_time else (refusal, message)
     # --- end picked by its time ---
+    if _the_one_listed(message, shown, title, titles):
+        return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
     if _the_one_whose_time_came(pt, message, title, titles) and not _another_in_everyday_words(message, others, titles):
         return None, message
     if any(_named(message, t, titles) for t in others):
