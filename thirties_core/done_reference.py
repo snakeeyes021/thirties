@@ -11,6 +11,8 @@ goes through when the user's words point at the item:
   message they saw named (or, if that named none, what they said just before); "both" for exactly two; "those"
   or "them" for up to MOST_POINTED of them.
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
+- **A whole routine**: its name with "all", "whole" or "everything", or "both" / "all of them" to a question about
+  its parts: every step of it, in every part (whole_routine.py).
 - **An answer to "which one?"**: "the first one", "the last one" for that one of the items the question listed, in
   the order it listed them (open list items it named count too, planned or not).
 - **The one just listed**: when the words fit several items equally and the last message the user was shown listed
@@ -273,7 +275,12 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids) or BULK_RE.search(message):
         return None, message
     said, shown = getattr(pt, "prior_exchange", None) or ("", "")
-    copy_refusal = (f"{title} is on the plan more than once and the user's words don't say which time, so it "
+    # --- a whole routine said done: every step of it, in every part (whole_routine.py) ---
+    from thirties_core.whole_routine import routine_meant
+    if routine_meant(pt, message, shown, title):
+        return None, message
+    # --- end a whole routine ---
+    copy_refusal =(f"{title} is on the plan more than once and the user's words don't say which time, so it "
                     "isn't marked done. Mark the one whose time has come, or ask which one they did.")
     if _named(message, title, titles):
         return (None, message) if _the_copy_meant(pt, [message], ids) else (copy_refusal, message)
