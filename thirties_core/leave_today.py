@@ -151,13 +151,21 @@ def after_skip(pt: "PlanTools", span: "EventSpan") -> str:
         return ""
     a = _assistant(pt)
     line = top_line(pt, span.title, span.task_id)
-    if a is None or line is None:
+    if a is None:
         return ""
     from thirties_core.due_today import held_due, list_stays_note  # due today or overdue: a skip never takes it off
-    held = held_due(pt, line, span.task_id)
-    if held is not None:  # held on today: a new block for it, never an untimed line (today_times.retime_held)
+    held = held_due(pt, line or span.title, span.task_id)
+    if held is not None and line is not None:  # held on today: a new block, never an untimed line (today_times)
         from thirties_core.today_times import retime_held
         return retime_held(a, line, span.task_id, span.end_dt, held) or list_stays_note(line, held, pt.today())
+    # --- it didn't happen (its time is past): back to its list, fitted where it makes sense (catch_up.refit) ---
+    from thirties_core.catch_up import refit
+    back = refit(pt, span, line)
+    if back is not None:
+        return back
+    # --- end didn't happen ---
+    if line is None:
+        return ""
     done = skip_line(a, line)
     return f" (also {done})" if done else ""
 

@@ -179,9 +179,7 @@ class TestHold(ServiceCase):
             self.add(sid, f"Errand {sid}", start, (at(start) + timedelta(minutes=15)).strftime("%H:%M"))
         set_debug_time(at("19:10"))
         self.svc.evening_catch_up(at("19:10"))
-        from thirties_core import catch_up
-        self.assertIsNone(catch_up.pending(self.svc.manager().tools, at("19:10")))  # never offered unseen
-        self.assertEqual(self.desktop, [])
+        self.assertEqual(self.desktop, [])  # never asked unseen
 
     def test_a_reply_still_goes_out_during_a_hold(self):
         self.hold()

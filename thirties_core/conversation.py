@@ -393,17 +393,7 @@ class ConversationManager:
             ended = ""
         if ended:
             return ended
-        from thirties_core import catch_up  # a yes to the evening's "Move these to tonight?" is acted on here
-        if catch_up.YES_RE.match(user_text):
-            try:
-                moved = catch_up.answer(self, user_text, via)
-            except Exception as e:
-                logger.warning("Answering the evening catch-up failed: %s", e)
-                moved = ""
-            if moved:
-                return moved
         mine = self.enqueue(user_text, via)  # first: messages keep the order they came in
-        catch_up.let_go(self)  # anything else said lets the offer go
         self.gate.wait_quiet(quiet)
         with self.turn_lock:
             if mine.taken:

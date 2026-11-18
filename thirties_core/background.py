@@ -11,7 +11,7 @@ window closed. Every few seconds it:
 - lists what's not marked yet only when that list changed, and after two check-ins with no reply sends no
   more until the user writes again (away.py),
 - tells the phone what was ticked in the app's day panel, with what's next,
-- puts what's still not marked on tonight, once an evening, and says so (catch_up.py),
+- asks once an evening, in one question, about what's still not marked (catch_up.py),
 - holds every message while the user asked for quiet, until they say it's over (holds.py),
 - delivers queued changes to Joplin, and syncs if sync is on.
 
@@ -827,27 +827,30 @@ class BackgroundService:
         self.send(join_sections(said, part), "panel", now=now, desktop=False)
 
     def evening_catch_up(self, now: datetime) -> None:
-        """Once an evening, when two or more of today's things are still not marked and there's room tonight: they
-        go on tonight at once and one line says so (catch_up.py). No question, no yes to wait for."""
+        """Once an evening: what's still unmarked from today and nobody has asked about yet goes into the one
+        batched status question, worded like a check-in (catch_up.py). Nothing moves by itself: unmarked is
+        unknown, and the user's answer is acted on as their report."""
         if self.level() in ("off", "light") or self._quiet(now) or self._talking(now) or self._turn_running() \
-                or self._held(now) or self._checkins_paused():  # never while nobody reads it
+                or self._held(now) or self._checkins_paused():  # a question: none while nobody answers
             return
         from thirties_core import catch_up
         from thirties_core.messages import missed_for
-        manager = self.manager()
-        with manager.turn_lock:
-            tools = manager.tools
-            missed = catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
-            if not catch_up.due(tools, now, missed):
-                return
-            text = catch_up.move(tools, now, missed)
-        if not text:
+        tools = self.manager().tools
+        asked = self._remembered("checkins_asked")
+        items = [s for s in catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
+                 if s.id not in asked]  # a check-in asked about it already: once
+        if not catch_up.due(tools, now, items):
             return
-        self.send(text, "catch_up", now=now)
+        catch_up.mark(tools, now, items)
+        for s in items:
+            asked[s.id] = now.date().isoformat()
+        self._remember("checkins_asked", asked, now)
+        titles = [s.title for s in sorted(items, key=lambda s: s.start_dt)]
+        names = [self._name(s) for s in sorted(items, key=lambda s: s.start_dt)]
+        self._asked(now, titles)
         from thirties_core.away import LastSentList  # the list it carried counts as sent (away.py)
-        from thirties_core.messages import MissedTracker
-        MissedTracker(self.scheduler.state_db).mark(now, missed)
-        LastSentList(self.scheduler.state_db).mark(now, missed)
+        LastSentList(self.scheduler.state_db).mark(now, items)
+        self.send(catch_up.question(names), "checkin", now=now, expires=now + timedelta(minutes=30))
 
     # --- the people and tickets duties. Each runs inside the tick's own try/except, so one failing
     # never stops the service. ---

@@ -1,4 +1,4 @@
-"""The evening catch-up carries only what can still happen tonight, and never calls an unmarked item "not done".
+"""The evening status question asks only about one-off items, and never calls an unmarked item "not done".
 
 Some things never roll: meals, routines and their steps, appointments, and anything tied to a time that has
 passed. An unmarked item's outcome is unknown. Invented items for someone who throws pots on a late shift at a
@@ -45,7 +45,7 @@ class TestOnlyWhatRolls(ServiceCase):
 
     def test_the_message_carries_only_those(self):
         self.svc.evening_catch_up(at("19:10"))
-        text = self.last("catch_up")
+        text = self.last("checkin")
         self.assertIn("Sort the test tiles", text)
         self.assertIn("Patch the canoe seat", text)
         for title in ("Brunch", "Stretch the shoulders", "Kiln delivery", "Call the outfitter"):
@@ -61,14 +61,14 @@ class TestOnlyWhatRolls(ServiceCase):
         self.add("sup", "Supper", "14:30", "15:00")
         self.svc._manager = None
         self.svc.evening_catch_up(at("19:10"))
-        self.assertEqual([k for k, _ in self.desktop if k == "catch_up"], [])
+        self.assertEqual([k for k, _ in self.desktop if k == "checkin"], [])
 
     def test_nothing_is_marked_by_it(self):
         self.svc.evening_catch_up(at("19:10"))
         by_id = {s.id: s for s in self.svc.manager().day_plan.spans}
-        for sid in ("brunch", "step", "call"):
+        for sid in ("brunch", "step", "call", "tile", "seat"):
             self.assertIn(by_id[sid].status, (SpanStatus.PLANNED, SpanStatus.UNKNOWN))  # unknown: never skipped
-            self.assertLess(by_id[sid].start_dt, at("15:00"))
+            self.assertLess(by_id[sid].start_dt, at("15:00"))  # and never moved
 
 
 if __name__ == "__main__":

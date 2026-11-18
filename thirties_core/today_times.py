@@ -75,10 +75,11 @@ def place_new_item(assistant: "AssistantTools", task: "TaskItem", day: Any = Non
 
 
 def retime_held(assistant: "AssistantTools", line: str, task_id: Optional[str] = None,
-                after: Optional[datetime] = None, due: Optional[date] = None) -> str:
+                after: Optional[datetime] = None, due: Optional[date] = None, said: str = "") -> str:
     """A held item (its date is today or already past) lost its block: it gets another one later today, from
     ``after`` (where the lost block ended) or now, whichever comes later. Returns the note for the tool's answer;
-    "" when no block is left at all, so the caller keeps its own line. ``due``: the date holding it here."""
+    "" when no block is left at all, so the caller keeps its own line. ``due``: the date holding it here.
+    ``said``: the caller's own words for why it's back on, before the time."""
     if assistant is None:
         return ""
     from thirties_core import if_time
@@ -102,6 +103,8 @@ def retime_held(assistant: "AssistantTools", line: str, task_id: Optional[str] =
                 args.update(task_id=task.id, category="task")
             if not pt.execute("add_event", args).startswith(NOT_DONE):
                 why = deadline_words(due, pt.today()) if due is not None else "due today"
+                if said:  # the caller's own words for why it's back on ("can't wait, so it's on tonight at")
+                    return f" ({line} {said} {format_clock(spot)}" + (", alongside another item)" if doubled else ")")
                 return (f" ({line} is {why}, so it's on today's plan again at {format_clock(spot)}"
                         + (", alongside another item)" if doubled else ")"))
     except Exception:
