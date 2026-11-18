@@ -298,6 +298,7 @@ def run_scenario(scn: Scenario, model: str, engine=None) -> Run:
     try:
         cfg = ThirtiesConfig()
         cfg.inference.gemini_model = model
+        cfg.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week its scenarios assume
         from tests.fixtures import temp_dir
         db = StateDatabase(Path(temp_dir("frontier_eval_")) / "state.sqlite")
         sched = DeterministicScheduler(config=cfg, state_db=db, calendar_engine=MockCalendarEngine(list(scn.events)))

@@ -174,6 +174,7 @@ class BridgeCase(unittest.TestCase):
         from thirties_core.calendar_engine import MockCalendarEngine
         set_debug_time(at("09:00"))  # a fixed workday, never the real date or calendar
         self.addCleanup(set_debug_time, None)
+        self.config.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the test person gave
         self.scheduler = DeterministicScheduler(
             config=self.config,
             state_db=self.state_db,

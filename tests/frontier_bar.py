@@ -368,6 +368,7 @@ def main() -> None:
     from thirties_core.scheduler import DeterministicScheduler, StateDatabase
     scripts = find_scripts([Path(p) for p in args.scripts], None if args.all else args.script)
     cfg = load_config()
+    cfg.general.work_days = ["mon", "tue", "wed", "thu", "fri"]  # the week the simulated person keeps
     sched = DeterministicScheduler(cfg, StateDatabase(Path(tempfile.mkdtemp()) / "s.sqlite"),
                                    MockCalendarEngine([]))
     tasks, notes = load_backlog(cfg, JoplinEngine(cfg), sched)

@@ -1319,6 +1319,10 @@ class PlanTools:
         from thirties_core.on_site import after_work_change
         moved_out = after_work_change(self, span)
         # --- end on-site work ---
+        # --- one day's work hours, kept; said the same a week later, they're the usual week (work_pattern.py) ---
+        from thirties_core.work_pattern import after_work_edit
+        moved_out += after_work_edit(self, span)
+        # --- end one day's work hours ---
         from thirties_core.day_edges import day_note
         return (f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}"
                 f"{getattr(self, '_kept_note', '')}{moved_out}")
@@ -1526,6 +1530,10 @@ class PlanTools:
             from thirties_core.off_today import after_removal
             also = after_removal(self, span)
         # --- end off today's list ---
+        # --- no work that day, kept; said the same a week later, it's the usual week (work_pattern.py) ---
+        from thirties_core.work_pattern import after_work_edit
+        also += after_work_edit(self, span, removed=True)
+        # --- end no work that day ---
         return f"Removed {self.describe(span)}.{also}"
 
     def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False, **_: Any) -> str:

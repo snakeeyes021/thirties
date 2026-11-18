@@ -233,8 +233,10 @@ def set_days_off(tools, start: Any = None, through: Any = None, back: Any = None
         raise ToolError("The last day off comes before the first.")
     rec = add(db, first, last, str(why or ""))
     off = _refresh(tools, [])
+    from thirties_core.work_pattern import after_day_off  # one day off, said again a week later: the usual week
+    learned = after_day_off(tools, first, last)
     return (f"Off {_describe(rec, today)}: no Work on those days, so they're open."
-            + (" Work is off today's plan." if off else ""))
+            + (" Work is off today's plan." if off else "") + learned)
 
 
 def _refresh(tools, restored: List[date]) -> bool:
