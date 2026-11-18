@@ -536,6 +536,15 @@ class ConversationManager:
         if moved_out:
             self.brain.messages.append({"role": "user", "content": moved_out, "hidden": True})
         # --- end on-site work ---
+        # --- an ask for quiet, from the user's words: kept by Python before the model replies (quiet_asks.py) ---
+        from thirties_core import quiet_asks
+        quiet = quiet_asks.at_turn_start(self.scheduler.state_db if self.scheduler else None, merged,
+                                         get_current_time(self.day_plan.day_start.tzinfo), self.day_plan)
+        if quiet is not None:
+            self.brain.messages.append({"role": "user", "hidden": True, "content": (
+                "(The user's message asks for quiet, and Thirties has already set it: " + quiet_asks.describe(quiet)
+                + " No call is needed for it.)")})
+        # --- end ask for quiet ---
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:
@@ -591,6 +600,14 @@ class ConversationManager:
         final = morning_reply.without_slice(self, final) if morning_now else \
             self._with_whats_next(final, merged, before)
         # --- end morning reply ---
+        # --- a promise of quiet only when quiet is kept (quiet_asks.py) ---
+        if self.scheduler is not None:
+            from thirties_core.memory import CheckinMutes
+            now_q = get_current_time(self.day_plan.day_start.tzinfo)
+            final = quiet_asks.without_false_quiet(
+                final, self.scheduler.state_db, now_q,
+                mutes_on=CheckinMutes(self.scheduler.state_db).paused_until(now_q) is not None)
+        # --- end promise of quiet ---
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
         final = clean_message(final, self.tools, merged)
         from thirties_core import fallback  # said once: a simpler assistant is answering, or the usual one is back

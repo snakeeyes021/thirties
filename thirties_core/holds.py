@@ -81,6 +81,14 @@ def active(db, now: datetime) -> Optional[dict]:
     return data
 
 
+def lets_through(data: Optional[dict], kind: str) -> bool:
+    """Whether a message of this kind goes out during this hold: answers and its end always; a reminder the user
+    set, when the hold came from their own words and they didn't say nothing at all (quiet_asks.py)."""
+    if data is None or kind in PASSES:
+        return True
+    return kind == "reminder" and bool(data.get("from_words")) and not data.get("strict", True)
+
+
 def start(db, now: datetime, ends: datetime, span_id: str = "", title: str = "", said: str = "") -> dict:
     words = sorted(set(_words(said) + (_words(title) if title and not said else [])))
     data = {"state": "on", "since": now.isoformat(), "ends": ends.isoformat(), "span_id": span_id,
@@ -104,7 +112,8 @@ def said_over(data: dict, messages: List[dict]) -> bool:
         return False
     since = data.get("since", "")
     for m in messages:
-        if m.get("role") != "user" or m.get("hidden") or str(m.get("at") or "") < since:
+        # the message that asked for the hold never ends it, even when it uses the words ("before my next message")
+        if m.get("role") != "user" or m.get("hidden") or str(m.get("at") or "") <= since:
             continue
         if want & set(_words(str(m.get("content") or ""))):
             return True
@@ -131,7 +140,17 @@ def check(db, plan, messages: List[dict], now: datetime) -> str:
     if said_over(data, messages):
         end(db, now, "said")
         return "said"
+    if data.get("until_user") and wrote_since(data, messages):  # "until I write" (quiet_asks.py): they wrote
+        end(db, now, "wrote")
+        return "wrote"
     return ""
+
+
+def wrote_since(data: dict, messages: List[dict]) -> bool:
+    """A message from the user after the one that asked for the hold."""
+    since = data.get("since", "")
+    return any(m.get("role") == "user" and not m.get("hidden") and str(m.get("at") or "") > since
+               and not str(m.get("content") or "").startswith("[System check") for m in messages)
 
 
 class HoldTools:
@@ -148,6 +167,12 @@ class HoldTools:
         if db is None:
             raise ToolError("Messages can't be held here.")
         now = pt._now()
+        # --- the user's own ask, already recorded from their words this turn, stands (quiet_asks.py) ---
+        from thirties_core import quiet_asks
+        mine = quiet_asks.recorded_for(db, getattr(pt, "user_message", None), now)
+        if mine is not None:
+            return quiet_asks.describe(mine)
+        # --- end the user's own ask ---
         span = pt._find_span(until_done) if until_done not in (None, "") else None
         ends = pt.day_plan.day_end
         if until not in (None, ""):
@@ -173,4 +198,4 @@ class HoldTools:
         return {"hold_messages": self.hold_messages, "end_hold": self.end_hold}
 
 
-__all__ = ["KEY", "PASSES", "HOLD_TOOL_SPECS", "HoldTools", "active", "start", "end", "check", "said_over"]
+__all__ = ["KEY", "PASSES", "lets_through", "HOLD_TOOL_SPECS", "HoldTools", "active", "start", "end", "check", "said_over"]
