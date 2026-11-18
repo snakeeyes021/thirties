@@ -89,6 +89,20 @@ def _about(clause: str, title: str, others: list) -> bool:
     return _names(clause, title, others) or named(clause, title, others)
 
 
+# --- a word another item shares, and an acknowledgement, in a done ---
+# a clause that only acknowledges ("ok", "okay so", "alright then"): a way into the message, never a word about an item
+_ACK_RE = re.compile(r"^\W*(?:ok|okay|k|alright|all right)(?:\W+(?:so|then|cool|great|lol|haha|thanks|thx))*\W*$",
+                     re.IGNORECASE)
+
+
+def _fits_level(clause: str, title: str, others: list) -> bool:
+    """The clause names the item by words another item shares just as much ("glaze run" beside Glaze run and Glaze
+    run review call): it's about this item as much as the other, so what it says counts for this one."""
+    from thirties_core.item_facts import tied_with
+    return bool(tied_with(clause, title, others))
+# --- end a word another item shares, and an acknowledgement ---
+
+
 def _done_in(clause: str, title: str) -> bool:
     return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
 
@@ -104,8 +118,8 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
     told = " ".join(t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t))
-    clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip()]
-    about = [c for c in clauses if _about(c, title, others)]
+    clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
+    about = [c for c in clauses if _about(c, title, others) or _fits_level(c, title, others)]
     if not about:
         about = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
     for c in about:

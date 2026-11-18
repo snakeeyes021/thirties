@@ -59,11 +59,13 @@ def _names(clause: str, title: str, others: list) -> bool:
 
 # --- a "not" that isn't the user saying it didn't happen ---
 # Words about the app's record, not about the thing: "still says not marked yet", "isn't ticked", "unmarked". The
-# record is what the user is asking to fix, so the "not" never means the thing didn't happen.
+# record is what the user is asking to fix, so the "not" never means the thing didn't happen. Chat words after it
+# ("isnt marked lol", "still not marked tho") don't change that.
 _RECORD_NOT_RE = re.compile(
     r"\b(?:not|isn'?t|aren'?t|wasn'?t|weren'?t)\s+(?:been\s+|yet\s+|even\s+)?(?:marked|ticked|checked off|"
     r"crossed off)(?:\s+(?:as\s+)?(?:yet|done|off|complete|completed|finished))*"
-    r"(?=\s*(?:$|[^\w\s]|\b(?:but|and|even|though|although|when|yet|in|on|here|there|anymore|still)\b))|"
+    r"(?=\s*(?:$|[^\w\s]|\b(?:but|and|even|though|although|when|yet|in|on|here|there|anymore|still|"
+    r"tho|lol|lmao|haha|pls|plz|please|either|again|for some reason)\b))|"
     r"\b(?:says?|said|shows?|showing|shown|reads?|listed as|marked as)\s+(?:as\s+|it'?s\s+)?"
     r"[\"'“‘]?\s*(?:not|un)", re.IGNORECASE)
 # a quoted stretch: "why does it say 'not marked yet'" quotes the app, it doesn't deny anything
