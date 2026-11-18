@@ -193,12 +193,21 @@ class TestATimeThirtiesPicks(GivenCase):
 
     def test_a_placing_started_by_another_tool_is_never_the_users(self):
         from thirties_core.plan_log import tool_call
-        self.t.user_message = "drop off the parcel at 4:45"
+        self.t.user_message = "fit the parcel drop in after work"
         with tool_call("apply_day_proposal"):  # a proposal, a carry-over, a routine: Thirties chose the time
             self.t.add_event("Drop off the parcel", "4:45 PM", duration="15 min")
         span = next(s for s in self.t.day_plan.spans if s.title == "Drop off the parcel")
         self.assertIsNone(span.given_start)
         self.assertEqual(span_when(span), "4:30 PM – 5:00 PM")
+
+    def test_another_tool_placing_it_at_the_time_the_user_gave_keeps_it_as_theirs(self):
+        from thirties_core.plan_log import tool_call
+        self.t.user_message = "drop off the parcel at 4:45"
+        with tool_call("apply_day_proposal"):  # the user's time goes first (routine_times.py)
+            self.t.add_event("Drop off the parcel", "4:30 PM", duration="15 min")
+        span = next(s for s in self.t.day_plan.spans if s.title == "Drop off the parcel")
+        self.assertEqual((span.start_dt, span.given_start), (at("16:45"), at("16:45")))
+        self.assertEqual(span_when(span), "4:45 PM – 5:00 PM")
 
     def test_a_routines_steps_are_never_given_times(self):
         self.add_reset_routine()

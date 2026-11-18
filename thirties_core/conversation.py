@@ -512,6 +512,8 @@ class ConversationManager:
         self.tools.prior_exchange = prior_exchange(self.brain.messages)
         from thirties_core.done_words import pending_dones  # a done asked for before and refused (done_words.py)
         self.tools.pending_dones = pending_dones(self.brain.messages)
+        from thirties_core.routine_times import earlier_today  # times given earlier today (routine_times.py)
+        self.tools.said_earlier = earlier_today(self.brain.messages)
         self.tools.shown_schedule = None
         from thirties_core import whats_next
         self._plan_before = whats_next.snapshot(self.day_plan)  # what the turn moves, for what's next
