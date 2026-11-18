@@ -164,5 +164,95 @@ class RefusedTickWritesNothingElseTest(GuardBase):
         self.assertEqual(self.done_notes(), [])
 
 
+class PaidAndTakeOffIsDoneTest(GuardBase):
+    """Said to have happened and to come off: a done, ticked on both notes, never filed as dropped, and never taken
+    off before the tick."""
+
+    def setUp(self):
+        super().setUp()
+        self.t.execute("add_event", {"title": "Rent", "start": "10:00 AM", "duration": "30 min", "task_id": "t_rent"})
+        self.t.execute("add_event", {"title": "Paddles", "start": "10:30 AM", "duration": "30 min",
+                                     "task_id": "t_paddles"})
+        set_debug_time(at("11:30"))
+
+    def test_paid_and_take_off_ticks_done(self):
+        span = next(s for s in self.t.day_plan.spans if s.task_id == "t_rent")
+        out = self.say("the studio rent is paid, take it off", "remove_event", {"event": span.id})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("- [x] Pay the studio rent", self.body("n_errands") + "".join(
+            n.get("body") or "" for n in self.done_notes()))
+        self.assertIsNone(self.dropped_note())
+        self.assertNotIn("- [ ] Pay the studio rent", self.body("n_errands"))
+        self.assertIn("- [ ] Return the canoe paddles", self.body("n_errands"))  # the other item is untouched
+
+    def test_clear_words_with_paid_let_the_done_through(self):
+        out = self.say("rent's paid, take that off", "log_outcome", {"event": "Pay the studio rent", "status": "done"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIsNone(self.dropped_note())
+
+    def test_paid_said_of_another_item_is_no_done_for_this_one(self):
+        span = next(s for s in self.t.day_plan.spans if s.task_id == "t_paddles")
+        self.say("rent's paid, and take the paddles off", "remove_event", {"event": span.id})
+        self.assertIn("- [ ] Return the canoe paddles", self.body("n_errands"))
+        self.assertIsNone(self.dropped_note())
+
+    def test_a_failed_tick_writes_nothing_else(self):
+        span = next(s for s in self.t.day_plan.spans if s.task_id == "t_rent")
+        today, before = self.body("n_today"), len(self.api.updates)
+        from unittest.mock import patch
+        with patch("thirties_core.joplin_writeback.JoplinWriter.submit", return_value=("failed", "1")):
+            out = self.say("the studio rent is paid, take it off", "remove_event", {"event": span.id})
+        self.assertEqual(self.body("n_today"), today)
+        self.assert_untouched_home()
+        self.assertEqual(len(self.api.updates), before)
+        self.assertIsNone(self.dropped_note())
+        self.assertNotIn("Removed", out)
+
+    def test_untimed_line_said_done_and_taken_off_is_ticked(self):
+        self.untimed("Sweep the wheel room")
+        out = self.say("swept the wheel room, take it off", "remove_event", {"event": "Sweep the wheel room"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("- [x] Sweep the wheel room", self.body("n_today"))
+        self.assertIsNone(self.dropped_note())
+
+    def test_a_failed_tick_on_an_untimed_line_says_so(self):
+        self.untimed("Sweep the wheel room")
+        from unittest.mock import patch
+        with patch("thirties_core.joplin_writeback.JoplinWriter.submit", return_value=("failed", "1")):
+            out = self.say("swept the wheel room", "if_there_is_time", {"item": "Sweep the wheel room",
+                                                                        "action": "done"})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertIn("isn't ticked", out)
+        self.assertIn("- [ ] Sweep the wheel room", self.body("n_today"))
+
+
+class LooseWordsOnlyPointTest(GuardBase):
+    """A reply to a question about one item points to it, however loosely; a reply saying it's going or fine is
+    still no done."""
+
+    def setUp(self):
+        super().setUp()
+        self.t.execute("add_event", {"title": "Fire the kiln", "start": "10:00 AM", "duration": "60 min"})
+        set_debug_time(at("11:30"))
+
+    def ask(self, message):
+        self.t.prior_exchange = ("", "Is Fire the kiln finished?")
+        try:
+            return self.say(message, "log_outcome", {"event": "Fire the kiln", "status": "done"})
+        finally:
+            self.t.prior_exchange = None
+
+    def test_a_reply_that_its_going_is_no_done(self):
+        for said in ("it IS running", "it's fine i guess", "still on"):
+            with self.subTest(said=said):
+                out = self.ask(said)
+                self.assertTrue(out.startswith(NOT_DONE), out)
+                self.assertNotIn("[x]", self.body("n_today"))
+
+    def test_a_reply_that_its_done_still_goes(self):
+        out = self.ask("yes, it's done")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+
+
 if __name__ == "__main__":
     unittest.main()

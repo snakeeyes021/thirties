@@ -221,7 +221,7 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
         _move_out(writer, note, title)
         return f"{title} is on the plan at {at}."
     if action == "done":
-        _tick(writer, note, title)
+        _ticked_or_say(_tick(writer, note, title), title)
         if task is not None and assistant._db is not None:
             assistant.pt.scheduler.state_db.record_task_completed(task.id, assistant._today())
         return f"Done: {title}."
@@ -237,6 +237,10 @@ def act(assistant, item: str, action: str, time: Optional[str] = None) -> str:
         pool.place(title, WEEK)
         _remove(writer, note, title)
         return f"{title} waits for a day later this week." + due
+    if not drop_said(assistant.pt):  # taken off today, not dropped: it waits for a day later this week
+        pool.place(title, WEEK)
+        _remove(writer, note, title)
+        return f"{title} is off today; it waits for a day later this week." + due
     pool.place(title, DROPPED)  # drop: it stops coming back; its own list (if it has one) is untouched
     _remove(writer, note, title)
     return f"Dropped {title} from today: it won't come back by itself (it's in Before today's archive)." + due
@@ -288,7 +292,7 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
     if action == "done":
         if ahead:
             return assistant.log_outcome(event=ahead[0].id, status="done")
-        _tick(assistant._writer(), assistant._today_note(), line)
+        _ticked_or_say(_tick(assistant._writer(), assistant._today_note(), line), line)
         if task is not None and assistant._db is not None:
             pt.scheduler.state_db.record_task_completed(task.id, assistant._today())
         return f"Done: {line}."
@@ -308,7 +312,7 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
             return f"There's no time left today for {line}, even alongside something else; it stays on the list."
         return f"{line} is on the plan at {format_clock(spot)}" + (" (alongside another item)." if doubled else ".")
     homed = has_home(assistant, line)
-    if action == "drop" and not homed:
+    if action == "drop" and not homed and drop_said(pt):
         from thirties_core.off_today import take_off_list
         if not take_off_list(pt, line):
             raise ToolError(f"{line} couldn't be taken off today's list just now.")
@@ -321,7 +325,7 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
             AheadLists(assistant._db).add(assistant._today() + timedelta(days=1), line,
                                           task if homed else None)
             said = f"{line} is on tomorrow's list; it goes on Today in the morning."
-        elif action == "week":
+        elif action == "week" or (action == "drop" and not homed):  # off today without a drop word: still to do
             from thirties_core.carry import WEEK, OpenPool
             pool = OpenPool(assistant._db)
             pool.add([{"title": line, "task_id": task.id if homed and task is not None else "", "horizon": WEEK}],
@@ -342,9 +346,29 @@ def _remove(writer, note, title: str) -> None:
         writer.submit({"op": "remove", "note_id": note["id"], "title": title, "state": "open"})
 
 
-def _tick(writer, note, title: str) -> None:
+def _tick(writer, note, title: str) -> Tuple[str, str]:
     if writer is not None and note is not None:
-        writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": note["id"], "title": title})
+        return writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": note["id"], "title": title})
+    return "failed", "Joplin isn't connected"
+
+
+def _ticked_or_say(result: Tuple[str, str], title: str) -> None:
+    """A tick Joplin didn't take: the done stops there, nothing else about the item is written, and the answer says
+    plainly that it isn't ticked."""
+    from thirties_core.assistant_tools import ToolError
+    status, msg = result
+    if status not in ("done", "queued"):
+        raise ToolError(f"{title} isn't ticked done ({msg}); nothing else about it changed.")
+
+
+def drop_said(pt) -> bool:
+    """A drop goes ahead as a drop on the app's own controls, or on the user's drop words (write_guard.py); "take it
+    off" alone takes it off today and it stays to do."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or message is None:
+        return True
+    from thirties_core.write_guard import asks_to_drop
+    return asks_to_drop(message)
 
 
 def _move_out(writer, note, title: str) -> None:

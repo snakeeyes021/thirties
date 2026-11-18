@@ -102,7 +102,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "remove_event",
-        "description": "Take an item off the schedule (including work or sleep, e.g. for a day off).",
+        "description": "Take an item off the schedule (including work or sleep, e.g. for a day off). Taking "
+                       "something off today isn't dropping it: it stays to do on its list. If the user says it "
+                       "happened (done, paid, sent), mark it done with log_outcome instead.",
         "parameters": {"event": "The item's id (or its exact title).", "day": "The day the item is on (default: the day being planned)."},
         "required": ["event"],
     },
@@ -1468,6 +1470,13 @@ class PlanTools:
                             f"resolve_calendar_event (attend=false); to delete it, they remove it from their calendar.")
         from thirties_core.item_facts import mentions
         from thirties_core.plan_log import outer_tool
+        # --- said it happened and asked to take it off: a done, never a drop (off_today.py) ---
+        if outer_tool() == "remove_event":
+            from thirties_core.off_today import done_instead
+            instead = done_instead(self, span)
+            if instead is not None:
+                return instead
+        # --- end said it happened ---
         if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
                 and self.user_message is not None
                 and not REMOVE_WORDS_RE.search(self.user_message)
