@@ -1,5 +1,6 @@
-"""The evening catch-up: when things from today are still not marked in the evening, one offer to move them to
-tonight ("Move these 5 to tonight?"), and a plain yes (or a 👍 on Telegram) that does it.
+"""The evening catch-up: when things from today are still not marked in the evening, they go on tonight at once,
+and one line says so. The schedule just is the schedule: there's no "Move these to tonight?" and no yes to wait
+for; the user corrects it if it's wrong (an item already done is simply marked done).
 
 Only one-off items that could still happen tonight are ever in it (``behind``). Some things never roll: meals,
 routines and their steps, appointments, and anything tied to a time that has passed (a calendar event, a fixed
@@ -7,10 +8,9 @@ time, a time the user stated). And an unmarked item's outcome is unknown: it may
 never calls it "not done"; it only puts it on tonight in case it hasn't.
 
 Listing what's behind isn't help on its own (11-14: five items listed under "Nothing else is planned today", and
-the user had to ask what about them). The background service makes the offer once an evening (``due``, ``offer``),
-when there's room tonight; the yes is answered here, by Python, from either the app or the phone (``answer``),
-so it moves exactly what was offered, through the same tools as any other change. Anything else said next lets
-the offer go: the conversation goes on as usual, and the assistant sees the offer there.
+the user had to ask what about them). The background service does it once an evening (``due``, ``move``), when
+there's room tonight, through the same tools as any other change.
+
 """
 
 from __future__ import annotations
@@ -128,6 +128,32 @@ def due(tools, now: datetime, missed: List[EventSpan]) -> bool:
     return bool(placed)
 
 
+def move(tools, now: datetime, missed: List[EventSpan]) -> str:
+    """Put what's behind on tonight, now, and return the one line that says so: no question. They're unmarked, so
+    their outcome is unknown: the line says they're there in case they haven't happened, never that they weren't
+    done."""
+    _save(tools._state_db, {"day": tools.day_plan.target_date.isoformat(), "at": now.isoformat(), "state": "applied",
+                            "ids": [s.id for s in missed]})
+    by_id = {s.id: s for s in tools.day_plan.spans}
+    items = [by_id[s.id] for s in missed if s.id in by_id and by_id[s.id].status == SpanStatus.PLANNED
+             and by_id[s.id].end_dt <= now]
+    if not items:
+        return ""
+    placed, left = placements(tools, items, now)
+    from thirties_core.plan_tools import NOT_DONE
+    moved, failed = [], list(left)
+    for item, at in placed:
+        result = tools.execute("update_event", {"event": item.id, "start": format_clock(at)})
+        (failed if result.startswith(NOT_DONE) else moved).append(item)
+    parts = []
+    if moved:
+        parts.append(f"On tonight, in case they haven't happened yet: {_listed([s.title for s in moved])}."
+                     if len(moved) > 1 else f"On tonight, in case it hasn't happened yet: {moved[0].title}.")
+    if failed:
+        parts.append(f"No room tonight for {_listed([s.title for s in failed])}.")
+    return " ".join(parts)
+
+
 def offer(tools, now: datetime, missed: List[EventSpan]) -> str:
     """The offer's text, recorded as open: what's behind, then the one question."""
     from thirties_core.whats_next import unmarked_lines
@@ -217,4 +243,4 @@ def answer(manager, text: str, via: str) -> str:
     return reply
 
 
-__all__ = ["KEY", "YES_RE", "rolls", "behind", "due", "offer", "pending", "apply", "answer", "placements"]
+__all__ = ["KEY", "YES_RE", "rolls", "behind", "due", "move", "offer", "pending", "apply", "answer", "placements"]

@@ -555,15 +555,15 @@ class TestSessions(PlannerCase):
 
     when = at("10:00", 4)  # Monday Oct 19: a new week
 
-    def test_offered_once_on_the_weeks_first_morning_and_applied_on_yes(self):
+    def test_planned_once_on_the_weeks_first_morning_with_no_yes(self):
         text = self.hp.offer_session()
-        self.assertTrue(text.startswith("A new week. For this week I'd plan:\nFile the taxes (overdue)"), text)
-        self.assertTrue(text.endswith("Want this week like that?"))
+        self.assertTrue(text.startswith("This week: File the taxes"), text)
+        self.assertNotIn("?", text)  # a notice, never a question (the schedule just is the schedule)
+        self.assertEqual(len(text.splitlines()), 1)
         self.assertIsNone(self.hp.offer_session())  # once
-        self.assertEqual(self.hp.pending(), period_of("week", self.when.date()))
-        out = self.t.execute("apply_period_proposal", {})
-        self.assertTrue(out.startswith("Planned for this week: File the taxes"), out)
-        self.assertIsNone(self.hp.pending())
+        self.assertIsNone(self.hp.pending())  # nothing waits for a yes
+        week = period_of("week", self.when.date())
+        self.assertIn("File the taxes", [r["title"] for r in HorizonPlans(self.sched.state_db).in_period(week)])
 
     def test_the_new_weeks_offer_says_how_last_week_went(self):
         HorizonPlans(self.sched.state_db).put("door", "Fix the door", "n_home", "Home", period_of("week", MON),
@@ -571,16 +571,15 @@ class TestSessions(PlannerCase):
         HorizonPlans(self.sched.state_db).put("paint", "Paint the hall", "n_home", "Home", period_of("week", MON))
         self.sched.state_db.record_task_completed("paint", MON + timedelta(days=2))
         text = self.hp.offer_session()
-        self.assertTrue(text.startswith("A new week. Last week: 1 of 2 done; slipped: Fix the door. For this week "
-                                        "I'd plan:"), text)
+        self.assertTrue(text.startswith("Last week: 1 of 2 done; slipped: Fix the door. This week: "), text)
 
-    def test_a_declined_offer_isnt_pending(self):
-        self.hp.offer_session()
+    def test_a_proposal_asked_for_can_be_declined(self):
+        self.hp.propose(period_of("week", self.when.date()))
         self.hp.decline()
         self.assertIsNone(self.hp.pending())
 
-    def test_an_unanswered_offer_goes_stale(self):
-        self.hp.offer_session()
+    def test_an_unapplied_proposal_goes_stale(self):
+        self.hp.propose(period_of("week", self.when.date()))
         set_debug_time(at("15:00", 4))
         self.assertIsNone(self.hp.pending())
 
@@ -592,10 +591,10 @@ class TestSessions(PlannerCase):
     def test_the_month_comes_first_and_the_week_the_next_morning(self):
         set_debug_time(at("10:00", 17))  # Sunday Nov 1
         self.build()
-        self.assertTrue(self.hp.offer_session().startswith("A new month (November). For this month (November)"))
+        self.assertTrue(self.hp.offer_session().startswith("This month (November): "))
         set_debug_time(at("10:00", 18))  # Monday Nov 2
         self.build()
-        self.assertTrue(self.hp.offer_session().startswith("A new week."))
+        self.assertTrue(self.hp.offer_session().startswith("This week: "))
 
     def test_the_background_offers_it_after_the_days_own_offer(self):
         from thirties_core.background import BackgroundService
@@ -627,8 +626,8 @@ class TestSessions(PlannerCase):
             self.assertEqual(sent, [])
             return
         self.assertEqual([k for k, _ in sent], ["horizon"])
-        self.assertTrue(sent[0][1].startswith("📅 A new week."))
-        self.assertIn("A new week.", svc.manager().history()[-1]["content"])
+        self.assertTrue(sent[0][1].startswith("📅 This week: "))
+        self.assertIn("This week: ", svc.manager().history()[-1]["content"])
 
 
 class TestSlmAnswersTheOffer(unittest.TestCase):
@@ -650,18 +649,10 @@ class TestSlmAnswersTheOffer(unittest.TestCase):
         self.m._load(None)
         self.m.add_assistant_message("📅 " + HorizonPlanner(self.m.tools).offer_session())
 
-    def say(self, text):
-        from tests.test_slm_brain import actions
-        self.rt.parse_replies.append(actions({"type": "chat"}))
-        self.m.send_user_message(text)
-        return self.m.last_raw_reply
-
-    def test_yes_applies_it(self):
-        self.assertIn("Planned for this week: Fix the door", self.say("yes please"))
-
-    def test_no_declines_it(self):
-        self.assertEqual(self.say("no thanks"), "Okay, no plan for it then. Ask any time.")
-        self.assertIsNone(HorizonPlanner(self.m.tools).pending())
+    def test_its_planned_with_no_yes(self):
+        self.assertIsNone(HorizonPlanner(self.m.tools).pending())  # nothing waits for an answer
+        week = period_of("week", at("10:00", 4).date())
+        self.assertIn("Fix the door", [r["title"] for r in HorizonPlans(self.sched.state_db).in_period(week)])
 
 
 class TestSorters(unittest.TestCase):

@@ -46,13 +46,12 @@ class TestTheCatchUpWhileAway(CatchUpCase):
         from thirties_core import catch_up
         self.assertIsNone(catch_up.pending(self.svc.manager().tools, at("19:10")))  # never offered unseen
 
-    def test_the_list_it_carried_isnt_repeated_under_the_next_bell(self):
+    def test_what_it_carried_isnt_listed_as_behind_under_the_next_bell(self):
         self.svc.evening_catch_up(at("19:10"))
         self.assertIn("Water the ferns", self.kinds("catch_up")[-1])
-        self.svc.starts(at("20:00"))
+        self.svc.starts(at("19:30"))
         bell = self.kinds("start")[-1]
-        self.assertTrue(bell.startswith("🔔 8:00 PM: Film night"), bell)
-        self.assertNotIn("Water the ferns", bell)  # already carried by the offer: not repeated
+        self.assertNotIn("Not marked yet", bell)  # they're on tonight now, not behind
 
 
 class TestACheckInThatNeverArrived(ServiceCase):

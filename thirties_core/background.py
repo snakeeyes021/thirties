@@ -11,7 +11,7 @@ window closed. Every few seconds it:
 - lists what's not marked yet only when that list changed, and after two check-ins with no reply sends no
   more until the user writes again (away.py),
 - tells the phone what was ticked in the app's day panel, with what's next,
-- offers once an evening to move what's still not marked to tonight (catch_up.py),
+- puts what's still not marked on tonight, once an evening, and says so (catch_up.py),
 - holds every message while the user asked for quiet, until they say it's over (holds.py),
 - delivers queued changes to Joplin, and syncs if sync is on.
 
@@ -53,7 +53,7 @@ def phone_text(text: str, emphasis: Sequence[str] = ()) -> str:
 
 
 from thirties_core.holds import PASSES as HOLD_PASSES  # noqa: E402 (what a hold lets through)
-YES_KINDS = ("rollover", "catch_up")  # messages that ask for a yes: a 👍 reaction on Telegram answers them
+YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
 CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
@@ -807,18 +807,23 @@ class BackgroundService:
         self.send(join_sections(said, part), "panel", now=now, desktop=False)
 
     def evening_catch_up(self, now: datetime) -> None:
-        """Once an evening, when two or more of today's things are still not marked and there's room tonight:
-        "Move these 5 to tonight?" (catch_up.py). A yes, in the app or on the phone, or a 👍 there, moves them."""
+        """Once an evening, when two or more of today's things are still not marked and there's room tonight: they
+        go on tonight at once and one line says so (catch_up.py). No question, no yes to wait for."""
         if self.level() in ("off", "light") or self._quiet(now) or self._talking(now) or self._turn_running() \
-                or self._held(now) or self._checkins_paused():  # a question too: none while nobody answers
+                or self._held(now) or self._checkins_paused():  # never while nobody reads it
             return
         from thirties_core import catch_up
         from thirties_core.messages import missed_for
-        tools = self.manager().tools
-        missed = catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
-        if not catch_up.due(tools, now, missed):
+        manager = self.manager()
+        with manager.turn_lock:
+            tools = manager.tools
+            missed = catch_up.behind(tools, missed_for(tools, now))  # never meals, routines or appointments
+            if not catch_up.due(tools, now, missed):
+                return
+            text = catch_up.move(tools, now, missed)
+        if not text:
             return
-        self.send(catch_up.offer(tools, now, missed), "catch_up", now=now)
+        self.send(text, "catch_up", now=now)
         from thirties_core.away import LastSentList  # the list it carried counts as sent (away.py)
         from thirties_core.messages import MissedTracker
         MissedTracker(self.scheduler.state_db).mark(now, missed)
