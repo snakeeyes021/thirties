@@ -1351,7 +1351,7 @@ class PlanTools:
             target_plan.spans.sort(key=lambda s: s.start_dt)
             self._persist(moved)
             if self.assistant and self.is_current(target_plan):
-                self.assistant.list_today(moved)
+                self._list_today_on(target_plan, moved)
             from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
             off = after_move(self, moved, source_plan, target_plan)
             return (f"Planned {moved.title} again on {target_plan.target_date.strftime('%A, %B %d')}, "
@@ -1364,10 +1364,21 @@ class PlanTools:
         self._persist(span)
         listed = ""
         if self.assistant and self.is_current(target_plan):
-            listed = self.assistant.list_today(span)
+            listed = self._list_today_on(target_plan, span)
         from thirties_core.leave_today import after_move  # off today's list too (leave_today.py)
         listed = (listed + after_move(self, span, source_plan, target_plan)).strip()
         return f"Moved {before} to {target_plan.target_date.strftime('%A, %B %d')}, {format_clock(new_start)} – {format_clock(new_end)}." + (f" {listed}" if listed else "")
+
+    def _list_today_on(self, plan: DayPlan, span: EventSpan) -> str:
+        """The Today copy of an item moved onto ``plan`` from another day, written as that day's: while the tool still
+        had the day it came from loaded, a list item moved from a later day went on that day's list instead, and
+        never reached the Today note."""
+        was = self.day_plan
+        self.day_plan = plan
+        try:
+            return self.assistant.list_today(span)
+        finally:
+            self.day_plan = was
 
     def swap_events(self, first: Any, second: Any, **_: Any) -> str:
         a, b = self._find_span(first), self._find_span(second)
