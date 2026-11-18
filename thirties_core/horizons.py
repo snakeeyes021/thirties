@@ -416,11 +416,40 @@ class HorizonCatalog:
             return URGENCY_HORIZON[urgency]
         return ROLE_HORIZON.get(t.list_role, "year")
 
+    def guessed(self, t: TaskItem, items: Optional[Dict[str, Dict[str, str]]] = None,
+                notes: Optional[Dict[str, Dict[str, str]]] = None,
+                urgencies: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+        """The horizon ``effective`` gives the item is only a guess (the list sorter's, for the item or its note).
+        Not a guess: the user's own horizon or urgency, a due date, a Someday heading, a heading's or the list's
+        role, or "as soon as possible" in the item's own words. A guess may order the week's options; it never makes
+        an item pressing or meant for today."""
+        items = self.items() if items is None else items
+        notes = self.notes() if notes is None else notes
+        urgencies = _urgencies(self.db) if urgencies is None else urgencies
+        mark, u = items.get(t.id), urgencies.get(t.id)
+        if mark and mark["source"] == "user":
+            return False
+        from thirties_core.carry import ASAP_RE
+        if _as_date(t.due or (u or {}).get("due")) or ASAP_RE.search(t.title or ""):
+            return False
+        if (u and u["source"] == "user") or t.someday:
+            return False
+        if mark:
+            return True
+        urgency = (u or {}).get("urgency") or t.urgency
+        if urgency in ("now", "soon", "someday"):
+            return u is not None  # the sorter's row; without one, it came from a heading in the note
+        note = notes.get(t.parent_note_id if t.is_checkbox_item else t.id or "")
+        if note:
+            return note["source"] != "user"
+        return u is not None and urgency in URGENCY_HORIZON
+
     def apply(self, tasks: List[TaskItem], today: date, week_start: int = 0) -> List[TaskItem]:
-        """Set each task's horizon (TaskItem.horizon), for every brain to read."""
+        """Set each task's horizon (TaskItem.horizon), and whether it's only a guess, for every brain to read."""
         items, notes, urgencies = self.items(), self.notes(), _urgencies(self.db)
         for t in tasks:
             t.horizon = self.effective(t, today, week_start, items, notes, urgencies)
+            t.guessed = self.guessed(t, items, notes, urgencies)
         return tasks
 
     # --- what still needs a guess ---
@@ -636,7 +665,7 @@ class Candidate:
 
 
 _SOURCE_SCORE = {"pinned": 100.0, "due": 80.0, "carried": 65.0, "from_plan": 55.0, "belongs": 40.0, "upper": 20.0,
-                 "someday": 5.0}
+                 "guessed": 10.0, "someday": 5.0}
 # A month, year or span of years also offers a few someday items, last of all, so they fill room a plan has rather
 # than waiting for a once-a-year look. Which ones turns over each period (a stable shuffle by period), so each gets
 # its turn.
@@ -1097,6 +1126,9 @@ class HorizonPlanner:
             if t.id in placed_elsewhere or not self._plannable(t):
                 continue
             h = self.horizon_of(t, maps)
+            if p.level == "day" and (finer(h, here) or h == above) and self.catalog.guessed(t, *maps):
+                add(t, "guessed", GUESSED_WHY)  # only a guess: an option for the week, never pressing today
+                continue
             if finer(h, here):
                 add(t, "belongs", HORIZON_WHY[h])
             elif above and h == above:
@@ -1420,6 +1452,8 @@ class HorizonPlanner:
 
 HORIZON_WHY = {"day": "can't wait", "week": "for this week", "month": "for this month", "year": "for this year",
                "someday": "someday"}
+# How a day's option reads when only a guessed urgency or horizon brought it: one for the week, not pressing.
+GUESSED_WHY = "could go this week"
 
 
 def _score(c: Candidate, today: date) -> float:

@@ -68,6 +68,7 @@ def is_light(candidate: Dict[str, Any]) -> bool:
 
 
 from thirties_core.morning import POLICY  # one written rule for proposing (A1)
+from thirties_core.horizons import GUESSED_WHY  # how an option only a guess brought reads
 
 MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
@@ -231,6 +232,7 @@ class DayProposal:
         pool_ids = {v.get("task_id"): k for k, v in pool.items() if v.get("task_id")}
         from thirties_core.carry import cant_wait, sorted_this_morning
         sorted_now = sorted_this_morning(self.db, day)
+        guessed = _guess_check(self.db)  # an urgency only the sorter guessed is never pressing
 
         def left_open(t) -> Optional[Dict[str, str]]:
             key = t.title.strip().lower()
@@ -278,6 +280,8 @@ class DayProposal:
             since = f"left open since {weekday(date.fromisoformat(left['since']))}" if left else ""
             if due_in is not None and due_in <= 7:
                 rank, why = (0, due_in), urgency_label(t) + (f"; {since}" if since else "")
+            elif t.urgency in ("now", "soon") and guessed(t):
+                rank, why = (4, 0), GUESSED_WHY + (f"; {since}" if since else "")
             elif t.urgency == "now":
                 rank, why = (1, 0), "now" + (f"; {since}" if since else "")
             elif h == "today":  # left open, and it can't wait / is quick / is due very soon / its window ends
@@ -298,7 +302,8 @@ class DayProposal:
                 out[low] = {"rank": rank, "task": t, "title": title, "why": why,
                             "where": t.parent_note_title or t.source_notebook or "",
                             "minutes": usual_minutes(self.a, t, title),
-                            "unknown": bool(left) and not users}  # left unmarked: its status isn't known
+                            "unknown": bool(left) and not users,  # left unmarked: its status isn't known
+                            "guessed": rank[0] == 4}
         found = sorted(out.values(), key=lambda c: (c["rank"], c["title"].lower()))
         menus = [c for c in found if c["rank"][0] == 5][:2]
         found = [c for c in found if c["rank"][0] < 5][:MAX_CANDIDATES - len(menus)] + menus
@@ -333,7 +338,12 @@ class DayProposal:
             lines.insert(0, said)
         if until is not None:
             lines.insert(0, f"The time they have: until {format_clock(until)}.")
+        guesses = False
         for c in cands:
+            if c.get("guessed") and not guesses:  # after what's pressing, under their own heading
+                guesses = True
+                lines.append("Could go this week, if there's room (not pressing, not for today unless the user "
+                             "picks it):")
             ref = f" task_id={c['task'].id}" if c["task"] is not None else ""
             size = energy.weight(c) if said else ""  # light or bigger, when the energy makes it matter
             name = _named(self.a, c["title"], c["task"].id if c["task"] is not None else None, 120)
@@ -394,7 +404,8 @@ class DayProposal:
         low = low_energy(self.a, plan)  # a low day: fewer, lighter, more room
         cands = [c for c in self.candidates(plan) if c["title"].strip().lower() not in (skip or set())
                  and not (ahead and c.get("task") is not None and c["task"].list_role == "today")
-                 and not (c.get("unknown") and c["rank"][0] >= 2)]  # Python never puts an unknown on by itself
+                 and not (c.get("unknown") and c["rank"][0] >= 2)  # Python never puts an unknown on by itself
+                 and not c.get("guessed")]  # nor what only a guessed urgency or horizon brought
         if low:
             from thirties_core.energy import is_due
             cands = [c for c in cands if is_light(c) or is_due(c, plan.target_date)]
@@ -617,12 +628,14 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
         why, minutes = c.why, usual_minutes(dp.a, c.task, c.title)
         if c.sessions and c.minutes:
             minutes = c.minutes  # a session of a budgeted effort: the budget says how long (budgets.py)
-        out.append({"rank": (0, i), "task": c.task, "title": c.title, "why": why,
+        guess = c.source == "guessed"
+        out.append({"rank": (4, i) if guess else (0, i), "task": c.task, "title": c.title, "why": why,
                     "where": c.list or (c.task.parent_note_title if c.task is not None else "") or "",
-                    "minutes": minutes, "session": bool(c.sessions and c.due)})
+                    "minutes": minutes, "session": bool(c.sessions and c.due), "guessed": guess})
         seen.add(c.title.lower())
     out = _resting_out(dp, plan.target_date, out)
     out += [c for c in own if c["title"].lower() not in seen]
+    out.sort(key=lambda c: bool(c.get("guessed")))  # a guess never ahead of what's pressing (stable otherwise)
     try:  # out of season, an item waits for its months: never offered day after day (seasons.py)
         from thirties_core.horizons import HorizonPlanner
         from thirties_core.seasons import in_season
@@ -649,6 +662,17 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
                     c["why"] = f"pencilled in for {format_clock(pencilled[c['title'].strip().lower()])}; {c['why']}"
     from thirties_core.project_pieces import with_steady_pieces  # a piece of each project, every day
     return with_steady_pieces(dp.a, plan, out, MAX_CANDIDATES)
+
+
+def _guess_check(db):
+    """A test for "only the sorter's guess makes this one look pressing" (horizons.HorizonCatalog.guessed), with
+    the marks read once."""
+    if db is None:
+        return lambda t: bool(getattr(t, "guessed", False))
+    from thirties_core.horizons import HorizonCatalog, _urgencies
+    catalog = HorizonCatalog(db)
+    maps = (catalog.items(), catalog.notes(), _urgencies(db))
+    return lambda t: catalog.guessed(t, *maps)
 
 
 def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

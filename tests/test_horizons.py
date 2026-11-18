@@ -249,14 +249,14 @@ class TestBubblingDown(PlannerCase):
         self.hp.pin(self.tasks[0], parse_period("this week", DAY))        # door: this week, no day yet
         self.hp.pin(self.tasks[5], parse_period("Saturday", DAY))         # paint: another day of the week
         self.hp.pin(self.tasks[2], parse_period("next week", DAY))        # gutters: placed elsewhere
-        ListCatalog(self.sched.state_db).set_urgency("cards", "soon", source="guess")  # for this week
+        ListCatalog(self.sched.state_db).set_urgency("cards", "soon", source="guess")  # a guess: an option for the week
         got = candidates_for_day(self.t)
         self.assertEqual(self.ids(got), ["garage", "tax", "door", "cards"])
         c = self.by_id(got)
         self.assertEqual((c["garage"].source, c["garage"].why), ("pinned", "pinned to today"))
         self.assertEqual(c["tax"].why, "due tomorrow")
         self.assertEqual(c["door"].why, "from the plan for this week")
-        self.assertEqual((c["cards"].source, c["cards"].why), ("upper", "for this week"))
+        self.assertEqual((c["cards"].source, c["cards"].why), ("guessed", "could go this week"))
         line_with(c["garage"].line(), "Call the garage", "[Car]", "pinned to today", "id=garage")
 
     def test_a_week_plan_ending_tomorrow_is_pressing(self):

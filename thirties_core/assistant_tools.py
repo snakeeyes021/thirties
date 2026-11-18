@@ -1743,6 +1743,8 @@ class AssistantTools(KindTools):
         keep = [k for k in keep if k.lower() not in children]  # 11-05: a group and each of its steps, as five lines
         on = {k.lower() for k in keep}
         today = self._today()
+        from thirties_core.day_proposal import _guess_check
+        guessed = _guess_check(self._db)  # "now" only as the sorter's guess isn't pressing
 
         def pressing(t: TaskItem) -> bool:
             if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference") \
@@ -1753,7 +1755,7 @@ class AssistantTools(KindTools):
                     return (date.fromisoformat(t.due) - today).days <= 2
                 except ValueError:
                     return False
-            return t.urgency == "now"
+            return t.urgency == "now" and not guessed(t)
         add = [t.id for t in self.s.tasks if pressing(t) and t.title.lower() not in on][:3]
         return {"keep": keep, "add": add}
 
