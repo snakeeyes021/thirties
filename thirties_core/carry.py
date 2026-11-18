@@ -16,7 +16,8 @@ The rules, applied once a day when the day is built (after the user's first repl
    - today: it can't wait (urgency "now", or its horizon is today/tomorrow), it's due today or tomorrow, or
      it's quick (15 minutes or less, as the user said);
    - by its deadline: a due date further off;
-   - someday: the user put it there (someday, a someday section, a pick-from menu list);
+   - someday: the user put it there (someday, a someday section, their own horizon for it); never because
+     it sits on a pick-from list or was missed once;
    - this week: everything else; when unsure, this week, never today.
    The morning model revises it (propose_leftovers): drops what has gone moot (a one-time event whose day is
    gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
@@ -535,8 +536,10 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
         except Exception:
             minutes = None
     from thirties_core.list_reading import live
-    if task is not None and (task.someday or task.list_role in ("menu", "backlog") or not live(task)) \
-            or horizon == "someday":
+    # someday only by the user's own word (a someday heading, their horizon or urgency for it) or when the item
+    # isn't live any more; a pick-from list or a guessed someday isn't it: an item the plan held yesterday and
+    # missed once waits for this week (when unsure, this week). Long neglect has its own rule (backoff.py: park).
+    if task is not None and (task.someday or not live(task) or user_said_someday(assistant, task)):
         return SOMEDAY
     if (task is not None and task.urgency == "now") or horizon == "day" or (due is not None and (due - day).days <= 1) \
             or ASAP_RE.search(title or "") \
@@ -545,6 +548,22 @@ def choose_horizon(assistant, task, title: str, day: date, said_minutes: Optiona
     if due is not None:
         return DEADLINE
     return WEEK
+
+
+def user_said_someday(assistant, task) -> bool:
+    """The user put this item at someday themselves: their horizon for it, or their urgency for it."""
+    db = getattr(assistant, "_db", None)
+    if db is None or task is None:
+        return False
+    try:
+        from thirties_core.horizons import HorizonCatalog, _urgencies
+        mark = HorizonCatalog(db).items().get(task.id)
+        if mark and mark.get("source") == "user":
+            return mark.get("horizon") == "someday"
+        u = _urgencies(db).get(task.id)
+        return bool(u and u.get("source") == "user" and u.get("urgency") == "someday")
+    except Exception:
+        return False
 
 
 def weekday(day: Optional[date]) -> str:
