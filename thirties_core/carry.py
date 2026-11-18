@@ -274,6 +274,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     displaced = displaced_ids(db, yesterday.target_date)  # an overrun used their time: never a miss
     off_today: List[str] = []
     seen = set()
+    pooled_ids: set = set()  # the home items already kept: never a second record under other words
 
     def never_rolls(title: str, kind_src) -> bool:
         low = title.strip().lower()
@@ -288,7 +289,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
 
     def rollable_item(title: str, low: str) -> Dict[str, str]:
         home = home_of(title)
-        task = tasks.get((home or {}).get("home_id", "")) or listed.get(low)
+        task = tasks.get((home or {}).get("home_id", "")) or listed.get(low) or home_by_label(assistant, title)
         horizon = WEEK if low in untimed_left else choose_horizon(assistant, task, title, day)  # If there's time: this week
         return {"title": title, "task_id": (home or {}).get("home_id") or (task.id if task is not None else ""),
                 "horizon": horizon, "due": (task.due or "")[:10] if task else ""}
@@ -319,9 +320,13 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
                     ongoing_missed.append({"title": s.title, "due": until.isoformat(), "level": level,
                                            "minutes": int((s.end_dt - s.start_dt).total_seconds() // 60)})
             continue
+        item = rollable_item(s.title, low)
+        if item["task_id"] and item["task_id"] in pooled_ids:
+            continue  # the same item under other words: one record per item
+        pooled_ids.add(item["task_id"])
         if low not in asked_before:
             ask.append(s.title)
-        pool_items.append(rollable_item(s.title, low))
+        pool_items.append(item)
         if s.id not in displaced:
             missed.append(_miss(s, pool_items[-1].get("task_id") or "", tasks))
 
@@ -358,7 +363,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
             continue
         link = home_of(title)  # leaves Today only if its home item is really still open on its list
         has_home = bool(link and link.get("home_id") in tasks and tasks[link["home_id"]].list_role != "today") \
-            or low in listed
+            or low in listed or home_by_label(assistant, title) is not None  # "Parent: item" on Today is that item
         if low in done_titles:
             off_today.append(title)  # done on the plan: the morning reset takes it off
             continue
@@ -373,12 +378,39 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low in seen:
             continue
         seen.add(low)
+        item = rollable_item(title, low)
+        if item["task_id"] and item["task_id"] in pooled_ids:
+            if title not in off_today and item["task_id"] in tasks:
+                off_today.append(title)  # a Today copy of an item already kept: it waits on its own list
+            continue  # one record per item, tied to its home list
+        pooled_ids.add(item["task_id"])
         if low not in asked_before:
             ask.append(title)
-        pool_items.append(rollable_item(title, low))
+        pool_items.append(item)
     return {"ask": ask, "off_today": off_today, "ended": ended,
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed,
             "missed": missed, "done": done_items}
+
+
+def home_by_label(assistant, title: str):
+    """The list item a Today line stands for when it's written with its parents, "Parent › item" or "Parent: item"
+    (item_path.label), and no link says so: its home item (never a Today copy). None when it names no single one."""
+    from thirties_core.item_path import SEP, resolve
+    raw = str(title or "").strip()
+    if not raw:
+        return None
+    tasks = [t for t in assistant.s.tasks if getattr(t, "list_role", "") != "today"]
+    for ref in dict.fromkeys((raw, re.sub(r"\s*:\s+", SEP, raw, count=1))):
+        found = resolve(ref, tasks)
+        if found is not None:
+            return found
+    if ":" in raw:  # "Heading: item" where the item has no parents of its own: its list or heading and its words
+        head, own = (x.strip().lower() for x in raw.split(":", 1))
+        same = [t for t in tasks if t.title.strip().lower() == own
+                and head in {str(t.parent_note_title or "").strip().lower(), str(t.section or "").strip().lower()}]
+        if len(same) == 1:
+            return same[0]
+    return None
 
 
 def _miss(span, task_id: str, tasks: Dict[str, Any]) -> Dict[str, str]:
