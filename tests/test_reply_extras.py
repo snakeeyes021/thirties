@@ -11,6 +11,7 @@ from tests.fixtures import DAY, at
 from tests.test_whats_next import WhatsNextCase
 from thirties_core.astronomy import set_debug_time
 from thirties_core.conversation import ConversationManager
+from thirties_core.models import SpanStatus
 from thirties_core.reply_extras import TODAY_KEY, clear_today, effective
 from thirties_core.settings import settings_for
 
@@ -131,6 +132,42 @@ class TestOnlyWhenAsked(WhatsNextCase):
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY),
                          {"whats_next": "rest", "not_marked": True, "status_line": True})
         self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))
+
+    def test_the_many_ways_of_asking_for_the_lists_to_stop(self) -> None:
+        # Seen in simulated days: a person asked again and again in their own words, and every one was refused.
+        asks = (("drop the time blocks, just the tasks till the kiln's done", "all"),
+                ("I don't need the reminder lists while I'm at the wheel", "not_marked"),
+                ("no more lists until I'm back from the lake", "whats_next"),
+                ("quit sending me those kiln lists, please", "whats_next"),
+                ("for the third time: without the half-hour blocks", "all"))
+        for said, part in asks:  # each on its own is enough, and saying it again is fine too
+            out = self.call(said, part=part, for_today=True)
+            self.assertFalse(out.startswith("NOT_DONE"), (said, out))
+        now = effective(self.sched.config, self.sched.state_db, DAY)
+        self.assertEqual((now["whats_next"], now["not_marked"], now["status_line"]), ("nothing", False, False))
+        self.assertIsNone(settings_for(self.sched.state_db).get("assistant.after_change"))  # for today only
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY + timedelta(days=1))["whats_next"],
+                         "rest")
+
+    def test_taking_an_item_off_the_list_is_still_about_the_schedule(self) -> None:
+        for said in ("take the canoe paddles off the list", "remove the glaze order from my list",
+                     "the list says the kiln is at 2, that's wrong", "block out 3 to 5 for the canoe club",
+                     "no time for the glaze test today"):
+            out = self.call(said)
+            self.assertTrue(out.startswith("NOT_DONE"), (said, out))
+        self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY),
+                         {"whats_next": "rest", "not_marked": True, "status_line": True})
+
+    def test_the_rest_of_today_stays_off_once_asked(self) -> None:
+        out = self.turn(ADD, "The fern's at 5:30.", said="repot the fern at 5:30")
+        self.assertIn("The rest of today:", out)
+        self.turn('CALL set_reply_extras {"part": "whats_next", "show": "off", "for_today": true}', "Okay.",
+                  said="no more lists until I'm back from the lake")
+        out = self.turn('CALL log_outcome {"event": "Repot the fern", "status": "done"}', "Noted.",
+                        said="repotted the fern")
+        fern = next(s for s in self.manager.tools.day_plan.spans if s.title == "Repot the fern")
+        self.assertEqual(fern.status, SpanStatus.DONE)  # the change happened
+        self.assertNotIn("The rest of today:", out)  # a change, and nothing under the reply
 
     def test_nothing_without_a_message_from_the_user(self) -> None:
         self.manager.tools.user_message = None
