@@ -10,7 +10,10 @@ for them in plain words:
 - **Ticked done.** A tick needs the user saying it happened: a done word ("done", "finished", "paid", "sent",
   "all set"), the item's own verb in the past ("renewed" for Renew the kiln permit), or a plain yes to a question.
   Words that say something is under way or merely all right ("the kiln is firing", "it's running", "the glaze is
-  fine") are never a done, for the item they're said about, however loosely the words point to it.
+  fine") are never a done, for the item they're said about, however loosely the words point to it. Neither are
+  words telling the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor
+  words naming something else that shares a word with it ("the glaze order is sent" for Glaze recipe test:
+  done_fit.py).
 
 Changes made outside a turn (the app's own controls, the background, this morning's housekeeping) aren't judged
 here: they have their own rules.
@@ -103,6 +106,45 @@ def _fits_level(clause: str, title: str, others: list) -> bool:
 # --- end a word another item shares, and an acknowledgement ---
 
 
+# --- told not to tick it: no done, whatever done word is near the item's name ---
+# Asked to leave it unticked or open, not to tick or mark it, to wait with the tick, or to untick it; or told it's far
+# from done. The app's own status described in a complaint (still not ticked, though it happened) is no such thing.
+NEGATED_DONE_RE = re.compile(
+    r"\b(?:leave|keep|let)\b[^.!?\n]{0,40}?\b(?:un(?:ticked|checked|marked|done|finished)|"
+    r"not (?:yet )?(?:ticked|checked|marked|done|finished)|open|as (?:it is|is)|alone|for (?:now|later))\b|"
+    r"\b(?:stays?|remains?|staying)\s+(?:un(?:ticked|checked|marked)|open)\b|"
+    r"\bun(?:tick|check|mark)(?:s|ing)?\b|"
+    r"\b(?:don'?t|dont|do not|never|no need to|not to|hold off(?: on)?|wait (?:on|before|to))\s+"
+    r"(?!forget\b|hesitate\b)(?:\w+\s+){0,2}?(?:tick|mark|check|cross)(?:ing)?\b|"
+    r"\bno (?:tick|check ?mark)\b|"
+    r"\b(?:nowhere near|far from|anything but|not quite|not even close to|not close to|not yet)\s+(?:being\s+)?"
+    r"(?:done|finished|complete|completed|ready|over)\b", re.IGNORECASE)
+_POINTER_RE = re.compile(r"\b(?:it|them|that|this|those|these|both|they|theyre|they'?re)\b", re.IGNORECASE)
+
+
+def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
+    """Why the user's words say not to tick this item ("leave the bowls unticked", "don't tick it", "nowhere near
+    done"), said about it: in a clause naming it, in a clause pointing back with "it" or "them" that names no other
+    item, or, when no clause names it, in any clause naming no other item. "" when nothing says so."""
+    if not message:
+        return ""
+    from thirties_core.started import _SENTENCE_RE, _asks
+    others = [o for o in others if o and o != title]
+    told = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
+    clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip()]
+    if not any(NEGATED_DONE_RE.search(c) for c in clauses):
+        return ""
+    named = [c for c in clauses if _about(c, title, others)]
+    free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)
+            and c not in named]
+    about = named + ([c for c in free if _POINTER_RE.search(c)] if named else free)
+    if any(NEGATED_DONE_RE.search(c) for c in about):
+        return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
+                "say it is.")
+    return ""
+# --- end told not to tick it ---
+
+
 def _done_in(clause: str, title: str) -> bool:
     return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
 
@@ -114,6 +156,9 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     such thing is said. However loosely the words point to the item, they never make a done of these."""
     if not message:
         return ""
+    told_not = told_not_to_tick(message, title, others)
+    if told_not:
+        return told_not
     from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
@@ -175,7 +220,11 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     if kind == "complete" and not says_done(message, title):
         return (f"not written: the user's words don't say {title} is finished, so it isn't ticked. Something "
                 "running, started or fine isn't done; it's done when they say it is.")
+    from thirties_core.done_fit import names_something_else
+    if kind == "complete" and names_something_else(message, title):  # "the glaze order is sent": not this item
+        return (f"not written: the user's words name something other than {title}, so it isn't ticked.")
     return ""
 
 
-__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "STATE_RE", "asks_to_drop", "says_done", "state_not_done", "refused"]
+__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "STATE_RE", "asks_to_drop", "says_done",
+           "state_not_done", "told_not_to_tick", "refused"]

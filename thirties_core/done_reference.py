@@ -22,6 +22,10 @@ goes through when the user's words point at the item:
   hour: a done is often said a little early); before any has begun, the next one. A copy named by its start time
   ("the 8am walk") is that copy.
 
+Whatever points to it, words that share a word with the item but name something else ("the glaze order is sent"
+beside a planned Glaze recipe test) never mark it in that thing's place (done_fit.py): the note names the list
+item that fits all the words, or says to ask.
+
 Anything else is refused with a note to ask which item they mean. The app's own controls (a tick in the Agenda)
 and the background (nobody talking) are never held here.
 """
@@ -272,7 +276,15 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     others = [t for t in titles if t != title]
     refusal = (f"The user's words don't point to {title}, so it isn't marked done. If they meant it, ask which "
                "item they finished; if they named another item, mark that one by its id.")
-    if any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids) or BULK_RE.search(message):
+    if any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
+        return None, message
+    # --- words naming something else that shares a word with it: never this item in its place (done_fit.py) ---
+    from thirties_core.done_fit import names_of, names_something_else, refusal as named_else
+    elsewhere = names_something_else(message, names_of(pt, title, ids), others)
+    if elsewhere:
+        return named_else(pt, title, elsewhere), message
+    # --- end something else ---
+    if BULK_RE.search(message):
         return None, message
     said, shown = getattr(pt, "prior_exchange", None) or ("", "")
     # --- a whole routine said done: every step of it, in every part (whole_routine.py) ---
