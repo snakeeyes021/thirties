@@ -385,6 +385,7 @@ class PlanTools:
         # (what the user said last, the last message they saw) before this turn: what their words can point back
         # to (done_reference.py)
         self.prior_exchange: Optional[tuple] = None
+        self.recent_said: Optional[list] = None  # the user's last few messages before this turn (change_asks.py)
         self.shown_schedule: Optional[str] = None  # what show_schedule laid out this turn (message_tools)
 
     # ------------------------------------------------------------------
@@ -1555,9 +1556,10 @@ class PlanTools:
             self._save_plan_after_change()
             return f"Removed {self.describe(span)}; its other copy stays on the plan."
         # --- end the plan's own duplicate ---
+        from thirties_core.change_asks import removal_asked  # this turn or just before (change_asks.py)
         if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
                 and self.user_message is not None
-                and not REMOVE_WORDS_RE.search(self.user_message)
+                and not removal_asked(self)
                 and not mentions(self.user_message, self._title(span),
                                  [self._title(s) for s in self.day_plan.spans if s.id != span.id])):
             # 10-28: an item vanished from the plan that nobody asked to take off. Taking something off is the

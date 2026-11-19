@@ -418,6 +418,7 @@ class ConversationManager:
             self.tools.user_message = None  # a drag in the Agenda later isn't judged by this message
             self.tools.prior_exchange = None
             self.tools.pending_dones = None
+            self.tools.recent_said = None
 
     def _command(self, user_text: str, via: str) -> str:
         """Developer / runtime simulation slash commands: never reach a model."""
@@ -502,6 +503,8 @@ class ConversationManager:
         self.tools.prior_exchange = prior_exchange(self.brain.messages)
         from thirties_core.done_words import pending_dones  # a done asked for before and refused (done_words.py)
         self.tools.pending_dones = pending_dones(self.brain.messages)
+        from thirties_core.change_asks import recent_said  # a removal or move asked for just before (change_asks.py)
+        self.tools.recent_said = recent_said(self.brain.messages)
         from thirties_core.routine_times import earlier_today  # times given earlier today (routine_times.py)
         self.tools.said_earlier = earlier_today(self.brain.messages)
         self.tools.shown_schedule = None

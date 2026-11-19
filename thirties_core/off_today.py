@@ -180,8 +180,9 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     if getattr(pt, "by_hand", False) or message is None or span.source == "calendar" or span.is_envelope:
         return ""
     title = pt._title(span)
-    from thirties_core.leave_today import asks_to_skip  # "skip it today" takes it off as well (leave_today.py)
-    if not asks_to_clear(message, title) and not asks_to_skip(message):
+    # a clear ask, or "skip it today" (leave_today.py), this turn or just before when this isn't a no (change_asks.py)
+    from thirties_core.change_asks import asked as asked_lately
+    if not asked_lately(pt, _ClearAsk(title)):
         return ""
     if any(s.id != span.id and (s.title == span.title or (span.task_id and s.task_id == span.task_id))
            for s in pt.day_plan.spans):
@@ -202,16 +203,66 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     return f" (also {done})" if done else ""
 
 
+class _ClearAsk:
+    """A clear ask for the item to go, or to skip it today, as a pattern change_asks.asked can search with."""
+
+    def __init__(self, title: str) -> None:
+        self.title = title
+
+    def search(self, text: Optional[str]) -> bool:
+        from thirties_core.leave_today import asks_to_skip
+        return asks_to_clear(text, self.title) or asks_to_skip(text)
+
+
 def _off_list(pt: "PlanTools", line: str, title: str) -> str:
-    """Off today's list as the user put it: dropped only on a drop word (take_off_list; write_guard.asks_to_drop),
-    else just not today (leave_today.skip_line: an item that lives only on Today waits for a day later this week).
-    "Take it off" is about today: the item stays to do."""
+    """Off today's list as the user put it: dropped only when their words drop that item for good (drop_meant;
+    take_off_list), else just not today (leave_today.skip_line: an item that lives only on Today waits for a day
+    later this week). "Take it off" is about today: the item stays to do."""
     from thirties_core.leave_today import skip_line
-    from thirties_core.write_guard import asks_to_drop
     message = getattr(pt, "user_message", None)
-    if message is not None and not asks_to_drop(message) and _assistant(pt) is not None:
+    if message is not None and _assistant(pt) is not None and not drop_meant(pt, title):
         return skip_line(_assistant(pt), line)
     return take_off_list(pt, line)
+
+
+# --- dropped for good only on words for that item, and never when the drop is said for today ---
+# Which item a removal means is the model's reading (change_asks.py), so a drop word alone no longer says which
+# item goes for good: "scrap the glaze bit for today" takes it off today and leaves it to do.
+_FOR_TODAY_RE = re.compile(r"\b(?:for|from|off|just) (?:today|tonight|this (?:morning|afternoon|evening|shift))\b|"
+                           r"\btoday'?s (?:plan|list|schedule)\b|\bnot today\b", re.IGNORECASE)
+_FOR_GOOD_RE = re.compile(r"\b(?:for good|for ever|forever|permanently|altogether|delete|archive|never|no longer)\b",
+                          re.IGNORECASE)
+
+
+def _for_today(message: str) -> bool:
+    """The drop is said for today only ("for today", "from today's plan"), with nothing saying for good."""
+    return bool(_FOR_TODAY_RE.search(message)) and not _FOR_GOOD_RE.search(message)
+
+
+def _words_point_to(pt: "PlanTools", title: str) -> bool:
+    """The user's words this turn name the item or point back to it (done_reference.check)."""
+    from thirties_core.done_reference import check
+    try:
+        held, _ = check(pt, title)
+    except Exception:
+        return False
+    return held is None
+
+
+def drop_meant(pt: "PlanTools", title: str) -> bool:
+    """The user's words drop this item for good (it stops coming back): a drop word (write_guard.asks_to_drop),
+    not said for today only, and words that name the item or point back to it. With nobody talking, the caller's
+    own rules apply (True); the app's own controls need only the drop word."""
+    from thirties_core.write_guard import asks_to_drop
+    message = getattr(pt, "user_message", None)
+    if message is None:
+        return True
+    if not asks_to_drop(message):
+        return False
+    if getattr(pt, "by_hand", False):
+        return True
+    return not _for_today(message) and _words_point_to(pt, title)
+# --- end dropped for good ---
 
 
 def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
@@ -229,7 +280,9 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
         from thirties_core.if_time import act
         return act(a, line, "done")
-    if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None:
+    from thirties_core.change_asks import removal_asked  # asked for: which line is the model's reading
+    if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None \
+            and not removal_asked(pt):
         from thirties_core.done_reference import check
         held, _ = check(pt, line, [task.id] if task is not None else [])
         from thirties_core.leave_today import asks_to_skip  # "skip it today" too (leave_today.py)

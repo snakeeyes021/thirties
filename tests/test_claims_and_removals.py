@@ -76,12 +76,17 @@ class TestRemovalNeedsTheUsersWords(PlanCase):
         out = self.remove("Oil change", "put the oil change back where i had it")
         self.assertTrue(out.startswith(NOT_DONE), out)
 
-    def test_a_removal_word_for_one_item_never_takes_another(self):
-        out = self.remove("Bake bread", "drop the fern please")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Bake bread")), 1)
+    def test_asked_for_a_removal_which_item_is_the_models_reading(self):
+        # which items a removal the user asked for means is the model's to read (change_asks.py)
         self.assertFalse(self.remove("Repot the fern", "drop the fern please").startswith(NOT_DONE))
         self.assertEqual(self.planned("Repot the fern"), [])
+        self.assertFalse(self.remove("Bake bread", "drop the fern please").startswith(NOT_DONE))
+        self.assertEqual(self.planned("Bake bread"), [])
+
+    def test_nobody_asked_for_a_removal_it_stays(self):
+        out = self.remove("Bake bread", "the fern looks happier already")
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(len(self.planned("Bake bread")), 1)
 
     def test_asked_for_by_name_or_pointed_back_to_it_goes(self):
         self.assertFalse(self.remove("Oil change", "take the oil change off, it's done next week").startswith(NOT_DONE))

@@ -8,7 +8,8 @@ The design, drawn from how people use the word: "skip" means "not today". It nev
 - A skipped to-do goes back to waiting on its own list and returns on a later day this week, a day Python picks
   by fit (``later_day``): never the very next day by itself. Only when the user names a day ("Saturday", "put
   it tomorrow") does it go there instead (``named_window``).
-- Only the user's own drop words stop it coming back (write_guard.asks_to_drop, handled where drops are).
+- Only the user's own drop words for that item stop it coming back, never a drop said for today
+  (off_today.drop_meant).
 
 The same holds for any move to "tomorrow" that the user didn't ask for: the model moving an item to tomorrow
 (update_event with a day, If there's time's tomorrow, a leftover kept for tomorrow), or Python finding no room
@@ -259,8 +260,8 @@ def skipped_off(a: Any, title: str, line: Optional[str], span: Any = None) -> st
     pt = a.pt
     homed = line is not None and has_home(a, line)
     message = getattr(pt, "user_message", None)
-    from thirties_core.write_guard import asks_to_drop
-    if message is not None and asks_to_drop(message):  # the user's drop words: it stops coming back
+    from thirties_core.off_today import drop_meant  # their drop words for this item, not for today (off_today.py)
+    if message is not None and drop_meant(pt, title):  # the user's drop words: it stops coming back
         from thirties_core.carry import DROPPED, OpenPool
         if line is not None:
             from thirties_core.off_today import take_off_list

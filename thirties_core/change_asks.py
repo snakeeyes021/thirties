@@ -1,25 +1,33 @@
-"""An item comes off the plan only on the user's words for it, read as for a done (done_reference.py).
+"""Which item a removal the user asked for means is the model's to read; a removal nobody asked for doesn't happen.
 
-Before, one removal word anywhere in a message was enough ("drop the fern" took Bake bread off as well), and so
-was the item's name in a grumble about it (asking how come the oil change sat at night took the oil change off).
-Now an item comes off when:
+People rarely name an item word for word ("the glaze bit and that kiln thing" for Glazing: celadon test tiles and
+Kilnwash the shelves), and reading their words against the titles kept refusing what the model had read right,
+until the user was told to spell the items out. So now:
 
-- the user's words point to the item: named in this message, pointed back to ("yes, take it off" after a message
-  that named it), or asked for in bulk ("clear the rest"), exactly as done_reference.check reads them; and
-- a message naming it without asking for it to go isn't a grumble about its place or how it got there (a
-  question about how it ended up there, or a request to return it to where it was).
+- **Asked for** (``removal_asked``): the user's message asks for something to come off ("drop", "take ... off",
+  "skip", "not doing", ...), or one of their last RECENT_MESSAGES messages did and this one isn't a no ("the two I
+  mentioned are still there" after a request that didn't go through). Which items it means is the model's reading,
+  and it stands.
+- **Not asked for**: nothing the user said this turn or just before asks for anything to come off. An item then
+  comes off only when this message names it or points back to it (done_reference.check), and not when the message
+  only grumbles about its place or says it isn't time for it yet.
 
-The app's own controls and the background (nobody talking) are never held here.
+Taking something off the plan never ticks it or files it as dropped by itself: the user's lists have their own
+guard (write_guard.py; off_today._off_list). The app's own controls and the background (nobody talking) are never
+held here.
 """
 
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 if TYPE_CHECKING:
     from thirties_core.models import EventSpan
     from thirties_core.plan_tools import PlanTools
+
+# how many of the user's messages before this one a request still counts for
+RECENT_MESSAGES = 2
 
 # talking about an item's place, or how it got there, without asking for it to go
 COMPLAINT_RE = re.compile(r"\b(?:(?:why|how come) (?:did|would|is|are|was|were|has|have|it|the)\b|never (?:said|asked|told)|did(?:n'?t| not) "
@@ -29,26 +37,68 @@ COMPLAINT_RE = re.compile(r"\b(?:(?:why|how come) (?:did|would|is|are|was|were|h
                           r"stay(?:s)? (?:where|there|put|as)|undo|revert)", re.IGNORECASE)
 
 
+def recent_said(messages: Any) -> List[str]:
+    """The user's last RECENT_MESSAGES visible messages before this turn, newest first."""
+    out = []
+    for m in reversed(list(messages or [])):
+        text = str(m.get("content") or "")
+        if m.get("role") == "user" and text.strip() and not m.get("hidden") and not text.startswith("[System check"):
+            out.append(text)
+            if len(out) >= RECENT_MESSAGES:
+                break
+    return out
+
+
+def earlier_messages(pt: Any) -> List[str]:
+    """What the user said just before this turn: the recent messages the conversation set, else the last one."""
+    recent = getattr(pt, "recent_said", None)
+    if recent:
+        return list(recent)[:RECENT_MESSAGES]
+    said, _ = getattr(pt, "prior_exchange", None) or ("", "")
+    return [said] if said else []
+
+
+def asked(pt: Any, words: Any) -> bool:
+    """The user asks for this kind of change (``words`` a pattern for it): in this message, or in a recent one when
+    this message isn't a no."""
+    message = getattr(pt, "user_message", None)
+    if not message:
+        return False
+    if words.search(message):
+        return True
+    from thirties_core.done_words import NO_RE
+    return not NO_RE.match(message) and any(words.search(m) for m in earlier_messages(pt))
+
+
+def _removal_words() -> Any:
+    from thirties_core.leave_today import SKIP_ASK_RE
+    from thirties_core.plan_tools import REMOVE_WORDS_RE
+    return re.compile(f"(?:{REMOVE_WORDS_RE.pattern})|(?:{SKIP_ASK_RE.pattern})", re.IGNORECASE)
+
+
+def removal_asked(pt: Any) -> bool:
+    """The user asked for something to come off the plan, this turn or just before."""
+    return asked(pt, _removal_words())
+
+
 def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     """Why this item can't come off the plan on the user's words this turn, or None."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return None
-    from thirties_core.done_reference import POINTER_RE, check
-    from thirties_core.plan_tools import REMOVE_WORDS_RE
+    if removal_asked(pt):
+        return None  # which items the request means is the model's reading
+    from thirties_core.done_reference import check
     title = pt._title(span)
     held, _ = check(pt, title, [i for i in (span.id, span.task_id) if i])
-    if held and getattr(pt, "prior_exchange", None) is None and REMOVE_WORDS_RE.search(message) \
-            and POINTER_RE.search(message):
-        held = None  # "take that off" with nothing known to read "that" against: the model's reading stands
     if held:
-        return (f"The user's words don't point to {title}, so it stays on the plan. Take off only what the user "
-                "asks to take off; ask them if it isn't clear.")
-    if not REMOVE_WORDS_RE.search(message) and COMPLAINT_RE.search(message):
+        return (f"The user hasn't asked for anything to come off the plan, so {title} stays. Take something off "
+                "only when they ask; if you think they want it gone, ask them in your own words.")
+    if COMPLAINT_RE.search(message):
         return (f"The user talked about {title} but didn't ask for it to come off, so it stays on the plan. If "
                 "they want it somewhere else, move it there; if it isn't clear, ask.")
     # --- "not yet" is about when, not whether: it stays (a simulated day lost an item the user said wasn't due yet) ---
-    if not REMOVE_WORDS_RE.search(message) and NOT_YET_RE.search(message):
+    if NOT_YET_RE.search(message):
         return (f"The user said it isn't time for {title} yet, not that it's off, so it stays on the plan. Leave it "
                 "where it is, or move it later if they say when.")
     # --- end "not yet" ---
@@ -60,7 +110,8 @@ NOT_YET_RE = re.compile(r"\bnot (?:\w+ ){0,3}yet\b|\b(?:isn'?t|is not|aren'?t|ar
                         r"\bnot (?:right )?now\b|\bnot time (?:for|to)\b|\btoo (?:early|soon) for\b", re.IGNORECASE)
 
 
-__all__ = ["removal_refused", "COMPLAINT_RE"]
+__all__ = ["removal_refused", "removal_asked", "asked", "recent_said", "earlier_messages", "COMPLAINT_RE",
+           "RECENT_MESSAGES"]
 
 
 def merge_readd(pt: "PlanTools", copies: Any, start: Any, end: Any = None, duration: Any = None) -> Optional[str]:

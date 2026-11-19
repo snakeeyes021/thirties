@@ -8,9 +8,11 @@ it saved work hours as well. Each time the user had to notice and undo it.
 Now, when a change is called for the user's message (the tool is the one the model called, not part of Thirties'
 own planning: a day proposal, a routine, the morning set-up), it goes ahead only when the message refers to it:
 
-- **moving an item** (update_event): the message names it, points back to it, or gives a time for it in words
-  that fit it (done_reference.check, stated_times.loosely_named), or asks for a bulk change ("redo the afternoon",
-  "fix the schedule", "move everything");
+- **moving an item** (update_event): the user asks for a move, in this message or one of their last few that this
+  one isn't a no to ("push", "later", "swap", "put ... at", "redo the afternoon": ``move_asked``), and which items
+  that means is then the model's reading, as for a removal (change_asks.py); with no such words, the message names
+  the item, points back to it, or gives a time for it in words that fit it (done_reference.check,
+  stated_times.loosely_named);
 - **a new item** (add_event): its words are in the message, the message points back to it (yes to an offer), or the
   user asked Thirties to plan ("plan my afternoon", "fit in what you can");
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
@@ -101,15 +103,29 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     message = _talking(pt, "update_event")
     if message is None or span.is_envelope or span.source == "calendar":
         return None  # work and sleep, and calendar events, have their own rules
-    if BULK_CHANGE_RE.search(message):
-        return None
+    if BULK_CHANGE_RE.search(message) or move_asked(pt):
+        return None  # which items the request means is the model's reading (change_asks.py)
     title = pt._title(span)
     if _referred_to(pt, message, title, (span.id, span.task_id)):
         return None
     from thirties_core.unasked import refusal_note  # never announced as a failed move (unasked.py)
-    return (f"The user's message doesn't name {title}, so it stays where it is: change only what they asked about. "
-            f"If what they named needs this time, put it alongside (alongside=true), or ask them before moving "
-            f"{title}." + refusal_note(title))
+    return (f"The user hasn't asked for anything to move, so {title} stays where it is. If something they asked "
+            f"for needs this time, put it alongside (alongside=true), or ask them before moving {title}."
+            + refusal_note(title))
+
+
+# the user asking for something to move: a move word, a later or earlier time, or a new place for it
+MOVE_ASK_RE = re.compile(
+    r"\b(?:mov(?:e|es|ed|ing)|push\w*|shift\w*|slid\w*|bump\w*|delay\w*|postpon\w*|resched\w*|swap\w*|switch\w*|"
+    r"defer\w*|earlier|later|sooner|instead|rather|make room|put (?:\w+ ){0,6}?(?:at|to|after|before|back|on|in|"
+    r"between|first|last)|(?:go|goes|do|have|start)\w* (?:\w+ ){0,4}?(?:at|after|before|by) (?:\d|noon|midnight)|"
+    r"(?:run|runs|running|ran) (?:late|over|long|behind)|behind)\b", re.IGNORECASE)
+
+
+def move_asked(pt: Any) -> bool:
+    """The user asked for something to move, this turn or just before (change_asks.asked)."""
+    from thirties_core.change_asks import asked
+    return asked(pt, MOVE_ASK_RE) or asked(pt, BULK_CHANGE_RE)
 
 
 def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
@@ -140,4 +156,5 @@ def week_refused(pt: "PlanTools", work: bool, sleep: bool) -> Optional[str]:
     return None
 
 
-__all__ = ["move_refused", "add_refused", "week_refused", "BULK_CHANGE_RE", "PLAN_ASK_RE", "AGREE_RE", "MAKE_ROOM_REACH"]
+__all__ = ["move_refused", "move_asked", "add_refused", "week_refused", "MOVE_ASK_RE", "BULK_CHANGE_RE", "PLAN_ASK_RE",
+           "AGREE_RE", "MAKE_ROOM_REACH"]

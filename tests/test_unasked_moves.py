@@ -1,8 +1,8 @@
 """A move nobody asked for that didn't happen is never announced (unasked.py).
 
-Asked to move one item, the model also tried to shift another; the guard kept that one where it was, and the reply
-came back saying it "is still in the 6:30 PM block; I couldn't move it" though the user never asked. On invented
-items only: someone who glazes pottery and paddles a canoe.
+Given a time for one item (no word asking for anything to move), the model also tried to shift another; the guard
+kept that one where it was, and the reply came back saying it "is still in the 6:30 PM block; I couldn't move it"
+though the user never asked. On invented items only: someone who glazes pottery and paddles a canoe.
 """
 
 import unittest
@@ -14,8 +14,8 @@ from thirties_core.plan_tools import NOT_DONE
 
 
 class TestAMoveNobodyAskedFor(ConversationTestCase):
-    """Asked to move one item, the model also tried to shift another; the guard kept that one where it was, and the
-    reply never mentions it."""
+    """Given a time for one item, the model also tried to shift another; the guard kept that one where it was, and
+    the reply never mentions it."""
 
     def setUp(self):
         super().setUp()
@@ -31,7 +31,7 @@ class TestAMoveNobodyAskedFor(ConversationTestCase):
         from thirties_core.plan_log import model_call
         from thirties_core.unasked import LEAVE_OUT
         t = self.manager.tools
-        t.user_message = "move the test tiles to 6:30"
+        t.user_message = "test tiles at 6:30 then"
         try:
             with model_call():
                 out = t.execute("update_event", {"event": "Wax the canoe hull", "start": "7:00 PM"})
@@ -46,7 +46,7 @@ class TestAMoveNobodyAskedFor(ConversationTestCase):
             reply('CALL update_event {"event": "Glaze the test tiles", "start": "6:30 PM", "alongside": true}'),
             reply("Moved Glaze the test tiles to 6:30 PM and moved Wax the canoe hull to 7:00 PM."),
             reply("Moved Glaze the test tiles to 6:30 PM and moved Wax the canoe hull to 7:00 PM.")]
-        out = self.manager.send_user_message("move the test tiles to 6:30")
+        out = self.manager.send_user_message("test tiles at 6:30 then")
         self.assertEqual(self.hull().start_dt, at("18:30"))
         self.assertNotIn("couldn't", out.lower())
         self.assertNotIn("Wax the canoe hull is still", out)
@@ -58,7 +58,7 @@ class TestAMoveNobodyAskedFor(ConversationTestCase):
             reply('CALL update_event {"event": "Wax the canoe hull", "start": "7:00 PM"}'),
             reply('CALL update_event {"event": "Glaze the test tiles", "start": "6:30 PM", "alongside": true}'),
             reply(said)]
-        self.assertEqual(self.manager.send_user_message("move the test tiles to 6:30"), said)
+        self.assertEqual(self.manager.send_user_message("test tiles at 6:30 then"), said)
 
 
 class TestTheCouldntLineIsForAskedChanges(unittest.TestCase):
@@ -77,7 +77,7 @@ class TestTheCouldntLineIsForAskedChanges(unittest.TestCase):
 
     def messages(self):
         from thirties_core.unasked import refusal_note
-        return [{"role": "user", "content": "move the test tiles to 6:30"},
+        return [{"role": "user", "content": "test tiles at 6:30 then"},
                 {"role": "assistant", "content": "", "tool_calls": [
                     {"name": "update_event", "arguments": {"event": "Wax the canoe hull", "start": "7:00 PM"}}]},
                 {"role": "tool", "name": "update_event",
