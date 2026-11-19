@@ -169,7 +169,7 @@ class TestTurnLoop(ConversationTestCase):
         self.engine.set_next_response(reply("I've logged that session on the Acme brochure as done!"))
         self.engine.set_next_response(reply('CALL log_outcome {"event": "Acme piece", "status": "done"}'))
         self.engine.set_next_response(reply("Logged the Acme brochure as done."))
-        self.manager.send_user_message("great session on the Acme piece")
+        self.manager.send_user_message("had a session on the Acme piece")
         notes = [m["content"] for m in self.manager.brain.messages if m.get("role") == "user"]
         self.assertTrue(any("no log_outcome went through" in n for n in notes), notes)
         self.assertEqual(self.manager.tools.outcomes_logged, 1)

@@ -277,6 +277,13 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     line = today_line(pt, task.title if task is not None else name, task.id if task is not None else None)
     if line is None:
         return None
+    # --- a question, or a pointer at an item's parts, takes nothing off (said_for_it.py) ---
+    from thirties_core.said_for_it import removal_held
+    held_here = removal_held(pt, line)
+    if held_here:
+        from thirties_core.plan_tools import ToolError as _Held
+        raise _Held(held_here)
+    # --- end a question, or a pointer at parts ---
     if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
         from thirties_core.if_time import act
         return act(a, line, "done")

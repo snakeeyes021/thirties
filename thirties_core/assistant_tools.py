@@ -1388,6 +1388,13 @@ class AssistantTools(KindTools):
             if going:
                 raise ToolError(going)
             # --- end going or fine ---
+            # --- a question, a pointer at an item's parts, or no done said: no done (said_for_it.py) ---
+            from thirties_core.said_for_it import held_done
+            why = held_done(self.pt, name, [o for o in others if o not in passed_over], words, event,
+                            spanned=started not in (None, "") and finished not in (None, ""))
+            if why:
+                raise ToolError(why)
+            # --- end a question, parts, or no done said ---
         if span is None and task is None and st == SpanStatus.DONE and not ITEM_ID.fullmatch(str(event).strip()):
             # --- a done that's an open item on the user's lists ticks that item, never a new one (done_on_lists.py) ---
             from thirties_core.done_on_lists import on_the_lists

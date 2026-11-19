@@ -86,6 +86,12 @@ def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return None
+    # --- a question, or a pointer at an item's parts, takes nothing off (said_for_it.py) ---
+    from thirties_core.said_for_it import removal_held
+    held_here = removal_held(pt, pt._title(span))
+    if held_here:
+        return held_here
+    # --- end a question, or a pointer at parts ---
     if removal_asked(pt):
         return None  # which items the request means is the model's reading
     from thirties_core.done_reference import check

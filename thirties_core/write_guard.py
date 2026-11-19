@@ -165,6 +165,12 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     if ahead:
         return ahead
     # --- end said ahead ---
+    # --- begun, or coming next, beside a done for something else: no done for it (said_for_it.py) ---
+    from thirties_core.said_for_it import begun_or_next
+    onward = begun_or_next(message, title, others)
+    if onward:
+        return onward
+    # --- end begun or next ---
     from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
@@ -237,6 +243,15 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
         from thirties_core.reopen import untick_refused
         return untick_refused(message, title)
     # --- end a count, and an untick ---
+    # --- a question, or a pointer at an item's parts, writes nothing for the item (said_for_it.py) ---
+    from thirties_core.said_for_it import only_questions, parts_only, removal_in_question
+    if kind in ("complete", "remove", "file_dropped") and parts_only(message, title):
+        return f"not written: the user's words point at what's under or in {title}, not at the item itself."
+    if kind == "complete" and only_questions(message) and not DONE_WORDS_RE.search(message):
+        return f"not written: the user only asked about {title}, so it isn't ticked."
+    if kind in ("remove", "file_dropped") and (only_questions(message) or removal_in_question(message)):
+        return f"not written: the user only asked about taking {title} off, so its line stays."
+    # --- end a question, or a pointer at parts ---
     return ""
 
 

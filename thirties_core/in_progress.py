@@ -108,6 +108,16 @@ def _expected_end(tools: "PlanTools", span: EventSpan, now: datetime, until: Any
     return end if end - now > ALMOST_DONE else end + timedelta(minutes=30)
 
 
+# --- done by itself only when the user asked for it (said_for_it.py) ---
+def _finish_asked(tools: "PlanTools", auto_done: Any) -> bool:
+    """Whether the item is marked done by itself at its end: the caller asked, and during a turn the user's words
+    ask for it too ("mark it done after that"). Otherwise it's only in progress, and done when the user says so."""
+    wanted = str(auto_done).strip().lower() in ("true", "yes", "1") if isinstance(auto_done, str) else bool(auto_done)
+    from thirties_core.said_for_it import auto_done_asked
+    return wanted and auto_done_asked(tools)
+# --- end done by itself only when asked ---
+
+
 def still_doing(tools: "PlanTools", event: Any = None, until: Any = None, length: Any = None, auto_done: Any = None,
                 **_: Any) -> str:
     """The user is in the middle of ``event``: in progress, stretched to when it will end, the rest moved along."""
@@ -121,7 +131,7 @@ def still_doing(tools: "PlanTools", event: Any = None, until: Any = None, length
     now = tools._now()
     if span.start_dt > now:
         return start_now(tools, span, until=until, length=length, auto_done=auto_done)
-    finish = str(auto_done).strip().lower() in ("true", "yes", "1") if isinstance(auto_done, str) else bool(auto_done)
+    finish = _finish_asked(tools, auto_done)
     if finish and until in (None, "") and length in (None, ""):
         raise ToolError("Say when it's done by itself: until (a time) or length.")
     _keep_plan(span)
@@ -145,7 +155,7 @@ def start_now(tools: "PlanTools", span: EventSpan, until: Any = None, length: An
     from thirties_core.placement import apply_flow, flexible, make_way
     now = tools._now().replace(second=0, microsecond=0)
     plan = tools.day_plan
-    finish = str(auto_done).strip().lower() in ("true", "yes", "1") if isinstance(auto_done, str) else bool(auto_done)
+    finish = _finish_asked(tools, auto_done)
     _keep_plan(span)
     was = (span.start_dt, span.end_dt)
     from thirties_core.relative_times import begun_at  # "started 20 minutes ago": it began then, not now
