@@ -7,7 +7,8 @@ item already under way, and another planned beside it, hours later. Now:
 
 - update_event, add_event and set_week, called for the user's message, change only the items and settings the
   message refers to (by name, by a pointer back, or by the time it gives for them), unless the user asks for a
-  bulk change ("redo the afternoon"); otherwise the model is told to leave it, put the named item alongside, or ask;
+  bulk change ("redo the afternoon") or, for update_event, asks for a move at all (then which items is the
+  model's reading: change_asks.py); otherwise the model is told to leave it, put the named item alongside, or ask;
 - Thirties' own planning tools (a day proposal, a routine, the morning set-up) place what they need;
 - nobody talking (the app's own controls, the background), and Thirties' own code calling a tool, are never held
   here;
@@ -51,7 +52,7 @@ class UnaskedCase(ConversationTestCase):
 class TestMovingWhatTheUserDidntName(UnaskedCase):
 
     def test_an_item_the_user_didnt_name_stays(self):
-        out = self.say("move the van to 6", "update_event", {"event": "Sand the bench", "start": "11:00 AM"})
+        out = self.say("van at 6 then", "update_event", {"event": "Sand the bench", "start": "11:00 AM"})
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertIn("Sand the bench", out)
         self.assertEqual(self.span("Sand the bench").start_dt, at("10:00"))
@@ -99,7 +100,7 @@ class TestInATurn(UnaskedCase):
             reply('CALL update_event {"event": "Wash the van", "start": "6:00 PM"}\n'
                   'CALL update_event {"event": "Sand the bench", "start": "11:00 AM"}'),
             reply(said)]
-        out = self.manager.send_user_message("move the van to 6")
+        out = self.manager.send_user_message("van at 6 then")
         self.assertEqual(self.span("Wash the van").start_dt, at("18:00"))
         self.assertEqual(self.span("Sand the bench").start_dt, at("10:00"))
         results = [str(m.get("content")) for m in self.manager.brain.messages if m.get("role") == "tool"]

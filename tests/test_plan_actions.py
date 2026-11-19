@@ -59,17 +59,22 @@ class TestClearRequestsWork(ActionsCase):
                        shown=shown, before="the bench thing is still there?")
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.planned("Sand the bench"), [])
-        out = self.say("remove_event", {"event": "Wash the van"}, "ugh just take that off",
-                       shown=shown, before="the bench thing is still there?")
-        self.assertTrue(out.startswith(NOT_DONE), out)  # the pointer was to the bench, not the van
 
     def test_a_short_form_of_its_name(self):
         self.add("Hardware Store: hinges and glue", "3:00 PM")
         out = self.say("remove_event", {"event": "Hardware Store: hinges and glue"}, "take HS off today")
         self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_another_item_is_still_never_taken(self):
+    def test_which_item_an_asked_removal_means_is_the_models_reading(self):
+        # (change_asks.py) it comes off the plan; nothing is ticked or filed as dropped for it
         out = self.say("remove_event", {"event": "Wash the van"}, "drop the cactus")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.planned("Wash the van"), [])
+        self.assertFalse([n for n in self.api.notes.values()
+                          if str(n.get("title", "")).startswith(("Dropped", "Done"))])
+
+    def test_nobody_asked_for_a_removal_it_stays(self):
+        out = self.say("remove_event", {"event": "Wash the van"}, "the cactus looks thirsty")
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertEqual(len(self.planned("Wash the van")), 1)
 
@@ -90,10 +95,12 @@ class TestAStaleItemNamedByItsTime(ActionsCase):
         self.assertEqual(self.planned("Atlas report: draft three chart options"), [])
         self.assertEqual(len(self.planned("Atlas report - review call")), 1)
 
-    def test_the_time_never_takes_the_other_one(self):
+    def test_asked_for_which_one_is_the_models_reading(self):
+        # (change_asks.py) a removal the user asked for goes by the model's reading of which item
         out = self.say("remove_event", {"event": "Atlas report - review call"},
                        "the 11am atlas thing is STILL there?? i said clear it. pls remove")
-        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.planned("Atlas report - review call"), [])
 
 
 class TestOffTodaysList(ActionsCase):

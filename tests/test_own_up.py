@@ -10,6 +10,8 @@ from tests.test_conversation import ConversationTestCase, reply
 from thirties_core.own_up import handled, plain_line
 
 OLD_WORDS = ("didn't go through", "recorded yet")
+# names the fern and asks for nothing to come off: the fern may go (named), Bake bread is refused (nobody asked)
+ASKED = "repotting the fern can wait till the weekend"
 
 
 class TestPlainWords(unittest.TestCase):
@@ -41,7 +43,7 @@ class OwnUpCase(ConversationTestCase):
 
     def test_a_reply_that_asks_about_the_refused_item_gets_nothing_added(self):
         self.engine.responses = [self.calls(), reply("Removed the fern. Should I take Bake bread off as well?")]
-        out = self.manager.send_user_message("drop the fern please")
+        out = self.manager.send_user_message(ASKED)
         self.assertEqual(out, "Removed the fern. Should I take Bake bread off as well?")
         self.assertEqual(len(self.engine.call_history), 2)  # never sent back
         self.assertEqual(len(self.planned("Bake bread")), 1)
@@ -49,19 +51,19 @@ class OwnUpCase(ConversationTestCase):
     def test_a_reply_that_hides_it_is_sent_back_and_a_true_rewrite_is_kept(self):
         self.engine.responses = [self.calls(), reply("Removed both."),
                                  reply("The fern is off. Bake bread is still on at 5:00; say if it should go.")]
-        out = self.manager.send_user_message("drop the fern please")
+        out = self.manager.send_user_message(ASKED)
         self.assertEqual(out, "The fern is off. Bake bread is still on at 5:00; say if it should go.")
 
     def test_if_it_still_claims_it_the_claim_says_the_item_in_plain_words(self):
         self.engine.responses = [self.calls(), reply("Removed both."), reply("Removed both, all done.")]
-        out = self.manager.send_user_message("drop the fern please")
+        out = self.manager.send_user_message(ASKED)
         self.assertEqual(out, "Bake bread is still on the plan at 5:00 PM; I couldn't take it off.")  # in place
         for words in OLD_WORDS:
             self.assertNotIn(words, out)
 
     def test_all_fixed_over_a_refusal_is_caught_too(self):
         self.engine.responses = [self.calls(), reply("All fixed!"), reply("All fixed!")]
-        out = self.manager.send_user_message("drop the fern please")
+        out = self.manager.send_user_message(ASKED)
         self.assertEqual(out, "Bake bread is still on the plan at 5:00 PM; I couldn't take it off.")
 
     def test_a_change_that_was_already_so_is_no_failure(self):

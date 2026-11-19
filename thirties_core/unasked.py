@@ -3,8 +3,9 @@
 The move guard (change_scope.move_refused) keeps an item where it is when the user hasn't asked for anything to
 move, this turn or just before, and the message doesn't name it: the model shifted something by itself. That's the
 guard working, not a failure the user needs to hear about. (A move the user did ask for is the model's to read and
-isn't refused: change_asks.py.) Yet the reply checks read every refused change as one, and the reply came back with "Wax the canoe
-hull is still in the 2:00 PM block; I couldn't move it." about an item the user never mentioned.
+isn't refused: change_asks.py.) Yet the reply checks read every refused change as one, and the reply came back
+with "Wax the canoe hull is still in the 2:00 PM block; I couldn't move it." about an item the user never
+mentioned.
 
 Now:
 
