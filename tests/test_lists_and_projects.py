@@ -167,6 +167,7 @@ class TestDoneNote(LaneCase):
     def test_undo_takes_it_back_out_of_the_chosen_note(self):
         self.choose()
         self.do_bank()
+        self.t.user_message = "untick the bank call, nobody picked up"  # a reopen goes with the user's ask (reopen.py)
         out = self.t.execute("reopen_item", {"item": "Call the bank"})
         self.assertIn("back on Errands/Admin", out)
         self.assertEqual(self.body("n_log"), "My finished things, newest last.\n")

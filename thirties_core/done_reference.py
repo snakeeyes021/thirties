@@ -278,9 +278,13 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
                "item they finished; if they named another item, mark that one by its id.")
     if any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
         return None, message
+    # --- a count is never a name: "those two" counts items, it doesn't name Fire two test tiles (done_counts.py) ---
+    from thirties_core.done_counts import without_counts
+    naming = without_counts(message)  # which item the words name; pointers, counts and times read them as said
+    # --- end a count ---
     # --- words naming something else that shares a word with it: never this item in its place (done_fit.py) ---
     from thirties_core.done_fit import names_of, names_something_else, refusal as named_else
-    elsewhere = names_something_else(message, names_of(pt, title, ids), others)
+    elsewhere = names_something_else(naming, names_of(pt, title, ids), others)
     if elsewhere:
         return named_else(pt, title, elsewhere), message
     # --- end something else ---
@@ -294,18 +298,18 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     # --- end a whole routine ---
     copy_refusal =(f"{title} is on the plan more than once and the user's words don't say which time, so it "
                     "isn't marked done. Mark the one whose time has come, or ask which one they did.")
-    if _named(message, title, titles):
+    if _named(naming, title, titles):
         return (None, message) if _the_copy_meant(pt, [message], ids) else (copy_refusal, message)
     # --- a time the user gives picks one of several items their words fit equally ("the 11am one") ---
     by_time = _picked_by_time(pt, message, title, titles)
     if by_time is not None:
         return (None, message) if by_time else (refusal, message)
     # --- end picked by its time ---
-    if _the_one_listed(message, shown, title, titles):
+    if _the_one_listed(naming, shown, title, titles):
         return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
-    if _the_one_whose_time_came(pt, message, title, titles) and not _another_in_everyday_words(message, others, titles):
+    if _the_one_whose_time_came(pt, naming, title, titles) and not _another_in_everyday_words(naming, others, titles):
         return None, message
-    if any(_named(message, t, titles) for t in others):
+    if any(_named(naming, t, titles) for t in others):
         return refusal, message  # they're talking about other items
     # --- a question about one item, and a done already asked for (done_words.py) ---
     from thirties_core.done_words import NO_RE, asked_about

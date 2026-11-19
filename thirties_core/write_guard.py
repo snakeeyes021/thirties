@@ -159,6 +159,12 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     told_not = told_not_to_tick(message, title, others)
     if told_not:
         return told_not
+    # --- a done said ahead of time: promised, hoped for, or once something happens (done_ahead.py) ---
+    from thirties_core.done_ahead import said_ahead
+    ahead = said_ahead(message, title, others)
+    if ahead:
+        return ahead
+    # --- end said ahead ---
     from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
@@ -223,6 +229,14 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     from thirties_core.done_fit import names_something_else
     if kind == "complete" and names_something_else(message, title):  # "the glaze order is sent": not this item
         return (f"not written: the user's words name something other than {title}, so it isn't ticked.")
+    # --- a count is never a name (done_counts.py); an untick only on the user's ask (reopen.py) ---
+    from thirties_core.done_counts import counted_only
+    if kind == "complete" and counted_only(message, title):  # "check those two off" for Fire two test tiles
+        return (f"not written: the user's words only count items; they don't name {title}, so it isn't ticked.")
+    if kind in ("untick", "unfile_done"):
+        from thirties_core.reopen import untick_refused
+        return untick_refused(message, title)
+    # --- end a count, and an untick ---
     return ""
 
 

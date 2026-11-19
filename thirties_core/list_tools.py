@@ -375,6 +375,12 @@ class ListTools:
         linked = span.task_id if span is not None else (ref if re.fullmatch(r"[0-9a-f]{16}", ref) else "")
         task = next((t for t in self.a.s.tasks if linked and t.id == linked), None)
         names = [x for x in {title, task.title if task else ""} if x]
+        # --- only the item the user names and asks to open again (reopen.py) ---
+        from thirties_core.reopen import held
+        refusal = held(self.pt, sorted(names), [ref, span.id if span is not None else "", linked])
+        if refusal:
+            raise ToolError(refusal)
+        # --- end only the item named ---
         log = DoneLog(self.a._db)
         rec = (next((r for r in log.filed() if linked and linked in line_ids(self.a._db, r["source_note_id"], r["title"])),
                     None)

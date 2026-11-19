@@ -1298,6 +1298,11 @@ class AssistantTools(KindTools):
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
                     estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False, **_: Any) -> str:
+        # --- reported as open again ("open", "not done"): a reopen, on the user's named ask (reopen.py) ---
+        from thirties_core.reopen import is_reopen_status
+        if is_reopen_status(status):
+            return self.lists.reopen_item(event)
+        # --- end reported as open ---
         try:
             st = SpanStatus(str(status).strip().lower())
         except ValueError:
