@@ -13,6 +13,8 @@ this is the last word, in Python, on every reply:
   "the system" returned ("I can't make that change with a command in plain text"). The user never sees those
   workings, so a sentence about them only puzzles them. The brains send such a reply back once for plain words
   (``talks_internals``); what's still left is taken out here;
+- the mark on when an item under way began ("(recorded; show the block, not the minute)") goes, leaving the
+  words around it;
 - the leftovers' tally the model checks its words against ("kept N from before; N of them on today's plan; …")
   becomes the one plain sentence the user may hear: how many things wait in Before today.
 
@@ -52,6 +54,12 @@ _TALK_RE = re.compile(
     r"\bthe system (?:returned|said|reported|rejected|refused|didn'?t|won'?t|blocked)\b|"
     r"\b[a-z]+_[a-z_]+ (?:tool|function|call|command)s?\b", re.IGNORECASE)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+# --- the mark on when an item under way began, for the model only (under_way.RECORDED) ---
+# "began 10:50 AM (recorded; show the block, not the minute)": copied into a reply, the mark goes; the minute
+# beside it is said by its block (under_way.unsaid, clock.to_thirties).
+_RECORDED_RE = re.compile(r"\s*\(\s*recorded;\s*show the block,\s*not the minute\s*\)", re.IGNORECASE)
+# --- end the mark ---
 
 # --- the leftovers' tally for the model never reaches the user (leftover_facts.summary) ---
 # The model is handed "kept N from before; N of them on today's plan; N not on today's plan; N proposed for
@@ -122,7 +130,7 @@ def has_internal(text: str) -> bool:
     if not text:
         return False
     return bool(_RESULT_RE.search(text) or any(_LINE_RE.search(line) for line in text.splitlines())
-                or _TALK_RE.search(text) or _TALLY_RE.search(text))
+                or _TALK_RE.search(text) or _TALLY_RE.search(text) or _RECORDED_RE.search(text))
 
 
 def _without_talk(line: str) -> str:
@@ -160,7 +168,7 @@ def strip_internal(text: str) -> str:
     """The reply without anything only the model was meant to see (see the module notes)."""
     if not text or not has_internal(text):
         return text
-    out = _without_results(text)
+    out = _RECORDED_RE.sub("", _without_results(text))
     out = "\n".join(_without_talk(_without_tally(line.rstrip())) for line in out.splitlines()
                     if not _LINE_RE.search(line))
     return re.sub(r"\n{3,}", "\n\n", out).strip()

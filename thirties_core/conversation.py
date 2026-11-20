@@ -588,6 +588,8 @@ class ConversationManager:
                 and not m.get("hidden") and not str(m.get("content") or "").startswith("[System check")]  # not Python's
         keep = real_times(*said, merged, spans=self.day_plan.spans)  # real item times and the user's
         now_times = real_times(now=get_current_time(self.day_plan.day_start.tzinfo))  # said as itself, never a row's
+        from thirties_core.under_way import unsaid  # when an item under way began: by its block (under_way.py)
+        keep, now_times = unsaid(keep, now_times, self.day_plan.spans, merged)
         # else blocks; every time keeps its AM/PM (a schedule with some times trimmed and some not was hard to read)
         final = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep, now=now_times)
         final = self._no_repeat_checkins(final)

@@ -11,7 +11,8 @@ Now:
   message asked for by naming it (``note``, kept for the day). Starting something else now (PlanTools._make_room)
   leaves it where it is, alongside, and says so; the user moves it when they want it elsewhere;
 - an item under way (the user said they started it) keeps its start: a change to it moves its end or its length,
-  never its start, unless the user's message gives the item that new time (``start_refused``).
+  never its start, unless the user's message gives the item that new time or asks for when it began to be
+  corrected (``start_refused``, under_way.py).
 
 Nothing here holds the app's own controls or the background (nobody talking).
 """
@@ -105,6 +106,11 @@ def start_refused(pt: "PlanTools", span: "EventSpan", new_start: datetime) -> Op
     from thirties_core.given_times import stated
     if stated(pt, span.title, new_start, any_tool=True):
         return None
+    # --- the user corrects when it began ("it began at 10:44", "it got going a minute ago"): it changes (under_way.py) ---
+    from thirties_core.under_way import restart_allowed
+    if restart_allowed(pt, span, new_start):
+        return None
+    # --- end corrected ---
     title = pt._title(span)
     return (f"{title} is under way: the user started it at {format_clock(span.actual_start)}, so its start stays. "
             f"Change its end or length if they gave one; if it can't finish in time, say so plainly and leave the "

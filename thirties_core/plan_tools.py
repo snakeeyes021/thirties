@@ -573,7 +573,9 @@ class PlanTools:
         fixed = ", fixed" if span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK) and self._is_fixed(span) else ""
         from thirties_core.item_path import span_label, tasks_of  # a nested list item with its parents
         name = span_label(span, tasks_of(self))
-        return f"{name}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})")
+        from thirties_core.under_way import recorded  # under way: when it began, for the record (under_way.py)
+        began = f"; under way, {recorded(span)}" if recorded(span) else ""
+        return f"{name}, {times}" + ("" if on_blocks and not fixed else f" ({where}{fixed})") + began
 
     def _find_span(self, ref: Any) -> EventSpan:
         ref_str = str(ref or "").strip()
@@ -947,8 +949,9 @@ class PlanTools:
         if added and self.assistant is not None:
             listed = self.assistant.list_today(span)
             notes += [listed.strip("()")] if listed else []
-        said = (f"{self._title(span)} started at {format_clock(began)}" + ("" if _as_bool(by_itself) else
-                f", on the plan {format_clock(start)} – {format_clock(end)}"))
+        from thirties_core.under_way import RECORDED  # the minute is for the record, the block is shown
+        said = (f"{self._title(span)} started at {format_clock(began)} ({RECORDED})" + ("" if _as_bool(by_itself)
+                else f", on the plan {format_clock(start)} – {format_clock(end)}"))
         if early:  # this morning, before the plan begins: on today's record, the plan's start unchanged
             said += f" (this morning, before today's plan begins at {format_clock(plan.day_start)}; on today's record)"
         return (f"{said}; not done yet." + (f" ({'; '.join(notes)})" if notes else "")
@@ -1322,6 +1325,13 @@ class PlanTools:
         why = start_refused(self, span, new_start)
         if why:
             raise ToolError(why)
+        from thirties_core.under_way import corrected, given_start, is_correction  # when it began (under_way.py)
+        began_at = given_start(self, span, new_start) if start not in (None, "") else None
+        if began_at is not None and is_correction(self, began_at) and shift in (None, "") and not title:
+            out = corrected(self, span, began_at)  # the recorded start: in the block it began in, never a clock
+            if end in (None, "") and duration in (None, ""):
+                return out
+            return out + " " + self.update_event(span.id, end=end, duration=duration)
         # --- end an item under way ---
         kept = ""
         if not span.is_envelope and not self._is_fixed(span) and (new_start, new_end) != (span.start_dt, span.end_dt):
@@ -1353,6 +1363,11 @@ class PlanTools:
         if span.source == "routine":
             span.source = "user"
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
+        # --- an item under way moved to later isn't under way any more (under_way.py) ---
+        if began_at is not None:
+            from thirties_core.under_way import restarted
+            restarted(self, span, began_at)
+        # --- end moved to later ---
         # --- a new time the user stated for it is kept, to be shown as said (given_times.py) ---
         from thirties_core.given_times import keep as keep_given
         keep_given(self, span, start not in (None, ""), end not in (None, ""),
@@ -1970,6 +1985,9 @@ class PlanTools:
             flags.append(s.status.value)
         elif s.time_source in ("running", "auto_done"):  # in progress, not done (in_progress.py)
             flags.append("in progress" + (", done by itself at its end" if s.time_source == "auto_done" else ""))
+        from thirties_core.under_way import recorded  # under way: when it began, for the record (under_way.py)
+        if recorded(s):
+            flags.append(f"under way, {recorded(s)}")
         if upcoming_from and s.end_dt <= upcoming_from:
             flags.append("already over")
         return flags
@@ -1997,6 +2015,7 @@ class PlanTools:
         def when(start: datetime, end: datetime) -> str:
             start, end = (start, end) if exact else (thirty_of(start), thirty_ceil(end))
             return f"{format_clock(start)} – {format_clock(end)}"
+        from thirties_core.under_way import real_start
 
         for s in in_view:
             if s.id in shared:
@@ -2010,13 +2029,14 @@ class PlanTools:
                     + " (sharing this time: one entry)")
                 continue
             if s.duration_minutes < 30 and thirty_of(s.start_dt) == thirty_of(s.end_dt - timedelta(seconds=1)) \
-                    and not s.is_envelope and not exact:
+                    and not s.is_envelope and not exact and real_start(s) is None:
                 block = thirty_of(s.start_dt)
                 if block in shown_blocks:
                     continue
                 shown_blocks.add(block)
                 group = [x for x in in_view if x.duration_minutes < 30 and not x.is_envelope and x.id not in shared
-                         and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)]
+                         and thirty_of(x.start_dt) == block and x.end_dt <= block + timedelta(minutes=30)
+                         and real_start(x) is None]
                 lines.append(f"- {format_clock(block)} – {format_clock(block + timedelta(minutes=30))}: " + ", then ".join(
                     f"{self._title(x)}{' [' + x.status.value + ']' if x.status.value != 'planned' else ''} id={x.id}"
                     for x in group) + " (short items sharing this block, in this order)")

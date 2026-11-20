@@ -14,6 +14,10 @@ in its place.
 - **Names something else**: phrases share the item's words, but none of them fits. Then the item isn't what was
   done; ``elsewhere`` finds the one open list item that fits all the words, if any, for the model to mark instead.
 - **Names nothing**: a pointer ("that's done", "yes") or an id has no such phrase; the other checks judge it.
+- **A word for how the app shows it**: "the teapot row", "the varnish slot", "that line": a display noun the item
+  lacks ("line", "entry", "row", "slot", "listing", "block", "schedule") only points at where the item is shown, so
+  the rest of the phrase names it. That settles which item is meant, nothing more: a done still needs the user's
+  done words ("the teapot row has the wrong start" isn't one).
 - **A word for the thing's papers or bits**: "the firing paperwork's lodged" for Lodge kiln firing permit. A
   container noun ("paperwork", "forms", "stuff", "bits", "errand") the item lacks doesn't make the words name
   something else when the rest of the phrase is the item's, the clause says the item's own verb in the past
@@ -124,7 +128,7 @@ def reading(message: Optional[str], names: Sequence[str],
 
     def another(w: str) -> bool:
         return any(_is_its(w, o) for o in others)
-    phrases = [[w for w in p if its(w) or not another(w)] for p in _phrases(message or "")]
+    phrases = [[w for w in p if its(w) or not (another(w) or _shown_as(w))] for p in _phrases(message or "")]
     touching = [p for p in phrases if any(its(w) for w in p)]
     return touching, [p for p in touching if all(its(w) for w in p)]
 
@@ -145,6 +149,17 @@ def names_something_else(message: Optional[str], names: Union[str, Sequence[str]
     if fits_but_for_a_container(message, names, others + [t for t in listed if t not in names]):
         return []
     return [" ".join(p) for p in touching]
+
+
+# --- a word for how the app shows an item: "the teapot row", "the varnish slot" name the item (which item only;
+# whether it's done is the done words' to say: said_for_it.no_done_said) ---
+DISPLAY_NOUNS = {"line", "entry", "row", "slot", "listing", "block", "schedule"}
+
+
+def _shown_as(word: str) -> bool:
+    return word in DISPLAY_NOUNS or (word.endswith("s") and word[:-1] in DISPLAY_NOUNS) or \
+        (word.endswith("ies") and word[:-3] + "y" in DISPLAY_NOUNS)  # "rows", "entries"
+# --- end how the app shows it ---
 
 
 # --- a word for the thing's papers or bits ---

@@ -248,8 +248,10 @@ class BackgroundService:
                 fixed = self.manager().tools._is_fixed  # (the bell says it: "Vet at 4:45")
                 keep = real_times(*(format_clock(s.start_dt) for s in spans if not s.is_envelope and fixed(s)),
                                   spans=spans)
+                from thirties_core.under_way import unsaid  # when an item under way began: by its block
+                keep, now_kept = unsaid(keep, real_times(now=now), spans)
                 text = to_thirties(self.manager().tools.shorten(text), keep,  # short titles, AM/PM kept
-                                   now=real_times(now=now))  # "it's 8:41", never as a row's start
+                                   now=now_kept)  # "it's 8:41", never as a row's start
         except Exception:
             pass
         if self.desktop_notify is not None and desktop:
