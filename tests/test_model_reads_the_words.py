@@ -233,5 +233,35 @@ class TestAWordForWhichKind(WordsCase):
         self.assertTrue(names_something_else("the paddle rack is varnished", "Varnish the paddle"))
 
 
+
+class TestAnAddTheModelNames(WordsCase):
+    """An add the model named in its own words was refused because no word of its title was in the message."""
+
+    def add(self, title, words, start="9:10 PM", **more):
+        from thirties_core.plan_log import model_call
+        with model_call():
+            return self.said("add_event", {"title": title, "start": start, "duration": "30 min", **more}, words)
+
+    def test_the_models_name_for_it_goes_on(self):
+        self.assertWent(self.add("Hardware store run", "I need sandpaper and a tin of spar varnish before 9:10"))
+        self.assertEqual(len(self.planned("Hardware store run")), 1)
+
+    def test_tone_words_alone_add_nothing(self):
+        for words in ("thanks!", "lol", "hmm"):
+            with self.subTest(words=words):
+                self.assertHeld(self.add("Hardware store run", words))
+                self.assertEqual(self.planned("Hardware store run"), [])
+
+    def test_a_second_copy_of_whats_planned_still_isnt_added(self):
+        for again in (False, True):
+            with self.subTest(again=again):
+                out = self.add("Varnish the paddle", "I need sandpaper first", start="8:40 PM", again=again)
+                self.assertHeld(out)
+                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+        self.assertWent(self.add("Varnish the paddle", "a second paddle varnish coat at 8:40", start="8:40 PM",
+                                 again=True))
+        self.assertEqual(len(self.planned("Varnish the paddle")), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

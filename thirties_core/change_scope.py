@@ -16,8 +16,10 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
   the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
   words, the message names the item, points back to it, or gives a time for it in words that fit it
   (done_reference.check, stated_times.loosely_named);
-- **a new item** (add_event): its words are in the message, the message points back to it (yes to an offer), or the
-  user asked Thirties to plan ("plan my afternoon", "fit in what you can");
+- **a new item** (add_event): what the user's words call for, and what to call it, is the model's reading ("I have
+  to pick up my prescription at 4" may go on as Pharmacy run). Only a message with no words in it for anything (an
+  "ok" or "thanks" that answers no offer) adds nothing, and neither does a second copy of an item already planned
+  that the message doesn't name (adding what's already planned keeps it one item: change_asks.merge_readd);
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
   talks about sleep.
 
@@ -135,17 +137,26 @@ def move_asked(pt: Any) -> bool:
 
 
 def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
-    """Why add_event can't put this new item on for the user's message, or None."""
+    """Why add_event can't put this new item on for the user's message, or None. What the words ask to add, and
+    under what name, is the model's reading; only a message with nothing in it but tone words ("ok", "thanks"),
+    answering no offer, gives no basis for an add."""
     message = _talking(pt, "add_event")
-    if message is None or BULK_CHANGE_RE.search(message) or PLAN_ASK_RE.search(message):
+    if message is None:
         return None
-    from thirties_core.item_facts import match_words
-    if match_words(title) & match_words(message):
+    # --- an exact copy of an item already planned, which the words don't name: no second one ---
+    low = str(title or "").strip().lower()
+    if any(s.title.strip().lower() == low and not s.is_envelope for s in pt.day_plan.spans if s.title) \
+            and not _referred_to(pt, message, title):
+        return (f"{title} is already on the plan and the user didn't ask for another, so no second copy is added. "
+                "To change when it is, move it with update_event.")
+    # --- end an exact copy ---
+    from thirties_core.turn_guards import _NEUTRAL_RE, _SENTENCES_RE
+    if any(s.strip() and not _NEUTRAL_RE.match(s.strip()) for s in _SENTENCES_RE.split(message)):
         return None
     if _referred_to(pt, message, title):
-        return None
-    return (f"The user didn't ask for {title} this turn, so it isn't added. Mention it in your reply if it matters, "
-            "and add it when they say so.")
+        return None  # a yes to what was offered
+    return (f"The user's message asks for nothing new, so {title} isn't added. Mention it in your reply if it "
+            "matters, and add it when they say so.")
 
 
 def week_refused(pt: "PlanTools", work: bool, sleep: bool) -> Optional[str]:

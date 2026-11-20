@@ -110,9 +110,11 @@ class TestInATurn(UnaskedCase):
 
 class TestANewItemTheUserDidntAskFor(UnaskedCase):
 
-    def test_an_item_nobody_mentioned_isnt_added(self):
-        out = self.say("move the van to 6", "add_event", {"title": "Polish the brass", "start": "3:00 PM",
-                                                          "duration": "30 min"})
+    def test_an_item_with_no_words_for_it_isnt_added(self):
+        # what a message asks to add, and under what name, is the model's reading; only a message with nothing
+        # in it but tone words gives no basis (change_scope.add_refused)
+        out = self.say("thanks!", "add_event", {"title": "Polish the brass", "start": "3:00 PM",
+                                                "duration": "30 min"})
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertFalse(any(s.title == "Polish the brass" for s in self.manager.day_plan.spans))
 
