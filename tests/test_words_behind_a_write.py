@@ -232,5 +232,37 @@ class TestStartedBesideAnotherDone(WordsCase):
         self.assertEqual(not_finished("the paddle varnish I started at 6:10 is done", "Varnish the paddle"), "")
 
 
+class TestOffTodaysListOnTheSameGrounds(LeaveBase):
+    """Removing an item on words about a full day left its Today line, or refused an untimed one."""
+
+    def untimed_line(self, title):
+        self.api.notes["n_today"]["body"] += f"- [ ] {title}\n"
+
+    def test_a_full_day_takes_an_untimed_line_off(self):
+        self.untimed_line("Oil the hinges")
+        out = self.say("today is way too packed", "remove_event", {"event": "Oil the hinges"})
+        self.assertFalse(out.startswith("NOT_DONE"), out)
+        self.assertNotIn("Oil the hinges", self.body("n_today"))
+        self.assert_guarded()
+
+    def test_a_full_day_takes_a_timed_items_line_off_too(self):
+        set_debug_time(at("09:45"))
+        self.say("fix the gate today", "add_to_today", {"items": ["Fix the gate"]})
+        span = self.planned("Fix the gate")[0]
+        out = self.say("today is way too packed", "remove_event", {"event": span.id})
+        self.assertFalse(out.startswith("NOT_DONE"), out)
+        self.assertEqual(self.planned("Fix the gate"), [])
+        self.assertNotIn("Fix the gate", self.body("n_today"))
+        self.assert_guarded()
+
+    def test_busy_words_about_something_else_or_a_keep_take_no_line_off(self):
+        self.untimed_line("Oil the hinges")
+        for words in ("I packed the van", "keep the hinges on today"):
+            with self.subTest(words=words):
+                out = self.say(words, "remove_event", {"event": "Oil the hinges"})
+                self.assertTrue(out.startswith("NOT_DONE"), out)
+                self.assertIn("Oil the hinges", self.body("n_today"))
+
+
 if __name__ == "__main__":
     unittest.main()
