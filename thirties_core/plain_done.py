@@ -1,0 +1,243 @@
+"""A done the model read goes through, unless the user's words give it no basis at all.
+
+Which item the user means is the model's call: an everyday name or a nickname for it, a reply that refers back
+to what the app asked, the done said again in exasperation. done_reference.check refuses a done only when the words give no basis
+for it:
+
+- **No done said**: nothing in the words says it happened or confirms it ("the chooks are getting watered" is
+  under way, not done).
+- **Something else named**: the words name another item by its own words (checked before this, in
+  done_reference.check and done_fit.py).
+- **Something else fits better**: the words fit another item, done or not, a routine or a list item better than
+  this one ("the chooks got watered" for Brush the goats beside Water the hens).
+- **A plain tie**: the words fit another item still to do as well as this one, and say nothing beyond what the two
+  share ("the watering's done" beside Water the hens and Water the goats). A word that names no item ("the chooks
+  got watered") is what the model read to pick this one, so it stands.
+- **Nothing about it**: no word of the item, in any of its forms ("laundry done" for a vet visit, a bare "mark it
+  done"), and no reply of the app's naming it to answer.
+
+So these go through on the model's reading, as long as the words still say it happened (write_guard.py and
+said_for_it.py stay as strict as before):
+
+- **Answering the app**: the app's last reply named this item and no other one still to do, and the user confirms
+  (a yes, a request for the tick, an insisting word) or says it happened.
+- **The model's reading**: a done said with a word of the item (its verb, say) and the rest in the user's own
+  words, with nothing that names another item and no plain tie.
+- **Said again**: a done the user asked for earlier, refused for this same item, said again.
+
+Complaints beside a done ("quit checking on that one", "you don't need to ask") are talk to the app, never a
+word about the item: they don't make the done read as under way or not done (write_guard.state_not_done).
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Iterable, List, Sequence
+
+# words before a past that make it under way or still to come ("getting watered", "to be watered")
+_UNDER_WAY = {"getting", "being", "get", "be", "gets", "need", "needs", "want", "wants", "to"}
+# a reply that confirms what the app just named, or insists on it
+CONFIRM_RE = re.compile(
+    r"\b(?:yes|yep|yeah|yup|yea|correct|right|exactly|sure|indeed|that one|this one|the one|that'?s (?:it|the one)|"
+    r"obvious(?:ly)?|of course|duh|clearly|already (?:told|said)|(?:told|tell) you|i (?:just |already )?said|"
+    r"said so|said that|how many times|(?:mark|tick|check|cross|log)\w*\s+(?:it|that|this|them|those|off|done)|"
+    r"do it|just do|go ahead)\b", re.IGNORECASE)
+
+# a clause said to the app about the conversation ("quit checking on that one", "you don't need to ask")
+_TO_THE_APP_RE = re.compile(
+    r"\b(?:you|your|you'?re|youre|u|ur|yourself)\b|\b(?:stop|quit|keep)\s+(?:asking|checking|bugging|nagging)\b|"
+    r"\b(?:asking|ask me|told|said|obvious(?:ly)?|how many times)\b", re.IGNORECASE)
+# a pointer to the item as what the clause is about ("it isn't", "that's not", "they're still"): never talk to the app
+_ABOUT_A_POINTER_RE = re.compile(
+    r"\b(?:it|that|this|they|them|those|these)(?:'s|'re|s|re)?\s+(?:is\s+|are\s+|was\s+|were\s+)?(?:still\s+)?"
+    r"(?:not|n'?t|isn'?t|aren'?t|wasn'?t|weren'?t|running|going|on|fine|ok|okay|good|started)\b", re.IGNORECASE)
+
+
+def _stems(text: Any) -> List[tuple]:
+    from thirties_core.done_words import _words
+    return _words(text)
+
+
+def _open_titles(pt: Any) -> List[str]:
+    from thirties_core.done_reference import _still_to_do
+    return list(dict.fromkeys(s.title for s in _still_to_do(pt) if s.title))
+
+
+# words that say how, or ask for the tick, never which item
+_NOT_WHICH = {"yes", "yep", "yeah", "yup", "yea", "correct", "exactly", "sure", "indeed", "obvious", "obviously",
+              "course", "duh", "clearly", "mark", "tick", "check", "cross", "log", "please", "now", "ok", "okay",
+              "one", "too", "also", "finally", "just", "all", "got", "get", "are", "is", "was", "were", "have", "has",
+              "had", "been", "its", "they", "them", "theyre", "those", "these", "it", "that", "this", "off", "go",
+              "ahead", "so", "say", "times", "many", "how", "i", "you", "me", "we", "us", "lol", "ugh", "omg"}
+
+
+def _which_words(message: str) -> List[tuple]:
+    """(stem, word) for each word of the message that can say which item: not a done word, a yes, a pointer or a
+    word saying how."""
+    from thirties_core.done_words import _NOT_NAMES
+    from thirties_core.started import FINISHED_RE
+    from thirties_core.write_guard import DONE_WORDS_RE
+    out = []
+    for stem, word in _stems(message):
+        if word in _NOT_NAMES or stem in _NOT_NAMES or word in _NOT_WHICH or stem in _NOT_WHICH:
+            continue
+        if DONE_WORDS_RE.fullmatch(word) or (FINISHED_RE.fullmatch(word) and not word.endswith("ed")):
+            continue
+        out.append((stem, word))
+    return out
+
+
+def _other_names(pt: Any, title: str) -> List[str]:
+    """Everything else the words could be about: the other items on the plan (done ones too), the routines this item
+    isn't a step of, and what is still open on the lists."""
+    from thirties_core.done_reference import _listed_items, _titles
+    from thirties_core.item_facts import item_name
+    names = list(_titles(pt))
+    try:
+        from thirties_core.whole_routine import _routines
+        names += [r["name"] for r in _routines(pt) if not any(sp.title == title for sp in r["spans"])]
+    except Exception:
+        pass
+    names += _listed_items(pt, [title])
+    return [n for n in dict.fromkeys(names) if n and item_name(n) != item_name(title)]
+
+
+def by_the_models_reading(pt: Any, message: str, title: str) -> bool:
+    """A done said in the user's own words, fitting no other item still to do better, and with no plain tie: no
+    other item the words fit as well while saying nothing beyond what the two share. Words that name another item
+    outright were refused before this (done_reference.check)."""
+    from thirties_core.done_words import _hits, kin
+    from thirties_core.item_facts import item_name
+    if not says_it_happened(message):
+        return False
+    which = _which_words(message)
+    said = _stems(message)
+    mine = _hits(said, title)
+    if not mine:
+        return False  # nothing in the words touches the item: no basis for it
+    if any(len(_hits(said, o)) > len(mine) for o in _other_names(pt, title)):
+        return False  # the words fit something else better
+    rivals = [o for o in _open_titles(pt) if item_name(o) != item_name(title)]
+    level = [o for o in rivals if _hits(said, o) and len(_hits(said, o)) == len(mine)]
+    if not level:
+        return True
+    shared = [w for t in [title] + level for w, _ in _stems(t)]
+    return any(not any(kin(t, sw) for t in shared) for sw in which)  # a word beyond the tie: the model's to read
+
+
+def _named_in(shown: str, pool: Sequence[str], titles: Sequence[str]) -> List[str]:
+    from thirties_core.done_reference import _listed
+    from thirties_core.done_words import named
+    return list(dict.fromkeys(t for t in pool if _listed(shown, t) or named(shown, t, titles)))
+
+
+def says_it_happened(message: str) -> bool:
+    """The words say something happened: a done word or a past, not one still under way or to come ("getting
+    watered", "needs to be fed")."""
+    from thirties_core.started import FINISHED_RE
+    from thirties_core.write_guard import DONE_WORDS_RE
+    for m in list(DONE_WORDS_RE.finditer(message or "")) + list(FINISHED_RE.finditer(message or "")):
+        before = re.findall(r"[a-z]+", (message or "")[:m.start()].lower())
+        if not before or before[-1] not in _UNDER_WAY:
+            return True
+    return False
+
+
+def answers_the_app(pt: Any, message: str, title: str, titles: Sequence[str], shown: str) -> bool:
+    """The app's last reply named this item and no other one still to do, and the user confirms it or says it
+    happened."""
+    if not shown or not (CONFIRM_RE.search(message) or says_it_happened(message)):
+        return False
+    from thirties_core.done_reference import _open_items_shown
+    from thirties_core.item_facts import item_name
+    pool = list(dict.fromkeys([title] + _open_titles(pt) + _open_items_shown(pt, shown, list(titles))))
+    named = {item_name(t) for t in _named_in(shown, pool, titles)}
+    return named == {item_name(title)}
+
+
+def said_again(pt: Any, message: str, title: str) -> bool:
+    """A done the user asked for in an earlier message, refused for this same item, said again: the words share
+    what names the thing with that earlier request."""
+    from thirties_core.item_facts import item_name, match_words
+    from thirties_core.done_words import _NOT_NAMES
+    asked = getattr(pt, "done_asks", None) or {}
+    earlier = [said for t, said in asked.items() if item_name(t) == item_name(title)]
+    if not earlier or not says_it_happened(message):
+        return False
+    from thirties_core.started import FINISHED_RE
+    from thirties_core.write_guard import DONE_WORDS_RE
+
+    def naming(text: str) -> set:
+        return {w for w in match_words(text) if w not in _NOT_NAMES and not FINISHED_RE.fullmatch(w)
+                and not DONE_WORDS_RE.fullmatch(w)}
+
+    def plain(text: str) -> str:
+        return " ".join(re.findall(r"[a-z]+", text.lower()))
+    mine = naming(message)
+    return any(mine & naming(said) or plain(said) == plain(message) for said in earlier)
+
+
+def trusted(pt: Any, message: str, title: str, titles: Sequence[str], shown: str) -> bool:
+    """Whether the model's reading of which item the user means stands (the module docstring says when)."""
+    return (answers_the_app(pt, message, title, titles, shown) or by_the_models_reading(pt, message, title)
+            or said_again(pt, message, title))
+
+
+# --- the dones asked for before, and refused as not pointing to the item ---
+_REFUSED_RE = re.compile(r"The user's words don't point to (.+?), so it isn't marked done\.")
+
+
+def done_asks(messages: Sequence[dict]) -> Dict[str, str]:
+    """{item: what the user said} for each done the user asked for in their recent messages that was refused as
+    not pointing to the item, and that hasn't been marked since or been called off with a no. Read from the
+    conversation before this turn."""
+    from thirties_core.done_words import NO_RE, TURNS_BACK, _DONE_ASK_RE
+    from thirties_core.started import FINISHED_RE, said_not_done
+
+    def visible_user(m: dict) -> bool:
+        text = str(m.get("content") or "")
+        return (m.get("role") == "user" and bool(text.strip()) and not m.get("hidden")
+                and not text.startswith("[System check"))
+    starts = [i for i, m in enumerate(messages) if visible_user(m)]
+    if not starts:
+        return {}
+    asks: Dict[str, str] = {}
+    said = ""
+    for m in messages[starts[-TURNS_BACK] if len(starts) >= TURNS_BACK else starts[0]:]:
+        if visible_user(m):
+            said = str(m.get("content") or "")
+            for title in list(asks):
+                if NO_RE.match(said) or said_not_done(said, title):
+                    asks.pop(title)
+        elif m.get("role") == "tool" and m.get("name") == "log_outcome":
+            content = str(m.get("content") or "")
+            found = _REFUSED_RE.search(content)
+            if found and (FINISHED_RE.search(said) or _DONE_ASK_RE.search(said)):
+                asks[found.group(1)] = said
+            elif not content.startswith("NOT_DONE"):
+                for title in list(asks):
+                    if title in content:
+                        asks.pop(title)
+    return asks
+# --- end the dones asked for before ---
+
+
+# --- talk to the app beside a done ---
+def to_the_app(clause: str) -> bool:
+    """The clause is said to the app about the conversation ("quit checking on that one", "you don't need to
+    ask"), not about the item: no pointer to the item is what it says is under way or not done."""
+    return bool(_TO_THE_APP_RE.search(clause or "")) and not _ABOUT_A_POINTER_RE.search(clause or "")
+
+
+def without_talk_to_the_app(clauses: Iterable[str], message: str) -> List[str]:
+    """The clauses that can say something about an item: talk to the app is left out when the message also says
+    it happened or confirms it."""
+    clauses = list(clauses)
+    if not (says_it_happened(message) or CONFIRM_RE.search(message)):
+        return clauses
+    return [c for c in clauses if not to_the_app(c)]
+# --- end talk to the app ---
+
+
+__all__ = ["CONFIRM_RE", "answers_the_app", "by_the_models_reading", "done_asks",
+           "said_again", "to_the_app", "trusted", "without_talk_to_the_app"]

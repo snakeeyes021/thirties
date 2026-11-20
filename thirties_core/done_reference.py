@@ -17,6 +17,9 @@ goes through when the user's words point at the item:
   the order it listed them (open list items it named count too, planned or not).
 - **The one just listed**: when the words fit several items equally and the last message the user was shown listed
   exactly one of them ("Not marked yet: Glaze run" beside a Glaze run review call), it's that one.
+- **A plain done**: the app's last reply named only this item and the user confirms it or says it happened; the
+  item's verb in the past with its object in everyday words ("the chooks got watered") and no other item still to
+  do fitting as well; or a done refused earlier for this item, said again (plain_done.py).
 - **The one whose time has come**: when the words fit several items equally ("the walk's done" with three walks),
   or the item has copies under one name, it's the one still to do that began last (or is due within the half
   hour: a done is often said a little early); before any has begun, the next one. A copy named by its start time
@@ -341,8 +344,17 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         if len(set(narrowed)) == 1:
             pointed = narrowed
     # --- end narrowed ---
+    # --- a plain done the model read right, where nothing above points to it: answering the app, its verb and
+    # object in other words, or said again (plain_done.py) ---
+    from thirties_core.plain_done import trusted
+
+    def plain() -> Tuple[Optional[str], Optional[str]]:
+        if not trusted(pt, naming, title, titles, shown):
+            return refusal, message
+        return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
+    # --- end a plain done ---
     if title not in pointed:
-        return refusal, message
+        return plain()
     many = len(set(pointed))
     picked = _by_place(message, shown, list(dict.fromkeys(pointed)), title)
     if picked is not None:
@@ -359,7 +371,7 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         ok = pointed_count(message) == many
     # --- end a count pointing back ---
     if not ok:
-        return refusal, message
+        return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
     if not _the_copy_meant(pt, [message, shown], ids):
         return copy_refusal, message
     return None, POINTER_RE.sub(title, message)

@@ -207,6 +207,10 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     # --- end when something else stops ---
     if not about:
         about = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
+        # --- talk to the app beside a done ("quit checking on that one") says nothing about it (plain_done.py) ---
+        from thirties_core.plain_done import without_talk_to_the_app
+        about = without_talk_to_the_app(about, told)
+        # --- end talk to the app ---
     for c in about:
         if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
             return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
