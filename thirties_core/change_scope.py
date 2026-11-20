@@ -17,9 +17,12 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
   words, the message names the item, points back to it, or gives a time for it in words that fit it
   (done_reference.check, stated_times.loosely_named);
 - **a new item** (add_event): what the user's words call for, and what to call it, is the model's reading ("I have
-  to pick up my prescription at 4" may go on as Pharmacy run). Only a message with no words in it for anything (an
-  "ok" or "thanks" that answers no offer) adds nothing, and neither does a second copy of an item already planned
-  that the message doesn't name (adding what's already planned keeps it one item: change_asks.merge_readd);
+  to pick up my prescription at 4" may go on as Pharmacy run), as long as the words touch it: its name shares a
+  word with them that no planned item has, they ask to plan or fit something in, or they say there's something to
+  do or get that isn't planned (``add_basis``). An add in a turn about other things ("move the varnish to 8:40")
+  has no basis, and neither does a second copy of an item already planned, in its words or others, that the
+  message doesn't name, or a second session nobody asked for (adding what's already planned keeps it one item:
+  change_asks.merge_readd);
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
   talks about sleep.
 
