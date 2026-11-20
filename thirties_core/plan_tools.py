@@ -1038,7 +1038,7 @@ class PlanTools:
         # --- a new item needs the user's words for it (change_scope.py) ---
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
             from thirties_core.change_scope import add_refused
-            why = add_refused(self, str(title))
+            why = add_refused(self, str(title), _as_bool(again))
             if why:
                 raise ToolError(why)
         # --- end a new item needs the user's words ---
@@ -1051,6 +1051,9 @@ class PlanTools:
             # Adding what's already planned that day makes a ghost copy that nags and rolls over (10-27 to 10-30:
             # one item five times, another listed twice): moving is update_event.
             same = self._planned_copies(self.day_plan, str(title), task_id)
+            if not same and not task_id:  # the same item in other words, added by the model (change_scope.py)
+                from thirties_core.change_scope import reworded_copies
+                same = reworded_copies(self, str(title))
             # --- re-adding what's already planned merges into it, never a second copy (change_asks.py) ---
             if same:
                 from thirties_core.change_asks import merge_readd

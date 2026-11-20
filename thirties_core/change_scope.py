@@ -136,27 +136,88 @@ def move_asked(pt: Any) -> bool:
     return asked(pt, MOVE_ASK_RE) or asked(pt, BULK_CHANGE_RE)
 
 
-def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
+def add_refused(pt: "PlanTools", title: str, again: bool = False) -> Optional[str]:
     """Why add_event can't put this new item on for the user's message, or None. What the words ask to add, and
-    under what name, is the model's reading; only a message with nothing in it but tone words ("ok", "thanks"),
-    answering no offer, gives no basis for an add."""
+    under what name, is the model's reading, as long as the words touch it (``add_basis``); a second copy of what's
+    planned, however it's worded, needs the user to name it, and to ask for another one when it's a second
+    session."""
     message = _talking(pt, "add_event")
     if message is None:
         return None
-    # --- an exact copy of an item already planned, which the words don't name: no second one ---
-    low = str(title or "").strip().lower()
-    if any(s.title.strip().lower() == low and not s.is_envelope for s in pt.day_plan.spans if s.title) \
-            and not _referred_to(pt, message, title):
-        return (f"{title} is already on the plan and the user didn't ask for another, so no second copy is added. "
-                "To change when it is, move it with update_event.")
-    # --- end an exact copy ---
-    from thirties_core.turn_guards import _NEUTRAL_RE, _SENTENCES_RE
-    if any(s.strip() and not _NEUTRAL_RE.match(s.strip()) for s in _SENTENCES_RE.split(message)):
+    # --- a copy of an item already planned, in its words or others ("Paddle varnish" for Varnish the paddle) ---
+    copies = pt._planned_copies(pt.day_plan, str(title)) + reworded_copies(pt, str(title))
+    if copies:
+        if not _referred_to(pt, message, title) and not any(_referred_to(pt, message, pt._title(c)) for c in copies):
+            return (f"{title} is already on the plan and the user didn't ask for another, so no second copy is "
+                    "added. To change when it is, move it with update_event.")
+        if again and not AGAIN_RE.search(message):
+            return (f"{title} is already on the plan and the user's words don't ask for a second one, so none is "
+                    "added. To change when it is, move it with update_event.")
+        return None  # named: a second session they asked for, or the one copy moves (change_asks.merge_readd)
+    # --- end a copy ---
+    if add_basis(pt, message, title) or _referred_to(pt, message, title):
         return None
-    if _referred_to(pt, message, title):
-        return None  # a yes to what was offered
-    return (f"The user's message asks for nothing new, so {title} isn't added. Mention it in your reply if it "
-            "matters, and add it when they say so.")
+    return (f"The user's words this turn are about other things and don't ask for {title}, so it isn't added. "
+            "Mention it in your reply if it matters, and add it when they say so.")
+
+
+# asking for another session of something already planned
+AGAIN_RE = re.compile(r"\b(?:another|second|2nd|third|again|twice|one more|extra|more|repeat)\b",
+                      re.IGNORECASE)
+# the user saying there's something to do, get or go to: "I have to pick up X", "need sandpaper", "remind me to"
+ADD_CUE_RE = re.compile(
+    r"\b(?:need(?:s|ed)?|have to|has to|got to|gotta|must|should|ought to|want(?:s)? to|wanna|going to|gonna|"
+    r"plan(?:ning)? to|hoping to|remember to|remind me|don'?t (?:let me )?forget|i'?ll|i will|let'?s|add|put|"
+    r"book|pencil|squeeze|could use|appointment|errand)\b", re.IGNORECASE)
+
+
+# words for changing or ticking what's there, which name nothing new
+_CHANGE_WORDS_RE = re.compile(r"(?:mov|push|shift|slid|bump|delay|postpon|resched|swap|switch|defer|drop|remov|skip|"
+                              r"cancel|finish|start|tick|mark|plan|schedul)\w*|earlier|later|sooner|instead|rather|"
+                              r"redo|time", re.IGNORECASE)
+
+
+def _own_words(pt: "PlanTools", text: str) -> set:
+    """The naming words of the text that belong to no item already planned (what's new in it), as stems."""
+    from thirties_core.done_fit import _breaks, _is_its
+    from thirties_core.item_facts import _stem
+    planned = _titles(pt)
+    words = re.findall(r"[a-z]+", re.sub(r"[‘’'`]", "", str(text or "").lower()))
+    return {_stem(w) for w in words if len(w) > 2 and not _breaks(w) and not ADD_CUE_RE.fullmatch(w)
+            and not _CHANGE_WORDS_RE.fullmatch(w) and not any(_is_its(w, t) for t in planned)}
+
+
+def add_basis(pt: "PlanTools", message: str, title: str) -> bool:
+    """The user's words touch a new item: the model's name for it shares a word with them that no planned item
+    has; or they ask to plan or fit something in; or a sentence says there's something to do or get, in words
+    about no planned item ("I have to pick up my prescription at 4", which may go on as Pharmacy run). An add in a
+    turn about something else ("move the varnish to 8:40", "the thwart is done") has no basis."""
+    if BULK_CHANGE_RE.search(message) or PLAN_ASK_RE.search(message):
+        return True
+    if _own_words(pt, title) & _own_words(pt, message):
+        return True
+    from thirties_core.turn_guards import _SENTENCES_RE
+    return any(ADD_CUE_RE.search(s) and _own_words(pt, s) for s in _SENTENCES_RE.split(message))
+
+
+def reworded_copies(pt: "PlanTools", title: str) -> list:
+    """Items already planned today in other words that are the same words ("Paddle varnish" and Varnish the
+    paddle): only for the model's own adds; the plan's exact copies are PlanTools._planned_copies."""
+    if _talking(pt, "add_event") is None:
+        return []
+    key = _word_key(title)
+    if not key:
+        return []
+    low = str(title or "").strip().lower()
+    from thirties_core.models import SpanStatus
+    return [s for s in pt.day_plan.spans_in_view() if s.title and s.status == SpanStatus.PLANNED
+            and not s.is_envelope
+            and s.source != "calendar" and s.title.strip().lower() != low and _word_key(s.title) == key]
+
+
+def _word_key(title: str) -> frozenset:
+    from thirties_core.item_facts import match_words
+    return frozenset(w[:-1] if w.endswith("e") and len(w) > 3 else w for w in match_words(title))
 
 
 def week_refused(pt: "PlanTools", work: bool, sleep: bool) -> Optional[str]:

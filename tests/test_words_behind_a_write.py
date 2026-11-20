@@ -21,6 +21,48 @@ class AddCase(WordsCase):
             return self.said("add_event", {"title": title, "start": start, "duration": "30 min", **more}, words)
 
 
+class TestAnAddNeedsWordsThatTouchIt(AddCase):
+    """Any message with a sentence in it let the model add an item nobody's words touched."""
+
+    def test_an_add_in_a_turn_about_something_else_is_refused(self):
+        for words in ("move the paddle varnish to 8:40", "the thwart sanding is done",
+                      "kiln wash went fine, all wrapped", "I need to push the paddle varnish to 8:40"):
+            with self.subTest(words=words):
+                self.assertHeld(self.add("Polish the brass hinges", words))
+                self.assertEqual(self.planned("Polish the brass hinges"), [])
+
+    def test_a_reworded_second_copy_is_refused(self):
+        for title in ("Varnish paddle", "Varnish the paddles"):
+            with self.subTest(title=title):
+                self.assertHeld(self.add(title, "move the paddle varnish to 8:40", start="8:40 PM", again=True))
+        for again in (True, False):
+            with self.subTest(again=again):
+                self.assertHeld(self.add("Paddle varnish", "the thwart sanding is done", start="8:40 PM",
+                                         again=again))
+        self.assertEqual(len([s for s in self.manager.day_plan.spans if "arnish" in s.title]), 1)
+
+    def test_a_reworded_copy_named_with_a_new_time_moves_the_one_copy(self):
+        out = self.add("Paddle varnish", "the paddle varnish at 8:40 instead", start="8:40 PM")
+        self.assertWent(out)
+        varnish = [s for s in self.manager.day_plan.spans if "arnish" in s.title]
+        self.assertEqual(len(varnish), 1)
+        self.assertEqual(varnish[0].start_dt, at("20:40"))
+
+    def test_a_second_session_asked_for_goes_on(self):
+        self.assertWent(self.add("Varnish paddle", "another paddle varnish coat at 8:40", start="8:40 PM",
+                                 again=True))
+        self.assertEqual(len([s for s in self.manager.day_plan.spans if "arnish" in s.title]), 2)
+
+    def test_an_errand_said_goes_on_under_the_models_name(self):
+        for title, words, start in (("Sharpener pickup", "I still have to collect my chisels from the sharpener before 9:10", "9:10 PM"),
+                             ("Hardware store run", "need a tin of spar varnish and some sandpaper tonight", "9:40 PM"),
+                             ("Polish the brass hinges", "the brass hinges could use a polish later", "10:10 PM"),
+                             ("Sweep the shop", "fit something quick in after the thwart", "10:40 PM")):
+            with self.subTest(words=words):
+                self.assertWent(self.add(title, words, start=start))
+                self.assertEqual(len(self.planned(title)), 1)
+
+
 class TestAGiveUpOrAGrumbleIsNoDone(WordsCase):
     """Phrases of giving up, grumbling or place read as a finish, and ticked the item."""
 
