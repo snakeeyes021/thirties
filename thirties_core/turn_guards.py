@@ -3,8 +3,9 @@
 - **A question gets an answer, not an action.** A message that only asks ("why is lunch at 1?", "should I move the
   run to 5?", "what's next") changes nothing: every tool that would change the plan, the lists or the records is
   refused for that turn, with a note to answer instead. A request worded as a question ("can you move lunch to
-  1?") is a request. A message with anything besides questions in it ("lunch done. what's next?") is acted on as
-  usual. While the day is still being built (its morning hasn't gone out), the morning's own changes go ahead.
+  1?") is a request, and so is a question that asks for a change ("can the run go at 5?", "shouldn't we drop the
+  run today?"): what it means is the model's reading (said_for_it.asks_for_change). A message with anything
+  besides questions in it ("lunch done. what's next?") is acted on as usual. While the day is still being built (its morning hasn't gone out), the morning's own changes go ahead.
 - **Meant for another day, kept there.** Something the user put on a later day (due then, or waiting for that
   day's list) doesn't go on today's plan unless the user's words this turn bring it up ("the tweaks are for
   tomorrow", then put on tonight).
@@ -51,7 +52,7 @@ _ALWAYS_ALLOWED = {"show_schedule", "list_schedule", "item_history"}
 
 def is_question(message: Optional[str]) -> bool:
     """The message only asks: at least one question, and nothing in it but questions (and words like "ok" or
-    "lol"). A request worded as a question is a request."""
+    "lol"). A request worded as a question, or a question that asks for a change, is a request."""
     if not message or not message.strip():
         return False
     asked = False
@@ -59,7 +60,8 @@ def is_question(message: Optional[str]) -> bool:
         s = sentence.strip()
         if not s or _NEUTRAL_RE.match(s):
             continue
-        if _REQUEST_RE.search(s):
+        from thirties_core.said_for_it import asks_for_change
+        if _REQUEST_RE.search(s) or asks_for_change(s):
             return False
         if s.endswith("?") or (_QUESTION_START_RE.match(s) and not s.endswith((".", "!"))):
             asked = True

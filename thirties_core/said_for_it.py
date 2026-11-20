@@ -5,10 +5,13 @@
   stretch about an item that starts with an onward word ("on to", "moving on to", "time for", "now", "starting",
   "working on", "about to", "heading into") or that says it comes next, with no done word of its own, is never a
   done for it, whatever else the message says (``begun_or_next``).
-- **A question changes nothing.** An item named only in questions ("is the clay bins thing done?", "did I already
-  restock the bins?") is neither ticked nor taken off for it; a removal said only inside a question ("which would
-  you take off?", "should the bins come off?") isn't asked for. A request worded as a question ("could you take
-  the bins off?") is a request (``asked_only``, ``removal_in_question``).
+- **A plain question changes nothing.** An item named only in questions that only ask ("is the clay bins thing
+  done?", "did I already restock the bins?") is neither ticked nor taken off for it; a removal said only inside such
+  a question ("which would you take off?") isn't asked for. A question that asks for a change is an ask, and what
+  it means is the model's reading: worded as a request ("could you take the bins off?"), as a suggestion or a
+  request for leave ("shouldn't we drop the bins today?", "can the bins go?"), or as an objection to the item still
+  being there ("why are the bins still on?"). A question asking an opinion ("should the bins come off?") only asks
+  (``asks_for_change``, ``asked_only``, ``removal_in_question``).
 - **Pointing at an item's parts isn't pointing at the item.** "what are the two clays under the clay bins? get rid
   of those": the pointer is about what's under, in or listed inside the item, not the item. Nothing is taken off
   or ticked on such words; an item named outright still is (``parts_only``).
@@ -79,11 +82,38 @@ _POLITE_RE = re.compile(r"^\W*(?:(?:can|could|would|will|won'?t)\s+(?:you|u|ya)\
 _SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]*")
 
 
+# a question that puts a change forward: a suggestion ("why not", "how about"), an objection to the item still
+# being there ("why is the varnish coat still on?"), or wondering whether it's still wanted
+_PROPOSES_RE = re.compile(
+    r"\b(?:why not|why don'?t (?:we|you|i)|how about|what about|what if (?:we|i|you)|mind if|"
+    r"is it (?:ok|okay|fine|alright|all right) (?:if|to)|any reason (?:not to|to keep)|"
+    r"do (?:we|i) (?:still |really |even )+(?:need|have|want)|(?:why|how come)\b[^.!?\n]*\bstill\b)",
+    re.IGNORECASE)
+# a question opened by a modal that asks for leave or puts something forward ("shouldn't we", "can't we", "can the
+# paddle", "could I", "shall we"); "should the bins come off?" asks for an opinion, and only asks ...
+_MODAL_RE = re.compile(r"^\W*(?:shouldn'?t|can'?t|cannot|couldn'?t|won'?t|wouldn'?t|(?:can|could|may|shall)(?=\s+(?:we|i|"
+                       r"it|that|this|they|those|these|the|my|our)\b))\b", re.IGNORECASE)
+# ... with a change in it: off, gone, moved, put somewhere, ticked
+_CHANGE_RE = re.compile(
+    r"\b(?:go|gone|off|drop\w*|remov\w*|skip\w*|cut|ditch\w*|scrap\w*|cancel\w*|nix|lose|get rid|clear\w*|"
+    r"move\w*|push\w*|shift\w*|bump\w*|slide|swap\w*|put|add|fit|mark\w*|tick\w*|cross\w*|log|done|"
+    r"finished|count\w*)\b", re.IGNORECASE)
+
+
+def asks_for_change(sentence: str) -> bool:
+    """A question that asks for a change, not one that only asks: a suggestion, an objection to the item still
+    being there, or a question asking leave for a change ("shouldn't we drop the bins?", "can the bins go?"). One
+    asking an opinion ("should the bins come off?") only asks. Which change it means is the model's reading."""
+    s = (sentence or "").strip()
+    return bool(s) and bool(_PROPOSES_RE.search(s) or (_MODAL_RE.match(s) and _CHANGE_RE.search(s)))
+
+
 def is_asking(sentence: str) -> bool:
-    """A sentence that asks something, not one asking for something: a wh-question (even with "would you" in it),
-    or one ending in a question mark that isn't a request ("could you take it off?")."""
+    """A sentence that only asks something, not one asking for something: a wh-question (even with "would you" in
+    it), or one ending in a question mark that isn't a request ("could you take it off?") or a question that asks
+    for a change (``asks_for_change``)."""
     s = sentence.strip()
-    if not s:
+    if not s or asks_for_change(s):
         return False
     if _WH_RE.match(s):
         return True
@@ -284,5 +314,5 @@ def auto_done_asked(pt: Any) -> bool:
 # --- end the user's own done ---
 
 
-__all__ = ["asked_only", "auto_done_asked", "begun_or_next", "is_asking", "no_done_said", "only_questions",
+__all__ = ["asked_only", "asks_for_change", "auto_done_asked", "begun_or_next", "is_asking", "no_done_said", "only_questions",
            "parts_only", "parts_refusal", "removal_in_question"]
