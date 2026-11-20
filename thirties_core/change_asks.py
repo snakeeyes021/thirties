@@ -9,7 +9,11 @@ until the user was told to spell the items out. So now:
   mentioned are still there" after a request that didn't go through). Which items it means is the model's reading,
   and it stands.
 - **Said how full the plan is** (``load_said``): "tonight is way too packed", "I need to lighten the evening". Which
-  item comes off for it is the model's reading.
+  item comes off for it is the model's reading, among the items in the part of the day the words name, or the whole
+  day when they name none ("too much today", "I'm swamped") (``load_covers``). A packed van or a cleared-out shelf
+  says nothing about the plan.
+- **Asked to keep it**: "keep the varnish", "put the oil change back where I had it", "drop the thwart but keep the
+  varnish": the item named, or pointed back to, never comes off on those words (``kept``).
 - **Talked about the item**: the message names it or points back to it (done_reference.check), even only to grumble
   about it ("why is the varnish coat still there, not happening"). Whether that means taking it off is the model's
   reading; the tool's answer carries a note when the words read more like a complaint about its place, so the
@@ -86,23 +90,110 @@ def removal_asked(pt: Any) -> bool:
     return asked(pt, _removal_words())
 
 
-# the user saying the plan is too full, or asking for less on it: grounds for the model to take something off
+# the user saying the plan or the day is too full, or asking for less on it: grounds for the model to take something
+# off what they said is too full. A full van or a cleared-out shelf is no such thing.
+_STRETCH = (r"(?:today|tonight|(?:the |my |this |today'?s |tonight'?s )?(?:day|plan|schedule|agenda|calendar|"
+            r"evening|morning|afternoon|night|plate))")
+_FULL = (r"(?:too (?:much|many|full|packed|busy|crowded|crammed|long)|(?:over)?packed|overloaded|overbooked|"
+         r"swamped|slammed|crammed|jammed|stuffed|full|busy|a lot)")
 LOAD_SAID_RE = re.compile(
-    r"\b(?:too (?:much|many|full|packed|busy|crowded|crammed)|(?:over)?packed|overloaded|swamped|slammed|crammed|"
-    r"lighten|thin (?:it|things|this|that|the \w+) out|less on|fewer things|cut (?:it |things )?back|"
-    r"clear (?:out|up) (?:my|the|this)|can'?t (?:fit|manage|handle|get through) (?:it all|everything|all (?:of )?"
-    r"(?:this|that|it|them)))\b", re.IGNORECASE)
+    rf"\b(?:{_STRETCH}(?:'s| is| are| looks| feels| seems| has| got| getting)?\s+(?:\w+\s+){{0,3}}?{_FULL}|"
+    rf"too (?:much|many (?:things|items))(?: (?:on|for|in))? {_STRETCH}|too much (?:to do|going on)|"
+    r"(?:i'?m|i am|we'?re|we are|feeling|i feel) (?:\w+ ){0,2}?(?:swamped|slammed|overloaded|overwhelmed|"
+    r"stretched thin|overbooked)|"
+    rf"lighten (?:up )?{_STRETCH}|lighten (?:the|my) load|thin (?:out )?{_STRETCH}|thin (?:it|things) out|"
+    rf"clear (?:out |up )?{_STRETCH}|(?:less|fewer things) on {_STRETCH}|cut (?:things|it) back|"
+    rf"cut back on (?:things|stuff|{_STRETCH})|"
+    r"can'?t (?:fit|manage|handle|get through|do) (?:it all|everything|all (?:of )?(?:this|that|it|them)))\b",
+    re.IGNORECASE)
+# the stretch of the day load words name: (from hour, to hour)
+_LOAD_PARTS = (("morning", 0, 12), ("afternoon", 12, 17), ("evening", 17, 30), ("tonight", 17, 30),
+               ("night", 17, 30))
 
 
 def load_said(pt: Any) -> bool:
-    """The user says the plan is too full or asks for less on it, this turn or just before."""
+    """The user says the plan or the day is too full or asks for less on it, this turn or just before."""
     return asked(pt, LOAD_SAID_RE)
 
 
-def removal_grounds(pt: Any) -> bool:
-    """The user's words give the model grounds to take something off without naming it: they ask for something to
-    come off, or say the plan is too full."""
-    return removal_asked(pt) or load_said(pt)
+def _load_hours(pt: Any) -> List[tuple]:
+    """The stretches of the day the user's load words are about, as (from hour, to hour); the whole day when they
+    name no part of it ("too much today", "I'm swamped")."""
+    message = getattr(pt, "user_message", None)
+    if not message:
+        return []
+    from thirties_core.done_words import NO_RE
+    texts = [message] + ([] if NO_RE.match(message) else earlier_messages(pt))
+    out = []
+    for text in texts:
+        for m in LOAD_SAID_RE.finditer(text):
+            said = m.group(0).lower()
+            parts = [(a, b) for name, a, b in _LOAD_PARTS if re.search(rf"\b{name}\b", said)]
+            out += parts or [(0, 30)]
+    return out
+
+
+def load_covers(pt: Any, span: Optional["EventSpan"] = None) -> bool:
+    """The user's load words cover this item: they name the part of the day it's in ("tonight is way too
+    packed" for an item at 7:20 PM), or the whole day. With no item (a line on today's list with no time), only
+    words about the whole day cover it."""
+    hours = _load_hours(pt)
+    if span is None or getattr(span, "start_dt", None) is None:
+        return (0, 30) in hours
+    day = getattr(getattr(pt, "day_plan", None), "target_date", None)
+    at = span.start_dt.hour + (24 if day is not None and span.start_dt.date() > day else 0)
+    return any(a <= at < b for a, b in hours)
+
+
+def removal_grounds(pt: Any, span: Optional["EventSpan"] = None) -> bool:
+    """The user's words give the model grounds to take this item off without naming it: they ask for something to
+    come off, or say the part of the day it's in is too full (``load_covers``)."""
+    return removal_asked(pt) or load_covers(pt, span)
+
+
+# --- asked to keep it, or to put it back: never a removal ---
+KEEP_RE = re.compile(
+    r"\b(?:keep(?!\s+(?:\w+\s+){0,5}?(?:off|out|away)\b)|leave (?:\w+\s+){0,4}?(?:there|alone|where|be|as (?:it|is)|"
+    r"on|in place)\b|stay(?:s)? (?:where|there|put|on)|(?:put|bring) (?:\w+\s+){0,5}?back|restore|"
+    r"don'?t (?:drop|remove|take|skip|cancel|touch|lose))", re.IGNORECASE)
+
+
+def kept(pt: Any, title: str, ids: Any = ()) -> str:
+    """Why the user's words keep this item: they ask to keep it, leave it, or put it back ("put the oil change back
+    where I had it", "drop the thwart but keep the varnish"), in words that name it or point back to it naming
+    nothing else. "" when they don't."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or not message or not KEEP_RE.search(message):
+        return ""
+    from thirties_core.done_reference import _named, check
+    from thirties_core.write_guard import _CLAUSE_RE, _POINTER_RE
+    titles = []
+    for s in getattr(getattr(pt, "day_plan", None), "spans", None) or []:
+        try:
+            titles.append(pt._title(s))
+        except Exception:
+            titles.append(s.title)
+    others = [t for t in titles if t and t != title]
+    for clause in (c for c in _CLAUSE_RE.split(message) if c and c.strip()):
+        if not KEEP_RE.search(clause):
+            continue
+        if _named(clause, title, others):
+            return _kept_why(title)
+        if _POINTER_RE.search(clause) and not any(_named(clause, o, [x for x in others if x != o] + [title])
+                                                  for o in others):
+            try:
+                held, _ = check(pt, title, [i for i in ids if i])
+            except Exception:
+                held = "?"
+            if held is None:
+                return _kept_why(title)
+    return ""
+
+
+def _kept_why(title: str) -> str:
+    return (f"The user asked to keep {title} or put it back, so it stays on the plan. If they want it somewhere "
+            "else, move it there.")
+# --- end asked to keep it ---
 
 
 def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
@@ -116,10 +207,13 @@ def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if held_here:
         return held_here
     # --- end a question, or a pointer at parts ---
-    if removal_grounds(pt):
-        return None  # which items the request means is the model's reading
-    from thirties_core.done_reference import check
     title = pt._title(span)
+    keep = kept(pt, title, (span.id, span.task_id))  # asked to keep it or put it back: never a removal
+    if keep:
+        return keep
+    if removal_grounds(pt, span):
+        return None  # which items the request means is the model's reading, within what the words cover
+    from thirties_core.done_reference import check
     held, _ = check(pt, title, [i for i in (span.id, span.task_id) if i])
     if held:
         return (f"The user hasn't asked for anything to come off the plan, so {title} stays. Take something off "
@@ -137,7 +231,7 @@ def removal_note(pt: "PlanTools", span: "EventSpan") -> str:
     off. The removal stands; the note lets the model put it back if that was the meaning. "" when there's nothing
     to note."""
     message = getattr(pt, "user_message", None)
-    if getattr(pt, "by_hand", False) or not message or removal_grounds(pt):
+    if getattr(pt, "by_hand", False) or not message or removal_grounds(pt, span):
         return ""
     title = pt._title(span)
     if COMPLAINT_RE.search(message):
@@ -151,7 +245,8 @@ NOT_YET_RE = re.compile(r"\bnot (?:\w+ ){0,3}yet\b|\b(?:isn'?t|is not|aren'?t|ar
                         r"\bnot (?:right )?now\b|\bnot time (?:for|to)\b|\btoo (?:early|soon) for\b", re.IGNORECASE)
 
 
-__all__ = ["removal_refused", "removal_asked", "removal_grounds", "removal_note", "load_said", "asked", "recent_said",
+__all__ = ["removal_refused", "removal_asked", "removal_grounds", "removal_note", "load_said", "load_covers", "kept",
+           "KEEP_RE", "asked", "recent_said",
            "earlier_messages", "COMPLAINT_RE", "LOAD_SAID_RE", "RECENT_MESSAGES"]
 
 

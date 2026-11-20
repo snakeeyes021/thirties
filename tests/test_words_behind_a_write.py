@@ -108,6 +108,41 @@ class TestAGiveUpOrAGrumbleIsNoDone(WordsCase):
                 self.assertHeld(self.tick("Varnish the paddle", words))
 
 
+class TestAKeepIsNoRemoval(WordsCase):
+    """A keep or a restore naming the item, or a busy word about something else, let the item come off."""
+
+    def test_a_restore_or_keep_never_takes_it_off(self):
+        for words in ("put the paddle varnish back where I had it", "keep the paddle varnish",
+                      "drop the thwart sanding but keep the paddle varnish",
+                      "tonight is way too packed, keep the paddle varnish though"):
+            with self.subTest(words=words):
+                self.assertHeld(self.remove("Varnish the paddle", words))
+                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+
+    def test_the_other_item_still_comes_off(self):
+        self.assertWent(self.remove("Sand the canoe thwart", "drop the thwart sanding but keep the paddle varnish"))
+
+    def test_load_words_mean_a_full_day(self):
+        from thirties_core.change_asks import LOAD_SAID_RE
+        for said in ("too much today", "my day is packed", "lighten the day", "this evening is way too full",
+                     "I can't fit it all in", "I'm swamped", "tonight is overloaded"):
+            self.assertTrue(LOAD_SAID_RE.search(said), said)
+        for said in ("I packed the van", "need to clear out the kiln shelves at 5", "the van is packed",
+                     "lighten the glaze a shade", "too much salt in the soup", "the shop was swamped with sawdust"):
+            self.assertFalse(LOAD_SAID_RE.search(said), said)
+
+    def test_busy_words_about_something_else_take_nothing_off(self):
+        for words in ("I packed the van for the lake", "the van is packed to the roof"):
+            with self.subTest(words=words):
+                self.assertHeld(self.remove("Varnish the paddle", words))
+                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+
+    def test_load_words_cover_only_the_stretch_they_name(self):
+        self.assertHeld(self.remove("Varnish the paddle", "this morning is way too packed"))
+        self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+        self.assertWent(self.remove("Varnish the paddle", "this evening is way too packed"))
+
+
 class TestAQuestionIsNoDone(WordsCase):
     """A question with a change word in it counted as a request, and its done word as the user's done."""
 
