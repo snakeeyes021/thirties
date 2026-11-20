@@ -82,30 +82,52 @@ _POLITE_RE = re.compile(r"^\W*(?:(?:can|could|would|will|won'?t)\s+(?:you|u|ya)\
 _SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]*")
 
 
-# a question that puts a change forward: a suggestion ("why not", "how about"), an objection to the item still
-# being there ("why is the varnish coat still on?"), or wondering whether it's still wanted
+# a change the app can make, said in a question: off, gone, moved, put somewhere, ticked. Getting something done,
+# or its waiting, isn't one ("can I get the bins done by 4?", "can the bins wait till the shelves are done?")
+_CHANGE = (r"(?:drop\w*|remov\w*|skip\w*|ditch\w*|scrap\w*|cancel\w*|nix|lose|get rid of|clear\w*|mov(?:e|ed|ing)|"
+           r"push\w*|shift\w*|bump\w*|slide|swap\w*|postpon\w*|resched\w*|take (?:\w+ ){0,5}?off|"
+           r"put (?:\w+ ){0,5}?(?:on|at|off|back|in|after|before|later|earlier)|add|mark\w*|tick\w*|log|"
+           r"(?:cross|check)\w* (?:\w+ ){0,5}?off|go(?=\s*[?.!]*\s*$|\s+(?:at|to|later|earlier|after|before|"
+           r"tomorrow|tonight|instead|elsewhere|somewhere)\b))")
+_CHANGE_RE = re.compile(rf"\b{_CHANGE}", re.IGNORECASE)
+# a question that puts a change forward: a suggestion ("why not move it", "how about we"), an objection to the item
+# still being on the plan ("why is the varnish coat still on?"), or wondering whether it's still wanted. "Why not?"
+# alone, "what about the bins?" and "why is the kiln still hot?" only ask.
 _PROPOSES_RE = re.compile(
-    r"\b(?:why not|why don'?t (?:we|you|i)|how about|what about|what if (?:we|i|you)|mind if|"
-    r"is it (?:ok|okay|fine|alright|all right) (?:if|to)|any reason (?:not to|to keep)|"
-    r"do (?:we|i) (?:still |really |even )+(?:need|have|want)|(?:why|how come)\b[^.!?\n]*\bstill\b)",
-    re.IGNORECASE)
+    rf"\b(?:why not\s+\w|why don'?t (?:we|you|i)|(?:how|what) about (?:we|you|i|if|\w+ing)\b|what if (?:we|i|you)|"
+    rf"mind if (?:i|we) (?:just )?{_CHANGE}|is it (?:ok|okay|fine|alright|all right) (?:if|to)\b[^.!?\n]*\b{_CHANGE}|"
+    r"any reason (?:not to|to keep)|do (?:we|i) (?:still |really |even )+(?:need|want)|"
+    r"(?:why|how come)\b[^.!?\n]*\bstill (?:(?:on|in)(?=\s*[?.!]*\s*$|\s+(?:today|tonight|the|my|there|here)\b)|"
+    r"there|here|planned|scheduled|listed|showing))", re.IGNORECASE)
 # a question opened by a modal that asks for leave or puts something forward ("shouldn't we", "can't we", "can the
-# paddle", "could I", "shall we"); "should the bins come off?" asks for an opinion, and only asks ...
+# paddle", "could I", "shall we"), with a change in it; "should the bins come off?" asks for an opinion, and only
+# asks
 _MODAL_RE = re.compile(r"^\W*(?:shouldn'?t|can'?t|cannot|couldn'?t|won'?t|wouldn'?t|(?:can|could|may|shall)(?=\s+(?:we|i|"
-                       r"it|that|this|they|those|these|the|my|our)\b))\b", re.IGNORECASE)
-# ... with a change in it: off, gone, moved, put somewhere, ticked
-_CHANGE_RE = re.compile(
-    r"\b(?:go|gone|off|drop\w*|remov\w*|skip\w*|cut|ditch\w*|scrap\w*|cancel\w*|nix|lose|get rid|clear\w*|"
-    r"move\w*|push\w*|shift\w*|bump\w*|slide|swap\w*|put|add|fit|mark\w*|tick\w*|cross\w*|log|done|"
-    r"finished|count\w*)\b", re.IGNORECASE)
+                       r"you|it|that|this|they|those|these|the|my|our)\b))\b", re.IGNORECASE)
 
 
 def asks_for_change(sentence: str) -> bool:
-    """A question that asks for a change, not one that only asks: a suggestion, an objection to the item still
-    being there, or a question asking leave for a change ("shouldn't we drop the bins?", "can the bins go?"). One
-    asking an opinion ("should the bins come off?") only asks. Which change it means is the model's reading."""
+    """A question that asks the app for a change, not one that only asks: a suggestion, an objection to the item
+    still being on the plan, or a question asking leave for a change ("shouldn't we drop the bins?", "can the bins
+    go?", "can we move the bins to 4?"). One asking an opinion ("should the bins come off?"), or whether something
+    can get done ("can I get the bins done by 4?"), only asks. Which change it means is the model's reading."""
     s = (sentence or "").strip()
     return bool(s) and bool(_PROPOSES_RE.search(s) or (_MODAL_RE.match(s) and _CHANGE_RE.search(s)))
+
+
+# a question asked outright: a question word or a modal opens it, and it ends in a question mark. A done word in it
+# is asked about, never said ("shouldn't the bins be done by now?"); "did it at 4, why isn't it ticked?" opens with
+# what the user did.
+_OPENS_QUESTION_RE = re.compile(
+    r"^\W*(?:what|what'?s|which|why|how|how'?s|where|where'?s|when|who|is|isn'?t|are|aren'?t|was|wasn'?t|were|"
+    r"did(?!\s+(?:it|that|them|those|this)\b)|didn'?t|do|don'?t|does|doesn'?t|should|shouldn'?t|shall|has|hasn'?t|"
+    r"have|haven'?t|can|can'?t|cannot|could|couldn'?t|may|might|will|won'?t|would|wouldn'?t)\b", re.IGNORECASE)
+
+
+def asked_outright(sentence: str) -> bool:
+    """The sentence is a question asked outright (``_OPENS_QUESTION_RE``): what's in it is asked, not told."""
+    s = (sentence or "").strip()
+    return s.endswith("?") and bool(_OPENS_QUESTION_RE.match(s))
 
 
 def is_asking(sentence: str) -> bool:
@@ -258,12 +280,15 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
     others = [o for o in others if o and o != title]
     for text in dict.fromkeys(t for t in (words, message) if t):
         told = [s for s in _SENTENCE_RE.findall(text) if s.strip() and not is_asking(s)]
-        if told and (says_done(" ".join(told), title, others) or _TICK_ASK_RE.search(" ".join(told))):
+        # a done word inside a question is asked about, never said, even in one asking for a change ("can I get
+        # the bins done by 4?"): only what's told carries a done
+        stated = [s for s in told if not asked_outright(s) and not asks_for_change(s)]
+        if (stated and says_done(" ".join(stated), title, others)) or (told and _TICK_ASK_RE.search(" ".join(told))):
             return ""
         # a done said once for several things in one sentence ("the mugs and the gunwales are done"): the sentence
         # naming it carries it (what only began, or comes next, was refused before this). A report without a done
         # word counts where it names the item or points back to it; nothing counts once it's taken back.
-        for s in told:
+        for s in stated:
             named = _named(s, title, others)
             about = named or not any(_named(s, o, [x for x in others if x != o] + [title]) for o in others)
             reported = bool(REPORTED_RE.search(s)) and (named or bool(_POINTER_RE.search(s)))

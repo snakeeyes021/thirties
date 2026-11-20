@@ -66,5 +66,33 @@ class TestAGiveUpOrAGrumbleIsNoDone(WordsCase):
                 self.assertHeld(self.tick("Varnish the paddle", words))
 
 
+class TestAQuestionIsNoDone(WordsCase):
+    """A question with a change word in it counted as a request, and its done word as the user's done."""
+
+    def test_questions_that_only_ask(self):
+        from thirties_core.said_for_it import asks_for_change
+        for asks in ("why not?", "why is the kiln still hot?", "can I get the paddle varnish done in 30 minutes?",
+                     "can the kiln wash wait till the shelves are done?", "what about the kiln wash?",
+                     "do we still have sandpaper?"):
+            self.assertFalse(asks_for_change(asks), asks)
+        for change in ("can you drop the kiln wash?", "can we move the thwart sanding to 8:40?",
+                       "shouldn't we drop the kiln wash?", "why is the kiln wash still on today?",
+                       "why is the thwart sanding still on the plan?", "can we take the kiln wash off?",
+                       "could we push the paddle varnish?", "can we skip the thwart sanding?"):
+            self.assertTrue(asks_for_change(change), change)
+
+    def test_a_done_word_inside_a_question_ticks_nothing(self):
+        for title, words in (("Varnish the paddle", "can I get the paddle varnish done in 30 minutes?"),
+                             ("Kiln wash the shelves", "can the kiln wash wait till the shelves are done?"),
+                             ("Varnish the paddle", "shouldn't the paddle varnish be done by now?")):
+            with self.subTest(words=words):
+                self.assertHeld(self.tick(title, words))
+
+    def test_the_list_tick_reads_a_question_the_same_way(self):
+        from thirties_core.write_guard import refused
+        op = {"op": "complete", "title": "Varnish the paddle"}
+        self.assertNotEqual(refused(op, "[app] can I get the paddle varnish done in 30 minutes?", None), "")
+
+
 if __name__ == "__main__":
     unittest.main()
