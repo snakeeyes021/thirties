@@ -320,7 +320,9 @@ def says_done(message: Optional[str], title: str, others=(), strict: bool = Fals
     if strict:
         message = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
     else:  # a done word inside a question asked outright is asked about, never said (said_for_it.asked_outright)
-        from thirties_core.said_for_it import asked_outright
+        from thirties_core.said_for_it import asked_outright, tick_asked
+        if tick_asked(message, title, others):  # "can we mark the varnish off?": read as on the plan
+            return True
         message = " ".join(t for t in _SENTENCE_RE.findall(message) if not asked_outright(t))
     clauses = [c for c in _CLAUSE_RE.split(message) if c and c.strip()]
     if any(_about(c, title, others) and (_done_in(c, title) or (not strict and (FINISHED_RE.search(c)

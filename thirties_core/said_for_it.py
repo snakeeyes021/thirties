@@ -256,6 +256,24 @@ def parts_refusal(title: str) -> str:
 _TICK_ASK_RE = re.compile(r"\b(?:mark|tick|check|cross|log)\w*\b", re.IGNORECASE)
 
 
+def tick_asked(message: Optional[str], title: str, others: Iterable[str] = ()) -> bool:
+    """The user asks for this item to be ticked: a sentence asking for a tick ("mark the varnish off", "can we
+    tick the varnish?"), not one that only asks, that names the item, or points back naming nothing else ("mark
+    it done"). The plan and the list read it alike (write_guard.says_done)."""
+    if not message:
+        return False
+    from thirties_core.write_guard import _about, _names_another_thing
+    others = [o for o in others if o and o != title]
+    for s in _SENTENCE_RE.findall(message):
+        if not s.strip() or is_asking(s) or not _TICK_ASK_RE.search(s):
+            continue
+        if any(_about(s, o, [x for x in others if x != o] + [title]) for o in others) and not _about(s, title, others):
+            continue  # a tick asked for another item
+        if not _names_another_thing(s, title):
+            return True
+    return False
+
+
 # a stretch of time said from its start to its end ("from 1:40 to 4:10", "1:40-4:10")
 _SPAN_RE = re.compile(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*(?:to|-|–|until|till|til)\s*"
                       r"\d{1,2}(?::\d{2})?\b", re.IGNORECASE)
@@ -283,7 +301,7 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
         # a done word inside a question is asked about, never said, even in one asking for a change ("can I get
         # the bins done by 4?"): only what's told carries a done
         stated = [s for s in told if not asked_outright(s) and not asks_for_change(s)]
-        if (stated and says_done(" ".join(stated), title, others)) or (told and _TICK_ASK_RE.search(" ".join(told))):
+        if (stated and says_done(" ".join(stated), title, others)) or tick_asked(text, title, others):
             return ""
         # a done said once for several things in one sentence ("the mugs and the gunwales are done"): the sentence
         # naming it carries it (what only began, or comes next, was refused before this). A report without a done
@@ -295,8 +313,6 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
             if about and not _MISTAKEN_RE.search(s) and (_done_in(s, title) or FINISHED_RE.search(s) or reported
                                                          or YES_RE.match(s)):
                 return ""
-    if _TICK_ASK_RE.search(message) and not only_questions(message):
-        return ""
     from thirties_core.work_sessions import reading
     if reading(message, title, others) == "session":
         return ""  # time on it, said: recorded as a session, never a tick (work_sessions.py)
