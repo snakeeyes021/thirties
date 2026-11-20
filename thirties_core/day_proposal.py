@@ -695,10 +695,10 @@ def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> Lis
 MORNING_FACTS = (
     "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already). "
     "If it says what was done with what's left from before, say that as a notice in your words, not a question: "
-    "how many were kept and how many are on today's plan, how many you'd drop, and that it's all in Before today "
-    "(the tab beside Today). You may change Python's first guess with propose_leftovers (drop what has gone moot or "
-    "can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it takes "
-    "effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
+    "at most one plain sentence on what waits in Before today (the tab beside Today), never a tally of kept, "
+    "on-the-plan and dropped items. You may change Python's first guess with propose_leftovers (drop what has gone "
+    "moot or can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it "
+    "takes effect at once, and a drop is applied after today unless the user says otherwise. Start with \"☀️ Good "
     "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
     "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 

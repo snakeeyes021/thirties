@@ -2021,8 +2021,8 @@ class AssistantTools(KindTools):
             lines.append(f"- {named(tasks, k['title'], k.get('task_id'), 200)} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; where each "
-                "one is now):\n" + "\n".join(lines) + "\nAS THE PLAN STANDS NOW (say these counts): "
-                + leftover_facts.summary(now_facts, names=False) + ("\n" + ask if ask else ""))
+                "one is now):\n" + "\n".join(lines) + "\nAS THE PLAN STANDS NOW "
+                + leftover_facts.for_model(now_facts, names=False) + ("\n" + ask if ask else ""))
 
     def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python

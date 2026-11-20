@@ -103,7 +103,7 @@ def restate(assistant: Any, text: str) -> str:
 
 def summary(f: Optional[Dict[str, Any]], names: bool = True) -> str:
     """The counts (and names, unless the lines beside it give them) for the model, in one line (not for the
-    user)."""
+    user: the model gets it through ``for_model``, and a copy in a reply is rewritten, internal_text.py)."""
     if not f:
         return ""
     from thirties_core.clock import format_clock, thirty_of
@@ -119,6 +119,26 @@ def summary(f: Optional[Dict[str, Any]], names: bool = True) -> str:
     if f["overflow"]:
         out += "; doesn't fit today: " + ", ".join(f["overflow"])
     return out + "."
+
+
+def plain(f: Optional[Dict[str, Any]]) -> str:
+    """The most the user hears about the leftovers' counts, in one plain sentence: how many wait in Before today
+    (kept items off today's plan, and proposed drops). "" when nothing waits there."""
+    if not f:
+        return ""
+    from thirties_core.internal_text import waiting_sentence
+    return waiting_sentence(sum(1 for r in f["keep"] if r["span"] is None) + len(f["drop"]))
+
+
+def for_model(f: Optional[Dict[str, Any]], names: bool = True) -> str:
+    """The counts for the model, marked as its own (a copy of the line is taken out of the reply,
+    internal_text.py), with the plain sentence it may say instead."""
+    if not f:
+        return ""
+    say = plain(f)
+    return ("(for the assistant only, never copy it: " + summary(f, names) + ") "
+            + (f"If you mention what's left from before, say at most: \"{say}\"" if say else
+               "Nothing from before waits in Before today."))
 
 
 def where_now(f: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -137,10 +157,10 @@ def tool_result(assistant: Any) -> str:
     if f["drop"]:
         lines.append("Drop:")
         lines += f["drop"]
-    return ("In effect now, no approval needed. As the plan stands now: " + summary(f, names=False) + " What isn't on today's "
-            "plan waits at its horizon; drops are applied by themselves after today unless the user says otherwise. "
-            "Say it as a short notice (see Before today), not a question, with exactly these counts:\n"
-            + "\n".join(lines))
+    return ("In effect now, no approval needed. As the plan stands now " + for_model(f, names=False) + " What isn't on "
+            "today's plan waits at its horizon; drops are applied by themselves after today unless the user says "
+            "otherwise. Say it as a short notice, not a question, and never as a tally of kept, on-the-plan and "
+            "dropped items. Where each one is now:\n" + "\n".join(lines))
 
 
 # --- the model's words, checked against the facts ---
@@ -246,7 +266,7 @@ def problems(brain: Any, turn_start: int, reply: str) -> List[str]:
         if not bad:
             return []
         return ["what it says about what's left from before doesn't match the plan as it stands (" + "; ".join(bad)
-                + "). Say it from these facts, as they are: " + summary(facts(assistant))]
+                + "). Say it again in plain words from these facts " + for_model(facts(assistant))]
     except Exception as e:  # never costs the user the reply
         logger.warning("Couldn't check the leftovers' notice: %s", e)
         return []
@@ -283,5 +303,5 @@ def set_straight(brain: Any, turn_start: int, reply: str) -> str:
         return reply
 
 
-__all__ = ["facts", "notice", "restate", "summary", "where_now", "tool_result", "wrong", "problems", "set_straight",
-           "span_of"]
+__all__ = ["facts", "notice", "restate", "summary", "plain", "for_model", "where_now", "tool_result", "wrong",
+           "problems", "set_straight", "span_of"]
