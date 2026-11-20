@@ -133,7 +133,10 @@ NEGATED_DONE_RE = re.compile(
     r"(?!forget\b|hesitate\b)(?:\w+\s+){0,2}?(?:tick|mark|check|cross)(?:ing)?\b|"
     r"\bno (?:tick|check ?mark)\b|"
     r"\b(?:nowhere near|far from|anything but|not quite|not even close to|not close to|not yet)\s+(?:being\s+)?"
-    r"(?:done|finished|complete|completed|ready|over)\b", re.IGNORECASE)
+    r"(?:done|finished|complete|completed|ready|over)\b|"
+    # a plain "isn't done" / "not finished": said of the item, never a done for it
+    r"\b(?:isn'?t|is not|aren'?t|are not|wasn'?t|was not|weren'?t|were not|hasn'?t been|haven'?t been|not)\s+"
+    r"(?:yet\s+|really\s+|actually\s+|even\s+)?(?:done|finished|complete|completed|over)\b", re.IGNORECASE)
 _POINTER_RE = re.compile(r"\b(?:it|them|that|this|those|these|both|they|theyre|they'?re)\b", re.IGNORECASE)
 
 
