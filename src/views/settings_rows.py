@@ -463,7 +463,31 @@ def gemini_group(ctx: SettingsContext, on_change=None) -> Adw.PreferencesGroup:
     for row in (agy, key, api, first):
         group.add(row)
     first.set_sensitive(agy.get_active() and api.get_active())
+    agent_mode_row(ctx, group)
     return group
+
+
+AGENT_MODE_TITLE = "Agent mode (Gemini on its own, no Thirties assistant)"
+def agent_mode_hint() -> str:
+    from thirties_core.agent_mode import UNDO_COMMAND
+    return (f"Each message goes to Gemini, which changes your lists and plan itself. Send {UNDO_COMMAND} to take "
+            "back its last change.")
+
+
+def agent_mode_row(ctx: SettingsContext, group: Adw.PreferencesGroup):
+    """The Agent mode switch (thirties_core/agent_mode/): only with the developer switch on, or while it's on."""
+    from thirties_core import agent_mode
+    db = getattr(getattr(ctx.core, "scheduler", None), "state_db", None)
+    if not agent_mode.offered(ctx.config(), db):
+        return None
+    row = Adw.SwitchRow(title=AGENT_MODE_TITLE, subtitle=agent_mode_hint(),
+                        active=agent_mode.is_on(ctx.config(), db))
+    row.set_sensitive(not agent_mode.env_on())  # the env var holds it on for this run
+    row.connect("notify::active", lambda r, _p: (ctx.set(agent_mode.SETTING, bool(r.get_active())),
+                                                 agent_mode.forget_choice()))
+    group.add(row)
+    group.agent_mode_row = row
+    return row
 
 
 # --- tasks ---

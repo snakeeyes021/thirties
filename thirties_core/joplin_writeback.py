@@ -674,6 +674,38 @@ class JoplinWriter:
                 return True, ""
         return False, "The notes kept changing while Thirties wrote to them; it'll try again."
 
+    # --- whole-body edits for Agent mode (agent_mode/tools.py): checked and logged like every other write ---
+
+    def edit_note(self, note_id: str, edit, op: Dict[str, Any]) -> Tuple[bool, str, List[Tuple[str, str, str, str]]]:
+        """Apply ``edit`` (old body -> new body, or None when it no longer applies) to one note now, never queued:
+        (ok, message, [(note_id, title, before, after)] for what landed). Logged in the write log as ``op``."""
+        if not self.api.ping():
+            return False, "Joplin isn't reachable right now, so nothing was written.", []
+        self._edits = []
+        self._op = op
+        ok, msg = self._edit_body(note_id, edit)
+        if msg.startswith("gone:"):
+            msg = msg[5:].strip()
+        edits = list(self._edits)
+        try:
+            log = WriteLog(self.db)
+            for nid, title, before, after in edits or [(note_id, "", "", "")]:
+                log.record(op, title or str(op.get("title", "")), ok, msg, before, after, note_id=nid)
+        except Exception as e:  # the log must never stop a write
+            logger.warning("Couldn't log the Joplin write: %s", e)
+        return ok, msg, [(nid, title, before, after) for nid, title, before, after in edits]
+
+    def revert(self, note_id: str, written: str, original: str) -> bool:
+        """Put a note back as it was, only if it still holds exactly what was written to it (logged)."""
+        ok = self._revert(note_id, written, original)
+        if ok:
+            try:
+                WriteLog(self.db).record({"op": "agent_undo", "note_id": note_id}, "", True, "", written, original,
+                                         note_id=note_id)
+            except Exception as e:
+                logger.warning("Couldn't log the Joplin write: %s", e)
+        return ok
+
     def _revert(self, note_id: str, written: str, original: str) -> bool:
         """Put a note back as it was, only if it still holds exactly what was written to it."""
         now = self.api.get_note(note_id, fields="id,body,updated_time")

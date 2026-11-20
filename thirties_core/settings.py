@@ -74,6 +74,7 @@ _ALL = [
     # about this machine
     Setting("assistant.brain", "device"),
     Setting("assistant.slm_model", "device"),  # the smaller model on a device where the bigger one doesn't fit (fit.py)
+    Setting("assistant.agent_mode", "device"),  # the developer switch for Agent mode (agent_mode/)
     Setting("general.latitude", "device"),
     Setting("general.longitude", "device"),
     Setting("general.timezone", "device"),
@@ -178,6 +179,9 @@ class Settings:
             self.db.set_shared_setting(key, json.dumps(value), _now())
         else:
             self.db.set_setting(key, json.dumps(value))
+        if key == "assistant.agent_mode":  # Agent mode keeps its reading of this switch for a moment: drop it
+            from thirties_core.agent_mode import forget_choice
+            forget_choice()
 
     def is_set(self, key: str) -> bool:
         return self.get(key) is not None

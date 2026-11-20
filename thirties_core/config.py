@@ -121,6 +121,13 @@ class AssistantConfig:
     fallback_calls_per_5h: int = 20
     sunrise_notice: bool = False  # a message at sunrise every day (sun_notices.py), e.g. to switch the lights
     sunset_notice: bool = False
+    # A developer switch: Agent mode (agent_mode/). Each turn goes to one full Gemini run through agy, acting on
+    # the lists and the plan through plain tools, instead of to Thirties' own assistant. Off by default; also on
+    # with THIRTIES_AGENT_MODE=1 or the switch in Developer options. The model and its effort, apart.
+    agent_mode: bool = False
+    agent_model: str = ""  # empty: agent_mode/session.py DEFAULT_MODEL
+    agent_effort: str = "low"
+    agent_timeout_seconds: float = 600.0
 
 
 @dataclass

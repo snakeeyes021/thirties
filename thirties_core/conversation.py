@@ -30,6 +30,11 @@ from thirties_core.turns import (LOST_RETRY_MINUTES, LOST_GIVE_UP_HOURS, LOST_TU
 logger = logging.getLogger(__name__)
 
 
+def _undo_command() -> str:
+    from thirties_core.agent_mode import UNDO_COMMAND
+    return UNDO_COMMAND
+
+
 class ConversationManager:
     """Pairs a day's PlanTools with a brain, routes user turns to it, and keeps the conversation.
 
@@ -386,8 +391,9 @@ class ConversationManager:
                 return self._command(user_text, via)
         # a short answer to "Done with work?", when it's the last thing asked: recorded, with what's left of the day
         from thirties_core import work_end_answer
+        from thirties_core import agent_mode  # Agent mode: every message goes to Gemini as is (agent_mode/)
         try:
-            ended = work_end_answer.answer(self, user_text, via)
+            ended = "" if agent_mode.for_manager(self) else work_end_answer.answer(self, user_text, via)
         except Exception as e:
             logger.warning("Answering the end-of-work question failed: %s", e)
             ended = ""
@@ -403,6 +409,19 @@ class ConversationManager:
             return reply
 
     def _turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
+        # --- developer Agent mode: the turn goes to one full Gemini run, not this assistant (agent_mode/) ---
+        from thirties_core import agent_mode
+        if agent_mode.for_manager(self):
+            done = agent_mode.take_turn(self, batch, via)
+            if done is not None:
+                return done
+            from thirties_core.agent_mode.route import with_notice
+            reply, answered = self._usual_turn(batch, via, attempts)
+            return with_notice(self, reply), answered
+        # --- end Agent mode ---
+        return self._usual_turn(batch, via, attempts)
+
+    def _usual_turn(self, batch: List[Incoming], via: str, attempts: int = 0) -> tuple:
         # --- the usage limit: a simpler assistant answers, or the messages wait until it resets (fallback.py) ---
         from thirties_core import fallback
         held = fallback.before_turn(self, batch, via)
@@ -461,6 +480,9 @@ class ConversationManager:
                     reply = f"Now using {BRAINS[self.set_brain(arg)]}. This conversation continues."
                 except ValueError as e:
                     reply = str(e)
+        elif cmd == _undo_command():  # Agent mode: Gemini's last change taken back (agent_mode/)
+            from thirties_core import agent_mode
+            reply = agent_mode.undo_last(self)
         elif cmd.startswith("/time"):
             val = clean_text[5:].strip()
             set_debug_time(val)

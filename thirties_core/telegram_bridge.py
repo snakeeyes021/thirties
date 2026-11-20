@@ -575,7 +575,8 @@ class ThirtiesTelegramBridge:
         if text.startswith("/"):
             parts = text.split(maxsplit=1)
             cmd = parts[0].lower().split("@")[0]
-            if cmd == "/brain":  # a turn of the conversation: stored by the turn itself
+            from thirties_core.agent_mode import UNDO_COMMAND
+            if cmd in ("/brain", UNDO_COMMAND):  # a turn of the conversation: stored by the turn itself
                 self._reply(chat_id, self.conv_manager.send_user_message(text, via="telegram"))
                 return
             if cmd in ("/new", "/clear"):  # kept at the end of the conversation it closes; the new one starts empty

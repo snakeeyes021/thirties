@@ -107,10 +107,10 @@ def agy_outcome(res: subprocess.CompletedProcess) -> str:
     return "quota" if AGY_QUOTA_RE.search(output) else "error"
 
 
-def record_agy_call(model: str, outcome: str) -> None:
+def record_agy_call(model: str, outcome: str, caller: Optional[str] = None) -> None:
     """Append one call to the ledger: unix time, model, outcome (ok, error, timeout, quota), and who made it: what a
     test or study says (THIRTIES_AGY_CALLER), else the process itself (untagged:pid=…:cwd=…:argv=…), so a caller
-    nobody named can still be found."""
+    nobody named can still be found. ``caller`` names it in code (Agent mode does), before the env var."""
     try:
         AGY_LEDGER.parent.mkdir(parents=True, exist_ok=True)
         if AGY_LEDGER.exists() and AGY_LEDGER.stat().st_size > 1_000_000:
@@ -119,14 +119,16 @@ def record_agy_call(model: str, outcome: str) -> None:
                     and int(l.split("\t", 1)[0]) >= cutoff]
             AGY_LEDGER.write_text("\n".join(keep) + ("\n" if keep else ""))
         with open(AGY_LEDGER, "a") as f:
-            f.write(f"{int(time.time())}\t{model}\t{outcome}\t{agy_caller()}\n")
+            f.write(f"{int(time.time())}\t{model}\t{outcome}\t{agy_caller(caller)}\n")
     except OSError as e:
         logger.debug("Could not record the agy call: %s", e)
 
 
-def agy_caller() -> str:
+def agy_caller(caller: Optional[str] = None) -> str:
     """The ledger's 4th column, kept to a single field."""
     named = os.environ.get(AGY_CALLER_ENV, "")
+    if caller:  # named in code, with the env's tag after it when a study set one
+        named = f"{caller}:{named.strip()}" if named.strip() else caller
     if not named.strip():
         import sys
         named = f"untagged:pid={os.getpid()}:cwd={os.getcwd()}:argv={' '.join(sys.argv[:3])}"
