@@ -9,8 +9,9 @@ outright, where the fix is a fact Python has, or names the problem for one rewri
   plan, lists, notes or calendar).
 - **No made-up explanations**: asked why something on the plan is as it is, the model is told with the message
   where the item's record is (why_notes.py); that's a note for its one answer, not a rewrite.
-- **It decides**: told to pick ("you pick", "up to you"), or asked to plan, it
-  doesn't hand back a choice of times or options without changing anything.
+- **Its questions are its own**: whether to ask the user which time, or whether they'd like a change, is the
+  model's judgement, and such a question is never sent back for a rewrite. Told to pick ("you pick", "up to
+  you"), the model gets a note with the message that the choice is left to it (``choice_note``).
 - **Its notes are its own**: it never talks about its workings (its tools, system, internal lists or dates), as if
   the user could see them; what it keeps is "my notes".
 - **The day's end is no reason to drop things**: when something doesn't fit, it says where it goes, never offers to
@@ -56,23 +57,6 @@ DELEGATE_RE = re.compile(r"\byou (?:pick|choose|decide|sort it|figure it out)\b|
                          r"slot|fit|make)\b|\bpick (?:one|the best|for me)\b|\bfigure it out\b|\bsort (?:it|the|out)\b|"
                          r"\bdon'?t ask\b|\bstop asking\b|\bno more questions\b|\bbest one\b|"
                          r"\bset (?:it|that|them|the \w+) up\b", re.IGNORECASE)
-# a question handing a scheduling choice back: "3:00 or 5:00?", "Would you rather...", "Option 1 ..."
-CHOICE_RE = re.compile(r"\b(?:would you (?:prefer|rather|like)|do you (?:want|prefer)|should I|shall I|which (?:one|"
-                       r"would you|do you)|want (?:it|me to|them)|or would you|or should I|option [1-9a-c])\b"
-                       r"|\bor\b", re.IGNORECASE)
-_PLANNING_WORDS_RE = re.compile(r"\b(?:put|move|schedule|plan|slot|start|fit|place|do|go|keep|push|shift|swap|at|"
-                                r"before|after|tonight|today|tomorrow|morning|afternoon|evening|\d{1,2}(?::\d{2})?)\b",
-                                re.IGNORECASE)
-
-# asking leave for a change Thirties could just make: "Would you like me to move it?", "Want this week like that?".
-# The schedule just is the schedule: the change is made and said; the only question is when something can't fit.
-_PERIOD_RE = re.compile(r"\b(?:week|weekend|month|year)\b", re.IGNORECASE)
-_THING = r"(?:it|them|that|those|these|this(?: \w+)?|the \w+(?: \w+)?)(?: \d+)?"
-ASKS_LEAVE_RE = re.compile(r"\b(?:would you like me to|do you want me to|want me to|should I|shall I|is it ok(?:ay)? if I|"
-                           r"(?:would you like|do you want|want) " + _THING + r" (?:like that|moved|to move|put|on|at|"
-                           r"for|tonight|today|tomorrow|there)|"
-                           r"(?:move|put|plan|schedule|shift|push) " + _THING + r" (?:to|for|at|on|into) [^?]*\?$)",
-                           re.IGNORECASE)
 
 DROP_OFFER_RE = re.compile(r"\b(?:drop|let (?:it|them|that|those) go|skip (?:it|them|that|those)|remove (?:it|them|"
                            r"that|those)|take (?:it|them|that|those) off|cut (?:it|them|that|those)|leave (?:it|them) "
@@ -159,12 +143,6 @@ def _user_words(brain: Any, turn_start: int) -> str:
     users = [m for m in brain.messages[:turn_start] if m.get("role") == "user"
              and not str(m.get("content") or "").startswith(brain.CHECK_PREFIX)]
     return str(users[-1].get("content") or "") if users else ""
-
-
-def _changed(brain: Any, turn_start: int) -> bool:
-    from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
-    return any(m.get("role") == "tool" and m.get("name") not in READ_ONLY_TOOLS
-               and not str(m.get("content") or "").startswith(NOT_DONE) for m in brain.messages[turn_start:])
 
 
 def _called(brain: Any, turn_start: int, name: str) -> bool:
@@ -338,30 +316,7 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
         out.append("it talks about how Thirties works inside: say what you keep as your own notes (\"I've noted…\", "
                    "\"I'll remember…\") and leave the workings out")
     # asked why about an item: the model hears where its record is with the message, never a rewrite (why_notes.py)
-    from thirties_core.turn_guards import is_question
-    delegated = bool(said and DELEGATE_RE.search(said))
-    asked_to_decide = delegated or bool(said and not is_question(said))
-
-    def hands_back(s: str) -> bool:
-        """A question handing a scheduling choice back: told to pick, any "this or that?"; otherwise only one that
-        offers Thirties' own options ("should I…", "do you want…"), never a question of fact (when an appointment
-        is)."""
-        if not (s.rstrip().endswith("?") and _PLANNING_WORDS_RE.search(s)):
-            return False
-        offers = [m.group(0).lower() for m in CHOICE_RE.finditer(s) if m.group(0).lower() != "or"]
-        return bool(offers) or (delegated and " or " in f" {s.lower()} ")
-    if asked_to_decide and any(hands_back(s) for s in lines) and not _changed(brain, turn_start):
-        out.append("it hands the user a choice to make: choose for them, make the change, and say in a "
-                   "line what you chose and why")
-    elif any(s.rstrip().endswith("?") and ASKS_LEAVE_RE.search(s) and (_PLANNING_WORDS_RE.search(s) or _PERIOD_RE.search(s))
-             for s in lines) \
-            and not FIT_RE.search(reply) and not (said and is_question(said)):
-        # a change the user didn't ask for isn't made to drop the question: they hear the fact instead (a rewrite
-        # once moved an item under way to the afternoon, unasked, to answer when it would end)
-        out.append("it waits on a yes for a change you can make: the schedule just is the schedule. If the user asked "
-                   "for that change, make it and say in one line what you did; if they didn't, don't make it: say "
-                   "the fact plainly (when it ends, what it runs into) and leave the plan as it is. No question "
-                   "either way (ask only when something meant for today can't fit)")
+    # a question back to the user (which time, whether they'd like a change) is the model's to ask (choice_note)
     if said is not None and not USER_DROP_RE.search(said or ""):
         if any(DROP_OFFER_RE.search(s) and FIT_RE.search(s) for s in lines):
             out.append("it offers to drop something because today is full; the day's end is no reason to drop "
@@ -381,6 +336,15 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     if moon:
         out.append(f"the moon tonight is a {moon}, as computed; say that, or nothing about the moon")
     return out
+
+
+def choice_note(said: Optional[str]) -> Optional[str]:
+    """When the user leaves a choice to Thirties ("you pick", "up to you", "don't ask"), a note for the model with
+    their message; None otherwise. A note, never a rewrite: whether to ask anyway is the model's judgement."""
+    if not said or not DELEGATE_RE.search(said):
+        return None
+    return ("(The user's message leaves the choice to you: pick, make the change, and say in a line what you chose "
+            "and why.)")
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
@@ -403,4 +367,4 @@ def last_resort(reply: str) -> str:
     return out or reply
 
 
-__all__ = ["fix_now_time", "problems", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE", "DELEGATE_RE"]
+__all__ = ["choice_note", "fix_now_time", "problems", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE", "DELEGATE_RE"]

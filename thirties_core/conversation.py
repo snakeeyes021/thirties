@@ -579,6 +579,12 @@ class ConversationManager:
         if why:
             self.brain.messages.append({"role": "user", "content": why, "hidden": True})
         # --- end asked why ---
+        # --- told to pick: a note that the choice is the model's, never a rewrite of its question (reply_checks.py) ---
+        from thirties_core.reply_checks import choice_note
+        pick = choice_note(merged)
+        if pick:
+            self.brain.messages.append({"role": "user", "content": pick, "hidden": True})
+        # --- end told to pick ---
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:

@@ -263,5 +263,33 @@ class TestAnAddTheModelNames(WordsCase):
         self.assertEqual(len(self.planned("Varnish the paddle")), 2)
 
 
+
+class TestTheModelMayAsk(WordsCase):
+    """A reply asking the user to choose, or asking leave for a change, was sent back for a rewrite."""
+
+    def test_a_choice_question_reaches_the_user(self):
+        from tests.test_conversation import reply
+        self.engine.set_next_response(reply("Would you rather unload the bisque before the paddle varnish or after it?"))
+        out = self.manager.send_user_message("I need to unload the bisque this afternoon")
+        self.assertEqual(out, "Would you rather unload the bisque before the paddle varnish or after it?")
+        self.assertEqual(len(self.engine.call_history), 1)
+
+    def test_asking_leave_reaches_the_user(self):
+        from tests.test_conversation import reply
+        self.engine.set_next_response(reply("Your wrist sounds sore. Would you like me to take the thwart sanding "
+                                            "off tonight?"))
+        out = self.manager.send_user_message("my wrist is acting up again")
+        self.assertIn("Would you like me to take the thwart sanding off tonight?", out)
+        self.assertEqual(len(self.engine.call_history), 1)
+
+    def test_talk_of_the_workings_is_still_sent_back(self):
+        from tests.test_conversation import reply
+        for _ in range(3):
+            self.engine.set_next_response(reply("My internal planning session put the paddle at 6:10. Want it "
+                                                "later?"))
+        out = self.manager.send_user_message("is the paddle still on?")
+        self.assertNotIn("internal planning session", out)
+
+
 if __name__ == "__main__":
     unittest.main()

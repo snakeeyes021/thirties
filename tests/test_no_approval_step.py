@@ -1,5 +1,5 @@
-"""The schedule just is the schedule: a change Thirties can make is made and said in a line, never offered as a
-question ("Would you like me to…?"). The only question left is when something meant for today can't fit.
+"""Whether to ask the user before a change ("Would you like me to…?") is the model's judgement: such a question
+reaches the user as the model wrote it, never sent back for a rewrite. A notice passes as it is too.
 
 A mock model plays the assistant; invented items for someone who throws pots on a late shift and paddles a canoe."""
 
@@ -23,27 +23,24 @@ class TestNoLeaveAsked(ConversationTestCase):
     def rewrite_asked(self):
         return len(self.engine.call_history) > 1 and "waits on a yes" in self.engine.call_history[1][-1]["content"]
 
-    def test_would_you_like_me_to_is_rewritten_as_a_notice(self):
+    def test_would_you_like_me_to_reaches_the_user(self):
         self.engine.set_next_response(reply('CALL update_event {"event": "Wax the canoe hull", "start": "6:00 PM"}'))
         self.engine.set_next_response(reply("The hull waxing is at 6 now. Would you like me to move it to tomorrow "
                                             "instead?"))
-        self.engine.set_next_response(reply("The hull waxing is at 6 now."))
         out = self.manager.send_user_message("wax the canoe hull at 6, the clay delivery comes at 5")
-        self.assertTrue(any("waits on a yes" in str(c[-1]["content"]) for c in self.engine.call_history))
-        self.assertEqual(out, "The hull waxing is at 6 now.")
+        self.assertFalse(any("waits on a yes" in str(c[-1]["content"]) for c in self.engine.call_history))
+        self.assertEqual(out, "The hull waxing is at 6 now. Would you like me to move it to tomorrow instead?")
 
-    def test_move_these_to_tonight_is_rewritten(self):
+    def test_move_these_to_tonight_reaches_the_user(self):
         self.engine.set_next_response(reply("Two things are behind. Move these 2 to tonight?"))
-        self.engine.set_next_response(reply("Both are on tonight now."))
         out = self.manager.send_user_message("long day at the studio")
-        self.assertTrue(self.rewrite_asked())
-        self.assertEqual(out, "Both are on tonight now.")
+        self.assertFalse(self.rewrite_asked())
+        self.assertEqual(out, "Two things are behind. Move these 2 to tonight?")
 
-    def test_want_the_week_like_that_is_rewritten(self):
+    def test_want_the_week_like_that_reaches_the_user(self):
         self.engine.set_next_response(reply("This week: the hull and the paddle rack. Want this week like that?"))
-        self.engine.set_next_response(reply("This week: the hull and the paddle rack."))
         self.manager.send_user_message("ok, morning")
-        self.assertTrue(self.rewrite_asked())
+        self.assertFalse(self.rewrite_asked())
 
     def test_overflow_may_still_ask(self):
         self.engine.set_next_response(reply("The hull doesn't fit before bed tonight. Should I put it at 9 tomorrow?"))

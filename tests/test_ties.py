@@ -9,7 +9,7 @@ for. Now (relations.py):
 - when the item it follows ends at another time, the tied item moves with it;
 - a tied item isn't pencilled in, and taking a leftover line off "If there's time" leaves the planned item;
 - a follow-up named like an item already on today is that item, moved, not a second copy;
-- the rewrite of a reply that waits on a yes makes only a change the user asked for.
+- a reply that asks before a change the user didn't ask for reaches them as it is, and the change isn't made.
 
 On invented items: someone who works a late shift at a pottery studio, here on a day off with a canoe trip.
 """
@@ -160,24 +160,22 @@ class TestItStaysOnThePlan(TieCase):
 
 
 class TestNoChangeMadeToDropAQuestion(ConversationTestCase):
-    """A reply that offers a change gets rewritten; the rewrite makes only what the user asked for."""
+    """A reply that asks before a change reaches the user as it is: no rewrite, and no change nobody asked for."""
 
-    def test_the_rewrite_says_the_fact_and_leaves_an_unasked_change(self):
+    def test_the_question_stays_and_the_unasked_change_isnt_made(self):
         set_debug_time(at("09:10"))
         self.manager.execute_tool("doing_now", {"item": "Fire the test kiln", "duration": "2 hours"})
         set_debug_time(at("09:20"))
         self.engine.set_next_response(reply('CALL update_event {"event": "Fire the test kiln", "duration": "3 hours"}'))
         self.engine.set_next_response(reply("The test kiln ends around 12:00 PM, after the lake shuttle leaves. "
                                             "Would you like me to move the firing to this afternoon?"))
-        self.engine.set_next_response(reply('CALL update_event {"event": "Fire the test kiln", "start": "2:00 PM"}'))
-        self.engine.set_next_response(reply("The test kiln ends around 12:00 PM, after the shuttle leaves."))
         out = self.manager.send_user_message("the test kiln needs about three hours. tell me when it ends")
         asked = [str(c[-1]["content"]) for c in self.engine.call_history]
-        self.assertTrue(any("waits on a yes" in a and "leave the plan as it is" in a for a in asked), asked)
+        self.assertFalse(any("waits on a yes" in a for a in asked), asked)
         kiln = next(s for s in self.manager.day_plan.spans if s.title == "Fire the test kiln")
         self.assertEqual(kiln.start_dt, at("09:00"))  # under way: its start stays
         self.assertIn("ends around 12:00 PM", out)
-
+        self.assertIn("Would you like me to move the firing", out)
 
 if __name__ == "__main__":
     unittest.main()

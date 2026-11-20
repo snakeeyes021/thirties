@@ -171,13 +171,14 @@ class TestTheReplyTalksRight(ConversationTestCase):
         self.assertFalse(any(self.manager.brain._is_check(m) for m in self.manager.messages))
         self.assertEqual(out, "It was added this morning at 5; nothing records why.")
 
-    def test_told_to_pick_it_picks(self):
+    def test_told_to_pick_the_model_hears_the_choice_is_its(self):
+        # a note with the message, never a rewrite: whether to ask anyway is the model's judgement
         self.engine.set_next_response(reply("Should I put the fence at 5:00 or 6:00?"))
-        self.engine.set_next_response(reply("The fence stays at 5: it's still light.\n"
-                                            'CALL set_item_facts {"event": "Paint the fence", "daylight": true}'))
         out = self.manager.send_user_message("you pick when the fence goes")
-        self.assertIn("choose for them", self.check_sent())
-        self.assertTrue(out.startswith("The fence stays at 5"), out)
+        self.assertTrue(any("leaves the choice to you" in str(m.get("content") or "")
+                            for m in self.engine.call_history[0] if m.get("role") == "user"))
+        self.assertEqual(out, "Should I put the fence at 5:00 or 6:00?")
+        self.assertEqual(len(self.engine.call_history), 1)
 
     def test_a_question_of_fact_is_fine(self):
         self.engine.set_next_response(reply("Is the paint delivery at 3 or 4?"))
