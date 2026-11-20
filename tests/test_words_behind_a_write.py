@@ -108,5 +108,22 @@ class TestAWordForWhichKindIsAName(WordsCase):
         self.assertHeld(self.tick("Kiln wash the shelves", "the car wash is done"))
 
 
+class TestADoneBesideFineIsAbout(WordsCase):
+    """A done for another thing beside "fine" ticked the item said to be fine."""
+
+    def test_the_list_tick_is_refused(self):
+        from thirties_core.write_guard import refused, says_done
+        op = {"op": "complete", "title": "Varnish the paddle"}
+        for words in ("the paddle varnish is fine, the thwart sanding is done",
+                      "the paddle varnish is fine, the dishes are done"):
+            with self.subTest(words=words):
+                self.assertFalse(says_done(words, "Varnish the paddle"))
+                self.assertNotEqual(refused(op, f"[app] {words}", None), "")
+        self.assertEqual(refused(op, "[app] the paddle varnish went fine, all wrapped", None), "")
+
+    def test_the_turn_tick_is_refused(self):
+        self.assertHeld(self.tick("Varnish the paddle", "the paddle varnish is fine, the dishes are done"))
+
+
 if __name__ == "__main__":
     unittest.main()

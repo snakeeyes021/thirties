@@ -218,15 +218,27 @@ def _under_way_in(clause: str, title: str) -> bool:
 
 
 def _done_beside(clause: str, sentences: list, title: str, others: list) -> bool:
-    """A done word in the same sentence as this clause, in a stretch about this item or naming no other one."""
+    """A done word in the same sentence as this clause, in a stretch about this item or naming no other one. A
+    stretch that names another thing, planned or not ("the dishes are done"), is that thing's done, never this
+    item's, whatever items are known here."""
     for sentence in sentences:
         if clause.strip() not in sentence:
             continue
         for part in _CLAUSE_RE.split(sentence):
             if part and part.strip() and _done_in(part, title) and not any(
-                    _about(part, o, [x for x in others if x != o] + [title]) for o in others):
+                    _about(part, o, [x for x in others if x != o] + [title]) for o in others) \
+                    and not _names_another_thing(part, title):
                 return True
     return False
+
+
+def _names_another_thing(part: str, title: str) -> bool:
+    """The stretch names a thing that isn't the item: a phrase with none of the item's words in it ("the dishes"),
+    or one that shares a word with it but names something else (done_fit.names_something_else)."""
+    from thirties_core.done_fit import _is_its, _phrases, names_something_else
+    if any(not any(_is_its(w, title) for w in p) for p in _phrases(DONE_WORDS_RE.sub(" ", part))):
+        return True
+    return bool(names_something_else(part, title))
 
 
 def _done_in(clause: str, title: str) -> bool:
