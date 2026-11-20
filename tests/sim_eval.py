@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.house_rules import JUDGE_HOUSE_SECTION, drop_house_rule_text, with_house_rules
 from thirties_core.astronomy import set_debug_time
 from thirties_core.backlog import load_backlog
 from thirties_core.brains.slm.parse import extract_json
@@ -572,7 +573,20 @@ Grade strictly and return ONLY a JSON object:
  "clarity": 1-5 (are replies easy to read and shaped for the question? The user's own units (chunks if they count in chunks); plan lists one item per line led by start times, without durations, block numbers or ids the user didn't need?),
  "efficiency": 1-5 (how much effort did the user need? 5 = minimal back-and-forth),
  "tone": 1-5 (warm, appropriate, not pushy),
- "issues": [<short concrete problems>]}}"""
+ "issues": [<short concrete problems>]}}
+
+""" + JUDGE_HOUSE_SECTION
+
+
+def drop_house_rule_issues(judge: Dict[str, Any]) -> None:
+    """A judge's issues and worst moments without the ones that only complain against a house rule (house_rules.py);
+    how many were dropped is kept as dropped_house_rule."""
+    dropped = 0
+    for key in ("issues", "worst_moments"):
+        if isinstance(judge.get(key), list):
+            judge[key], n = drop_house_rule_text(judge[key])
+            dropped += n
+    judge["dropped_house_rule"] = dropped
 
 
 @dataclass
@@ -711,7 +725,8 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
             if turn == 0 and scn.opening:
                 message = scn.opening
             else:
-                message = sim(SIM_PROMPT.format(persona=scn.persona, situation=scn.situation, goals=goals,
+                message = sim(SIM_PROMPT.format(persona=with_house_rules(scn.persona), situation=scn.situation,
+                                                goals=goals,
                                                 transcript=run.transcript_text())).strip().strip('"')
             if not message:
                 run.end_reason = "simulator returned nothing"
@@ -746,6 +761,7 @@ def run_scenario(scn: SimScenario, brain: str, sim, judge, tasks, notes, frontie
         verdict = judge(JUDGE_PROMPT.format(persona=scn.persona, situation=scn.situation, goals=goals,
                                             transcript=run.transcript_text(), schedule=run.schedule_text()))
         run.judge = extract_json(verdict) or {"raw": verdict[:500]}
+        drop_house_rule_issues(run.judge)
     except QuotaExhausted:
         raise
     except Exception as e:

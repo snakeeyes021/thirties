@@ -47,6 +47,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests.day_sim import (SCRIPT_DIRS, DayRun, DayScript, _hhmm, advance, find_scripts, joplin_facts, measure,
                            start_day, tool_lines)
+from tests.house_rules import house_rule_of, with_house_rules
 from tests.sim_eval import QuotaExhausted, at, raise_if_agy_failed
 from thirties_core.astronomy import set_debug_time
 from thirties_core.brains.slm.parse import extract_json
@@ -242,6 +243,7 @@ class StudyDay:
     person: Person
     frictions: List[Friction] = field(default_factory=list)
     calls: int = 0
+    house_rule_drops: Dict[str, int] = field(default_factory=dict)  # complaints against the app's design, by rule
 
 
 def agenda_text(run: DayRun, now: datetime) -> str:
@@ -285,7 +287,7 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
         phone = "\n".join(f"[{t}] {'You' if w == 'user' else 'App' if w == 'app' else 'Thirties'}: "
                           f"{x if w == 'user' else phone_view(x)}" for t, w, x in run.log if w != "tool") or "(nothing yet)"
         raw = actor(ACTOR_PROMPT.format(
-            persona=script.persona, situation=script.situation, life=life, constraints=constraints,
+            persona=with_house_rules(script.persona), situation=script.situation, life=life, constraints=constraints,
             now=format_clock(now), bed=format_clock(bed), phone=phone, just=just,
             agenda=f"\nThe app's Agenda, open on your screen:\n{agenda_text(run, now)}\n" if show_agenda else "",
             **person.state))
@@ -302,7 +304,11 @@ def live_study_day(run: DayRun, actor: Callable[[str], str], person: Person, max
         said = [x for _, w, x in new if w in ("assistant", "app")]  # what the person was reacting to, and only that
         did = [x for _, w, x in new if w == "tool"]
         gave_up = person.state["patience"] == 0 and person.state["trust"] == 0
-        if is_friction(felt, move, drop) or gave_up:
+        said_why = f"{felt.get('annoyance') or ''}. {felt.get('why') or ''}"
+        rule = None if gave_up else house_rule_of({"evidence": said_why})
+        if rule and is_friction(felt, move, drop):  # only a complaint against the app's design: counted, not kept
+            day.house_rule_drops[rule] = day.house_rule_drops.get(rule, 0) + 1
+        elif is_friction(felt, move, drop) or gave_up:
             day.frictions.append(Friction(
                 day=script.id, at=_hhmm(now), label=str(felt.get("annoyance") or felt.get("why") or "")[:120],
                 quote=str(move.get("message") or move.get("engineer_note") or felt.get("why") or "")[:300],
@@ -429,7 +435,8 @@ def day_record(day: StudyDay) -> Dict[str, Any]:
     run = day.run
     return {"script": run.script.id, "persona": run.script.persona, "end": run.end_reason,
             "state_at_bed": day.person.state, "notes": day.person.notes, "log": run.log, "facts": run.facts,
-            "calls": day.calls, "frictions": [f.to_dict() for f in day.frictions]}
+            "calls": day.calls, "frictions": [f.to_dict() for f in day.frictions],
+            "dropped_house_rule": sum(day.house_rule_drops.values()), "house_rule_drops": day.house_rule_drops}
 
 
 def review(study: Study, days: List[Dict[str, Any]], frictions: List[Friction], llm: Callable[[str], str],

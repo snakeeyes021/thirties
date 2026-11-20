@@ -45,8 +45,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.sim_eval import (QuotaExhausted, SimScenario, at, budget_left, build_manager, cal, make_llm,
-                            quota_stop, raise_if_agy_failed)
+from tests.house_rules import JUDGE_HOUSE_SECTION, with_house_rules
+from tests.sim_eval import (QuotaExhausted, SimScenario, at, budget_left, build_manager, cal, drop_house_rule_issues,
+                            make_llm, quota_stop, raise_if_agy_failed)
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService
 from thirties_core.backlog import load_backlog
@@ -227,10 +228,12 @@ Grade strictly. Return ONLY a JSON object:
  "plan_respect": 1-5 (did it change the plan only when asked or agreed, without shuffling things the user didn't mention?),
  "message_load": 1-5 (5 = the app's own messages were the right amount and useful; 1 = nagging, repeated or pointless),
  "record_keeping": 1-5 (did it track what actually happened, and when, from the user's reports?),
- "clarity": 1-5 (replies easy to read, shaped for the question, times in whole and half hours unless exact minutes were asked for),
+ "clarity": 1-5 (replies easy to read, shaped for the question, times named by their half-hour blocks as the house rules below say),
  "tone": 1-5 (warm, appropriate, not pushy),
  "worst_moments": [<short: the moments a real user would be most annoyed>],
- "issues": [<short concrete problems>]}}"""
+ "issues": [<short concrete problems>]}}
+
+""" + JUDGE_HOUSE_SECTION
 
 RATING_PROMPT = """You are this person: {persona}
 You just spent a day using a planning assistant app. Here is the whole conversation:
@@ -394,9 +397,9 @@ def live_day(run: DayRun, sim, max_moves: int = MAX_MOVES) -> None:
     messages = 0
     run.service.tick(now)  # anything due at wake-up (the morning rollover)
     for _ in range(max_moves):
-        raw = sim(DAY_SIM_PROMPT.format(persona=script.persona, situation=script.situation, life=life,
-                                        constraints=constraints, now=format_clock(now), bed=format_clock(bed),
-                                        transcript=run.transcript_text(for_user=True)))
+        raw = sim(DAY_SIM_PROMPT.format(persona=with_house_rules(script.persona), situation=script.situation,
+                                        life=life, constraints=constraints, now=format_clock(now),
+                                        bed=format_clock(bed), transcript=run.transcript_text(for_user=True)))
         move = extract_json(raw) or {}
         if not move:
             logger.warning("simulator move wasn't JSON: %r", raw[:200])
@@ -609,7 +612,9 @@ def judge_day(run: DayRun, judge, sim) -> None:
         constraints="\n".join(f"- {c}" for c in script.constraints) or "(none)",
         transcript=run.transcript_text(), schedule=run.record_text(), facts=json.dumps(facts)))
     run.judge = extract_json(verdict) or {"raw": verdict[:500]}
-    rating = sim(RATING_PROMPT.format(persona=script.persona, transcript=run.transcript_text(for_user=True)))
+    drop_house_rule_issues(run.judge)
+    rating = sim(RATING_PROMPT.format(persona=with_house_rules(script.persona),
+                                      transcript=run.transcript_text(for_user=True)))
     run.rating = extract_json(rating) or {"raw": rating[:300]}
 
 
