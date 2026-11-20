@@ -171,5 +171,33 @@ class TestEverydayWaysOfSayingDone(WordsCase):
             s.status = s.status.PLANNED
 
 
+
+class TestADoneBesideHowItWent(WordsCase):
+    """"Fine" or "good" beside a done word refused the done as if the item were still going."""
+
+    def test_the_done_wins_over_fine(self):
+        for title, words in (("Varnish the paddle", "the paddle varnish went fine, all wrapped"),
+                             ("Sand the canoe thwart", "thwart sanding was ok and it's squared away"),
+                             ("Kiln wash the shelves", "kiln wash turned out good, done")):
+            with self.subTest(words=words):
+                for s in self.planned(title):
+                    s.status = s.status.PLANNED
+                self.assertWent(self.tick(title, words))
+
+    def test_going_or_fine_alone_still_ticks_nothing(self):
+        for title, words in (("Sand the canoe thwart", "the thwart sanding is going"),
+                             ("Varnish the paddle", "the paddle varnish is fine"),
+                             ("Kiln wash the shelves", "kiln wash is going fine, about done"),
+                             ("Varnish the paddle", "the paddle varnish is fine, the thwart sanding is done")):
+            with self.subTest(words=words):
+                self.assertHeld(self.tick(title, words))
+
+    def test_the_list_tick_follows_the_same_reading(self):
+        from thirties_core.write_guard import refused
+        op = {"op": "complete", "title": "Mail the glaze samples"}
+        self.assertEqual(refused(op, "[app] the glaze samples went fine, all wrapped", None), "")
+        self.assertNotEqual(refused(op, "[app] the glaze samples are fine", None), "")
+
+
 if __name__ == "__main__":
     unittest.main()

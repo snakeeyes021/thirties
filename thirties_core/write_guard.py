@@ -12,7 +12,8 @@ for them in plain words:
   the past ("renewed" for Renew the kiln permit), a report that it happened ("I've written them up"), or a plain
   yes to a question.
   Words that say something is under way or merely all right ("the kiln is firing", "it's running", "the glaze is
-  fine") are never a done, for the item they're said about, however loosely the words point to it. Neither are
+  fine") are never a done, for the item they're said about, however loosely the words point to it; a done word in
+  the same sentence wins over merely all right ("the bisque unload went fine, all wrapped"). Neither are
   words telling the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor
   words naming something else that shares a word with it ("the glaze order is sent" for Glaze recipe test:
   done_fit.py).
@@ -195,6 +196,29 @@ def _state_in(clause: str, title: str) -> bool:
     return any(not (set(re.findall(r"[a-z]+", m.group(0).lower())) & own) for m in STATE_RE.finditer(clause))
 
 
+# merely all right: how it went, which a done beside it settles ("it went fine, all wrapped")
+_ALL_RIGHT_RE = re.compile(r"^(?:fine|ok|okay|alright|all right|good)$", re.IGNORECASE)
+
+
+def _under_way_in(clause: str, title: str) -> bool:
+    """The clause says something is under way ("firing", "running", "going"), in a word that isn't the item's own."""
+    own = set(re.findall(r"[a-z]+", str(title or "").lower()))
+    return any(not _ALL_RIGHT_RE.match(m.group(0).strip()) and not (set(re.findall(r"[a-z]+", m.group(0).lower())) & own)
+               for m in STATE_RE.finditer(clause))
+
+
+def _done_beside(clause: str, sentences: list, title: str, others: list) -> bool:
+    """A done word in the same sentence as this clause, in a stretch about this item or naming no other one."""
+    for sentence in sentences:
+        if clause.strip() not in sentence:
+            continue
+        for part in _CLAUSE_RE.split(sentence):
+            if part and part.strip() and _done_in(part, title) and not any(
+                    _about(part, o, [x for x in others if x != o] + [title]) for o in others):
+                return True
+    return False
+
+
 def _done_in(clause: str, title: str) -> bool:
     return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
 
@@ -224,7 +248,8 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
-    told = " ".join(t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t))
+    told_sentences = [t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t)]
+    told = " ".join(told_sentences)
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
     # --- an item named only as when something else stops is no done; what a clause says is about its head
     # ("working until the kiln check": the working) (not_about_it.py) ---
@@ -241,6 +266,11 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
         # --- end talk to the app ---
     for c in about:
         if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
+            # --- merely all right, with a done in the same sentence: the done wins ("it went fine, all wrapped") ---
+            if not _NOT_DONE_RE.search(c) and not _under_way_in(c, title) \
+                    and _done_beside(c, told_sentences, title, others):
+                continue
+            # --- end the done wins ---
             return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
                     "Leave it open; it's done when they say it is.")
     return ""

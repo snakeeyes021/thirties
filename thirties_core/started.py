@@ -120,8 +120,9 @@ def not_finished(message: Optional[str], title: str, others: Iterable[str] = ())
         return ""
     if said_not_done(message, title, others):
         return "not"
-    if any(_OVER_RE.search(c) for c in about):  # said in so many words
-        return ""
+    from thirties_core.write_guard import DONE_WORDS_RE
+    if any(_OVER_RE.search(c) or DONE_WORDS_RE.search(c) for c in about):  # said in so many words, in the same
+        return ""                                                            # clause as anything under way
     if any(STARTED_RE.search(c) for c in about):  # under way beats other verbs about the item ("pulled the cover off and
         return "begun"                            # started the washer")
     return ""
