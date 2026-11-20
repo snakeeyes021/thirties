@@ -141,5 +141,19 @@ class TestATickAskedInAQuestion(WordsCase):
         self.assertHeld(self.tick("Varnish the paddle", "can we mark the thwart sanding off?"))
 
 
+class TestStartedBesideAnotherDone(WordsCase):
+    """A done word about something else in the same clause made a start read as a finish."""
+
+    def test_started_stays_started(self):
+        from thirties_core.started import not_finished
+        words = "started the paddle varnish right after I picked up the brush"
+        self.assertEqual(not_finished(words, "Varnish the paddle"), "begun")
+        self.assertHeld(self.tick("Varnish the paddle", words))
+
+    def test_a_done_about_the_item_still_counts(self):
+        from thirties_core.started import not_finished
+        self.assertEqual(not_finished("the paddle varnish I started at 6:10 is done", "Varnish the paddle"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

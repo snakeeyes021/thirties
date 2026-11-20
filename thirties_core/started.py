@@ -127,11 +127,27 @@ def not_finished(message: Optional[str], title: str, others: Iterable[str] = ())
     if said_not_done(message, title, others):
         return "not"
     from thirties_core.write_guard import DONE_WORDS_RE
-    if any(_OVER_RE.search(c) or DONE_WORDS_RE.search(c) for c in about):  # said in so many words, in the same
-        return ""                                                            # clause as anything under way
+    # said in so many words, in the same clause as anything under way; a done word for something else, said in the
+    # same clause after "after", "before" or "when" ("started the varnish right after I picked up the brush"),
+    # isn't said of the item
+    if any(_OVER_RE.search(s) or DONE_WORDS_RE.search(s) for c in about for s in _naming_stretches(c, title, others)):
+        return ""
     if any(STARTED_RE.search(c) for c in about):  # under way beats other verbs about the item ("pulled the cover off and
         return "begun"                            # started the washer")
     return ""
+
+
+# a word that opens what happened before, after or when: what follows it is about something else
+_WHEN_RE = re.compile(r"\b(?:right |just |straight )?(?:after|before|once|when|whenever|since|because|as soon as|"
+                      r"until|till)\b", re.IGNORECASE)
+
+
+def _naming_stretches(clause: str, title: str, others: Iterable[str]) -> list:
+    """The stretches of the clause, cut at "after", "before", "when" and the like, that name the item; the whole
+    clause when none does on its own."""
+    parts = [p for p in _WHEN_RE.split(clause) if p and p.strip()]
+    naming = [p for p in parts if _names(p, title, list(others))]
+    return naming or [clause]
 
 
 def only_started(message: Optional[str], title: str, others: Iterable[str] = ()) -> bool:
