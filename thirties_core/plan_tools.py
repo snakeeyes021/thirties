@@ -661,6 +661,11 @@ class PlanTools:
         if _as_bool(alongside) or span.is_envelope:
             return False
         from thirties_core.sharing import wants_push
+        # --- sliding along unasked needs words for a group (move_scope.py) ---
+        from thirties_core.move_scope import push_said
+        if not push_said(self):
+            return False
+        # --- end words for a group ---
         return wants_push(self.user_message) and any(s.status == SpanStatus.PLANNED for s in self._sharing(span))
 
     def _push_asked(self) -> None:
@@ -794,6 +799,12 @@ class PlanTools:
             delta = target - span.start_dt
             moved.append((span, delta))
             cursor = span.end_dt + delta
+        # --- what slides along is only what the user's words cover (move_scope.py) ---
+        from thirties_core.move_scope import push_refused
+        why = push_refused(self, anchor, [s for s, _ in moved])
+        if why:
+            raise ToolError(why)
+        # --- end what the words cover ---
         for span, delta in moved:
             new_start, new_end = span.start_dt + delta, span.end_dt + delta
             firm = [c for c in self.day_plan.spans_overlapping(new_start, new_end)
@@ -1227,6 +1238,8 @@ class PlanTools:
                 from thirties_core.relations import follow
                 moved = follow(self, span, old_end)
                 # --- end tied ---
+                from thirties_core.move_scope import moved as note_moved  # what this turn moved (move_scope.py)
+                note_moved(self, span)
                 self._save_plan_after_change()
                 return kept + (f" ({'; '.join(moved)})" if moved else "")
             # --- end the user's own times ---
@@ -1254,7 +1267,10 @@ class PlanTools:
             due = move_check(self, span.title, span.task_id, parse_day(to_day, self.today())) \
                 if self.is_current(self.day_plan) and span.status == SpanStatus.PLANNED else ""
             # --- end due today ---
-            return self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside)) + due
+            out = self._move_to_day(span, to_day, start, end, duration, title, alongside=_as_bool(alongside)) + due
+            from thirties_core.move_scope import moved as note_moved  # what this turn moved (move_scope.py)
+            note_moved(self, span)
+            return out
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
         was = (span.start_dt, span.end_dt)  # for a time the user stated, moved by a shift (given_times.py)
@@ -1347,6 +1363,8 @@ class PlanTools:
         from thirties_core.user_placed import note as note_placed
         note_placed(self, span, "update_event")
         # --- end moved where the user asked ---
+        from thirties_core.move_scope import moved as note_moved  # what this turn moved (move_scope.py)
+        note_moved(self, span)
         # --- a place given by another item is kept as that tie; what's tied right after it moves along (relations.py) ---
         from thirties_core.relations import follow, keep as keep_tie
         notes = list(notes or []) + [n for n in [keep_tie(self, span)] if n] + follow(self, span, was[1])

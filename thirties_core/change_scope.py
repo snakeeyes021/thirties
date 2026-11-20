@@ -10,9 +10,10 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
 
 - **moving an item** (update_event): the user asks for a move, in this message or one of their last few that this
   one isn't a no to ("push", "later", "swap", "put ... at", "redo the afternoon": ``move_asked``), and which items
-  that means is then the model's reading, as for a removal (change_asks.py); with no such words, the message names
-  the item, points back to it, or gives a time for it in words that fit it (done_reference.check,
-  stated_times.loosely_named);
+  that means is then the model's reading, as for a removal (change_asks.py), as far as the user's words cover:
+  the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
+  words, the message names the item, points back to it, or gives a time for it in words that fit it
+  (done_reference.check, stated_times.loosely_named);
 - **a new item** (add_event): its words are in the message, the message points back to it (yes to an offer), or the
   user asked Thirties to plan ("plan my afternoon", "fit in what you can");
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
@@ -103,8 +104,11 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     message = _talking(pt, "update_event")
     if message is None or span.is_envelope or span.source == "calendar":
         return None  # work and sleep, and calendar events, have their own rules
-    if BULK_CHANGE_RE.search(message) or move_asked(pt):
-        return None  # which items the request means is the model's reading (change_asks.py)
+    # --- which items the request means is the model's reading, within what the words cover (move_scope.py) ---
+    from thirties_core.move_scope import asked_to_clear, refused
+    if move_asked(pt) or asked_to_clear(pt):
+        return refused(pt, span)
+    # --- end within what the words cover ---
     title = pt._title(span)
     if _referred_to(pt, message, title, (span.id, span.task_id)):
         return None
