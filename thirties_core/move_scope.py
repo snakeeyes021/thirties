@@ -240,7 +240,7 @@ def _on_plan(pt: "PlanTools", note: Any) -> List["EventSpan"]:
             and step_key(pt._title(s)) in steps]
 
 
-_ROUTINE_WORD_RE = re.compile(r"routines?", re.IGNORECASE)
+_ROUTINE_WORD_RE = re.compile(r"\broutines?\b", re.IGNORECASE)
 
 
 def _routines_named(pt: "PlanTools", message: str) -> List[Any]:
