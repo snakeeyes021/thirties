@@ -14,6 +14,11 @@ in its place.
 - **Names something else**: phrases share the item's words, but none of them fits. Then the item isn't what was
   done; ``elsewhere`` finds the one open list item that fits all the words, if any, for the model to mark instead.
 - **Names nothing**: a pointer ("that's done", "yes") or an id has no such phrase; the other checks judge it.
+- **A word for the thing's papers or bits**: "the firing paperwork's lodged" for Lodge kiln firing permit. A
+  container noun ("paperwork", "forms", "stuff", "bits", "errand") the item lacks doesn't make the words name
+  something else when the rest of the phrase is the item's, the clause says the item's own verb in the past
+  ("lodged" for Lodge), and no other planned or listed item fits the rest of the phrase. A noun for an object of
+  its own ("the glaze order is sent" beside Glaze recipe test) still does.
 """
 
 from __future__ import annotations
@@ -56,6 +61,11 @@ _BREAK = {
     "done", "finished", "finish", "complete", "completed", "sorted", "handled", "set", "ready", "fine",
     "good", "great", "mark", "marked", "tick", "ticked", "check", "checked", "cross", "crossed", "untick",
     "unticked", "unchecked", "unmarked", "leave", "keep", "hold", "wait",
+    # said in the past without "-ed": what happened ("lunch eaten", "letter written")
+    "eaten", "ate", "written", "wrote", "given", "driven", "drove", "thrown", "threw", "sewn", "drawn", "drew",
+    "worn", "torn", "seen", "ridden", "rode", "chosen", "spoken", "spoke", "frozen", "grown", "grew", "blown",
+    "flown", "hidden", "begun", "bought", "brought", "caught", "taught", "sold", "told", "found", "built", "sent",
+    "spent", "lent", "paid", "swept", "fed", "sung", "swum", "rung",
 }
 # what a book, a film or a show on the user's media lists is called besides its title
 _KIND_WORDS = {"book": ("book", "novel"), "film": ("film", "movie"), "show": ("show", "series", "episode")}
@@ -120,16 +130,51 @@ def reading(message: Optional[str], names: Sequence[str],
 
 
 def names_something_else(message: Optional[str], names: Union[str, Sequence[str]],
-                         others: Iterable[str] = ()) -> List[str]:
+                         others: Iterable[str] = (), listed: Iterable[str] = ()) -> List[str]:
     """The words of the user's that name something other than this item: phrases share its words but none is
-    made only of them ("glaze order" for Glaze recipe test). [] when a phrase fits it, or none touches it."""
+    made only of them ("glaze order" for Glaze recipe test). [] when a phrase fits it, or none touches it, or one
+    fits it but for a container noun (``fits_but_for_a_container``). ``listed``: the open items on the user's
+    lists, besides the planned ``others``."""
     if not message:
         return []
     names = [names] if isinstance(names, str) else [n for n in names if n]
+    others = list(others)
     touching, fitting = reading(message, names, others)
     if not touching or fitting:
         return []
+    if fits_but_for_a_container(message, names, others + [t for t in listed if t not in names]):
+        return []
     return [" ".join(p) for p in touching]
+
+
+# --- a word for the thing's papers or bits ---
+# nouns for what a thing comes as, not what it is: "the firing paperwork", "the permit forms", "the kiln stuff"
+CONTAINER_NOUNS = {"paperwork", "papers", "forms", "form", "stuff", "thing", "things", "bits", "bit", "errand",
+                   "errands", "business", "chore", "chores", "job", "jobs", "admin"}
+
+
+def _container(word: str) -> bool:
+    return word in CONTAINER_NOUNS or (word.endswith("s") and word[:-1] in CONTAINER_NOUNS)  # "paperwork's"
+
+
+def fits_but_for_a_container(message: str, names: Sequence[str], others: Iterable[str] = ()) -> bool:
+    """A clause says the item's own verb in the past ("lodged" for Lodge kiln firing permit), and a phrase in it is
+    made of the item's words and container nouns ("firing paperwork"), with no other item fitting its other words."""
+    from thirties_core.write_guard import _past_of_title
+    others = [o for o in others if o and o not in names]
+    for clause in _CLAUSE_RE.split(re.sub(r"[‘’'`]", "", str(message or "").lower())):
+        mine = [n for n in names if _past_of_title(clause, n)]
+        if not mine:
+            continue
+        for phrase in _phrases(clause):
+            words = [w for w in phrase if not _container(w)]
+            if len(words) == len(phrase) or not words:
+                continue
+            if any(all(_is_its(w, n) for w in words) for n in mine) \
+                    and not any(all(_is_its(w, o) for w in words) for o in others):
+                return True
+    return False
+# --- end a word for the thing's papers or bits ---
 
 
 def names_of(pt: Any, title: str, ids: Iterable[str] = ()) -> List[str]:
@@ -202,4 +247,5 @@ def refusal(pt: Any, title: str, named: List[str]) -> str:
                   "in one short question, and record nothing until they say.")
 
 
-__all__ = ["names_something_else", "names_of", "reading", "fits_all", "elsewhere", "refusal"]
+__all__ = ["CONTAINER_NOUNS", "names_something_else", "names_of", "reading", "fits_all",
+           "fits_but_for_a_container", "elsewhere", "refusal"]

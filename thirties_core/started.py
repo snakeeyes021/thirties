@@ -111,8 +111,11 @@ def not_finished(message: Optional[str], title: str, others: Iterable[str] = ())
     for it, isn't saying it hasn't happened (said_not_done)."""
     if not message:
         return ""
+    from thirties_core.not_about_it import head, without_display_now
+    message = without_display_now(message)  # "as it's showing now" is about the app's display, not the item
     others = list(others)
-    about = [c for c in _CLAUSE.split(message) if c.strip() and _names(c, title, others)]
+    # what a clause says is about what comes before "until" ("the wheel's going until the lunch sweep": the wheel)
+    about = [c for c in _CLAUSE.split(message) if c.strip() and _names(head(c), title, others)]
     if not about:
         return ""
     if said_not_done(message, title, others):

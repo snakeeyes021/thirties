@@ -4,6 +4,9 @@
 before. An item with the same word in its title (Fire two test tiles) isn't named by it. So when the done checks
 read which item the user's words name, number words and bare small numbers are left out; the pointer and the count
 still come from the words as said ("those two" points back to two items), and so does a time ("the 11am one").
+
+A count that points back ("all three finished", "those three are done", "three of them") covers the items the
+message the user was just shown lists, when it lists exactly that many (``pointed_count``).
 """
 
 from __future__ import annotations
@@ -34,4 +37,23 @@ def counted_only(message: Optional[str], title: str) -> bool:
             and not any(_about(without_counts(c), title, []) for c in clauses))
 
 
-__all__ = ["COUNT_RE", "counted_only", "without_counts"]
+_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+            "ten": 10, "eleven": 11, "twelve": 12}
+_N = r"(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d{1,2})"
+# a count with a word pointing back at items just shown, or a count "of them"
+_POINTED_RE = re.compile(
+    rf"\b(?:all|those|these|the)\s+{_N}\b(?!\s*(?::\d|am\b|pm\b|min|minutes?\b|hours?\b|o'?clock))|"
+    rf"\b{_N}\s+of\s+(?:them|those|these|em|'em)\b", re.IGNORECASE)
+
+
+def pointed_count(message: Optional[str]) -> Optional[int]:
+    """How many items a count in the words points back at ("all three finished" → 3); None when no count does,
+    or two counts differ."""
+    found = set()
+    for m in _POINTED_RE.finditer(message or ""):
+        said = (m.group(1) or m.group(2)).lower()
+        found.add(int(said) if said.isdigit() else _NUMBERS[said])
+    return found.pop() if len(found) == 1 else None
+
+
+__all__ = ["COUNT_RE", "counted_only", "pointed_count", "without_counts"]

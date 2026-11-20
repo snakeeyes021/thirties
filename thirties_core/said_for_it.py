@@ -46,9 +46,11 @@ def begun_or_next(message: Optional[str], title: str, others: Iterable[str] = ()
     Read only where the words name the item: a pointer ("on to the next one") says nothing about which."""
     if not message:
         return ""
+    from thirties_core.not_about_it import without_display_now
     from thirties_core.write_guard import _about, _done_in
     others = [o for o in others if o and o != title]
-    for clause in _clauses(re.sub(r"[‘’`]", "'", message)):
+    # a "now" about what the app shows ("the time it says now") is no onward word (not_about_it.py)
+    for clause in _clauses(without_display_now(re.sub(r"[‘’`]", "'", message))):
         marks = list(_ONWARD_RE.finditer(clause))
         for i, m in enumerate(marks):
             end = marks[i + 1].start() if i + 1 < len(marks) else len(clause)

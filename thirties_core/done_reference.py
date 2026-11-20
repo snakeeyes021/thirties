@@ -9,7 +9,7 @@ goes through when the user's words point at the item:
   reply isn't a no; or they asked for this done in an earlier message and it was refused (done_words.py).
 - **Pointed back to**, when this message names nothing: "that", "it", "yes", "done" for the one item the last
   message they saw named (or, if that named none, what they said just before); "both" for exactly two; "those"
-  or "them" for up to MOST_POINTED of them.
+  or "them" for up to MOST_POINTED of them; a count ("all three", "three of them") for exactly that many.
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
 - **A whole routine**: its name with "all", "whole" or "everything", or "both" / "all of them" to a question about
   its parts: every step of it, in every part (whole_routine.py).
@@ -251,6 +251,16 @@ def _listed(text: str, title: str) -> bool:
     return bool(mine) and mine <= name_words(text)
 
 
+def _listed_items(pt: "PlanTools", names: Sequence[str]) -> List[str]:
+    """The open items on the user's lists other than this one, by their wording."""
+    try:
+        from thirties_core.done_on_lists import _candidates
+        from thirties_core.list_reading import name_of
+        return [name_of(t) for t in _candidates(pt.assistant) if name_of(t) not in names]
+    except Exception:
+        return []
+
+
 def pointed_back(pt: "PlanTools", titles: List[str]) -> List[str]:
     """The items a pointer this turn ("it", "that", "both") can reach: those the last message the user was shown
     lists, else those the user's previous message named."""
@@ -284,7 +294,8 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     # --- end a count ---
     # --- words naming something else that shares a word with it: never this item in its place (done_fit.py) ---
     from thirties_core.done_fit import names_of, names_something_else, refusal as named_else
-    elsewhere = names_something_else(naming, names_of(pt, title, ids), others)
+    names = names_of(pt, title, ids)
+    elsewhere = names_something_else(naming, names, others, _listed_items(pt, names))
     if elsewhere:
         return named_else(pt, title, elsewhere), message
     # --- end something else ---
@@ -342,6 +353,11 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         ok = many <= MOST_POINTED
     else:
         ok = many == 1
+    # --- a count pointing back at exactly the items just shown ("all three finished") (done_counts.py) ---
+    if not ok:
+        from thirties_core.done_counts import pointed_count
+        ok = pointed_count(message) == many
+    # --- end a count pointing back ---
     if not ok:
         return refusal, message
     if not _the_copy_meant(pt, [message, shown], ids):

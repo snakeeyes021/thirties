@@ -77,12 +77,27 @@ def _past_of_title(message: str, title: str) -> bool:
     for w in words:
         if _IRREGULAR.get(w) in said:
             return True
+        if len(w) > 2 and any(p in said and p not in _NOT_PAST for p in _regular_past(w)):
+            return True  # "lodged" for Lodge the permit, "filed" for File the forms
     stems = {_stem(w) for w in words if len(w) > 2}
     for s in said:
         if len(s) >= 5 and s.endswith("ed") and s not in _NOT_PAST:
             if any(kin(t, (_stem(s), s)) for t in stems):
                 return True
     return False
+
+
+def _regular_past(word: str) -> set:
+    """The past of an everyday verb, said the regular way ("lodge" → "lodged", "file" → "filed", "tidy" →
+    "tidied", "plan" → "planned")."""
+    out = {word + "ed"}
+    if word.endswith("e"):
+        out.add(word + "d")
+    if word.endswith("y") and word[-2:-1] not in "aeiou":
+        out.add(word[:-1] + "ied")
+    if len(word) <= 4 and word[-1] not in "aeiouwxy" and word[-2:-1] in "aeiou":
+        out.add(word + word[-1] + "ed")
+    return out
 
 
 def _about(clause: str, title: str, others: list) -> bool:
@@ -145,6 +160,13 @@ def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
 # --- end told not to tick it ---
 
 
+def _state_in(clause: str, title: str) -> bool:
+    """The clause says something is under way or all right, in a word that isn't one of the item's own ("firing"
+    in Lodge kiln firing permit names it)."""
+    own = set(re.findall(r"[a-z]+", str(title or "").lower()))
+    return any(not (set(re.findall(r"[a-z]+", m.group(0).lower())) & own) for m in STATE_RE.finditer(clause))
+
+
 def _done_in(clause: str, title: str) -> bool:
     return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
 
@@ -176,11 +198,17 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
     told = " ".join(t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t))
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
-    about = [c for c in clauses if _about(c, title, others) or _fits_level(c, title, others)]
+    # --- an item named only as when something else stops is no done; what a clause says is about its head
+    # ("working until the kiln check": the working) (not_about_it.py) ---
+    from thirties_core.not_about_it import end_refusal, head, only_as_an_end
+    if only_as_an_end(clauses, title, others):
+        return end_refusal(title)
+    about = [c for c in clauses if _about(head(c), title, others) or _fits_level(head(c), title, others)]
+    # --- end when something else stops ---
     if not about:
         about = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
     for c in about:
-        if not _done_in(c, title) and (STATE_RE.search(c) or _NOT_DONE_RE.search(c)):
+        if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
             return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
                     "Leave it open; it's done when they say it is.")
     return ""
