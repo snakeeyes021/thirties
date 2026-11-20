@@ -1044,6 +1044,14 @@ class AssistantTools(KindTools):
         moved = self.routines.unplace_for_move(plan, note, parts)  # placed already, it moves (routines.py)
         on_plan = {step_times.key(sp.title) for sp in plan.spans
                    if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
+        # --- said from where each step landed; a step that can't go back where it was (routine_moves.py) ---
+        from thirties_core import routine_moves
+        from thirties_core.routine_times import leave, left
+        gone = list(getattr(self.routines, "unplaced", []) or [])
+        leaving = leave(gone)  # where a step is moving from is never read as a time the user gave for it
+        where: List[Tuple[str, datetime, datetime]] = []
+        refused: List[Tuple[str, Optional[datetime], str]] = []
+        # --- end said from where it landed ---
         self._quiet_today = True
         try:
             for part in parts:
@@ -1089,24 +1097,38 @@ class AssistantTools(KindTools):
                     if day not in (None, ""):
                         args["day"] = day
                     from thirties_core.routine_times import alongside as said_with, own_placing
+                    ids_before = [sp.id for sp in plan.spans]
                     with own_placing(), said_with([note["title"]] + [step_times.clean_title(s) for s in steps]):
                         out = self.pt.execute("add_event", args)
                     if out.startswith(NOT_DONE_PREFIX):
-                        raise ToolError(out[len(NOT_DONE_PREFIX):].lstrip(": "))
+                        was = routine_moves.put_back(self.pt, plan, gone, text)
+                        refused.append((args["title"], was, out[len(NOT_DONE_PREFIX):].lstrip(": ")))
+                        continue
+                    span_now = routine_moves.landed(plan, ids_before, args["title"])
+                    where.append((args["title"], span_now.start_dt if span_now is not None else begin, first))
+                    routine_moves.settled(gone, text)
                     # --- a step's own time the user gave is theirs, shown as said (stated_times.py) ---
                     if mine is not None:
                         from thirties_core.stated_times import keep_step_time
                         keep_step_time(self.pt, plan, args["title"], mine)
                     # --- end a step's own time ---
                     placed.append(text)
-                lines.append(f"{format_clock(thirty_of(first))}: {', '.join(step_times.clean_title(t) for t in todo)}")
+        except Exception:
+            routine_moves.put_all_back(self.pt, plan, gone)  # a step taken off is never lost to an error
+            raise
         finally:
             self._quiet_today = False
+            left(leaving)
+        lines = routine_moves.lines(where)
+        if not placed and refused:
+            raise ToolError(routine_moves.refusal(refused))
         if not placed:
             return f"{note['title']} is already on the plan."
         known = self.routines.known_extras(note)  # extras the user always places with it (Brush teeth): no asking
         extra = [x for x in extra if x.lower() not in known]
-        self.routines.learn(note, learned or parts)  # how the user places it becomes its usual placement (routines.py)
+        if not refused:  # a move that only partly happened isn't how the user places it
+            # how the user places it becomes its usual placement (routines.py)
+            self.routines.learn(note, learned or parts)
         listed = ""
         if self.pt.is_current(plan):
             self._day_begun([step_times.clean_title(t) for t in placed])
@@ -1117,6 +1139,8 @@ class AssistantTools(KindTools):
         out = (f"Moved {note['title']}: " if moved else f"Put {note['title']} on the plan: ") + "; ".join(lines) + "."
         if already:
             out += f" Already planned: {', '.join(already)}."
+        if refused:
+            out += " " + routine_moves.not_moved(refused)
         if extra:  # the template only changes when the user asks (10-30: the model wrote Brush teeth into it)
             out += (f" {', '.join(extra)} isn't in the {note['title']} note: it's planned with it today only. Ask "
                     "the user whether to add it to the routine itself.")

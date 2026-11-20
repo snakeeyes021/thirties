@@ -38,7 +38,8 @@ WORKAROUNDS: List[Tuple[str, str, str]] = [
     (r"\broutine\w*\b.*\btoday\b|\btoday\b.*\broutine|\bcop(?:y|ied|ies)\b.*\broutine|\broutine note",
      "routines go on Today as one group with their steps, and routine notes are never written", "0.2.0"),
     (r"\bshower\w*\b.*\bafter work|\bafter work\b.*\bshower",
-     "a routine's parts go where they belong in the day; one goes after work only when its morning was missed", "0.2.0"),
+     "a routine's parts go where they belong in the day: a later part follows the one before it, and goes after "
+     "work only when the morning has no room", "0.2.0"),
     (r"\b(?:done|finished|completed|ticked)\b.*\b(?:offer|suggest|again|roll)|\b(?:offer|suggest)\w*\b.*\b(?:done|"
      r"finished|completed)\b",
      "what's done stays done: a done item is never offered again", "0.2.0"),

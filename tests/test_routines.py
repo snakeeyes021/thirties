@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from tests.fixtures import mark_up, DAY, FakeJoplinAPI, at, event, line_with, make_scheduler
 from thirties_core.assistant_tools import Services, _checkbox_id
 from thirties_core.astronomy import set_debug_time
+from thirties_core.clock import format_clock
 from thirties_core.lists import ListCatalog
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem
 from thirties_core.plan_tools import NOT_DONE, PlanTools
@@ -209,7 +210,10 @@ class TestTheMorningSetUp(RoutineCase):
         t2 = self.tools_for(TOMORROW)  # a one-off placement another day doesn't change it
         t2.execute("put_routine", {"routine": "Studio opening", "start": "7:00 PM"})
         self.assertEqual(RoutineBook(self.sched.state_db).get("n_routine").parts, r.parts)
-        self.assertIn("(if missed: after work on work days)", self.t.assistant.routines.prompt_section())
+        section = self.t.assistant.routines.prompt_section()
+        end = format_clock(self.spans(self.t, "Work")[0].end_dt)  # its fallback's time today: when Work ends
+        self.assertIn("(if the morning has no room: ", section)
+        self.assertIn(f", {end} today)", section)
 
     def test_two_routines_sharing_a_word_are_told_apart_by_name(self):
         out = self.t.execute("put_routine", {"routine": "Deep Clean", "start": "6:00 PM"})
@@ -493,9 +497,10 @@ class TestSetUpWhenTheUserIsUp(RoutineCase):
         self.assertEqual(self.spans(self.t, "Make bed")[0].start_dt, at("10:30"))
 
 class TestTheFallbackWhenTheDayIsCrunched(RoutineCase):
-    """The studio opening happens when the user actually wakes, even during Work; the
-    shower group goes in the next block, or at its fallback (3 PM) when the day is crunched. The fallback was only
-    shown to the model; now the morning set-up places by it."""
+    """The studio opening happens when the user actually wakes, even during Work; the shower group goes in the
+    next block, right after it. Its fallback (a clock time, or after work) is for a day that really has no room:
+    the model's call or the user's, shown to the model with today's time for it; the set-up never sends a part
+    there by itself (a later part had gone to its fallback, though the user does it next)."""
 
     def set_up(self, fallback, up="09:45"):
         self.t.execute("set_routine", {"routine": "Studio opening", "confirm": True, "parts": [
@@ -506,16 +511,18 @@ class TestTheFallbackWhenTheDayIsCrunched(RoutineCase):
         summary = self.t.assistant.routines.set_up_current()
         return (self.spans(self.t, "Feed the fish")[0].start_dt, self.spans(self.t, "Make bed")[0].start_dt, summary)
 
-    def test_up_during_work_the_first_part_now_the_second_at_its_fallback(self):
-        fish, bed, summary = self.set_up("3 PM when the day is crunched")
+    def test_up_during_work_the_second_part_still_follows_the_first(self):
+        fish, bed, summary = self.set_up("7:20 PM when the day is crunched")
         self.assertEqual(fish, at("10:00"))  # on waking, regardless of Work
-        self.assertEqual(bed, at("15:00"))
-        self.assertIn("is at 3:00 PM, where it goes when the day is full", summary)
+        self.assertEqual(bed, at("10:30"))  # right after it, not at the fallback
+        self.assertNotIn("7:20 PM", summary)
         work = self.spans(self.t, "Work")[0]
         self.assertEqual((work.start_dt, work.end_dt), (at("08:30"), at("16:00")))
 
-    def test_after_work_is_when_work_ends(self):
-        self.assertEqual(self.set_up("after work")[1], at("16:00"))
+    def test_an_after_work_fallback_isnt_used_by_itself(self):
+        self.assertEqual(self.set_up("after work")[1], at("10:30"))
+        end = format_clock(self.spans(self.t, "Work")[0].end_dt)
+        self.assertIn(f"after work, {end} today", self.t.assistant.routines.prompt_section())
 
     def test_on_a_free_morning_the_next_block(self):
         self.t.execute("remove_event", {"event": "Work"})  # a day off: nothing crunched

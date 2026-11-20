@@ -9,7 +9,9 @@ Now, when a change is called for the user's message (the tool is the one the mod
 own planning: a day proposal, a routine, the morning set-up), it goes ahead only when the message refers to it:
 
 - **moving an item** (update_event): the user asks for a move, in this message or one of their last few that this
-  one isn't a no to ("push", "later", "swap", "put ... at", "redo the afternoon": ``move_asked``), and which items
+  one isn't a no to ("push", "later", "swap", "put ... at", "redo the afternoon": ``move_asked``), or their words
+  are about something on the plan at all (an item or a routine named or pointed to: a correction of where it sits
+  asks for a move as much as a move word does, and whether it does is the model's reading), and which items
   that means is then the model's reading, as for a removal (change_asks.py), as far as the user's words cover:
   the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
   words, the message names the item, points back to it, or gives a time for it in words that fit it
@@ -105,8 +107,8 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if message is None or span.is_envelope or span.source == "calendar":
         return None  # work and sleep, and calendar events, have their own rules
     # --- which items the request means is the model's reading, within what the words cover (move_scope.py) ---
-    from thirties_core.move_scope import asked_to_clear, refused
-    if move_asked(pt) or asked_to_clear(pt):
+    from thirties_core.move_scope import asked_to_clear, refused, words_about_plan
+    if move_asked(pt) or asked_to_clear(pt) or words_about_plan(pt, message):
         return refused(pt, span)
     # --- end within what the words cover ---
     title = pt._title(span)

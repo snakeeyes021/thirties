@@ -17,7 +17,11 @@ that places through another one), a time the user gave for that item goes first:
 - **still standing**: a time from an earlier message that has passed is left alone; one this message gives is
   always applied;
 - **theirs**: the item keeps it as ``given_start``, so it's shown to the minute and a reply may say it (shown_times,
-  clock.real_times).
+  clock.real_times);
+- **not where it was**: while an item is being moved (put_routine moving a routine's part), the time it's moving
+  away from is never read as a time the user gave for it. The user quoting where it sits ("the jars sitting at
+  11:20 AM are wrong") isn't asking for it to be there: a part asked to move came back to its old time, and the
+  reply still said it had moved.
 """
 
 from __future__ import annotations
@@ -161,6 +165,10 @@ def said_time(pt: "PlanTools", plan: Any, title: str, near: datetime, also: Iter
             dt = _on_day(plan, hour, minute, half, near)
             if dt is None:
                 continue
+            # --- the time it's moving away from isn't a time given for it ---
+            if any(lo <= dt < hi for lo, hi in _LEAVING.get().get(_key(title), ())):
+                return None
+            # --- end moving away ---
             if not this_turn and now is not None and dt < now:
                 return None  # passed: it no longer stands
             return dt
@@ -181,6 +189,47 @@ def placing_at(pt: "PlanTools", title: str, start: datetime, end: datetime) -> T
     return at, at + (end - start), True
 
 
+# the times items are moving away from, by step key, while they're moved (put_routine)
+_LEAVING: contextvars.ContextVar[dict] = contextvars.ContextVar("leaving_times", default={})
+
+
+def _key(title: str) -> str:
+    from thirties_core.step_times import key
+    return key(title)
+
+
+def leave(spans: Iterable[Any]) -> Any:
+    """These items are moving: until ``left``, where they're leaving (the time of the part each sat in, from its
+    thirty) is never read as a time the user gave for them. Returns what ``left`` takes."""
+    from thirties_core.clock import thirty_of
+    runs: List[list] = []  # steps back to back are one part: a time said for the part is where each step was
+    for s in sorted(spans, key=lambda x: x.start_dt):
+        if runs and s.start_dt - max(x.end_dt for x in runs[-1]) < timedelta(minutes=30):
+            runs[-1].append(s)
+        else:
+            runs.append([s])
+    times: dict = {}
+    for run in runs:
+        lo, hi = thirty_of(run[0].start_dt), max(x.end_dt for x in run)
+        for s in run:
+            times.setdefault(_key(s.title), []).append((lo, max(hi, lo + timedelta(minutes=30))))
+    return _LEAVING.set(times)
+
+
+def left(token: Any) -> None:
+    _LEAVING.reset(token)
+
+
+@contextlib.contextmanager
+def leaving(spans: Iterable[Any]) -> Iterator[None]:
+    """While these items move (leave ... left)."""
+    token = leave(spans)
+    try:
+        yield
+    finally:
+        left(token)
+
+
 # the names said alongside an item being placed (a routine and its steps), while it's placed
 _ALSO: contextvars.ContextVar[Tuple[str, ...]] = contextvars.ContextVar("placing_alongside", default=())
 
@@ -194,4 +243,4 @@ def alongside(names: Iterable[str]) -> Iterator[None]:
         _ALSO.reset(token)
 
 
-__all__ = ["alongside", "earlier_today", "own_placing", "placing_at", "said_time"]
+__all__ = ["alongside", "earlier_today", "leave", "leaving", "left", "own_placing", "placing_at", "said_time"]

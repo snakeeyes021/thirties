@@ -9,9 +9,10 @@ before the morning message; the model never has to remember to, and never asks.
   - its **repeat schedule**: every day, every N days, some weekdays (work days, days off), or only when asked.
     Python counts from the last time it was actually done, not from a fixed date;
   - its **placement**: its parts (which steps go together in one thirty), when each part usually happens, and a
-    fallback for a missed part ("after work"). It's learned from how the user places it: the last put_routine
-    becomes the placement, unless the user confirmed one ("that's how it always goes"), which then stays until
-    they change it. Before any of that, it's read from the last two weeks of plans. Steps that aren't in the note
+    fallback the user gave for a part ("after work"). A later part follows right after the part before it when that
+    one went late; the fallback is the model's call, for a morning with no room, or the user's. It's learned from
+    how the user places it: the last put_routine becomes the placement, unless the user confirmed one ("that's
+    how it always goes"), which then stays until they change it. Before any of that, it's read from the last two weeks of plans. Steps that aren't in the note
     (Brush teeth) may be part of it; they're planned with it, never written into the note;
   - **skips**, like a subscription: skip for today (back tomorrow), skip this time (a full cycle later), or skip
     until a day.
@@ -405,16 +406,17 @@ ROUTINE_TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "set_routine",
         "description": "Record how one of the user's routines goes, when they say so: how often it repeats, when it "
-                       "was last done, its usual placement, where a part goes if it's missed, or (confirm) that "
-                       "today's placement is how it always goes. Routines go on the plan by themselves each morning.",
+                       "was last done, its usual placement, where a part goes when its morning has no room, or "
+                       "(confirm) that today's placement is how it always goes. Routines go on the plan by "
+                       "themselves each morning.",
         "parameters": {"routine": "Which routine (its note's name).",
                        "repeat": "'every day', 'every other day', 'every 12 days', 'weekly', 'weekdays', 'work days', "
                                  "'days off', 'Mon and Thu' or 'on request'.",
                        "last_done": "When it was last done, if the user says (e.g. 'Oct 20', 'yesterday').",
                        "parts": "Its usual placement, as a list of {start, items} like put_routine's.",
                        "confirm": "true when the user says the way it's on the plan today is how it always goes.",
-                       "fallback": "Where a missed part goes, in the user's words (e.g. 'straight after work'); "
-                                   "one for every part, or a list with one per part."},
+                       "fallback": "Where a part goes when the user says its morning has no room, in their words "
+                                   "(e.g. 'straight after work'); one for every part, or a list with one per part."},
         "required": ["routine"],
     },
     {
@@ -587,7 +589,9 @@ class RoutineTools:
         """Placing a routine that's already on the plan moves it (11-03: put_routine refused, while the user had
         asked for it somewhere else). The steps this placement names come off the plan where they're still to do,
         so put_routine puts them at their new time; a step already done today stays done where it was. The morning
-        set-up never moves anything: what the user placed by hand stays. Returns the steps taken off."""
+        set-up never moves anything: what the user placed by hand stays. Returns the steps taken off; the spans
+        themselves are kept in ``unplaced`` until the next call, so a step that can't go to its new time goes back."""
+        self.unplaced: List[Any] = []
         if self.placing:
             return []
         from thirties_core.item_ids import line_ids
@@ -611,6 +615,7 @@ class RoutineTools:
         for s in moving:
             if state is not None:
                 state.delete_span(s.id)
+        self.unplaced = list(moving)
         return [s.title for s in moving]
     def _caught_up(self, r: Routine, new: List[Dict[str, Any]]) -> set:
         """Steps placed later than their usual time once that time has already gone by today, lowercased: the user
@@ -811,8 +816,8 @@ class RoutineTools:
     def set_up_day(self, plan: Optional["DayPlan"] = None) -> str:
         """Once per day, before the morning message: the day's due routines and its anchors go on the plan, where
         they usually go, without asking (R1). Work and Sleep stay as they are; things sit alongside them. A part
-        whose time has passed goes in the first free thirty from now (on a work day that's after work). Returns a
-        short summary for the morning message, or ''."""
+        whose time has passed goes in the first free thirty from now, and the parts after it follow right after it,
+        in order. Returns a short summary for the morning message, or ''."""
         plan = plan or self.pt.day_plan
         if self.db is None or self.pt.scheduler is None or not self.pt.is_current(plan):
             return ""
@@ -893,32 +898,30 @@ class RoutineTools:
         # in it. Routine steps sit alongside Work and other items (11-03: a morning routine may overlap
         # work; 11-05: a missed 6:30 part went to 3 PM, after work).
         from thirties_core.clock import first_fitting_thirty
-        t = first_fitting_thirty(now, minutes)  # the current thirty only if the part still fits in it
-        while t + timedelta(minutes=30) <= bed:
-            blocked = any(s.start_dt < t + timedelta(minutes=30) and t < s.end_dt and s.status != SpanStatus.SKIPPED
-                          and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))
-                          for s in plan.spans)
-            if not blocked:
-                return t, "missed"
-            t += timedelta(minutes=30)
-        return None, "missed"
+        # the current thirty only if the part still fits in it
+        return self._free_from(plan, first_fitting_thirty(now, minutes)), "missed"
 
-    def _crunched(self, plan: "DayPlan", part: Dict[str, Any], start: Optional[datetime], why: str,
-                  now: datetime) -> Tuple[Optional[datetime], str]:
-        """A later part of a routine with a fallback the user gave ('3 PM when the day is crunched', 'after
-        work'): it goes at the fallback when its own spot has passed, when there's no free time for it, or when
-        the day is crunched there: the spot falls inside Work or a fixed calendar event. Without a fallback, or
-        with one that's already passed, the part keeps its spot (on waking, and the next block after)."""
-        at = fallback_start(str(part.get("fallback") or ""), plan)
-        if at is None or at + timedelta(minutes=30) <= now or at + timedelta(minutes=30) > self._bedtime(plan):
-            return start, why
-        crunched = start is None or why == "missed" or any(
-            sp.start_dt < start + timedelta(minutes=30) and start < sp.end_dt and sp.status != SpanStatus.SKIPPED
-            and (sp.category == SpanCategory.WORK or (sp.category == SpanCategory.CALENDAR and sp.is_firm))
-            for sp in plan.spans)
-        if not crunched or (start is not None and start >= at):
-            return start, why
-        return max(at, first_fitting_thirty(now)) if at < now else at, "fallback"
+    @staticmethod
+    def _fallback_words(part: Dict[str, Any], plan: "DayPlan") -> str:
+        """A part's fallback for the prompt: the user's words and, when they name one, today's time for it. It's
+        for a morning with no room (the model's call); otherwise the part follows the one before it."""
+        words = str(part.get("fallback") or "").strip()
+        if not words:
+            return ""
+        at = fallback_start(words, plan)
+        return f" (if the morning has no room: {words}" + (f", {format_clock(at)} today" if at else "") + ")"
+
+    def _free_from(self, plan: "DayPlan", t: datetime) -> Optional[datetime]:
+        """The first thirty from ``t`` without sleep or a fixed calendar event in it, before bed (None: none left).
+        A routine's steps sit alongside Work and other items (11-03)."""
+        bed = self._bedtime(plan)
+        while t + timedelta(minutes=30) <= bed:
+            if not any(s.start_dt < t + timedelta(minutes=30) and t < s.end_dt and s.status != SpanStatus.SKIPPED
+                       and (s.category == SpanCategory.SLEEP or (s.category == SpanCategory.CALENDAR and s.is_firm))
+                       for s in plan.spans):
+                return t
+            t += timedelta(minutes=30)
+        return None
 
     def _place_routines(self, plan: "DayPlan", now: datetime, state: Dict[str, Any]) -> None:
         book = self.book()
@@ -943,10 +946,11 @@ class RoutineTools:
         for k, part in enumerate(parts):  # in their usual order, each in its own thirty after the one before
             # (11-05 replay: a sleep-in put both parts at 9:00)
             start, why = self._spot(plan, part["at"], now)
-            if k > 0:  # the first part is on waking, whatever the day holds; a later one may have a fallback
-                start, why = self._crunched(plan, part, start, why, now)
+            # A later part follows right after the one before it when that one went late (a late start): its
+            # place in the routine is after that part, in order. Its fallback ("after work") is the model's call,
+            # for a morning that really has no room, or the user's; the set-up never sends it there by itself.
             if start is not None and prev is not None and start < prev + timedelta(minutes=30):
-                start = prev + timedelta(minutes=30)
+                start = self._free_from(plan, prev + timedelta(minutes=30))
             prev = start or prev
             if start is None:
                 state["unplaced"].append(f"{note['title']} ({', '.join(part['items'])}): no free time left")
@@ -960,10 +964,7 @@ class RoutineTools:
             if out.endswith("is already on the plan."):
                 continue  # placed by hand already
             times.append(format_clock(start))
-            if why == "fallback":
-                state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
-                                      f"is at {format_clock(start)}, where it goes when the day is full.)")
-            elif why == "missed":
+            if why == "missed":
                 state["moved"].append(f"({', '.join(part['items'][:2])}{'…' if len(part['items']) > 2 else ''} "
                                       f"usually goes {'' if part['at'].startswith('wake') else 'at '}{_clock_of(part['at'])}; that's passed, so it's at "
                                       f"{format_clock(start)}.)")
@@ -1039,8 +1040,7 @@ class RoutineTools:
                 how = {"user": "confirmed by the user", "learned": "learned from how it was last placed",
                        "history": "read from recent plans"}.get(source, source)
                 line += f". Usual placement ({how}): " + "; ".join(
-                    f"{_clock_of(p['at'])}: {', '.join(p['items'])}" + (f" (if missed: {p['fallback']})"
-                                                                        if p.get("fallback") else "") for p in parts)
+                    f"{_clock_of(p['at'])}: {', '.join(p['items'])}" + self._fallback_words(p, plan) for p in parts)
             else:
                 line += ". No usual time yet: when the user places it, that becomes its placement"
             if r.snoozed_until and plan.target_date < _day_of(r.snoozed_until):

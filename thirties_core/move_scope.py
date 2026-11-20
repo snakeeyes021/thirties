@@ -16,7 +16,15 @@ Now each move in a turn is checked against what the user's words cover (``refuse
   afternoon", "shift everything", "all of it", "make room") cover any item; a stated window with a clearing word
   ("clear 1:40 to 3:10", "nothing from 2:20 till 4:10") covers the items in it;
 - **a tie**: an item the user tied to another before ("right after the kiln check", relations.py) may follow that
-  item when it moves, or one the request names.
+  item when it moves, or one the request names;
+- **a routine** (``routine_said``): words naming a routine cover its steps on the plan, and words naming one step
+  of a routine's part cover that part's other steps: a part goes together. Told that a routine's later part sat in
+  the wrong place, the model moved its steps and each one after the first was refused as unasked.
+
+A move needs no move word: a correction of where something sits ("those go after the chisels", "not at 11:20")
+asks for one as much as "move" does. Whether the words ask for a move is the model's reading; Python refuses only
+when the words are about nothing on the plan at all (``words_about_plan``), and the rules above still say which
+items they cover.
 
 Anything else stays where it is, and the refusal tells the model so and that it can ask the user in one short
 question. Sharing time with what moved, or with a fixed calendar event, is never by itself a reason to move an item.
@@ -201,6 +209,109 @@ def about(pt: "PlanTools", message: str) -> List[str]:
     return out
 
 
+def words_about_plan(pt: "PlanTools", message: Optional[str]) -> bool:
+    """The user's words this turn are about something on the plan: they name or point to an item, or a routine.
+    Then whether they ask for a move is the model's reading, and ``refused`` says which items they cover."""
+    if not message:
+        return False
+    try:
+        return bool(about(pt, message)) or bool(_routines_named(pt, message))
+    except Exception:
+        return False
+
+
+# --- a routine, or one of its parts, named ---
+
+def _routine_notes(pt: "PlanTools") -> List[Any]:
+    assistant = getattr(pt, "assistant", None)
+    if assistant is None or getattr(assistant, "_db", None) is None:
+        return []
+    try:
+        return list(assistant._routines())
+    except Exception:
+        return []
+
+
+def _on_plan(pt: "PlanTools", note: Any) -> List["EventSpan"]:
+    """The routine's steps on the day's plan."""
+    from thirties_core.step_times import key as step_key
+    steps = {step_key(t) for t in pt.assistant.routines.steps(note)}
+    return [s for s in pt.day_plan.spans if not s.is_envelope and not getattr(s, "shown_only", False)
+            and step_key(pt._title(s)) in steps]
+
+
+_ROUTINE_WORD_RE = re.compile(r"routines?", re.IGNORECASE)
+
+
+def _routines_named(pt: "PlanTools", message: str) -> List[Any]:
+    """The routines the words name: by the routine's name, or as "the routine" when only one is on the plan."""
+    from thirties_core.whole_routine import _names
+    notes = [n for n in _routine_notes(pt) if _on_plan(pt, n)]
+    named = [n for n in notes if _names(message, str(n.get("title") or ""))]
+    if not named and len(notes) == 1 and _ROUTINE_WORD_RE.search(message):
+        named = notes
+    return named
+
+
+def _runs_this_turn(pt: "PlanTools", message: str, note: Any, spans: List["EventSpan"]) -> List[Set[str]]:
+    """The routine's steps that sat together on the plan when this turn's moves began, as sets of step keys: the
+    first move of a part breaks it up, and its other steps are still that part."""
+    from thirties_core.step_times import key as step_key
+    from thirties_core.whole_routine import _parts
+    kept = getattr(pt, "_routine_runs", None)
+    if not kept or kept[0] is not message:
+        kept = (message, {})
+        pt._routine_runs = kept
+    runs = kept[1].get(note.get("id"))
+    if runs is None:
+        runs = [{step_key(pt._title(s)) for s in run} for run in _parts(spans)]
+        kept[1][note.get("id")] = runs
+    return runs
+
+
+def _remember_runs(pt: "PlanTools", message: str) -> None:
+    try:
+        for note in _routine_notes(pt):
+            _runs_this_turn(pt, message, note, _on_plan(pt, note))
+    except Exception:
+        pass
+
+
+def routine_said(pt: "PlanTools", message: str, span: "EventSpan") -> bool:
+    """The words cover this routine step: they name its routine, or a step of the part it belongs to (by the
+    routine's usual placement, and by the steps that sat together on the plan as the turn began). A step named
+    only as where something goes ("right after the chisels") covers nothing of its own part."""
+    try:
+        return _routine_said(pt, message, span)
+    except Exception:  # never in the way of the other checks
+        return False
+
+
+def _routine_said(pt: "PlanTools", message: str, span: "EventSpan") -> bool:
+    from thirties_core.step_times import key as step_key
+    title = pt._title(span)
+    mine = step_key(title)
+    named: Optional[Set[str]] = None
+    for note in _routine_notes(pt):
+        spans = _on_plan(pt, note)
+        if not any(step_key(pt._title(s)) == mine for s in spans):
+            continue
+        runs = _runs_this_turn(pt, message, note, spans)
+        if note in _routines_named(pt, message):
+            return True
+        try:
+            parts = [{step_key(str(i)) for i in p.get("items", [])}
+                     for p in pt.assistant.routines.parts_for(note)[0]]
+        except Exception:
+            parts = []
+        parts = [p for p in parts + runs if mine in p]
+        if named is None:
+            named = {step_key(t) for t in about(pt, message)}
+        if any(k != mine and k in named for part in parts for k in part):
+            return True
+    return False
+
+
 def _tied_to_moved(pt: "PlanTools", span: "EventSpan", moved_ids: Iterable[str]) -> bool:
     """The user tied this item to one that moved this turn, or that the request names (relations.py): it may
     follow."""
@@ -220,6 +331,7 @@ def refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if message is None or span.is_envelope or span.source == "calendar":
         return None
     ids = _record(pt)
+    _remember_runs(pt, message)  # before this turn's first move changes them
     if span.id in ids:
         return None
     stretches = windows(pt, message)
@@ -234,6 +346,8 @@ def refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
         return None
     named = [t for t in about(pt, message) if t != title]
     if _tied_to_moved(pt, span, list(ids) + [s.id for s in pt.day_plan.spans if pt._title(s) in named]):
+        return None
+    if routine_said(pt, message, span):
         return None
     # --- the model's reading: the item the request is about, when the words don't already name it ---
     others = {pt._title(s) for s in pt.day_plan.spans if s.id in ids and s.id != span.id}
@@ -283,4 +397,5 @@ def push_refused(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["Even
             f"(it can sit alongside, alongside=true); if room is really needed, ask the user in one short question.")
 
 
-__all__ = ["GROUP_RE", "about", "asked_to_clear", "group_said", "moved", "push_refused", "push_said", "refused", "windows"]
+__all__ = ["GROUP_RE", "about", "asked_to_clear", "group_said", "moved", "push_refused", "push_said", "refused",
+           "routine_said", "windows", "words_about_plan"]
