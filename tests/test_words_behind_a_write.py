@@ -94,5 +94,19 @@ class TestAQuestionIsNoDone(WordsCase):
         self.assertNotEqual(refused(op, "[app] can I get the paddle varnish done in 30 minutes?", None), "")
 
 
+class TestAWordForWhichKindIsAName(WordsCase):
+    """An extra word ahead of the item's verb was read as saying which kind of item."""
+
+    def test_a_shared_verb_is_no_kind(self):
+        from thirties_core.done_fit import names_something_else
+        self.assertTrue(names_something_else("the car wash is done", "Kiln wash the shelves"))
+        self.assertTrue(names_something_else("the cabinet paint is bought", "Paint the fence"))
+        self.assertTrue(names_something_else("the ash paddle is varnished, the paddle rack too", "Varnish the paddle"))
+        self.assertEqual(names_something_else("the ash paddle is varnished", "Varnish the paddle"), [])
+
+    def test_the_tick_is_refused(self):
+        self.assertHeld(self.tick("Kiln wash the shelves", "the car wash is done"))
+
+
 if __name__ == "__main__":
     unittest.main()

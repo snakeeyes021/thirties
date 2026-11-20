@@ -160,22 +160,35 @@ def names_something_else(message: Optional[str], names: Union[str, Sequence[str]
 
 # --- a word for which kind: "the ash paddle is varnished" names Varnish the paddle ---
 def only_said_which_kind(message: str, names: Sequence[str], others: Iterable[str] = ()) -> bool:
-    """A phrase touching the item has the item's own words last, and the extra words ahead of them ("ash" in "the
-    ash paddle") belong to no other planned or listed item: they tell its kind, not another thing. The model's
-    reading that the item was meant stands."""
+    """Every phrase touching the item ends in the item's own words, its head noun last ("paddle" of Varnish the
+    paddle), and the extra words ahead of them ("ash" in "the ash paddle") belong to no other planned or listed
+    item: they tell its kind, not another thing. The model's reading that the item was meant stands. A phrase that
+    ends in the item's verb rather than its head ("the car wash" beside Kiln wash the shelves) names another thing."""
     others = [o for o in others if o and o not in names]
 
     def its(w: str) -> bool:
         return any(_is_its(w, n) for n in names)
-    for phrase in _phrases(message or ""):
-        phrase = [w for w in phrase if not _shown_as(w)]
-        first = next((i for i, w in enumerate(phrase) if its(w)), None)
-        if first is None or first == 0 or not all(its(w) for w in phrase[first:]):
-            continue
-        extra = phrase[:first]
-        if not any(_is_its(w, o) for w in extra for o in others):
-            return True
-    return False
+
+    def its_head(w: str) -> bool:  # the last word of the item's name: its head noun
+        return any(_is_its(w, _head(n)) for n in names if _head(n))
+
+    def which_kind(phrase: List[str]) -> bool:
+        if not phrase or not its_head(phrase[-1]):
+            return False
+        # every place the item's own words could start, not only the first word of the item's
+        for first in range(1, len(phrase)):
+            if all(its(w) for w in phrase[first:]) and not any(_is_its(w, o) for w in phrase[:first] for o in others):
+                return True
+        return False
+    touching = [p for p in ([w for w in phrase if not _shown_as(w)] for phrase in _phrases(message or ""))
+                if any(its(w) for w in p)]
+    return bool(touching) and all(all(its(w) for w in p) or which_kind(p) for p in touching)
+
+
+def _head(title: str) -> str:
+    """The item's head noun: the last word of its name ("paddle" of Varnish the paddle, "load" of Bisque load)."""
+    words = [w for w in re.findall(r"[a-z0-9]+", re.sub(r"[‘’'`]", "", str(title or "").lower())) if not _breaks(w)]
+    return words[-1] if words else ""
 # --- end a word for which kind ---
 
 
