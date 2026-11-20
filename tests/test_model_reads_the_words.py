@@ -127,5 +127,49 @@ class TestAComplaintAboutAnItem(WordsCase):
                 self.assertEqual(len(self.planned("Varnish the paddle")), 1)
 
 
+
+class TestEverydayWaysOfSayingDone(WordsCase):
+    """A finish said in everyday words, or reported without a done word, was refused as no done said."""
+
+    def test_everyday_done_words_tick(self):
+        for title, words in (("Varnish the paddle", "squared away the paddle varnish"),
+                             ("Sand the canoe thwart", "knocked out the thwart sanding"),
+                             ("Kiln wash the shelves", "dealt with the kiln wash"),
+                             ("Varnish the paddle", "that's one less thing, the paddle varnish is in"),
+                             ("Sand the canoe thwart", "thwart sanding is out of the way")):
+            with self.subTest(words=words):
+                self.fresh_item(title)
+                self.assertWent(self.tick(title, words))
+
+    def test_a_report_without_a_done_word_ticks(self):
+        for title, words in (("Varnish the paddle", "I've given the paddle its varnish coat"),
+                             ("Sand the canoe thwart", "the canoe thwart has been sanded smooth")):
+            with self.subTest(words=words):
+                self.fresh_item(title)
+                self.assertWent(self.tick(title, words))
+
+    def test_not_ahead_asked_or_onward_still_ticks_nothing(self):
+        for title, words in (("Sand the canoe thwart", "the thwart sanding isn't squared away"),
+                             ("Varnish the paddle", "once the paddle varnish is dealt with I'll start on the oars"),
+                             ("Kiln wash the shelves", "has the kiln wash been dealt with?"),
+                             ("Sand the canoe thwart", "paddle varnish knocked out, on to the thwart sanding"),
+                             ("Varnish the paddle", "I haven't given the paddle its varnish coat")):
+            with self.subTest(words=words):
+                self.fresh_item(title)
+                self.assertHeld(self.tick(title, words))
+
+    def test_the_list_tick_goes_through_on_the_same_words(self):
+        from thirties_core.write_guard import refused
+        op = {"op": "complete", "title": "Mail the glaze samples"}
+        for words in ("the glaze samples are in", "glaze samples: squared away", "I've sent the glaze samples off"):
+            self.assertEqual(refused(op, f"[app] {words}", None), "", words)
+        for words in ("the glaze samples aren't in", "once the glaze samples are dealt with", "the glaze samples"):
+            self.assertNotEqual(refused(op, f"[app] {words}", None), "", words)
+
+    def fresh_item(self, title):
+        for s in self.planned(title):
+            s.status = s.status.PLANNED
+
+
 if __name__ == "__main__":
     unittest.main()

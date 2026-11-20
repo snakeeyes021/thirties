@@ -240,8 +240,10 @@ _SPAN_RE = re.compile(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*(?:to|
 
 
 def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str], spanned: bool = False) -> str:
-    """Why a done in this turn can't go ahead because nothing the user said is a done for it: no done word, past
-    tense or yes about it, no ask for a tick, and no reply to a question about whether it's done. "" when it can."""
+    """Why a done in this turn can't go ahead because nothing the user said is a done for it: no done word (the
+    everyday ones count: "squared away", "it's in"), no past tense or report that it happened, no yes about it, no
+    ask for a tick, and no reply to a question about whether it's done. When the words report something finished,
+    the model's reading of which item stands. "" when it can."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return ""
@@ -252,7 +254,7 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
         return ""  # a reply to a question about which item, or whether it's done: the question carries the done
     from thirties_core.done_reference import _named
     from thirties_core.started import FINISHED_RE
-    from thirties_core.write_guard import YES_RE, _done_in
+    from thirties_core.write_guard import REPORTED_RE, YES_RE, _done_in
     others = [o for o in others if o and o != title]
     for text in dict.fromkeys(t for t in (words, message) if t):
         told = [s for s in _SENTENCE_RE.findall(text) if s.strip() and not is_asking(s)]
@@ -263,7 +265,7 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
         for s in told:
             about = _named(s, title, others) or not any(_named(s, o, [x for x in others if x != o] + [title])
                                                          for o in others)
-            if about and (_done_in(s, title) or FINISHED_RE.search(s) or YES_RE.match(s)):
+            if about and (_done_in(s, title) or FINISHED_RE.search(s) or REPORTED_RE.search(s) or YES_RE.match(s)):
                 return ""
     if _TICK_ASK_RE.search(message) and not only_questions(message):
         return ""

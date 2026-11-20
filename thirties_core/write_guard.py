@@ -8,7 +8,9 @@ for them in plain words:
   "cross it off for good", "delete it", "never going to". Taking something off today ("take that off", "skip it",
   "not today") only changes today's plan and the Today note; the item stays to do on its list.
 - **Ticked done.** A tick needs the user saying it happened: a done word ("done", "finished", "paid", "sent",
-  "all set"), the item's own verb in the past ("renewed" for Renew the kiln permit), or a plain yes to a question.
+  "all set", and everyday ones like "squared away", "knocked it out", "the permit is in"), the item's own verb in
+  the past ("renewed" for Renew the kiln permit), a report that it happened ("I've written them up"), or a plain
+  yes to a question.
   Words that say something is under way or merely all right ("the kiln is firing", "it's running", "the glaze is
   fine") are never a done, for the item they're said about, however loosely the words point to it. Neither are
   words telling the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor
@@ -39,7 +41,30 @@ DONE_WORDS_RE = re.compile(
     r"\b(?:done|finished|finish(?:ed)? (?:it|that|them)|complete[ds]?|paid|sent|submitted|mailed|posted|returned|"
     r"bought|handed in|dropped off|picked up|signed|renewed|booked|fixed|repaired|cleaned|ticked|checked off|"
     r"crossed off|all set|taken care of|took care of|sorted|wrapped up|over with|handled|did (?:it|that|them)|"
-    r"got (?:it|that|them) done)\b", re.IGNORECASE)
+    r"got (?:it|that|them) done|"
+    # the everyday ways of saying it's finished
+    r"one less thing|knocked (?:it |that |them |those |\w+ )?out|squared away|dealt with|sorted out|"
+    r"(?:all|it'?s|that'?s|we'?re|i'?m) wrapped|that'?s a wrap|(?:it'?s|that'?s|is) in the bag|"
+    r"nailed (?:it|that|them)|(?:it'?s|that'?s|they'?re|is|are|now) out of the way|off my (?:plate|list|back)|"
+    r"(?:crossed|ticked) (?:it|that|them|those) off|put to bed|finished up|over and done)\b|"
+    # "the kiln permit is in", said as the end of what's said about it
+    r"\b(?:it'?s|its|that'?s|they'?re|is|are) in\s*[.!]*\s*$|[\u2713\u2714\u2611\u2705]", re.IGNORECASE)
+# a report that something happened, in the perfect ("I've written the glaze notes", "the parcel has gone") or an
+# everyday irregular past: the model's reading of a done in words like these stands. Not said as could, would or
+# will have; "I've started", "it's left" and "I've planned" aren't reports of a finish.
+_PARTICIPLES = ("written|sent|gone|given|done|seen|spoken|bought|brought|built|sold|told|won|swept|hung|wound|driven|"
+                "thrown|taken|made|eaten|drunk|paid|laid|fed|found|held|kept|lent|met|ridden|shaken|sewn|sown|sung|"
+                "spun|stuck|struck|swum|torn|woven|worn|dug|ground|bound|fought|taught|caught|sought|stood|swung")
+_NOT_REPORTED = ("started", "scheduled", "planned", "needed", "wanted", "supposed", "tired", "bored", "kicked", "turned",
+                 "asked", "wondered", "guessed", "worried", "listed", "added", "moved", "pushed", "postponed", "decided",
+                 "meant", "hoped", "tried", "used", "delayed")
+REPORTED_RE = re.compile(
+    r"(?<!would )(?<!could )(?<!should )(?<!might )(?<!must )(?<!will )(?<!'ll )(?<!'d )"
+    r"\b(?:'ve|'s|have|has|had)\s+(?:just\s+|already\s+|finally\s+|now\s+|all\s+)?(?:been\s+)?"
+    r"(?:" + _PARTICIPLES + r"|(?!(?:" + "|".join(_NOT_REPORTED) + r")\b)[a-z]{3,}ed)\b|"
+    r"\b(?:wrote|spoke|built|sold|drove|gave|threw|swept|dug|wove|sewed|fought|taught|caught|swung|hung|wound|"
+    r"bound|ground|tore|wore|rode|shook|sang|swam|spun|struck|stuck|bought|brought|ate|drank|lent|met|won)\b",
+    re.IGNORECASE)
 # a plain yes, answering a question the user was asked
 YES_RE = re.compile(r"^\W*(?:yes|yep|yeah|yup|yea|correct|right|exactly|that one|that'?s (?:it|the one)|sure)\b",
                     re.IGNORECASE)
@@ -222,7 +247,8 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
 
 
 def says_done(message: Optional[str], title: str, others=(), strict: bool = False) -> bool:
-    """Whether the user's words say this item happened: a done word or its verb in the past, said about it (or in a
+    """Whether the user's words say this item happened: a done word (everyday ones too: "squared away", "that's one
+    less thing") or its verb in the past, a report that it happened ("I've written them up"), said about it (or in a
     clause naming no other item), or a plain yes; and nothing about it says it's only under way, merely all right,
     or not done. ``strict``: only done words and the item's own verb count (any past tense about the item counts
     otherwise), and a question says nothing ("how come the rent got moved?")."""
@@ -235,11 +261,13 @@ def says_done(message: Optional[str], title: str, others=(), strict: bool = Fals
     if strict:
         message = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
     clauses = [c for c in _CLAUSE_RE.split(message) if c and c.strip()]
-    if any(_about(c, title, others) and (_done_in(c, title) or (not strict and FINISHED_RE.search(c)))
+    if any(_about(c, title, others) and (_done_in(c, title) or (not strict and (FINISHED_RE.search(c)
+                                                                                or REPORTED_RE.search(c))))
            for c in clauses):
         return True
     free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
-    return any(_done_in(c, title) for c in free) or bool(YES_RE.match(message))
+    return any(_done_in(c, title) or (not strict and REPORTED_RE.search(c)) for c in free) \
+        or bool(YES_RE.match(message))
 
 
 def _is_today(db: Any, note_id: str) -> bool:
@@ -290,5 +318,5 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     return ""
 
 
-__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "STATE_RE", "asks_to_drop", "says_done",
+__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "REPORTED_RE", "STATE_RE", "asks_to_drop", "says_done",
            "state_not_done", "told_not_to_tick", "refused"]
