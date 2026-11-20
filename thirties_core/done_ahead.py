@@ -23,8 +23,8 @@ from typing import Iterable, Optional
 _LEAD_RE = re.compile(r"\b(?:once|when|whenever|as soon as|soon as|the (?:moment|minute|second|instant)|after|if|"
                       r"until|till|by the time|before)\b", re.IGNORECASE)
 # said in the present after such a word: still to come ("once they are glazed", "when I finish them")
-_PRESENT_RE = re.compile(r"\b(?:is|are|am|be|get|gets|getting|finish|finishes|wrap|wraps|complete|completes)\b|"
-                         r"\w'(?:s|re)\b", re.IGNORECASE)
+_PRESENT_RE = re.compile(r"\b(?:is|are|am|be|get|gets|getting|finish|finishes|wrap|wraps|complete|completes|have|has)\b|"
+                         r"\w'(?:s|re|ve)\b", re.IGNORECASE)
 # said in the past: a report ("after the paddles were waxed", "when I finished them")
 _PAST_RE = re.compile(r"\b(?:was|were|had|did|got|went|came)\b|"
                       r"\b(?:i|we|you|they)\s+(?:\w+ly\s+)?(?:[a-z]{3,}ed|wrapped)\b", re.IGNORECASE)
@@ -47,7 +47,7 @@ def said_ahead(message: Optional[str], title: str, others: Iterable[str] = ()) -
         return ""
     from thirties_core.started import _SENTENCE_RE
     from thirties_core.started import FINISHED_RE
-    from thirties_core.write_guard import _CLAUSE_RE, _about, _done_in
+    from thirties_core.write_guard import REPORTED_RE, _CLAUSE_RE, _about, _done_in
     others = [o for o in others if o and o != title]
     sentences = [s for s in _SENTENCE_RE.findall(_plain(message)) if s.strip() and not s.rstrip().endswith("?")]
 
@@ -60,7 +60,7 @@ def said_ahead(message: Optional[str], title: str, others: Iterable[str] = ()) -
         return _about(text, title, others) if named_anywhere else not names_other(text)
 
     def done_in(text: str) -> bool:  # a done word goes with it: "should be fine" promises nothing
-        return _done_in(text, title) or bool(FINISHED_RE.search(text))
+        return _done_in(text, title) or bool(FINISHED_RE.search(text)) or bool(REPORTED_RE.search(text))
 
     for sentence in sentences:
         for lead in _LEAD_RE.finditer(sentence):

@@ -21,11 +21,17 @@ STARTED_RE = re.compile(
     r"about|still)\b|\b(?:going|running|started|starting|begun|beginning|heading|on my way|omw|about to|"
     r"working on|in progress|underway|under way|kicked off|turned on|put on|now doing)\b|\b[a-z]{3,}ing now\b|"
     r"\bin the [a-z]+ now\b", re.IGNORECASE)
+# past tenses that aren't the thing happening: a start or a plan, or giving up on it, putting it off or grumbling
+# about it ("I've skipped the glaze test", "the permit has bugged me all week", "I've dreaded the call")
+NOT_A_FINISH = ("started", "scheduled", "planned", "needed", "wanted", "supposed", "tired", "bored", "kicked", "turned",
+                "skipped", "bugged", "bothered", "annoyed", "irked", "nagged", "dreaded", "feared", "hated", "stalled",
+                "failed", "abandoned", "missed", "avoided", "dodged", "paused", "postponed", "delayed", "ignored",
+                "neglected", "struggled", "procrastinated")
 # a clause saying it's over
 FINISHED_RE = re.compile(
     r"\b(?:done|finished|finish|complete|completed|did|ate|fed|over with|wrapped up|handled|taken care of|"
-    r"took care of|got out|out of the|back from|back home|went|ran|took|had|made)\b|"
-    r"\b(?!(?:started|scheduled|planned|needed|wanted|supposed|tired|bored|kicked|turned)\b)[a-z]{3,}ed\b",
+    r"took care of|got out|out of the(?! way of\b)|back from|back home|went|ran|took|had|made)\b|"
+    r"\b(?!(?:" + "|".join(NOT_A_FINISH) + r")\b)[a-z]{3,}ed\b",
     re.IGNORECASE)
 # a clause saying it hasn't happened ("not cooking yet", "I haven't cooked", "it is NOT done")
 NOT_YET_RE = re.compile(r"\b(?:not|never|no|yet to|haven'?t|hasn'?t|didn'?t|isn'?t|wasn'?t|aren'?t)\b|n't\b",

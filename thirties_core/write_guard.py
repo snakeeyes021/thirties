@@ -44,28 +44,38 @@ DONE_WORDS_RE = re.compile(
     r"crossed off|all set|taken care of|took care of|sorted|wrapped up|over with|handled|did (?:it|that|them)|"
     r"got (?:it|that|them) done|"
     # the everyday ways of saying it's finished
-    r"one less thing|knocked (?:it |that |them |those |\w+ )?out|squared away|dealt with|sorted out|"
+    r"one less thing|knocked (?:it |that |them |those |this |the (?:\w+ ){1,3})?out|squared away|sorted out|"
+    # dealt with, but not still to be, nor done badly ("dealt with it badly")
+    r"(?<!to be )(?<!be )dealt with(?![^.!?\n]{0,30}\b(?:badly|poorly|wrong(?:ly)?|later)\b)|"
     r"(?:all|it'?s|that'?s|we'?re|i'?m) wrapped|that'?s a wrap|(?:it'?s|that'?s|is) in the bag|"
-    r"nailed (?:it|that|them)|(?:it'?s|that'?s|they'?re|is|are|now) out of the way|off my (?:plate|list|back)|"
+    r"nailed (?:it|that|them)|(?:it'?s|that'?s|they'?re|is|are|now) out of the way(?!\s+of\b)|"
+    r"off my (?:plate|list|back)|"
     r"(?:crossed|ticked) (?:it|that|them|those) off|put to bed|finished up|over and done)\b|"
     # "the kiln permit is in", said as the end of what's said about it
     r"\b(?:it'?s|its|that'?s|they'?re|is|are) in\s*[.!]*\s*$|[\u2713\u2714\u2611\u2705]", re.IGNORECASE)
 # a report that something happened, in the perfect ("I've written the glaze notes", "the parcel has gone") or an
 # everyday irregular past: the model's reading of a done in words like these stands. Not said as could, would or
-# will have; "I've started", "it's left" and "I've planned" aren't reports of a finish.
-_PARTICIPLES = ("written|sent|gone|given|done|seen|spoken|bought|brought|built|sold|told|won|swept|hung|wound|driven|"
-                "thrown|taken|made|eaten|drunk|paid|laid|fed|found|held|kept|lent|met|ridden|shaken|sewn|sown|sung|"
-                "spun|stuck|struck|swum|torn|woven|worn|dug|ground|bound|fought|taught|caught|sought|stood|swung")
-_NOT_REPORTED = ("started", "scheduled", "planned", "needed", "wanted", "supposed", "tired", "bored", "kicked", "turned",
-                 "asked", "wondered", "guessed", "worried", "listed", "added", "moved", "pushed", "postponed", "decided",
-                 "meant", "hoped", "tried", "used", "delayed")
+# will have; "I've started", "it's left" and "I've planned" aren't reports of a finish, and neither is giving up on
+# it, putting it off or grumbling about it ("I've given up on it", "it has bugged me", "I've skipped it").
+from thirties_core.started import NOT_A_FINISH  # noqa: E402  (started.py imports nothing of this module's)
+_PARTICIPLES = (r"written|sent|gone|given(?!\s+(?:up|in)\b)|done|seen|spoken|bought|brought|built|sold|told|won|"
+                "swept|hung|wound|driven|thrown|taken|made|eaten|drunk|paid|laid|fed|found|held|kept|lent|met|ridden|"
+                "shaken|sewn|sown|sung|spun|struck|swum|torn|woven|worn|dug|ground|bound|fought|taught|caught|sought|"
+                "stood|swung")
+_NOT_REPORTED = tuple(dict.fromkeys(NOT_A_FINISH + (
+    "asked", "wondered", "guessed", "worried", "listed", "added", "moved", "pushed", "postponed", "decided", "meant",
+    "hoped", "tried", "used", "delayed")))
 REPORTED_RE = re.compile(
     r"(?<!would )(?<!could )(?<!should )(?<!might )(?<!must )(?<!will )(?<!'ll )(?<!'d )"
     r"\b(?:'ve|'s|have|has|had)\s+(?:just\s+|already\s+|finally\s+|now\s+|all\s+)?(?:been\s+)?"
     r"(?:" + _PARTICIPLES + r"|(?!(?:" + "|".join(_NOT_REPORTED) + r")\b)[a-z]{3,}ed)\b|"
-    r"\b(?:wrote|spoke|built|sold|drove|gave|threw|swept|dug|wove|sewed|fought|taught|caught|swung|hung|wound|"
-    r"bound|ground|tore|wore|rode|shook|sang|swam|spun|struck|stuck|bought|brought|ate|drank|lent|met|won)\b",
-    re.IGNORECASE)
+    r"\b(?:wrote|spoke|built|sold|drove|gave(?!\s+(?:up|in)\b)|threw|swept|dug|wove|sewed|fought|taught|caught|"
+    r"swung|hung|wound|bound|ground|tore|wore|rode|shook|sang|swam|spun|struck|bought|brought|ate|drank|lent|met|"
+    r"won)\b", re.IGNORECASE)
+# said, then taken back: "the permit is in, or so I thought", "I thought it was done"
+_MISTAKEN_RE = re.compile(r"\b(?:or so i (?:thought|was told|hoped)|so i thought|i thought (?:it|that|they|so)\b|"
+                          r"turns out (?:it|they|that)(?:'s| is| was| are| were)? ?n[o']t|apparently not)\b",
+                          re.IGNORECASE)
 # a plain yes, answering a question the user was asked
 YES_RE = re.compile(r"^\W*(?:yes|yep|yeah|yup|yea|correct|right|exactly|that one|that'?s (?:it|the one)|sure)\b",
                     re.IGNORECASE)
@@ -250,6 +260,13 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
     told_sentences = [t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t)]
     told = " ".join(told_sentences)
+    # --- said, then taken back ("the permit is in, or so I thought"): about it, or naming no other item ---
+    for s in told_sentences:
+        if _MISTAKEN_RE.search(s) and (_about(s, title, others) or not any(
+                _about(s, o, [x for x in others if x != o] + [title]) for o in others)):
+            return (f"The user said they only thought {title} was finished, so it isn't marked done. Leave it "
+                    "open; it's done when they say it is.")
+    # --- end taken back ---
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
     # --- an item named only as when something else stops is no done; what a clause says is about its head
     # ("working until the kiln check": the working) (not_about_it.py) ---
@@ -296,8 +313,9 @@ def says_done(message: Optional[str], title: str, others=(), strict: bool = Fals
            for c in clauses):
         return True
     free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
-    return any(_done_in(c, title) or (not strict and REPORTED_RE.search(c)) for c in free) \
-        or bool(YES_RE.match(message))
+    # a report in a clause that doesn't name the item counts only when it points back ("I've mailed it")
+    return any(_done_in(c, title) or (not strict and REPORTED_RE.search(c) and _POINTER_RE.search(c))
+               for c in free) or bool(YES_RE.match(message))
 
 
 def _is_today(db: Any, note_id: str) -> bool:
