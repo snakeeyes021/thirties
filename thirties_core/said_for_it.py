@@ -306,8 +306,11 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
         # a done said once for several things in one sentence ("the mugs and the gunwales are done"): the sentence
         # naming it carries it (what only began, or comes next, was refused before this). A report without a done
         # word counts where it names the item or points back to it; nothing counts once it's taken back.
+        # a routine said done as a whole ("wrapped up the kiln check, all parts") is said of each of its steps
+        from thirties_core.whole_routine import _names as names_routine, routine_meant
+        whole = routine_meant(pt, message, shown, title)
         for s in stated:
-            named = _named(s, title, others)
+            named = _named(s, title, others) or bool(whole and names_routine(s, whole))
             about = named or not any(_named(s, o, [x for x in others if x != o] + [title]) for o in others)
             reported = bool(REPORTED_RE.search(s)) and (named or bool(_POINTER_RE.search(s)))
             if about and not _MISTAKEN_RE.search(s) and (_done_in(s, title) or FINISHED_RE.search(s) or reported
