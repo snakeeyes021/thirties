@@ -539,6 +539,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         reply = self._own_up(turn_start, reply, changes_before, outcomes_before)
         reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
+        reply = self._not_holding(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
+        reply = self._tidy(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before), changes_before)
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
             if m.get("role") == "assistant" and m.get("hidden"):
@@ -600,9 +602,11 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
     def _rounds(self, limit: int, changes_before: int, outcomes_before: int) -> str:
         """Model rounds until it has replied: each round's calls run, read-only lookups and refusals get a
         follow-up, and a reply that claims what didn't happen is sent back once. Every round of a turn, retries
-        included, goes through here, so no call escapes these checks. Returns the reply."""
+        included, goes through here, so no call escapes these checks. A last round that made calls with only a line
+        saying it's looking beside them gets one round more to answer. Returns the reply."""
         reply = ""
-        for round_index in range(limit):
+        from thirties_core.holding_lines import only_holds  # a lookup is always answered (holding_lines.py)
+        for round_index in range(limit + 1):
             response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
             content = response.get("content", "") or ""
             calls = response.get("tool_calls", []) or []
@@ -636,7 +640,9 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
                 break
             needs_follow_up = (any(c.get("name") in READ_ONLY_TOOLS for c in calls)
                                or any(r.startswith(NOT_DONE) for r in results) or not content.strip())
-            if not needs_follow_up or round_index == limit - 1:
+            # the last round looked something up and only said it would: one more, to answer from the result
+            unanswered = only_holds(content)
+            if not needs_follow_up or round_index == limit or (round_index == limit - 1 and not unanswered):
                 break
             if any(r.startswith(NOT_DONE) for r in results):
                 reply = ""  # the draft was written before the refusal; don't show it
@@ -816,6 +822,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         reply = self._own_up_baseline(turn_start, reply)
         reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
         reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
+        reply = self._not_holding(turn_start, reply, self._one_more_round)  # holding_lines.py
+        reply = self._tidy(turn_start, reply, self._one_more_round, changes_before)  # clean_prose.py
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply
@@ -1161,11 +1169,7 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         from thirties_core.unasked import mark as unasked  # a move nobody asked for isn't announced (unasked.py)
 
         def problems(text: str):
-            return (unasked(self, turn_start, self._unmade_moves(turn_start, text)
-                            + unmade_time_claims(self, turn_start, text)),
-                    self._unmade_dones(text), self._wrong_times(text),
-                    self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
-                    reply_checks.unkept_promises(self, turn_start, text))
+            return self._reply_problems(turn_start, text, now)
         unmade, undone, wrong, kept, talk, promised = problems(reply)
         if not (unmade or undone or wrong or kept or talk or promised):
             return reply
@@ -1216,6 +1220,18 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         return out
         # --- end in place ---
 
+    def _reply_problems(self, turn_start: int, text: str, now) -> tuple:
+        """What a reply says that disagrees with the turn (_moves_made): (unmade moves, undone dones, wrong times,
+        items not taken off, how it talks, unkept promises)."""
+        from thirties_core import reply_checks
+        from thirties_core.time_claims import unmade_time_claims
+        from thirties_core.unasked import mark as unasked
+        return (unasked(self, turn_start, self._unmade_moves(turn_start, text)
+                        + unmade_time_claims(self, turn_start, text)),
+                self._unmade_dones(text), self._wrong_times(text),
+                self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
+                reply_checks.unkept_promises(self, turn_start, text))
+
     def _no_unseen_correction(self, turn_start: int, reply: str, retry) -> str:
         """A reply that corrects a message the user never saw (a draft sent back this turn: "I need to correct my
         last message", "my first attempt didn't take") gets one fresh rewrite; if it still opens so, the opening
@@ -1229,7 +1245,62 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         fresh = (retry() or "").strip()
         if fresh and not reply_checks.unseen_corrections(self, turn_start, fresh):
             return fresh
-        return reply_checks.strip_corrections(fresh or reply)
+        stripped = reply_checks.strip_corrections(fresh or reply)
+        from thirties_core.clean_prose import introduced  # a cut that reads broken: the model's rewrite as written
+        return fresh if fresh and introduced(stripped, [fresh]) else stripped
+
+    # --- never only "checking…", and clean prose after Python's edits (holding_lines.py, clean_prose.py) ---
+
+    def _not_holding(self, turn_start: int, reply: str, retry) -> str:
+        """A reply that only says it's looking something up goes back once: look it up now and answer from it, in
+        this turn. Its answer is checked like any reply (_moves_made). If it still only announces, the user hears
+        plainly that it couldn't be looked up; a holding line beside a real answer goes, whole."""
+        from thirties_core import holding_lines
+        if not holding_lines.holds(reply):
+            return reply
+        if not holding_lines.only_holds(reply):
+            return holding_lines.without(reply) or reply
+        logger.warning("[FrontierBrain] Reply only announces a lookup; asking for the answer: %r", reply[:200])
+        self._check(holding_lines.CHECK)
+        fresh = (retry() or "").strip()
+        if fresh and not holding_lines.only_holds(fresh):
+            fresh = self._moves_made(turn_start, fresh, retry)
+            if not holding_lines.only_holds(fresh):
+                return holding_lines.without(fresh) or fresh
+        return holding_lines.COULDNT
+
+    def _written(self, turn_start: int) -> List[str]:
+        """Everything the model wrote this turn, drafts included."""
+        return [str(m.get("content") or "") for m in self.messages[turn_start:]
+                if m.get("role") == "assistant" and str(m.get("content") or "").strip()]
+
+    def _tidy(self, turn_start: int, reply: str, retry, changes_before: int) -> str:
+        """The last check before a reply goes: if Python's edits left it reading broken (a sentence starting in
+        lower case, a stranded colon, a list without its lead-in) where the model's own words weren't, the model
+        rewrites it whole. A rewrite that still disagrees with the turn, or only announces a lookup, isn't used:
+        the broken sentences go instead, whole."""
+        from thirties_core import clean_prose
+        from thirties_core.holding_lines import only_holds
+        written = self._written(turn_start)
+        broken = clean_prose.introduced(reply, written)
+        if not broken:
+            return reply
+        logger.warning("[FrontierBrain] An edit left the reply broken (%s): %r", broken, reply[:300])
+        self._check(clean_prose.rewrite_check(broken) + " It reads now: " + reply)
+        fresh = (retry() or "").strip()
+        try:
+            now = self.tools._now()
+        except Exception:
+            now = None
+        if fresh and not only_holds(fresh) and not clean_prose.introduced(fresh, written) \
+                and not any(self._reply_problems(turn_start, fresh, now)):
+            return fresh
+        out = clean_prose.cut_broken(reply, broken)
+        if out.strip() and not clean_prose.introduced(out, written):
+            return out
+        return "Done." if self.tools.successful_changes > changes_before else self.UNCHANGED_LINE
+
+    # --- end never only "checking…", clean prose ---
 
     UNCHANGED_LINE = "I wasn't able to change your schedule just now. Could you tell me again what you'd like moved or added?"
 
@@ -1254,21 +1325,32 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         return self.UNCHANGED_LINE
 
     def _one_more_round(self) -> str:
-        """The model's retry (the baseline turn's), its calls run: a second round when the first only made calls, so
-        the reply that follows them is the one kept."""
+        """The model's retry (the baseline turn's), its calls run: another round when one only made calls, looked
+        something up, or was refused, so the reply that answers the results is the one kept. Words written next to
+        a lookup are a draft ("Checking why…"): the answer comes after the result, in the same turn."""
         content = ""
-        for _ in range(2):
+        for _ in range(3):
             response = self.inference_engine.chat(messages=self._for_model(), tools=TOOL_SPECS)
             self.messages.append(response)
             calls = response.get("tool_calls", []) or []
+            results = []
             for call in calls:
                 with model_call():  # the model's own call (change_scope.py)
                     output = self.tools.execute(call.get("name"), call.get("arguments", {}))
+                results.append(str(output))
                 self.messages.append({"role": "tool", "tool_call_id": call.get("id", "call"),
                                       "name": call.get("name"), "content": output})
-            content = str(response.get("content") or "")
-            if content.strip() or not calls:
+            said = str(response.get("content") or "")
+            if said.strip() or not calls:
+                content = said
+            if not calls:
                 break
+            refused = any(r.startswith(NOT_DONE) for r in results)
+            if not (said.strip() and not refused and not any(c.get("name") in READ_ONLY_TOOLS for c in calls)):
+                if refused:
+                    content = ""  # written before the refusal: not what's true now
+                continue
+            break
         return content
 
     _META_RE = re.compile(

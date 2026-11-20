@@ -7,8 +7,8 @@ outright, where the fix is a fact Python has, or names the problem for one rewri
 - **The time now** is said as it is: "it's 7:30 right now" at 7:44 becomes "it's 7:44 right now" (fixed outright).
 - **No made-up limits**: the assistant never says it's "text only" or can't see or change what it can (the user's
   plan, lists, notes or calendar).
-- **No made-up explanations**: asked why something on the plan is as it is, the answer comes from the item's record
-  (item_history), not from a story.
+- **No made-up explanations**: asked why something on the plan is as it is, the model is told with the message
+  where the item's record is (why_notes.py); that's a note for its one answer, not a rewrite.
 - **It decides**: told to pick ("you pick", "up to you"), or asked to plan, it
   doesn't hand back a choice of times or options without changing anything.
 - **Its notes are its own**: it never talks about its workings (its tools, system, internal lists or dates), as if
@@ -17,7 +17,8 @@ outright, where the fix is a fact Python has, or names the problem for one rewri
   drop it, unless the user brought dropping up.
 - **The moon** is as computed (sky.py), never guessed.
 
-A reply that still has a made-up limit or talk of the workings after its rewrite loses those sentences.
+A reply that still has a made-up limit or talk of the workings after its rewrite loses those sentences. Every cut
+here takes whole sentences, and a sentence introducing a list takes the list with it (clean_prose.py).
 """
 
 from __future__ import annotations
@@ -50,11 +51,6 @@ WORKINGS_RE = re.compile(
 WHY_RE = re.compile(r"\bwhy\b|\bhow come\b|\bwhat happened (?:to|with)\b|\bwho (?:moved|removed|marked|changed|put|"
                     r"took)\b|\bwhere did\b.*\bgo\b", re.IGNORECASE)
 
-# a reply giving a cause: where a made-up story would be
-EXPLAINS_RE = re.compile(r"\b(?:because|since|so that|that's why|that is why|due to|the reason|was (?:moved|pushed|"
-                         r"removed|marked|skipped|split|dropped|changed)|got (?:moved|pushed|removed|marked|skipped|split|"
-                         r"dropped)|you (?:asked|said|told me|wanted)|I (?:moved|pushed|removed|marked|skipped|split|"
-                         r"dropped|changed))\b", re.IGNORECASE)
 DELEGATE_RE = re.compile(r"\byou (?:pick|choose|decide|sort it|figure it out)\b|\byour (?:call|job|choice)\b|"
                          r"\bup to you\b|\bwhatever(?:'s| is) best\b|\bjust (?:pick|put|do|schedule|plan|choose|decide|"
                          r"slot|fit|make)\b|\bpick (?:one|the best|for me)\b|\bfigure it out\b|\bsort (?:it|the|out)\b|"
@@ -248,21 +244,19 @@ def unseen_corrections(brain: Any, turn_start: int, reply: str) -> List[str]:
 
 def strip_corrections(reply: str) -> str:
     """Cut the correction openings ("I need to correct my last message:") and the sentences about the unseen draft
-    or attempt; what's true now stays."""
-    lines = []
-    for line in (reply or "").split("\n"):
-        kept = []
-        for s in re.split(r"(?<=[.!?])\s+", line):
-            rest = _OPENER_RE.sub("", s, count=1)
-            if rest != s:
-                s = rest[:1].upper() + rest[1:] if rest else ""
-            if s and CORRECTION_RE.search(s):
-                continue
-            if s:
-                kept.append(s)
-        if kept or not line.strip():
-            lines.append(" ".join(kept))
-    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    or attempt; what's true now stays. Whole sentences go, with the list one introduces; an opening that only
+    announced a list leaves it (and a caller checks the result still reads whole: clean_prose.introduced)."""
+    from thirties_core.clean_prose import edit
+
+    def new_for(s: str) -> Optional[str]:
+        rest = _OPENER_RE.sub("", s, count=1)
+        if rest != s:
+            return "" if not rest.strip() or CORRECTION_RE.search(rest) else rest
+        return "" if CORRECTION_RE.search(s) else None
+
+    def opener_only(s: str) -> bool:
+        return bool(_OPENER_RE.match(s)) and not _OPENER_RE.sub("", s, count=1).strip()
+    out, _ = edit(reply or "", new_for, keeps_list=opener_only)
     return out or reply
 
 
@@ -325,12 +319,10 @@ NOTHING_CHANGED = "I couldn't change that just now."
 
 def drop_sentences(reply: str, sentences: List[str]) -> str:
     """The reply without these sentences (a promise Python can't keep), lines kept; a reply that was nothing else
-    says plainly that nothing changed, never the claim."""
-    out = reply
-    for s in sentences:
-        out = out.replace(s, "")
-    out = re.sub(r"[ \t]+\n", "\n", re.sub(r"  +", " ", out))
-    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    says plainly that nothing changed, never the claim. Whole sentences go, with the list one introduces."""
+    from thirties_core.clean_prose import cut
+    gone = {s.strip() for s in sentences if s and s.strip()}
+    out = cut(reply or "", lambda s: s.strip() in gone)
     return out or NOTHING_CHANGED
 
 
@@ -345,10 +337,7 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     if any(WORKINGS_RE.search(s) for s in lines):
         out.append("it talks about how Thirties works inside: say what you keep as your own notes (\"I've noted…\", "
                    "\"I'll remember…\") and leave the workings out")
-    if said and WHY_RE.search(said) and _named_in(said, brain) and any(EXPLAINS_RE.search(s) for s in lines) \
-            and not _called(brain, turn_start, "item_history"):
-        out.append(f"they asked why about {', '.join(_named_in(said, brain)[:2])}: call item_history first and answer "
-                   "only from what it records; if it doesn't say, say you don't know")
+    # asked why about an item: the model hears where its record is with the message, never a rewrite (why_notes.py)
     from thirties_core.turn_guards import is_question
     delegated = bool(said and DELEGATE_RE.search(said))
     asked_to_decide = delegated or bool(said and not is_question(said))
@@ -408,13 +397,9 @@ def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
 
 def last_resort(reply: str) -> str:
     """After its rewrite, a reply that still claims a made-up limit or talks about the workings loses those
-    sentences (never the whole reply)."""
-    lines = []
-    for line in (reply or "").split("\n"):
-        kept = [s for s in re.split(r"(?<=[.!?])\s+", line) if not (LIMIT_RE.search(s) or WORKINGS_RE.search(s))]
-        if kept or not line.strip():
-            lines.append(" ".join(kept))
-    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    sentences (never the whole reply), and a list one introduces with it."""
+    from thirties_core.clean_prose import cut
+    out = cut(reply or "", lambda s: bool(LIMIT_RE.search(s) or WORKINGS_RE.search(s)))
     return out or reply
 
 

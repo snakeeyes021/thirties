@@ -573,6 +573,12 @@ class ConversationManager:
                 "(The user's message asks for quiet, and Thirties has already set it: " + quiet_asks.describe(quiet)
                 + " No call is needed for it.)")})
         # --- end ask for quiet ---
+        # --- asked why about an item: where its record is, for the model's one answer (why_notes.py) ---
+        from thirties_core import why_notes
+        why = why_notes.note(self.tools, merged)
+        if why:
+            self.brain.messages.append({"role": "user", "content": why, "hidden": True})
+        # --- end asked why ---
         morning_now = self._morning_in_turn()  # the first message of the day: its reply is the morning (A1)
         changes_before = self.tools.successful_changes
         try:

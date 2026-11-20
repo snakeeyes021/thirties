@@ -162,11 +162,13 @@ class TestTheReplyTalksRight(ConversationTestCase):
         self.assertEqual(out, "The fence is at 5.")
 
     def test_no_made_up_explanations(self):
-        self.engine.set_next_response(reply("It's at 5 because you asked for it after work."))
+        # where the item's record is comes with the message, as a note; the answer isn't sent back (why_notes.py)
         self.engine.set_next_response(reply('CALL item_history {"item": "Paint the fence"}'))
         self.engine.set_next_response(reply("It was added this morning at 5; nothing records why."))
         out = self.manager.send_user_message("why is painting the fence at 5?")
-        self.assertIn("call item_history first", self.check_sent())
+        self.assertTrue(any("item_history has the record for Paint the fence" in str(m.get("content") or "")
+                            for m in self.engine.call_history[0] if m.get("role") == "user"))
+        self.assertFalse(any(self.manager.brain._is_check(m) for m in self.manager.messages))
         self.assertEqual(out, "It was added this morning at 5; nothing records why.")
 
     def test_told_to_pick_it_picks(self):

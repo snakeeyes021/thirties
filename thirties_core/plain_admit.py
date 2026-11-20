@@ -97,22 +97,10 @@ def from_fact(fact: str) -> str:
 
 def replace_sentences(reply: str, new_for: Callable[[str], Optional[str]]) -> Tuple[str, bool]:
     """The reply with each sentence ``new_for`` gives a replacement for replaced in place ("" drops it), lines and
-    the rest kept; and whether anything was replaced."""
-    changed = False
-    lines = []
-    for line in (reply or "").split("\n"):
-        kept = []
-        for part in _SENTENCE_RE.split(line):
-            new = new_for(part) if part.strip() else None
-            if new is None:
-                kept.append(part)
-            else:
-                changed = True
-                if new:
-                    kept.append(new)
-        lines.append(" ".join(kept).rstrip())
-    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    return out, changed
+    the rest kept; and whether anything was replaced. Whole sentences only: one that introduces a list takes the
+    list with it (clean_prose.py)."""
+    from thirties_core.clean_prose import edit
+    return edit(reply, new_for)
 
 
 _PARTS_RE = re.compile(r",|;|\band\b|\bthen\b|\bplus\b", re.IGNORECASE)
@@ -127,8 +115,11 @@ def _true_part(sentence: str, failed: Sequence[str], others: Sequence[str], clai
     kept = [p for p in parts if not any(t and mentions(p, t, others) for t in failed)]
     if not kept or len(kept) == len(parts):
         return ""
-    text = " and ".join(p.strip() for p in kept if p.strip()).rstrip(" .!,;")
-    return f"{text}." if text and claim_re.search(text) else ""
+    text = " and ".join(p.strip() for p in kept if p.strip()).rstrip(" .!,;:")
+    if not text or not claim_re.search(text) or not text[:1].isupper():  # never a fragment ("the rest slid along")
+        return ""
+    from thirties_core.clean_prose import problems
+    return "" if problems(f"{text}.") else f"{text}."
 
 
 def _title_of(fact: str) -> str:
@@ -140,6 +131,7 @@ def say_in_place(reply: str, facts_of: Callable[[str], List[str]], claim_re: "re
                  titles: Sequence[str] = ()) -> Tuple[str, bool]:
     """The reply with each sentence the checks find false (``facts_of`` gives its facts) replaced by its true part
     and the plain sentences for what didn't change; whether anything was replaced."""
+    from thirties_core.clean_prose import cap
     from thirties_core.plain_corrections import in_app_words
     titles = list(titles)
 
@@ -147,7 +139,8 @@ def say_in_place(reply: str, facts_of: Callable[[str], List[str]], claim_re: "re
         facts = facts_of(sentence)
         if not facts:
             return None
-        lines = list(dict.fromkeys(in_app_words([x for x in (from_fact(f) for f in facts) if x], titles)))
+        lines = list(dict.fromkeys(cap(x) for x in in_app_words([x for x in (from_fact(f) for f in facts) if x],
+                                                                 titles)))
         keep = _true_part(sentence, [_title_of(f) for f in facts], titles, claim_re)
         return " ".join(([keep] if keep else []) + lines)
     return replace_sentences(reply, new_for)
@@ -158,6 +151,7 @@ def say_failed(tools: Any, reply: str, items: Sequence[Tuple[str, str]], claim_r
     """For each item (title, tool) whose change failed, the plain sentence takes the claim's place: the sentence
     naming it (keeping its true part), or failing that a claim naming nothing (a blanket "done" over several), or
     failing that it follows the first claim on its line."""
+    from thirties_core.clean_prose import cap
     from thirties_core.item_facts import mentions
     others = list(others)
     claims = [s for line in (reply or "").split("\n") for s in _SENTENCE_RE.split(line)
@@ -171,16 +165,18 @@ def say_failed(tools: Any, reply: str, items: Sequence[Tuple[str, str]], claim_r
     for sentence, mine in named.items():
         if not mine:
             continue
-        lines = list(dict.fromkeys(still_line(tools, t, tool) for t, tool in mine))
+        lines = list(dict.fromkeys(cap(still_line(tools, t, tool)) for t, tool in mine))
         keep = _true_part(sentence, [t for t, _ in mine], others, claim_re)
         new[sentence] = " ".join(([keep] if keep else []) + lines)
     if unnamed:
-        lines = list(dict.fromkeys(still_line(tools, t, tool) for t, tool in unnamed))
+        lines = list(dict.fromkeys(cap(still_line(tools, t, tool)) for t, tool in unnamed))
         if blanket is not None:
             new[blanket] = " ".join(lines)
         else:
             first = claims[0]
-            new[first] = new.get(first, first) + " " + " ".join(lines)
+            # after the claim, or before it when it introduces a list: never between a lead-in and its list
+            new[first] = (" ".join(lines) + " " + new.get(first, first) if first.rstrip().endswith(":")
+                          else new.get(first, first) + " " + " ".join(lines))
     done: set = set()
 
     def new_for(sentence: str) -> Optional[str]:
