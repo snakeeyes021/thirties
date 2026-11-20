@@ -199,5 +199,39 @@ class TestADoneBesideHowItWent(WordsCase):
         self.assertNotEqual(refused(op, "[app] the glaze samples are fine", None), "")
 
 
+
+class TestAWordForWhichKind(WordsCase):
+    """A word saying which one ("the ash paddle") was read as naming something else, and the done refused."""
+
+    def listed(self, *titles):
+        from thirties_core.models import TaskItem
+        tasks = [TaskItem(id=f"t_{i}", source_notebook="1. Tasks", title=t, is_checkbox_item=True,
+                          parent_note_title="Workshop", parent_note_id="n_workshop") for i, t in enumerate(titles)]
+        for t in tasks:
+            t.list_role = "list"
+        self.manager.tools.assistant.s.tasks[:] = tasks
+        return tasks
+
+    def test_which_kind_ticks_the_item(self):
+        self.assertWent(self.tick("Varnish the paddle", "the ash paddle is varnished"))
+
+    def test_another_item_with_that_word_still_holds_it(self):
+        self.listed("Oil the ash paddle")
+        out = self.tick("Varnish the paddle", "the ash paddle is varnished")
+        self.assertHeld(out)
+        self.assertIn("Oil the ash paddle", out)  # the list item that fits all the words is named
+
+    def test_a_different_thing_named_still_holds_it(self):
+        self.assertHeld(self.tick("Varnish the paddle", "the paddle rack is varnished"))
+
+    def test_what_says_which_kind(self):
+        from thirties_core.done_fit import names_something_else
+        self.assertEqual(names_something_else("the ash paddle is varnished", "Varnish the paddle"), [])
+        self.assertEqual(names_something_else("finished the stoneware bisque load", "Bisque load"), [])
+        self.assertTrue(names_something_else("the ash paddle is varnished", "Varnish the paddle", [],
+                                             ["Split the ash logs"]))
+        self.assertTrue(names_something_else("the paddle rack is varnished", "Varnish the paddle"))
+
+
 if __name__ == "__main__":
     unittest.main()

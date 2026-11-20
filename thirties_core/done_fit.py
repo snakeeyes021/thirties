@@ -13,6 +13,11 @@ in its place.
   this item, as the other checks read them.
 - **Names something else**: phrases share the item's words, but none of them fits. Then the item isn't what was
   done; ``elsewhere`` finds the one open list item that fits all the words, if any, for the model to mark instead.
+- **A word for which kind**: "the ash paddle is varnished" for Varnish the paddle. Extra words placed ahead of the
+  item's own, in a phrase whose last word is the item's, only tell its kind or material; they count against it
+  only when another planned or listed item has them. A phrase whose last word the item lacks ("glaze order" beside
+  Glaze recipe test, "paddle rack" beside Wax the canoe paddles) still names something else
+  (``only_said_which_kind``).
 - **Names nothing**: a pointer ("that's done", "yes") or an id has no such phrase; the other checks judge it.
 - **A word for how the app shows it**: "the teapot row", "the varnish slot", "that line": a display noun the item
   lacks ("line", "entry", "row", "slot", "listing", "block", "schedule") only points at where the item is shown, so
@@ -148,7 +153,30 @@ def names_something_else(message: Optional[str], names: Union[str, Sequence[str]
         return []
     if fits_but_for_a_container(message, names, others + [t for t in listed if t not in names]):
         return []
+    if only_said_which_kind(message, names, others + [t for t in listed if t not in names]):
+        return []
     return [" ".join(p) for p in touching]
+
+
+# --- a word for which kind: "the ash paddle is varnished" names Varnish the paddle ---
+def only_said_which_kind(message: str, names: Sequence[str], others: Iterable[str] = ()) -> bool:
+    """A phrase touching the item has the item's own words last, and the extra words ahead of them ("ash" in "the
+    ash paddle") belong to no other planned or listed item: they tell its kind, not another thing. The model's
+    reading that the item was meant stands."""
+    others = [o for o in others if o and o not in names]
+
+    def its(w: str) -> bool:
+        return any(_is_its(w, n) for n in names)
+    for phrase in _phrases(message or ""):
+        phrase = [w for w in phrase if not _shown_as(w)]
+        first = next((i for i, w in enumerate(phrase) if its(w)), None)
+        if first is None or first == 0 or not all(its(w) for w in phrase[first:]):
+            continue
+        extra = phrase[:first]
+        if not any(_is_its(w, o) for w in extra for o in others):
+            return True
+    return False
+# --- end a word for which kind ---
 
 
 # --- a word for how the app shows an item: "the teapot row", "the varnish slot" name the item (which item only;
@@ -263,4 +291,4 @@ def refusal(pt: Any, title: str, named: List[str]) -> str:
 
 
 __all__ = ["CONTAINER_NOUNS", "names_something_else", "names_of", "reading", "fits_all",
-           "fits_but_for_a_container", "elsewhere", "refusal"]
+           "fits_but_for_a_container", "only_said_which_kind", "elsewhere", "refusal"]
