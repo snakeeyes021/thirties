@@ -96,5 +96,36 @@ class TestAQuestionThatAsksForAChange(WordsCase):
         self.assertHeld(self.tick("Varnish the paddle", "is the paddle varnish ticked?"))
 
 
+
+class TestAComplaintAboutAnItem(WordsCase):
+    """A complaint about an item with the model's removal: refused as no ask."""
+
+    def test_a_complaint_naming_it_is_the_models_reading(self):
+        out = self.remove("Varnish the paddle", "how come the paddle varnish is on tonight? never planned that")
+        self.assertWent(out)
+        self.assertIn("Note:", out)  # the model can put it back if a move was meant
+        self.assertEqual(self.planned("Varnish the paddle"), [])
+
+    def test_an_objection_with_a_reason_takes_it_off(self):
+        out = self.remove("Sand the canoe thwart", "why is the thwart sanding still there, the canoe went back")
+        self.assertWent(out)
+        self.assertEqual(self.planned("Sand the canoe thwart"), [])
+
+    def test_saying_the_plan_is_too_full_lets_the_model_choose(self):
+        self.assertWent(self.remove("Sand the canoe thwart", "tonight is way too packed"))
+        self.assertEqual(self.planned("Sand the canoe thwart"), [])
+
+    def test_an_ask_to_take_it_off_carries_no_note(self):
+        out = self.remove("Varnish the paddle", "take the paddle varnish off")
+        self.assertWent(out)
+        self.assertNotIn("Note:", out)
+
+    def test_words_with_no_basis_still_take_nothing_off(self):
+        for words in ("the glaze came out a lovely green", "how come the kiln ran so hot?"):
+            with self.subTest(words=words):
+                self.assertHeld(self.remove("Varnish the paddle", words))
+                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

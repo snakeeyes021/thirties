@@ -8,9 +8,14 @@ until the user was told to spell the items out. So now:
   "skip", "not doing", ...), or one of their last RECENT_MESSAGES messages did and this one isn't a no ("the two I
   mentioned are still there" after a request that didn't go through). Which items it means is the model's reading,
   and it stands.
-- **Not asked for**: nothing the user said this turn or just before asks for anything to come off. An item then
-  comes off only when this message names it or points back to it (done_reference.check), and not when the message
-  only grumbles about its place or says it isn't time for it yet.
+- **Said how full the plan is** (``load_said``): "tonight is way too packed", "I need to lighten the evening". Which
+  item comes off for it is the model's reading.
+- **Talked about the item**: the message names it or points back to it (done_reference.check), even only to grumble
+  about it ("why is the varnish coat still there, not happening"). Whether that means taking it off is the model's
+  reading; the tool's answer carries a note when the words read more like a complaint about its place, so the
+  model can put it back if that's what was meant (``removal_note``).
+- **No basis**: nothing the user said this turn or just before asks for anything to come off, says how full the plan
+  is, or names or points to the item. It stays. Neither does an item the user only said isn't due yet.
 
 Taking something off the plan never ticks it or files it as dropped by itself: the user's lists have their own
 guard (write_guard.py; off_today._off_list). The app's own controls and the background (nobody talking) are never
@@ -81,6 +86,25 @@ def removal_asked(pt: Any) -> bool:
     return asked(pt, _removal_words())
 
 
+# the user saying the plan is too full, or asking for less on it: grounds for the model to take something off
+LOAD_SAID_RE = re.compile(
+    r"\b(?:too (?:much|many|full|packed|busy|crowded|crammed)|(?:over)?packed|overloaded|swamped|slammed|crammed|"
+    r"lighten|thin (?:it|things|this|that|the \w+) out|less on|fewer things|cut (?:it |things )?back|"
+    r"clear (?:out|up) (?:my|the|this)|can'?t (?:fit|manage|handle|get through) (?:it all|everything|all (?:of )?"
+    r"(?:this|that|it|them)))\b", re.IGNORECASE)
+
+
+def load_said(pt: Any) -> bool:
+    """The user says the plan is too full or asks for less on it, this turn or just before."""
+    return asked(pt, LOAD_SAID_RE)
+
+
+def removal_grounds(pt: Any) -> bool:
+    """The user's words give the model grounds to take something off without naming it: they ask for something to
+    come off, or say the plan is too full."""
+    return removal_asked(pt) or load_said(pt)
+
+
 def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     """Why this item can't come off the plan on the user's words this turn, or None."""
     message = getattr(pt, "user_message", None)
@@ -92,7 +116,7 @@ def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if held_here:
         return held_here
     # --- end a question, or a pointer at parts ---
-    if removal_asked(pt):
+    if removal_grounds(pt):
         return None  # which items the request means is the model's reading
     from thirties_core.done_reference import check
     title = pt._title(span)
@@ -100,15 +124,26 @@ def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if held:
         return (f"The user hasn't asked for anything to come off the plan, so {title} stays. Take something off "
                 "only when they ask; if you think they want it gone, ask them in your own words.")
-    if COMPLAINT_RE.search(message):
-        return (f"The user talked about {title} but didn't ask for it to come off, so it stays on the plan. If "
-                "they want it somewhere else, move it there; if it isn't clear, ask.")
     # --- "not yet" is about when, not whether: it stays (a simulated day lost an item the user said wasn't due yet) ---
     if NOT_YET_RE.search(message):
         return (f"The user said it isn't time for {title} yet, not that it's off, so it stays on the plan. Leave it "
                 "where it is, or move it later if they say when.")
     # --- end "not yet" ---
-    return None
+    return None  # their words are about this item: what they mean for it is the model's reading
+
+
+def removal_note(pt: "PlanTools", span: "EventSpan") -> str:
+    """A note on a removal the model read from a complaint about the item's place rather than an ask to take it
+    off. The removal stands; the note lets the model put it back if that was the meaning. "" when there's nothing
+    to note."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or not message or removal_grounds(pt):
+        return ""
+    title = pt._title(span)
+    if COMPLAINT_RE.search(message):
+        return (f" (Note: the user's words are about where {title} was or how it got there. If they meant it to "
+                "move rather than come off, put it where they want it.)")
+    return ""
 
 
 # the item's time hasn't come: "the kiln run isn't yet", "not time for the paddle yet", "not now, later"
@@ -116,8 +151,8 @@ NOT_YET_RE = re.compile(r"\bnot (?:\w+ ){0,3}yet\b|\b(?:isn'?t|is not|aren'?t|ar
                         r"\bnot (?:right )?now\b|\bnot time (?:for|to)\b|\btoo (?:early|soon) for\b", re.IGNORECASE)
 
 
-__all__ = ["removal_refused", "removal_asked", "asked", "recent_said", "earlier_messages", "COMPLAINT_RE",
-           "RECENT_MESSAGES"]
+__all__ = ["removal_refused", "removal_asked", "removal_grounds", "removal_note", "load_said", "asked", "recent_said",
+           "earlier_messages", "COMPLAINT_RE", "LOAD_SAID_RE", "RECENT_MESSAGES"]
 
 
 def merge_readd(pt: "PlanTools", copies: Any, start: Any, end: Any = None, duration: Any = None) -> Optional[str]:

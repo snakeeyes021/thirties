@@ -69,12 +69,16 @@ class TestRemovalNeedsTheUsersWords(PlanCase):
             self.pt.user_message = None
             self.pt.prior_exchange = None
 
-    def test_a_complaint_about_where_it_is_doesnt_take_it_off(self):
+    def test_a_complaint_about_where_it_is_is_the_models_reading(self):
+        # words about the item are a basis: whether they mean taking it off is the model's reading, with a note
+        # so it can put the item back where the user wants it (change_asks.removal_note)
         out = self.remove("Oil change", "how come the oil change got shoved to tonight?? not what i asked")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Oil change")), 1)
-        out = self.remove("Oil change", "put the oil change back where i had it")
-        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Note:", out)
+        self.assertEqual(len(self.planned("Oil change")), 0)
+        out = self.remove("Repot the fern", "how come the oil change got shoved to tonight?? not what i asked")
+        self.assertTrue(out.startswith(NOT_DONE), out)  # words about another item: no basis for this one
+        self.assertEqual(len(self.planned("Repot the fern")), 1)
 
     def test_asked_for_a_removal_which_item_is_the_models_reading(self):
         # which items a removal the user asked for means is the model's to read (change_asks.py)
