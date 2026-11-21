@@ -7,6 +7,7 @@ item, so they're no basis on their own. Invented data throughout.
 
 import unittest
 
+from tests.test_words_behind_a_write import AddCase
 from tests.test_model_reads_the_words import WordsCase
 
 
@@ -78,6 +79,34 @@ class TestAKeepHoldsPerClause(WordsCase, Earlier):
         earlier = ["keep the paddle varnish for now"]
         self.assertWent(self.said_after("remove_event", {"event": "Varnish the paddle"},
                                         "actually drop the paddle varnish", earlier))
+
+
+class TestAnAddNeedsTheItemsOwnWords(AddCase):
+    """A sentence saying there was something to do let any add through, and reworded copies with it."""
+
+    def test_an_add_named_from_nothing_said_is_refused(self):
+        words = "the weather should clear by 3 so push the paddle varnish then"
+        for title in ("Sand the hull", "Paddle varnish coat"):
+            with self.subTest(title=title):
+                self.assertHeld(self.add(title, words))
+                self.assertEqual(self.planned(title), [])
+
+    def test_an_add_in_the_users_words_goes(self):
+        self.assertWent(self.add("Buy spar varnish and sandpaper", "need a tin of spar varnish and some sandpaper"))
+        self.assertWent(self.add("Sweep the shop", "fit something quick in after the thwart", start="10:40 PM"))
+
+
+class TestASecondSessionIsTheModelsReading(AddCase):
+    """Only a listed word ("another", "more", "extra") let a second session on; the item named is the basis."""
+
+    def test_named_with_again_goes(self):
+        self.assertWent(self.add("Varnish the paddle", "one coat of the paddle varnish at 8:40 and one at 10:10",
+                                 start="10:10 PM", again=True))
+        self.assertEqual(len(self.planned("Varnish the paddle")), 2)
+
+    def test_not_named_stays_one(self):
+        self.assertHeld(self.add("Varnish the paddle", "more sandpaper would help", start="10:10 PM", again=True))
+        self.assertEqual(len(self.planned("Varnish the paddle")), 1)
 
 
 if __name__ == "__main__":

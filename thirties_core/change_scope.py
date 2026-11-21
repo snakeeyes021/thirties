@@ -16,13 +16,13 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
   the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
   words, the message names the item, points back to it, or gives a time for it in words that fit it
   (done_reference.check, stated_times.loosely_named);
-- **a new item** (add_event): what the user's words call for, and what to call it, is the model's reading ("I have
-  to pick up my prescription at 4" may go on as Pharmacy run), as long as the words touch it: its name shares a
-  word with them that no planned item has, they ask to plan or fit something in, or they say there's something to
-  do or get that isn't planned (``add_basis``). An add in a turn about other things ("move the varnish to 8:40")
-  has no basis, and neither does a second copy of an item already planned, in its words or others, that the
-  message doesn't name, or a second session nobody asked for (adding what's already planned keeps it one item:
-  change_asks.merge_readd);
+- **a new item** (add_event): what the user's words call for is the model's reading, as long as they name it: its
+  name shares a word with them that no planned item has ("Pick up the prescription" for "I have to collect my
+  prescription at 4"), they ask to plan or fit something in, or they point back to it (``add_basis``). An add in a
+  turn about other things ("move the varnish to 8:40") has no basis, and neither does a second copy of an item
+  already planned, in its words or others, that the message doesn't name. A second session of a named item
+  (again=true) is the model's reading; without it, adding what's already planned keeps it one item
+  (change_asks.merge_readd);
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
   talks about sleep.
 
@@ -139,11 +139,10 @@ def move_asked(pt: Any) -> bool:
     return asked(pt, MOVE_ASK_RE) or asked(pt, BULK_CHANGE_RE)
 
 
-def add_refused(pt: "PlanTools", title: str, again: bool = False) -> Optional[str]:
-    """Why add_event can't put this new item on for the user's message, or None. What the words ask to add, and
-    under what name, is the model's reading, as long as the words touch it (``add_basis``); a second copy of what's
-    planned, however it's worded, needs the user to name it, and to ask for another one when it's a second
-    session."""
+def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
+    """Why add_event can't put this new item on for the user's message, or None. What the words ask to add is the
+    model's reading, as long as they name it (``add_basis``); a second copy of what's planned, however it's worded,
+    needs the user to name it."""
     message = _talking(pt, "add_event")
     if message is None:
         return None
@@ -153,25 +152,12 @@ def add_refused(pt: "PlanTools", title: str, again: bool = False) -> Optional[st
         if not _referred_to(pt, message, title) and not any(_referred_to(pt, message, pt._title(c)) for c in copies):
             return (f"{title} is already on the plan and the user didn't ask for another, so no second copy is "
                     "added. To change when it is, move it with update_event.")
-        if again and not AGAIN_RE.search(message):
-            return (f"{title} is already on the plan and the user's words don't ask for a second one, so none is "
-                    "added. To change when it is, move it with update_event.")
-        return None  # named: a second session they asked for, or the one copy moves (change_asks.merge_readd)
+        return None  # named: a second session the model read (again=true), or the one copy moves (merge_readd)
     # --- end a copy ---
     if add_basis(pt, message, title) or _referred_to(pt, message, title):
         return None
     return (f"The user's words this turn are about other things and don't ask for {title}, so it isn't added. "
             "Mention it in your reply if it matters, and add it when they say so.")
-
-
-# asking for another session of something already planned
-AGAIN_RE = re.compile(r"\b(?:another|second|2nd|third|again|twice|one more|extra|more|repeat)\b",
-                      re.IGNORECASE)
-# the user saying there's something to do, get or go to: "I have to pick up X", "need sandpaper", "remind me to"
-ADD_CUE_RE = re.compile(
-    r"\b(?:need(?:s|ed)?|have to|has to|got to|gotta|must|should|ought to|want(?:s)? to|wanna|going to|gonna|"
-    r"plan(?:ning)? to|hoping to|remember to|remind me|don'?t (?:let me )?forget|i'?ll|i will|let'?s|add|put|"
-    r"book|pencil|squeeze|could use|appointment|errand)\b", re.IGNORECASE)
 
 
 # words for changing or ticking what's there, which name nothing new
@@ -186,21 +172,17 @@ def _own_words(pt: "PlanTools", text: str) -> set:
     from thirties_core.item_facts import _stem
     planned = _titles(pt)
     words = re.findall(r"[a-z]+", re.sub(r"[‘’'`]", "", str(text or "").lower()))
-    return {_stem(w) for w in words if len(w) > 2 and not _breaks(w) and not ADD_CUE_RE.fullmatch(w)
-            and not _CHANGE_WORDS_RE.fullmatch(w) and not any(_is_its(w, t) for t in planned)}
+    return {_stem(w) for w in words if len(w) > 2 and not _breaks(w) and not _CHANGE_WORDS_RE.fullmatch(w)
+            and not any(_is_its(w, t) for t in planned)}
 
 
 def add_basis(pt: "PlanTools", message: str, title: str) -> bool:
-    """The user's words touch a new item: the model's name for it shares a word with them that no planned item
-    has; or they ask to plan or fit something in; or a sentence says there's something to do or get, in words
-    about no planned item ("I have to pick up my prescription at 4", which may go on as Pharmacy run). An add in a
-    turn about something else ("move the varnish to 8:40", "the thwart is done") has no basis."""
+    """The user's words name a new item: the model's name for it shares a word with them that no planned item has
+    (a word only a planned item has names that item, not a new one), or they ask to plan or fit something in. An add
+    in a turn about something else ("move the varnish to 8:40", "the thwart is done") has no basis."""
     if BULK_CHANGE_RE.search(message) or PLAN_ASK_RE.search(message):
         return True
-    if _own_words(pt, title) & _own_words(pt, message):
-        return True
-    from thirties_core.turn_guards import _SENTENCES_RE
-    return any(ADD_CUE_RE.search(s) and _own_words(pt, s) for s in _SENTENCES_RE.split(message))
+    return bool(_own_words(pt, title) & _own_words(pt, message))
 
 
 def reworded_copies(pt: "PlanTools", title: str) -> list:

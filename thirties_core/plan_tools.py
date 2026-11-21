@@ -1038,7 +1038,7 @@ class PlanTools:
         # --- a new item needs the user's words for it (change_scope.py) ---
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
             from thirties_core.change_scope import add_refused
-            why = add_refused(self, str(title), _as_bool(again))
+            why = add_refused(self, str(title))
             if why:
                 raise ToolError(why)
         # --- end a new item needs the user's words ---

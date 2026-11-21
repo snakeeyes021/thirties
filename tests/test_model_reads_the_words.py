@@ -236,7 +236,8 @@ class TestAWordForWhichKind(WordsCase):
 
 
 class TestAnAddTheModelNames(WordsCase):
-    """An add the model named in its own words was refused because no word of its title was in the message."""
+    """An add the model named in its own words was refused because its title wasn't the user's phrase. A name that
+    shares one of the user's words with them goes on; one that shares none has nothing in the words behind it."""
 
     def add(self, title, words, start="9:10 PM", **more):
         from thirties_core.plan_log import model_call
@@ -244,8 +245,9 @@ class TestAnAddTheModelNames(WordsCase):
             return self.said("add_event", {"title": title, "start": start, "duration": "30 min", **more}, words)
 
     def test_the_models_name_for_it_goes_on(self):
-        self.assertWent(self.add("Hardware store run", "I need sandpaper and a tin of spar varnish before 9:10"))
-        self.assertEqual(len(self.planned("Hardware store run")), 1)
+        self.assertHeld(self.add("Hardware store run", "I need sandpaper and a tin of spar varnish before 9:10"))
+        self.assertWent(self.add("Sandpaper run", "I need sandpaper and a tin of spar varnish before 9:10"))
+        self.assertEqual(len(self.planned("Sandpaper run")), 1)
 
     def test_tone_words_alone_add_nothing(self):
         for words in ("thanks!", "lol", "hmm"):
