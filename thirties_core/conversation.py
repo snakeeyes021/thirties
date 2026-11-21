@@ -533,7 +533,7 @@ class ConversationManager:
         self.tools.pending_dones = pending_dones(self.brain.messages)
         from thirties_core.plain_done import done_asks  # dones refused earlier, said again (plain_done.py)
         self.tools.done_asks = done_asks(self.brain.messages)
-        self.tools.picked_dones = set()  # dones picked from a list this turn: the reply names them (reply_checks.py)
+        self.tools.picked_dones = set()  # dones the model picked this turn: the reply names them (reply_checks.py)
         from thirties_core.change_asks import recent_said  # a removal or move asked for just before (change_asks.py)
         self.tools.recent_said = recent_said(self.brain.messages)
         from thirties_core.routine_times import earlier_today  # times given earlier today (routine_times.py)

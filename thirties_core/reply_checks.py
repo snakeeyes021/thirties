@@ -329,7 +329,7 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     from thirties_core import leftover_facts
     out += leftover_facts.problems(brain, turn_start, reply)
     # --- end leftovers ---
-    # --- a done the model picked from a list says which item it was (done_reference._picked) ---
+    # --- a done the model picked says which items it was (done_reference._picked, whole_routine.answered) ---
     unnamed = picked_unnamed(brain, reply)
     if unnamed:
         out.append("it doesn't say which item you marked done: name " + " and ".join(unnamed) + " in plain words")
@@ -341,8 +341,9 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
 
 
 def picked_unnamed(brain: Any, reply: str) -> List[str]:
-    """The items ticked this turn on a bare done the model picked from a list (done_reference._picked) that the
-    reply doesn't name."""
+    """The items ticked this turn on words naming none of them, as the model picked them (a bare done after a list,
+    done_reference._picked; "both" or "all of them" to a question about groups of steps, whole_routine.answered),
+    that the reply doesn't name. A reply may name the group too, never in place of its items."""
     picks = getattr(getattr(brain, "tools", None), "picked_dones", None)
     if not picks:
         return []
@@ -355,11 +356,12 @@ def picked_unnamed(brain: Any, reply: str) -> List[str]:
 
 
 def say_picked(brain: Any, reply: str) -> str:
-    """A reply that still doesn't name an item picked from a list after its rewrite opens with what was ticked."""
+    """A reply that still doesn't name every item the model picked after its rewrite opens with what was ticked."""
     unnamed = picked_unnamed(brain, reply)
     if not unnamed:
         return reply
-    return f"Marked {' and '.join(unnamed)} done." + (("\n\n" + reply) if (reply or "").strip() else "")
+    names = unnamed[0] if len(unnamed) == 1 else ", ".join(unnamed[:-1]) + " and " + unnamed[-1]
+    return f"Marked {names} done." + (("\n\n" + reply) if (reply or "").strip() else "")
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:

@@ -13,8 +13,9 @@ goes through when the user's words point at the item:
 - **A bare done after a list**: "that one's sorted", "done!" with no word of any item in it, right after a reply
   listing several open items: the one of those the model picks. The reply says which, and a "no" takes it back.
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
-- **A whole routine**: its name with "all", "whole" or "everything", or "both" / "all of them" to a question about
-  its parts: every step of it, in every part (whole_routine.py).
+- **A whole routine**: its name with "all", "whole" or "everything": every step of it, in every part; or "both" /
+  "all of them" to a question about it or its parts: every step of the parts asked about (whole_routine.py). The
+  reply names each step ticked so.
 - **An answer to "which one?"**: "the first one", "the last one" for that one of the items the question listed, in
   the order it listed them (open list items it named count too, planned or not).
 - **The one just listed**: when the words fit several items equally and the last message the user was shown listed
@@ -332,14 +333,18 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if elsewhere:
         return named_else(pt, title, elsewhere), message
     # --- end something else ---
-    if BULK_RE.search(message):
-        return None, message
     said, shown = getattr(pt, "prior_exchange", None) or ("", "")
-    # --- a whole routine said done: every step of it, in every part (whole_routine.py) ---
-    from thirties_core.whole_routine import routine_meant
+    # --- a whole routine said done: every step of it, in every part; or a whole answer ("both") to a question
+    # about groups of steps, each of which the reply then names (whole_routine.py) ---
+    from thirties_core.whole_routine import answered, routine_meant
     if routine_meant(pt, message, shown, title):
+        picks = getattr(pt, "picked_dones", None)
+        if isinstance(picks, set) and answered(pt, message, shown, title):
+            picks.add(title)
         return None, message
     # --- end a whole routine ---
+    if BULK_RE.search(message):
+        return None, message
     copy_refusal =(f"{title} is on the plan more than once and the user's words don't say which time, so it "
                     "isn't marked done. Mark the one whose time has come, or ask which one they did.")
     if _named(naming, title, titles):

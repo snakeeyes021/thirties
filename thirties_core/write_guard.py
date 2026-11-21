@@ -428,7 +428,8 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
             and not asks_to_drop(message):
         return (f"not written: the user didn't ask to drop {title}, so its line stays on its list. Taking it off "
                 "today changes only today's plan and the Today note.")
-    if kind == "complete" and not says_done(message, title):
+    from thirties_core.whole_routine import answers_the_question
+    if kind == "complete" and not says_done(message, title) and not answers_the_question(message):
         return (f"not written: the user's words don't say {title} is finished, so it isn't ticked. Something "
                 "running, started or fine isn't done; it's done when they say it is.")
     from thirties_core.done_fit import names_something_else
