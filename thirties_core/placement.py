@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -213,6 +213,7 @@ class Flow:
     kept: List[EventSpan]                        # in the way of nothing: kept its time (there was room)
     meals_kept: List[EventSpan]                  # meals that stayed put while the rest went round them
     late: List[str]                              # a meal that had to go past its window
+    dark: List[EventSpan] = field(default_factory=list)  # of no_room: those that only ran past daylight, not bedtime
 
 
 def make_way(tools: "PlanTools", plan: DayPlan, chain: List[EventSpan], seed: Dict[str, timedelta],
@@ -299,10 +300,12 @@ def make_way(tools: "PlanTools", plan: DayPlan, chain: List[EventSpan], seed: Di
                 if not hit:
                     break
                 t, end = tools._snap(max(h[1] for h in hit), max(h[1] for h in hit) + length)
-        fits = end <= plan.day_end and not any(b.start_dt < end and t < b.end_dt for b in sleep) \
-            and not (daylight(span) and end > plan.sunset)
+        before_bed = end <= plan.day_end and not any(b.start_dt < end and t < b.end_dt for b in sleep)
+        fits = before_bed and not (daylight(span) and end > plan.sunset)
         if not fits:
             out.no_room.append(span)
+            if before_bed:
+                out.dark.append(span)  # it needs daylight: that's what it would run past, not bedtime
             t, end = s0, e0
         elif (t, end) != (s0, e0):
             out.placed[span.id] = (t, end)
@@ -349,10 +352,14 @@ def flow_lines(flow: Flow, moved: List[EventSpan]) -> List[str]:
         out.append(f"{names} stays where it was; the rest goes around it." if len(flow.meals_kept) == 1 else
                    f"{names} stay where they were; the rest goes around them.")
     out += flow.late
-    if flow.no_room:
-        out.append("Would run into bedtime, so it stays where it was: " + ", ".join(s.title for s in flow.no_room)
-                   + (". Plan it for another day, or let it go?" if len(flow.no_room) == 1 else
-                      ". Plan them for another day, or let them go?"))
+    dark = [s for s in flow.no_room if s in flow.dark]
+    bed = [s for s in flow.no_room if s not in flow.dark]
+    for spans, why in ((bed, "Would run into bedtime"), (dark, "Needs daylight and would run past sunset")):
+        if spans:
+            out.append(f"{why}, so " + ("it stays where it was: " if len(spans) == 1 else "they stay where they were: ")
+                       + ", ".join(s.title for s in spans)
+                       + (". Plan it for another day, or let it go?" if len(spans) == 1 else
+                          ". Plan them for another day, or let them go?"))
     return out
 
 
