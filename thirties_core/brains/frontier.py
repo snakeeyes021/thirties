@@ -965,6 +965,13 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
                 continue
             named = self._named(sentence)
+            # --- an item skipped or ticked this turn was handled, never one that failed to move ---
+            settled = getattr(self, "_status_before", None) or {}
+            unsettled = [s for s in named if settled.get(s.id, s.status) == s.status]
+            if named and not unsettled:
+                continue
+            named = unsettled
+            # --- end handled ---
             if not named:
                 if not anything:
                     out.append("nothing")
@@ -975,7 +982,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             # --- a claim about several items, checked part by part (claim_parts.py) ---
             elif still:
                 for s in self._claimed_unchanged(sentence, self._MOVED_RE,
-                                                 lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)):
+                                                 lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)
+                                                 and settled.get(s.id, s.status) == s.status):
                     out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
             # --- end part by part ---
         return list(dict.fromkeys(out))
