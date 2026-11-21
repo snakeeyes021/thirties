@@ -109,5 +109,34 @@ class TestASecondSessionIsTheModelsReading(AddCase):
         self.assertEqual(len(self.planned("Varnish the paddle")), 1)
 
 
+class TestAWordForWhichKindKeepsTheItemsOwn(WordsCase):
+    """A word for which kind pushed out the item's own describing word: the kitchen light ticked the bike light."""
+
+    def test_its_own_describing_word_is_needed(self):
+        from thirties_core.done_fit import names_something_else
+        self.assertTrue(names_something_else("the kitchen light is fixed", "Fix the bike light"))
+        self.assertTrue(names_something_else("the boat varnish is done", "Paddle varnish"))
+        self.assertEqual(names_something_else("the old bike light is fixed", "Fix the bike light"), [])
+        self.assertEqual(names_something_else("the ash paddle is varnished", "Varnish the paddle"), [])
+
+    def test_the_list_tick_is_refused(self):
+        from thirties_core.write_guard import refused
+        self.assertNotEqual(refused({"op": "complete", "title": "Fix the bike light"},
+                                    "[app] the kitchen light is fixed", None), "")
+        self.assertEqual(refused({"op": "complete", "title": "Fix the bike light"},
+                                 "[app] the bike light is fixed", None), "")
+
+
+class TestDownIsANamingWord(WordsCase):
+    """"down" was dropped from every reading, so the down jacket ticked the rain jacket."""
+
+    def test_the_down_jacket_names_something_else(self):
+        from thirties_core.done_fit import names_something_else
+        from thirties_core.write_guard import refused
+        self.assertTrue(names_something_else("the down jacket is washed", "Wash the rain jacket"))
+        self.assertNotEqual(refused({"op": "complete", "title": "Wash the rain jacket"},
+                                    "[app] the down jacket is washed", None), "")
+
+
 if __name__ == "__main__":
     unittest.main()

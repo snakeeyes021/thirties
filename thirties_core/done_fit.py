@@ -16,7 +16,8 @@ in its place.
 - **A word for which kind**: "the ash paddle is varnished" for Varnish the paddle. Extra words placed ahead of the
   item's own, in a phrase whose last word is the item's, only tell its kind or material; they count against it
   only when another planned or listed item has them. A phrase whose last word the item lacks ("glaze order" beside
-  Glaze recipe test, "paddle rack" beside Wax the canoe paddles) still names something else
+  Glaze recipe test, "paddle rack" beside Wax the canoe paddles) still names something else, and so does one
+  without the item's own word for which kind ("the kitchen light" beside Fix the bike light)
   (``only_said_which_kind``).
 - **Names nothing**: a pointer ("that's done", "yes") or an id has no such phrase; the other checks judge it.
 - **A word for how the app shows it**: "the teapot row", "the varnish slot", "that line": a display noun the item
@@ -50,8 +51,8 @@ _BREAK = {
     "here", "now", "then", "there", "one", "ones", "both", "each", "every", "any", "half", "rest", "lot", "bit",
     "few", "couple", "other", "another", "same", "own", "some", "all", "whole", "stuff", "item", "items", "task",
     "tasks", "bits", "old", "new", "big", "small", "extra",
-    # who did it, and where it was put ("fixed the fence myself", "put the bins down as done")
-    "myself", "yourself", "ourselves", "themselves", "itself", "down",
+    # who did it ("fixed the fence myself")
+    "myself", "yourself", "ourselves", "themselves", "itself",
     # everyday verbs said right after an item's name ("the bowls look fine", "the kiln shows hot")
     "say", "says", "show", "shows", "showing", "shown", "look", "looks", "seem", "seems", "need", "needs", "want",
     "wants", "go", "goes", "went", "come", "comes", "came", "make", "makes", "made", "let", "lets", "see", "sees",
@@ -148,6 +149,8 @@ def names_something_else(message: Optional[str], names: Union[str, Sequence[str]
     lists, besides the planned ``others``."""
     if not message:
         return []
+    from thirties_core.said_for_it import without_ask_words  # "put the bins down as done" names the bins
+    message = without_ask_words(message)
     names = [names] if isinstance(names, str) else [n for n in names if n]
     others = list(others)
     touching, fitting = reading(message, names, others)
@@ -165,17 +168,20 @@ def only_said_which_kind(message: str, names: Sequence[str], others: Iterable[st
     """Every phrase touching the item ends in the item's own words, its head noun last ("paddle" of Varnish the
     paddle), and the extra words ahead of them ("ash" in "the ash paddle") belong to no other planned or listed
     item: they tell its kind, not another thing. The model's reading that the item was meant stands. A phrase that
-    ends in the item's verb rather than its head ("the car wash" beside Kiln wash the shelves) names another thing."""
+    ends in the item's verb rather than its head ("the car wash" beside Kiln wash the shelves) names another thing,
+    and so does one that leaves out the word the item's own name says which kind with ("the kitchen light" beside
+    Fix the bike light): the extra word stands in its place."""
     others = [o for o in others if o and o not in names]
 
     def its(w: str) -> bool:
         return any(_is_its(w, n) for n in names)
 
-    def its_head(w: str) -> bool:  # the last word of the item's name: its head noun
-        return any(_is_its(w, _head(n)) for n in names if _head(n))
+    def its_head(phrase: List[str]) -> bool:  # ends in the item's head noun, with its own word for which kind
+        return any(_head(n) and _is_its(phrase[-1], _head(n))
+                   and (not _kind_word(n) or any(_is_its(w, _kind_word(n)) for w in phrase[:-1])) for n in names)
 
     def which_kind(phrase: List[str]) -> bool:
-        if not phrase or not its_head(phrase[-1]):
+        if not phrase or not its_head(phrase):
             return False
         # every place the item's own words could start, not only the first word of the item's
         for first in range(1, len(phrase)):
@@ -191,6 +197,15 @@ def _head(title: str) -> str:
     """The item's head noun: the last word of its name ("paddle" of Varnish the paddle, "load" of Bisque load)."""
     words = [w for w in re.findall(r"[a-z0-9]+", re.sub(r"[‘’'`]", "", str(title or "").lower())) if not _breaks(w)]
     return words[-1] if words else ""
+
+
+def _kind_word(title: str) -> str:
+    """The word right before the item's head noun that says which one it is ("bike" of Fix the bike light, "paddle"
+    of Paddle varnish); "" when an article or the like stands there (Varnish the paddle)."""
+    words = re.findall(r"[a-z0-9]+", re.sub(r"[‘’'`]", "", str(title or "").lower()))
+    head = _head(title)
+    at = max((i for i, w in enumerate(words) if w == head), default=-1)
+    return words[at - 1] if at > 0 and not _breaks(words[at - 1]) else ""
 # --- end a word for which kind ---
 
 

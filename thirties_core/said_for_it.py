@@ -286,6 +286,17 @@ _TICK_ASK_RE = re.compile(
     rf"\b(?:mark|check|cross)(?:s|ing)?\b{_BETWEEN}\s+(?:off|done|complete|completed|finished)\b|"
     rf"\b(?:put|set|mark|log|record|count|list|enter|note)\b{_BETWEEN}\s+(?:down\s+)?(?:as|to)\s+"
     r"(?:done|finished|complete|completed)\b", re.IGNORECASE)
+_DOWN_AS_RE = re.compile(r"\bdown\s+(?=(?:as|to)\b)", re.IGNORECASE)
+
+
+def without_ask_words(text: str) -> str:
+    """The text with the "down" of a tick ask taken out ("put the bins down as done" reads "put the bins as done"):
+    it belongs to the ask, not to the item's name. "The down jacket" keeps its word."""
+    for m in _TICK_ASK_RE.finditer(text or ""):
+        text = text.replace(m.group(0), _DOWN_AS_RE.sub("", m.group(0)))
+    return text
+
+
 # the tick is for later, or for the user to remember: "remind me to mark the bins off", "I'll tick the varnish at 8:40"
 _LATER_TICK_RE = re.compile(r"\b(?:remind(?:er)?|don'?t let me forget|i'?ll|i will|we'?ll|going to|gonna)\b",
                             re.IGNORECASE)
@@ -315,6 +326,7 @@ def tick_asked(message: Optional[str], title: str, others: Iterable[str] = ()) -
         if NEGATED_DONE_RE.search(re.sub(r"\bwhy don'?t\b", "why", s, flags=re.IGNORECASE)) \
                 or PUT_OFF_TICK_RE.search(s):
             continue
+        s = without_ask_words(s)
         if any(_about(s, o, [x for x in others if x != o] + [title]) for o in others) and not _about(s, title, others):
             continue  # a tick asked for another item
         if not _names_another_thing(s, title):
