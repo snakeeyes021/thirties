@@ -418,6 +418,9 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
             return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
         # --- a bare done after a list of several ("that one's sorted", "done!"): the model's pick (_picked) ---
         if _picked(pt, message, title, shown, titles):
+            if "?" in shown:  # the reply asked which: a bare done doesn't answer it
+                return (f"The user's words don't say which item they finished, and the last reply asked them, so "
+                        f"{title} isn't ticked. Ask again which one, in one short question."), message
             picks = getattr(pt, "picked_dones", None)
             if isinstance(picks, set):
                 picks.add(title)

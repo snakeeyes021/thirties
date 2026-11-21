@@ -4,7 +4,7 @@
   the open items just listed it is, is the model's to pick. Whichever listed item it ticks is ticked, on the plan
   and in Joplin.
 - **Only within what was listed.** An item the reply didn't list, a count or "both" that doesn't fit the list, words
-  that name another item, or no done word at all are still refused.
+  that name another item, or no done word at all are still refused. So is any pick after a reply that asked which.
 - **The reply says which.** A reply that doesn't name the ticked item is sent back once; if it still doesn't, it
   opens with what was ticked. A reply that names it goes as written.
 - **One word takes it back.** "no", "not that one", "undo" right after such a tick reopens it, on the plan and in
@@ -97,10 +97,11 @@ class TestThePickStands(OfficeDay):
                         if other != title:
                             self.assertOpen(other, out)
 
-    def test_a_question_listing_them_too(self):
+    def test_never_after_a_question_asking_which(self):
         out = self.say("done!", ROOM, shown=f"Which did you finish: {BINDERS}, {BADGES} or {ROOM}?")
-        self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertTicked(ROOM, out)
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertIn("Ask again which one", out)
+        self.assertOpen(ROOM, out)
 
 
 class TestStillRefused(OfficeDay):
