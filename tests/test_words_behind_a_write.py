@@ -122,25 +122,17 @@ class TestAKeepIsNoRemoval(WordsCase):
     def test_the_other_item_still_comes_off(self):
         self.assertWent(self.remove("Sand the canoe thwart", "drop the thwart sanding but keep the paddle varnish"))
 
-    def test_load_words_mean_a_full_day(self):
-        from thirties_core.change_asks import LOAD_SAID_RE
-        for said in ("too much today", "my day is packed", "lighten the day", "this evening is way too full",
-                     "I can't fit it all in", "I'm swamped", "tonight is overloaded"):
-            self.assertTrue(LOAD_SAID_RE.search(said), said)
-        for said in ("I packed the van", "need to clear out the kiln shelves at 5", "the van is packed",
-                     "lighten the glaze a shade", "too much salt in the soup", "the shop was swamped with sawdust"):
-            self.assertFalse(LOAD_SAID_RE.search(said), said)
-
     def test_busy_words_about_something_else_take_nothing_off(self):
         for words in ("I packed the van for the lake", "the van is packed to the roof"):
             with self.subTest(words=words):
                 self.assertHeld(self.remove("Varnish the paddle", words))
                 self.assertEqual(len(self.planned("Varnish the paddle")), 1)
 
-    def test_load_words_cover_only_the_stretch_they_name(self):
-        self.assertHeld(self.remove("Varnish the paddle", "this morning is way too packed"))
-        self.assertEqual(len(self.planned("Varnish the paddle")), 1)
-        self.assertWent(self.remove("Varnish the paddle", "this evening is way too packed"))
+    def test_words_about_a_full_day_name_no_item(self):
+        for words in ("this morning is way too packed", "this evening is way too packed", "my day is packed"):
+            with self.subTest(words=words):
+                self.assertHeld(self.remove("Varnish the paddle", words))
+                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
 
 
 class TestAQuestionIsNoDone(WordsCase):
@@ -233,27 +225,25 @@ class TestStartedBesideAnotherDone(WordsCase):
 
 
 class TestOffTodaysListOnTheSameGrounds(LeaveBase):
-    """Removing an item on words about a full day left its Today line, or refused an untimed one."""
+    """A line on today's list comes off on the same grounds as a planned item: words about a full day name none."""
 
     def untimed_line(self, title):
         self.api.notes["n_today"]["body"] += f"- [ ] {title}\n"
 
-    def test_a_full_day_takes_an_untimed_line_off(self):
+    def test_a_full_day_leaves_an_untimed_line(self):
         self.untimed_line("Oil the hinges")
         out = self.say("today is way too packed", "remove_event", {"event": "Oil the hinges"})
-        self.assertFalse(out.startswith("NOT_DONE"), out)
-        self.assertNotIn("Oil the hinges", self.body("n_today"))
-        self.assert_guarded()
+        self.assertTrue(out.startswith("NOT_DONE"), out)
+        self.assertIn("Oil the hinges", self.body("n_today"))
 
-    def test_a_full_day_takes_a_timed_items_line_off_too(self):
+    def test_a_full_day_leaves_a_timed_item_and_its_line(self):
         set_debug_time(at("09:45"))
         self.say("fix the gate today", "add_to_today", {"items": ["Fix the gate"]})
         span = self.planned("Fix the gate")[0]
         out = self.say("today is way too packed", "remove_event", {"event": span.id})
-        self.assertFalse(out.startswith("NOT_DONE"), out)
-        self.assertEqual(self.planned("Fix the gate"), [])
-        self.assertNotIn("Fix the gate", self.body("n_today"))
-        self.assert_guarded()
+        self.assertTrue(out.startswith("NOT_DONE"), out)
+        self.assertEqual(len(self.planned("Fix the gate")), 1)
+        self.assertIn("Fix the gate", self.body("n_today"))
 
     def test_busy_words_about_something_else_or_a_keep_take_no_line_off(self):
         self.untimed_line("Oil the hinges")

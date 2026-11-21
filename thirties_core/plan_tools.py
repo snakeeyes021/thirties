@@ -1592,10 +1592,10 @@ class PlanTools:
             self._save_plan_after_change()
             return f"Removed {self.describe(span)}; its other copy stays on the plan."
         # --- end the plan's own duplicate ---
-        from thirties_core.change_asks import removal_grounds  # this turn or just before (change_asks.py)
+        from thirties_core.change_asks import removal_asked  # this turn or just before (change_asks.py)
         if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
                 and self.user_message is not None
-                and not removal_grounds(self, span)
+                and not removal_asked(self)
                 and not mentions(self.user_message, self._title(span),
                                  [self._title(s) for s in self.day_plan.spans if s.id != span.id])):
             # 10-28: an item vanished from the plan that nobody asked to take off. Taking something off is the

@@ -180,10 +180,9 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     if getattr(pt, "by_hand", False) or message is None or span.source == "calendar" or span.is_envelope:
         return ""
     title = pt._title(span)
-    # a clear ask, or "skip it today" (leave_today.py), this turn or just before when this isn't a no; or words
-    # saying the part of the day it's in is too full, the same grounds the removal had (change_asks.py)
-    from thirties_core.change_asks import asked as asked_lately, load_covers
-    if not asked_lately(pt, _ClearAsk(title)) and not load_covers(pt, span):
+    # a clear ask, or "skip it today" (leave_today.py), this turn or just before when this isn't a no (change_asks.py)
+    from thirties_core.change_asks import asked as asked_lately
+    if not asked_lately(pt, _ClearAsk(title)):
         return ""
     if any(s.id != span.id and (s.title == span.title or (span.task_id and s.task_id == span.task_id))
            for s in pt.day_plan.spans):
@@ -288,14 +287,13 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
         from thirties_core.if_time import act
         return act(a, line, "done")
-    # asked for, or the whole day said to be too full: which line is the model's reading; never one the user asked
-    # to keep (change_asks.py)
-    from thirties_core.change_asks import kept, load_covers, removal_asked
+    # asked for: which line is the model's reading; never one the user asked to keep (change_asks.py)
+    from thirties_core.change_asks import kept, removal_asked
     keep = kept(pt, line, [task.id] if task is not None else [])
     if keep:
         raise ToolError(keep)
     if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None \
-            and not removal_asked(pt) and not load_covers(pt):
+            and not removal_asked(pt):
         from thirties_core.done_reference import check
         held, _ = check(pt, line, [task.id] if task is not None else [])
         from thirties_core.leave_today import asks_to_skip  # "skip it today" too (leave_today.py)

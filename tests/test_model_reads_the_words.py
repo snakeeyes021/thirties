@@ -111,8 +111,9 @@ class TestAComplaintAboutAnItem(WordsCase):
         self.assertWent(out)
         self.assertEqual(self.planned("Sand the canoe thwart"), [])
 
-    def test_saying_the_plan_is_too_full_lets_the_model_choose(self):
-        self.assertWent(self.remove("Sand the canoe thwart", "tonight is way too packed"))
+    def test_asking_for_less_on_a_full_plan_lets_the_model_choose(self):
+        self.assertHeld(self.remove("Sand the canoe thwart", "tonight is way too packed"))
+        self.assertWent(self.remove("Sand the canoe thwart", "tonight is way too packed, drop something"))
         self.assertEqual(self.planned("Sand the canoe thwart"), [])
 
     def test_an_ask_to_take_it_off_carries_no_note(self):
