@@ -138,5 +138,56 @@ class TestDownIsANamingWord(WordsCase):
                                     "[app] the down jacket is washed", None), "")
 
 
+class TestNoNoteReachesTheUser(unittest.TestCase):
+    """A note for the model that starts "(The user's message" could be copied into the reply and sent."""
+
+    NOTES = ("(The user's message asks why about Varnish the paddle. item_history has the record for Varnish the "
+             "paddle: answer from what it records, in this reply; if it records no reason, say you don't know.)",
+             "(The user's message asks for quiet, and Thirties has already set it: quiet until 9:10 PM. No call is "
+             "needed for it.)",
+             "(The user's message makes today an on-site day: nothing else fits during work. Thirties already moved "
+             "what it had placed inside work; pass these lines on as they are, and don't ask about moving anything:"
+             "\nNothing Thirties placed was inside work.)",
+             "(The user's message leaves the choice to you: pick, make the change, and say in a line what you chose "
+             "and why.)")
+
+    def notes(self):
+        """These, and the one Python writes for a note to the engineers, word for word."""
+        from thirties_core.engineer_notes import hidden_instruction
+
+        class Note:
+            text = "the week view flickers"
+        return self.NOTES + (hidden_instruction(Note()),)
+
+    def test_a_copied_note_goes(self):
+        from thirties_core.internal_text import has_internal, strip_internal
+        for note in self.notes():
+            with self.subTest(note=note[:40]):
+                reply = f"{note} I put the fence staining at 4:10."
+                self.assertTrue(has_internal(reply))
+                self.assertEqual(strip_internal(reply), "I put the fence staining at 4:10.")
+                self.assertEqual(strip_internal(f"Sure thing.\n{note}\nThe fence is at 4:10."),
+                                 "Sure thing.\n\nThe fence is at 4:10.")
+
+    def test_the_notes_python_writes_start_that_way(self):
+        from thirties_core.internal_text import NOTE_OPENER
+        for note in self.notes():
+            self.assertTrue(note.startswith(NOTE_OPENER))
+
+
+class TestNoChoiceNote(WordsCase):
+    """A loose "you pick" match told the model to make a change: "I just put the kettle on" got the note."""
+
+    def test_no_note_goes_with_the_message(self):
+        from tests.test_conversation import reply
+        for words in ("I just put the kettle on", "you pick when the paddle varnish goes"):
+            with self.subTest(words=words):
+                self.engine.set_next_response(reply("Sounds good."))
+                self.manager.send_user_message(words)
+                notes = [m for m in self.manager.brain.messages if m.get("hidden")
+                         and "leaves the choice" in str(m.get("content") or "")]
+                self.assertEqual(notes, [])
+
+
 if __name__ == "__main__":
     unittest.main()

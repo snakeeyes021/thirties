@@ -171,7 +171,7 @@ class TestNoChangeMadeToDropAQuestion(ConversationTestCase):
                                             "Would you like me to move the firing to this afternoon?"))
         out = self.manager.send_user_message("the test kiln needs about three hours. tell me when it ends")
         asked = [str(c[-1]["content"]) for c in self.engine.call_history]
-        self.assertFalse(any("waits on a yes" in a for a in asked), asked)
+        self.assertFalse(any(a.startswith("[System check") for a in asked), asked)  # no check sent it back
         kiln = next(s for s in self.manager.day_plan.spans if s.title == "Fire the test kiln")
         self.assertEqual(kiln.start_dt, at("09:00"))  # under way: its start stays
         self.assertIn("ends around 12:00 PM", out)

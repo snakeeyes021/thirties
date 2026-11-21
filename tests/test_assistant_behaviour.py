@@ -171,12 +171,12 @@ class TestTheReplyTalksRight(ConversationTestCase):
         self.assertFalse(any(self.manager.brain._is_check(m) for m in self.manager.messages))
         self.assertEqual(out, "It was added this morning at 5; nothing records why.")
 
-    def test_told_to_pick_the_model_hears_the_choice_is_its(self):
-        # a note with the message, never a rewrite: whether to ask anyway is the model's judgement
+    def test_told_to_pick_the_choice_is_the_models_reading(self):
+        # the model reads the choice left to it from the user's words: no note, never a rewrite
         self.engine.set_next_response(reply("Should I put the fence at 5:00 or 6:00?"))
         out = self.manager.send_user_message("you pick when the fence goes")
-        self.assertTrue(any("leaves the choice to you" in str(m.get("content") or "")
-                            for m in self.engine.call_history[0] if m.get("role") == "user"))
+        self.assertFalse(any(str(m.get("content") or "").startswith("(The user's message")
+                             for m in self.engine.call_history[0] if m.get("role") == "user"))
         self.assertEqual(out, "Should I put the fence at 5:00 or 6:00?")
         self.assertEqual(len(self.engine.call_history), 1)
 

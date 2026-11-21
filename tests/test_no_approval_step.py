@@ -21,14 +21,15 @@ class TestNoLeaveAsked(ConversationTestCase):
         morning.mark_done(self.manager.scheduler.state_db, DAY, at("07:30"))
 
     def rewrite_asked(self):
-        return len(self.engine.call_history) > 1 and "waits on a yes" in self.engine.call_history[1][-1]["content"]
+        """Any check sent the reply back to the model this turn."""
+        return any(str(c[-1]["content"]).startswith("[System check") for c in self.engine.call_history)
 
     def test_would_you_like_me_to_reaches_the_user(self):
         self.engine.set_next_response(reply('CALL update_event {"event": "Wax the canoe hull", "start": "6:00 PM"}'))
         self.engine.set_next_response(reply("The hull waxing is at 6 now. Would you like me to move it to tomorrow "
                                             "instead?"))
         out = self.manager.send_user_message("wax the canoe hull at 6, the clay delivery comes at 5")
-        self.assertFalse(any("waits on a yes" in str(c[-1]["content"]) for c in self.engine.call_history))
+        self.assertFalse(self.rewrite_asked())
         self.assertEqual(out, "The hull waxing is at 6 now. Would you like me to move it to tomorrow instead?")
 
     def test_move_these_to_tonight_reaches_the_user(self):

@@ -10,8 +10,8 @@ outright, where the fix is a fact Python has, or names the problem for one rewri
 - **No made-up explanations**: asked why something on the plan is as it is, the model is told with the message
   where the item's record is (why_notes.py); that's a note for its one answer, not a rewrite.
 - **Its questions are its own**: whether to ask the user which time, or whether they'd like a change, is the
-  model's judgement, and such a question is never sent back for a rewrite. Told to pick ("you pick", "up to
-  you"), the model gets a note with the message that the choice is left to it (``choice_note``).
+  model's judgement, and such a question is never sent back for a rewrite. When the user leaves the choice to it,
+  the model reads that from their words.
 - **Its notes are its own**: it never talks about its workings (its tools, system, internal lists or dates), as if
   the user could see them; what it keeps is "my notes".
 - **The day's end is no reason to drop things**: when something doesn't fit, it says where it goes, never offers to
@@ -52,11 +52,6 @@ WORKINGS_RE = re.compile(
 WHY_RE = re.compile(r"\bwhy\b|\bhow come\b|\bwhat happened (?:to|with)\b|\bwho (?:moved|removed|marked|changed|put|"
                     r"took)\b|\bwhere did\b.*\bgo\b", re.IGNORECASE)
 
-DELEGATE_RE = re.compile(r"\byou (?:pick|choose|decide|sort it|figure it out)\b|\byour (?:call|job|choice)\b|"
-                         r"\bup to you\b|\bwhatever(?:'s| is) best\b|\bjust (?:pick|put|do|schedule|plan|choose|decide|"
-                         r"slot|fit|make)\b|\bpick (?:one|the best|for me)\b|\bfigure it out\b|\bsort (?:it|the|out)\b|"
-                         r"\bdon'?t ask\b|\bstop asking\b|\bno more questions\b|\bbest one\b|"
-                         r"\bset (?:it|that|them|the \w+) up\b", re.IGNORECASE)
 
 DROP_OFFER_RE = re.compile(r"\b(?:drop|let (?:it|them|that|those) go|skip (?:it|them|that|those)|remove (?:it|them|"
                            r"that|those)|take (?:it|them|that|those) off|cut (?:it|them|that|those)|leave (?:it|them) "
@@ -316,7 +311,7 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
         out.append("it talks about how Thirties works inside: say what you keep as your own notes (\"I've noted…\", "
                    "\"I'll remember…\") and leave the workings out")
     # asked why about an item: the model hears where its record is with the message, never a rewrite (why_notes.py)
-    # a question back to the user (which time, whether they'd like a change) is the model's to ask (choice_note)
+    # a question back to the user (which time, whether they'd like a change) is the model's to ask
     if said is not None and not USER_DROP_RE.search(said or ""):
         if any(DROP_OFFER_RE.search(s) and FIT_RE.search(s) for s in lines):
             out.append("it offers to drop something because today is full; the day's end is no reason to drop "
@@ -336,15 +331,6 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     if moon:
         out.append(f"the moon tonight is a {moon}, as computed; say that, or nothing about the moon")
     return out
-
-
-def choice_note(said: Optional[str]) -> Optional[str]:
-    """When the user leaves a choice to Thirties ("you pick", "up to you", "don't ask"), a note for the model with
-    their message; None otherwise. A note, never a rewrite: whether to ask anyway is the model's judgement."""
-    if not said or not DELEGATE_RE.search(said):
-        return None
-    return ("(The user's message leaves the choice to you: pick, make the change, and say in a line what you chose "
-            "and why.)")
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
@@ -367,4 +353,4 @@ def last_resort(reply: str) -> str:
     return out or reply
 
 
-__all__ = ["choice_note", "fix_now_time", "problems", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE", "DELEGATE_RE"]
+__all__ = ["fix_now_time", "problems", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE"]

@@ -7,7 +7,9 @@ brains ask for a fresh reply when they see that, but a rewrite asked for by anot
 this is the last word, in Python, on every reply:
 
 - an echoed result goes whole: from "(Result of" to the bracket that closes it, across lines and paragraphs; one
-  cut off before its closing bracket goes to the end of the reply (nothing after it was meant for the user);
+  cut off before its closing bracket goes to the end of the reply (nothing after it was meant for the user). A note
+  Python adds beside the user's message ("(The user's message asks why about …)", ``NOTE_OPENER``) goes the same
+  way;
 - a line with a check, a refusal ("NOT_DONE"), "for the assistant only", or a call written out goes;
 - a sentence about the app's own workings goes: CALL lines, tool or function calls, commands it can't run, what
   "the system" returned ("I can't make that change with a command in plain text"). The user never sees those
@@ -27,8 +29,11 @@ from __future__ import annotations
 
 import re
 
-# where an echoed tool result starts
-_RESULT_RE = re.compile(r"\(\s*Result of\b", re.IGNORECASE)
+# how every note Python adds for the model beside the user's message opens (why_notes, on_site, engineer_notes,
+# the ask for quiet): copied into a reply, it goes whole, like an echoed result
+NOTE_OPENER = "(The user's message"
+# where an echoed tool result, or such a note, starts
+_RESULT_RE = re.compile(r"\(\s*(?:Result of|The user['’]s message)\b", re.IGNORECASE)
 # a line that's for the model only: a check, a refusal, the prompt's own wording, a call written out
 _LINE_RE = re.compile(
     r"for the assistant only|\[System check\b|\bNOT_DONE\b|\bResult of [a-z]+_[a-z_]+\b|"
@@ -174,4 +179,4 @@ def strip_internal(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", out).strip()
 
 
-__all__ = ["has_internal", "strip_internal", "talks_internals", "waiting_sentence"]
+__all__ = ["NOTE_OPENER", "has_internal", "strip_internal", "talks_internals", "waiting_sentence"]
