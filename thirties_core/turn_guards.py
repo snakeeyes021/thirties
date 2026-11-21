@@ -50,9 +50,10 @@ RELAX_RE = re.compile(r"^\W*(?:(?:some|a|an|quick|short|long)\s+)*(?:relax\w*|ch
 _ALWAYS_ALLOWED = {"show_schedule", "list_schedule", "item_history"}
 
 
-def is_question(message: Optional[str]) -> bool:
+def is_question(message: Optional[str], planned: Optional[list] = None) -> bool:
     """The message only asks: at least one question, and nothing in it but questions (and words like "ok" or
-    "lol"). A request worded as a question, or a question that asks for a change, is a request."""
+    "lol"). A request worded as a question, or a question that asks for a change, is a request; ``planned``, the
+    items on today's plan, says which items an objection to something still being on can be about."""
     if not message or not message.strip():
         return False
     asked = False
@@ -61,13 +62,19 @@ def is_question(message: Optional[str]) -> bool:
         if not s or _NEUTRAL_RE.match(s):
             continue
         from thirties_core.said_for_it import asks_for_change
-        if _REQUEST_RE.search(s) or asks_for_change(s):
+        if _REQUEST_RE.search(s) or asks_for_change(s, planned):
             return False
         if s.endswith("?") or (_QUESTION_START_RE.match(s) and not s.endswith((".", "!"))):
             asked = True
             continue
         return False
     return asked
+
+
+def _planned(pt: "PlanTools") -> Optional[list]:
+    """The titles of the items on the plan, or None when there's no plan to read."""
+    spans = getattr(getattr(pt, "day_plan", None), "spans", None)
+    return None if spans is None else [s.title for s in spans]
 
 
 def _building_the_day(pt: "PlanTools") -> bool:
@@ -94,7 +101,7 @@ def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, out
     if pt.user_message is None or not outermost:
         return None
     from thirties_core.done_words import earlier_request  # a done asked for before isn't held by a question
-    if name not in read_only and name not in _ALWAYS_ALLOWED and is_question(pt.user_message) \
+    if name not in read_only and name not in _ALWAYS_ALLOWED and is_question(pt.user_message, _planned(pt)) \
             and not _building_the_day(pt) and not (name == "log_outcome" and earlier_request(pt, args)):
         return ("The user asked a question; this turn changes nothing. Answer it from what's on the plan and in "
                 "your notes; if a change would help, say what you'd do and let them ask for it.")

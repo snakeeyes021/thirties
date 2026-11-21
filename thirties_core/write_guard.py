@@ -207,25 +207,40 @@ NEGATED_DONE_RE = re.compile(
     r"\b(?:isn'?t|is not|aren'?t|are not|wasn'?t|was not|weren'?t|were not|hasn'?t been|haven'?t been|not)\s+"
     r"(?:yet\s+|really\s+|actually\s+|even\s+)?(?:done|finished|complete|completed|over)\b", re.IGNORECASE)
 _POINTER_RE = re.compile(r"\b(?:it|them|that|this|those|these|both|they|theyre|they'?re)\b", re.IGNORECASE)
+# a tick put off, as it's asked in a question or said outright: "could we skip ticking the bins?", "can we not mark it
+# yet?", "shall we wait before marking it off?". "Why not tick it?" puts the tick forward.
+PUT_OFF_TICK_RE = re.compile(
+    r"(?:\bskip(?:s|ping)?|(?<!why )\bnot|\bwithout|\bbefore|\bhold(?:ing)? off(?: on)?|"
+    r"\bwait(?:ing)?(?: (?:on|before|with|to))?|\bput(?:ting)? off|\bdelay(?:ing)?|\bleave off)\s+"
+    r"(?:\w+\s+){0,2}?(?:tick|mark|check|cross)(?:s|ing)?\b", re.IGNORECASE)
 
 
 def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
     """Why the user's words say not to tick this item ("leave the bowls unticked", "don't tick it", "nowhere near
-    done"), said about it: in a clause naming it, in a clause pointing back with "it" or "them" that names no other
-    item, or, when no clause names it, in any clause naming no other item. "" when nothing says so."""
+    done", "can we hold off on ticking it?"), said about it: in a clause naming it, in a clause pointing back with
+    "it" or "them" that names no other item, or, when no clause names it, in any clause naming no other item. A
+    question says nothing here unless it puts the tick off. "" when nothing says so."""
     if not message:
         return ""
     from thirties_core.started import _SENTENCE_RE, _asks
     others = [o for o in others if o and o != title]
-    told = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
+    sentences = _SENTENCE_RE.findall(message)
+    told = " ".join(t for t in sentences if not _asks(t))
+    asked = " ".join(t for t in sentences if _asks(t) and PUT_OFF_TICK_RE.search(t))
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip()]
-    if not any(NEGATED_DONE_RE.search(c) for c in clauses):
+    put_off = [c for c in _CLAUSE_RE.split(asked) if c and c.strip() and PUT_OFF_TICK_RE.search(c)]
+    clauses += put_off
+
+    def says_not(c: str) -> bool:  # in a question, only a tick put off says so ("why isn't it done?" only asks)
+        return bool(PUT_OFF_TICK_RE.search(c)) if c in put_off else bool(NEGATED_DONE_RE.search(c))
+
+    if not any(says_not(c) for c in clauses):
         return ""
     named = [c for c in clauses if _about(c, title, others)]
     free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)
             and c not in named]
     about = named + ([c for c in free if _POINTER_RE.search(c)] if named else free)
-    if any(NEGATED_DONE_RE.search(c) for c in about):
+    if any(says_not(c) for c in about):
         return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
                 "say it is.")
     return ""
@@ -433,11 +448,13 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
         return f"not written: the user's words point at what's under or in {title}, not at the item itself."
     if kind == "complete" and only_questions(message) and not DONE_WORDS_RE.search(message):
         return f"not written: the user only asked about {title}, so it isn't ticked."
-    if kind in ("remove", "file_dropped") and (only_questions(message) or removal_in_question(message)):
+    # a question about the item still being on ("why is it still on?") asks for a change only when it names it
+    if kind in ("remove", "file_dropped") and (only_questions(message, [title])
+                                                or removal_in_question(message, [title])):
         return f"not written: the user only asked about taking {title} off, so its line stays."
     # --- end a question, or a pointer at parts ---
     return ""
 
 
-__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "REPORTED_RE", "STATE_RE", "asks_to_drop", "says_done",
+__all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "PUT_OFF_TICK_RE", "REPORTED_RE", "STATE_RE", "asks_to_drop", "says_done",
            "state_not_done", "told_not_to_tick", "refused"]

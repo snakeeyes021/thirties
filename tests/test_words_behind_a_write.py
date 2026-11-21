@@ -390,5 +390,96 @@ class TestOnlyWhatIsTakenBackHolds(ShopEvening):
                            ("Mail the studio grant form", "I thought I'd mailed the grant form")))
 
 
+class TestATickPutOffInAQuestion(ShopEvening):
+    """A tick the user put off, asked as a question, went through."""
+
+    PUT_OFF = ("could we skip ticking the clay bins?", "can we not mark the clay bins yet?",
+               "why don't we hold off on ticking the clay bins?", "could we wait before marking the clay bins off?")
+
+    def test_no_tick(self):
+        from thirties_core.said_for_it import tick_asked
+        from thirties_core.write_guard import told_not_to_tick
+        for words in self.PUT_OFF:
+            with self.subTest(words=words):
+                self.assertFalse(tick_asked(words, "Restock the clay bins", self.others("Restock the clay bins")))
+                self.assertNotEqual(told_not_to_tick(words, "Restock the clay bins",
+                                                     self.others("Restock the clay bins")), "")
+        self.assertNoTick(tuple(("Restock the clay bins", w) for w in self.PUT_OFF))
+
+
+class TestTheItemsOwnVerbIsNoTickAsk(ShopEvening):
+    """A tick word that's the item's own verb ("check" in Check kiln wiring) read as an ask to tick it."""
+
+    def test_its_own_verb_ticks_nothing(self):
+        from thirties_core.said_for_it import tick_asked
+        for words in ("remind me to check the kiln wiring at 7:40", "move the kiln wiring check to 7:50",
+                      "can you check the kiln wiring is safe before 7:40?", "remind me to mark the clay bins off later"):
+            with self.subTest(words=words):
+                for title in ("Check kiln wiring", "Restock the clay bins"):
+                    self.assertFalse(tick_asked(words, title, self.others(title)), title)
+        self.assertNoTick((("Check kiln wiring", "remind me to check the kiln wiring at 7:40"),
+                           ("Check kiln wiring", "move the kiln wiring check to 7:50")))
+
+    def test_a_tick_asked_for_still_ticks(self):
+        from thirties_core.said_for_it import tick_asked
+        for title, words in (("Check kiln wiring", "check off the kiln wiring"),
+                             ("Check kiln wiring", "tick the kiln wiring"),
+                             ("Restock the clay bins", "mark the clay bins done"),
+                             ("Restock the clay bins", "cross the clay bins off")):
+            with self.subTest(words=words):
+                self.assertTrue(tick_asked(words, title, self.others(title)))
+        self.assertTicks((("Check kiln wiring", "check off the kiln wiring"),
+                          ("Restock the clay bins", "cross the clay bins off")))
+
+
+class TestAPushBackIsNoAsk(ShopEvening):
+    """A question pushing back on a change read as an ask for it, so the change went through."""
+
+    PUSH_BACK = ("why not keep the clay bins on today?", "wouldn't pushing the clay bins to 8:40 overload Friday?",
+                 "why are the glaze bowls still in the kiln?")
+
+    def test_what_only_asks(self):
+        from thirties_core.said_for_it import asks_for_change, is_asking
+        from thirties_core.turn_guards import is_question
+        for words in self.PUSH_BACK:
+            with self.subTest(words=words):
+                self.assertFalse(asks_for_change(words))
+                self.assertTrue(is_asking(words))
+                self.assertTrue(is_question(words))
+        for words in ("wouldn't it be better to push the clay bins to 8:40?", "why not move the clay bins to 8:40?",
+                      "why is the clay bins restock still on today?", "why is the clay bins restock still on?"):
+            with self.subTest(words=words):
+                self.assertTrue(asks_for_change(words))
+
+    def test_nothing_comes_off_or_moves(self):
+        for words in self.PUSH_BACK:
+            with self.subTest(words=words):
+                self.assertHeld(self.remove("Restock the clay bins", words))
+                self.assertEqual(len(self.planned("Restock the clay bins")), 1)
+        out = self.said("update_event", {"event": "Restock the clay bins", "start": "8:40 PM"}, self.PUSH_BACK[1])
+        self.assertHeld(out)
+
+    def test_still_on_is_an_ask_only_for_a_planned_item(self):
+        from thirties_core.said_for_it import asks_for_change
+        planned = [t for t, _ in self.ITEMS]
+        self.assertTrue(asks_for_change("why is the clay bins restock still on?", planned))
+        self.assertFalse(asks_for_change("why is the oven still on?", planned))
+        self.assertHeld(self.remove("Restock the clay bins", "why is the oven still on?"))
+        self.assertWent(self.remove("Restock the clay bins", "why is the clay bins restock still on?"))
+
+
+class TestAPoliteDoneAsk(ShopEvening):
+    """A polite ask to put an item down as done was refused as a question."""
+
+    def test_it_ticks(self):
+        self.assertTicks((("Restock the clay bins", "could you put the clay bins down as finished?"),
+                          ("Restock the clay bins", "can you set the clay bins as done?"),
+                          ("Restock the clay bins", "would you mark the clay bins as done please?")))
+
+    def test_asking_whether_it_is_done_still_ticks_nothing(self):
+        self.assertNoTick((("Restock the clay bins", "could you check if the clay bins are finished?"),
+                           ("Restock the clay bins", "can you make sure the clay bins get done?")))
+
+
 if __name__ == "__main__":
     unittest.main()

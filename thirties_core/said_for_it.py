@@ -10,8 +10,9 @@
   a question ("which would you take off?") isn't asked for. A question that asks for a change is an ask, and what
   it means is the model's reading: worded as a request ("could you take the bins off?"), as a suggestion or a
   request for leave ("shouldn't we drop the bins today?", "can the bins go?"), or as an objection to the item still
-  being there ("why are the bins still on?"). A question asking an opinion ("should the bins come off?") only asks
-  (``asks_for_change``, ``asked_only``, ``removal_in_question``).
+  being there ("why are the bins still on?"). A question asking an opinion ("should the bins come off?"), or one
+  pushing back on a change ("why not keep the bins on today?", "wouldn't pushing the bins overload Friday?"), only
+  asks (``asks_for_change``, ``asked_only``, ``removal_in_question``).
 - **Pointing at an item's parts isn't pointing at the item.** "what are the two clays under the clay bins? get rid
   of those": the pointer is about what's under, in or listed inside the item, not the item. Nothing is taken off
   or ticked on such words; an item named outright still is (``parts_only``).
@@ -90,29 +91,50 @@ _CHANGE = (r"(?:drop\w*|remov\w*|skip\w*|ditch\w*|scrap\w*|cancel\w*|nix|lose|ge
            r"(?:cross|check)\w* (?:\w+ ){0,5}?off|go(?=\s*[?.!]*\s*$|\s+(?:at|to|later|earlier|after|before|"
            r"tomorrow|tonight|instead|elsewhere|somewhere)\b))")
 _CHANGE_RE = re.compile(rf"\b{_CHANGE}", re.IGNORECASE)
-# a question that puts a change forward: a suggestion ("why not move it", "how about we"), an objection to the item
-# still being on the plan ("why is the varnish coat still on?"), or wondering whether it's still wanted. "Why not?"
-# alone, "what about the bins?" and "why is the kiln still hot?" only ask.
+# a question that puts a change forward: a suggestion with a change in it ("why not move it", "how about we lose
+# it"), or wondering whether it's still wanted. "Why not?" alone, "what about the bins?" and a suggestion to keep it
+# ("why not keep the bins on today?") only ask.
+_SUGGESTS_RE = re.compile(r"\b(?:why not\s+\w|why don'?t (?:we|you|i)|(?:how|what) about (?:we|you|i|if|\w+ing)\b|"
+                          r"what if (?:we|i|you))", re.IGNORECASE)
+_KEEP_RE = re.compile(r"\b(?:keep\w*|leave|leaving|stay\w*|stick with|hold on to|hang on to)\b", re.IGNORECASE)
 _PROPOSES_RE = re.compile(
-    rf"\b(?:why not\s+\w|why don'?t (?:we|you|i)|(?:how|what) about (?:we|you|i|if|\w+ing)\b|what if (?:we|i|you)|"
-    rf"mind if (?:i|we) (?:just )?{_CHANGE}|is it (?:ok|okay|fine|alright|all right) (?:if|to)\b[^.!?\n]*\b{_CHANGE}|"
-    r"any reason (?:not to|to keep)|do (?:we|i) (?:still |really |even )+(?:need|want)|"
-    r"(?:why|how come)\b[^.!?\n]*\bstill (?:(?:on|in)(?=\s*[?.!]*\s*$|\s+(?:today|tonight|the|my|there|here)\b)|"
-    r"there|here|planned|scheduled|listed|showing))", re.IGNORECASE)
+    rf"\b(?:mind if (?:i|we) (?:just )?{_CHANGE}|is it (?:ok|okay|fine|alright|all right) (?:if|to)\b[^.!?\n]*\b"
+    rf"{_CHANGE}|any reason (?:not to|to keep)|do (?:we|i) (?:still |really |even )+(?:need|want))", re.IGNORECASE)
+# an objection to the item still being on the plan ("why is the varnish coat still on today?", "why is the varnish
+# still on?"). "Why is the kiln still hot?" and "why are the bowls still in the kiln?" only ask.
+_ON_THE_PLAN_RE = re.compile(
+    r"(?:why|how come)\b[^.!?\n]*\bstill (?:(?:on|in)\s+(?:today|tonight|the (?:plan|list|schedule|calendar|day)|"
+    r"my (?:plan|list|schedule|calendar|day)|today'?s|tonight'?s)\b|planned|scheduled|listed|showing|"
+    r"on(?=\s*[?.!]*\s*$|\s+(?:there|here)\b)|there|here)", re.IGNORECASE)
 # a question opened by a modal that asks for leave or puts something forward ("shouldn't we", "can't we", "can the
-# paddle", "could I", "shall we"), with a change in it; "should the bins come off?" asks for an opinion, and only
-# asks
-_MODAL_RE = re.compile(r"^\W*(?:shouldn'?t|can'?t|cannot|couldn'?t|won'?t|wouldn'?t|(?:can|could|may|shall)(?=\s+(?:we|i|"
-                       r"you|it|that|this|they|those|these|the|my|our)\b))\b", re.IGNORECASE)
+# paddle", "could I", "shall we", "wouldn't it be better to"), with a change in it; "should the bins come off?" asks
+# for an opinion, and "wouldn't pushing the bins overload Friday?" worries about one: both only ask
+_MODAL_RE = re.compile(r"^\W*(?:shouldn'?t|can'?t|cannot|couldn'?t|(?:won'?t|wouldn'?t) it be (?:better|easier|best|"
+                       r"smarter|simpler|wiser|nicer)|(?:can|could|may|shall)(?=\s+(?:we|i|you|it|that|this|they|"
+                       r"those|these|the|my|our)\b))\b", re.IGNORECASE)
 
 
-def asks_for_change(sentence: str) -> bool:
+def asks_for_change(sentence: str, planned: Optional[Iterable[str]] = None) -> bool:
     """A question that asks the app for a change, not one that only asks: a suggestion, an objection to the item
     still being on the plan, or a question asking leave for a change ("shouldn't we drop the bins?", "can the bins
     go?", "can we move the bins to 4?"). One asking an opinion ("should the bins come off?"), or whether something
-    can get done ("can I get the bins done by 4?"), only asks. Which change it means is the model's reading."""
+    can get done ("can I get the bins done by 4?"), only asks. Which change it means is the model's reading.
+    ``planned``: the items on today's plan; an objection to something still being on asks for a change only when it
+    names one of them ("why is the oven still on?" only asks)."""
     s = (sentence or "").strip()
-    return bool(s) and bool(_PROPOSES_RE.search(s) or (_MODAL_RE.match(s) and _CHANGE_RE.search(s)))
+    if not s:
+        return False
+    if _PROPOSES_RE.search(s) or (_MODAL_RE.match(s) and _CHANGE_RE.search(s)):
+        return True
+    if _SUGGESTS_RE.search(s) and _CHANGE_RE.search(s) and not _KEEP_RE.search(s):
+        return True
+    if _ON_THE_PLAN_RE.search(s):
+        if planned is None:
+            return True
+        from thirties_core.done_reference import _named
+        titles = [t for t in planned if t]
+        return any(_named(s, t, [x for x in titles if x != t]) for t in titles)
+    return False
 
 
 # a question asked outright: a question word or a modal opens it, and it ends in a question mark. A done word in it
@@ -130,12 +152,12 @@ def asked_outright(sentence: str) -> bool:
     return s.endswith("?") and bool(_OPENS_QUESTION_RE.match(s))
 
 
-def is_asking(sentence: str) -> bool:
+def is_asking(sentence: str, planned: Optional[Iterable[str]] = None) -> bool:
     """A sentence that only asks something, not one asking for something: a wh-question (even with "would you" in
     it), or one ending in a question mark that isn't a request ("could you take it off?") or a question that asks
-    for a change (``asks_for_change``)."""
+    for a change (``asks_for_change``, with today's ``planned`` items when known)."""
     s = sentence.strip()
-    if not s or asks_for_change(s):
+    if not s or asks_for_change(s, planned):
         return False
     if _WH_RE.match(s):
         return True
@@ -161,23 +183,25 @@ def asked_only(message: Optional[str], title: str, others: Iterable[str] = ()) -
                    for s in sentences)
 
 
-def only_questions(message: Optional[str]) -> bool:
+def only_questions(message: Optional[str], planned: Optional[Iterable[str]] = None) -> bool:
     """Everything the message says is a question (words like "ok" aside)."""
     if not message:
         return False
     from thirties_core.turn_guards import _NEUTRAL_RE
+    planned = None if planned is None else list(planned)
     said = [s for s in _SENTENCE_RE.findall(message) if s.strip() and not _NEUTRAL_RE.match(s.strip())]
-    return bool(said) and all(is_asking(s) for s in said)
+    return bool(said) and all(is_asking(s, planned) for s in said)
 
 
-def removal_in_question(message: Optional[str]) -> bool:
+def removal_in_question(message: Optional[str], planned: Optional[Iterable[str]] = None) -> bool:
     """The words asking for something to come off are only inside questions ("which would you take off?")."""
     if not message:
         return False
     from thirties_core.change_asks import _removal_words
     words = _removal_words()
+    planned = None if planned is None else list(planned)
     asking = [s for s in _SENTENCE_RE.findall(message) if s.strip() and words.search(s)]
-    return bool(asking) and all(is_asking(s) for s in asking)
+    return bool(asking) and all(is_asking(s, planned) for s in asking)
 # --- end a question changes nothing ---
 
 
@@ -230,15 +254,16 @@ def removal_held(pt: Any, title: str) -> str:
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return ""
-    if only_questions(message) or removal_in_question(message):
-        return (f"The user only asked about taking things off; a question changes nothing, so {title} stays. "
-                "Answer them; take it off when they ask for it.")
     titles = []
     for s in getattr(getattr(pt, "day_plan", None), "spans", None) or []:
         try:
             titles.append(pt._title(s))
         except Exception:
             titles.append(s.title)
+    planned = list(dict.fromkeys([title] + titles))
+    if only_questions(message, planned) or removal_in_question(message, planned):
+        return (f"The user only asked about taking things off; a question changes nothing, so {title} stays. "
+                "Answer them; take it off when they ask for it.")
     _, shown = getattr(pt, "prior_exchange", None) or ("", "")
     if parts_only(message, title, shown, list(dict.fromkeys([title] + titles))):
         return parts_refusal(title)
@@ -252,20 +277,43 @@ def parts_refusal(title: str) -> str:
 
 
 # --- the user's own done ---
-# asking for a tick in so many words
-_TICK_ASK_RE = re.compile(r"\b(?:mark|tick|check|cross|log)\w*\b", re.IGNORECASE)
+# asking for a tick in so many words: "tick the varnish coat", "mark the glaze bins off", "check off the lid
+# wiring", "cross the bins off", "put the bins down as done". "Check the wiring" and "mark essays" are the item's
+# own verb, and "check if the bins are done" asks something.
+_BETWEEN = r"(?:\s+(?!(?:if|whether|that|is|are|was|were|has|have|had|get|gets|got)\b)[\w']+){0,6}?"
+_TICK_ASK_RE = re.compile(
+    rf"\btick(?:s|ing)?\b(?!\s+(?:box|tock|bite)\b)|"
+    rf"\b(?:mark|check|cross)(?:s|ing)?\b{_BETWEEN}\s+(?:off|done|complete|completed|finished)\b|"
+    rf"\b(?:put|set|mark|log|record|count|list|enter|note)\b{_BETWEEN}\s+(?:down\s+)?(?:as|to)\s+"
+    r"(?:done|finished|complete|completed)\b", re.IGNORECASE)
+# the tick is for later, or for the user to remember: "remind me to mark the bins off", "I'll tick the varnish at 8:40"
+_LATER_TICK_RE = re.compile(r"\b(?:remind(?:er)?|don'?t let me forget|i'?ll|i will|we'?ll|going to|gonna)\b",
+                            re.IGNORECASE)
 
 
 def tick_asked(message: Optional[str], title: str, others: Iterable[str] = ()) -> bool:
     """The user asks for this item to be ticked: a sentence asking for a tick ("mark the varnish off", "can we
-    tick the varnish?"), not one that only asks, that names the item, or points back naming nothing else ("mark
-    it done"). The plan and the list read it alike (write_guard.says_done)."""
+    tick the varnish?", "could you put the varnish down as done?"), not one that only asks, that names the item,
+    or points back naming nothing else ("mark it done"). A tick put off ("could we skip ticking it?", "can we not
+    mark it yet?") or left for later ("remind me to mark the bins off") isn't asked for, and neither is the item's own
+    verb ("check the kiln wiring" for Check kiln wiring). The plan and the list read it alike
+    (write_guard.says_done)."""
     if not message:
         return False
-    from thirties_core.write_guard import _about, _names_another_thing
+    from thirties_core.write_guard import NEGATED_DONE_RE, PUT_OFF_TICK_RE, _about, _names_another_thing
     others = [o for o in others if o and o != title]
+    own = set(re.findall(r"[a-z]+", str(title or "").lower()))
     for s in _SENTENCE_RE.findall(message):
-        if not s.strip() or is_asking(s) or not _TICK_ASK_RE.search(s):
+        if not s.strip() or is_asking(s):
+            continue
+        asks = [m for m in _TICK_ASK_RE.finditer(s)
+                if not (m.group(0).lower().startswith("tick") and "tick" in own)
+                and not _LATER_TICK_RE.search(s[:m.start()])]
+        if not asks:
+            continue
+        # "why don't we tick it?" puts the tick forward; "don't tick it" and "can we hold off on ticking?" don't
+        if NEGATED_DONE_RE.search(re.sub(r"\bwhy don'?t\b", "why", s, flags=re.IGNORECASE)) \
+                or PUT_OFF_TICK_RE.search(s):
             continue
         if any(_about(s, o, [x for x in others if x != o] + [title]) for o in others) and not _about(s, title, others):
             continue  # a tick asked for another item
