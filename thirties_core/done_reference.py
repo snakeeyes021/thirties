@@ -256,6 +256,19 @@ def _listed(text: str, title: str) -> bool:
     return bool(mine) and mine <= name_words(text)
 
 
+def _listed_alone(text: str, title: str) -> bool:
+    """A message the user was shown lists the item on its own: its whole title stands as an entry, a list line
+    ("- 9:20 AM – Costumes") or one of a series ("Costumes, Props and Gels"), never inside a longer title
+    ("Steam the costumes" doesn't list Costumes)."""
+    title = (title or "").strip()
+    for m in re.finditer(rf"(?<![\w'’]){re.escape(title)}(?![\w'’])", text or "", re.IGNORECASE) if title else ():
+        before, after = text[:m.start()].rstrip(" \t"), text[m.end():].lstrip(" \t")
+        if (not before or not before[-1].isalnum() or re.search(r"(?<!\w)(?:and|or)$", before, re.IGNORECASE)) \
+                and (not after or not after[0].isalnum() or re.match(r"(?:and|or)(?!\w)", after, re.IGNORECASE)):
+            return True
+    return False
+
+
 def _listed_items(pt: "PlanTools", names: Sequence[str]) -> List[str]:
     """The open items on the user's lists other than this one, by their wording."""
     try:
@@ -277,10 +290,10 @@ def pointed_back(pt: "PlanTools", titles: List[str]) -> List[str]:
 def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[str]) -> bool:
     """A done right after a reply listing several open items, with no word of an item on the plan or in that reply
     ("that one's sorted", "done!"): which one it is is the model's pick. It stands when the item is one of the open
-    items that reply showed; the reply then has to say which one it ticked (reply_checks.picked_unnamed)."""
+    items that reply listed on its own; the reply then has to say which one it ticked (reply_checks.picked_unnamed)."""
     from thirties_core.done_words import _hits
     from thirties_core.plain_done import _open_titles, _which_words, says_it_happened
-    if not says_it_happened(message) or not _listed(shown, title):
+    if not says_it_happened(message) or not _listed_alone(shown, title):
         return False
     shown_open = _open_items_shown(pt, shown, titles)
     if title not in _open_titles(pt) + shown_open:
