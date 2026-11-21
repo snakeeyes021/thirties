@@ -293,11 +293,12 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
     if _last_question(shown):
         return ""  # a reply to a question about which item, or whether it's done: the question carries the done
     from thirties_core.done_reference import _named
-    from thirties_core.started import FINISHED_RE
+    from thirties_core.started import FINISHED_RE, without_caused
     from thirties_core.write_guard import _MISTAKEN_RE, _POINTER_RE, REPORTED_RE, YES_RE, _done_in
     others = [o for o in others if o and o != title]
     for text in dict.fromkeys(t for t in (words, message) if t):
-        told = [s for s in _SENTENCE_RE.findall(text) if s.strip() and not is_asking(s)]
+        # what the user is only getting done ("getting the fence fixed") is no done
+        told = [s for s in _SENTENCE_RE.findall(without_caused(text)) if s.strip() and not is_asking(s)]
         # a done word inside a question is asked about, never said, even in one asking for a change ("can I get
         # the bins done by 4?"): only what's told carries a done
         stated = [s for s in told if not asked_outright(s) and not asks_for_change(s)]

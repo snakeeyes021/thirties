@@ -19,9 +19,9 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
-# a condition, or a moment still to come, that a done waits on
-_LEAD_RE = re.compile(r"\b(?:once|when|whenever|as soon as|soon as|the (?:moment|minute|second|instant)|after|if|"
-                      r"until|till|by the time|before)\b", re.IGNORECASE)
+# a condition, or a moment still to come, that a done waits on (once again, once more: no condition)
+_LEAD_RE = re.compile(r"\b(?:once(?!\s+(?:again|more|or twice|in a while)\b)|when|whenever|as soon as|soon as|"
+                      r"the (?:moment|minute|second|instant)|after|if|until|till|by the time|before)\b", re.IGNORECASE)
 # said in the present after such a word: still to come ("once they are glazed", "when I finish them")
 _PRESENT_RE = re.compile(r"\b(?:is|are|am|be|get|gets|getting|finish|finishes|wrap|wraps|complete|completes|have|has)\b|"
                          r"\w'(?:s|re|ve)\b", re.IGNORECASE)

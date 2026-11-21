@@ -50,6 +50,8 @@ _BREAK = {
     "here", "now", "then", "there", "one", "ones", "both", "each", "every", "any", "half", "rest", "lot", "bit",
     "few", "couple", "other", "another", "same", "own", "some", "all", "whole", "stuff", "item", "items", "task",
     "tasks", "bits", "old", "new", "big", "small", "extra",
+    # who did it, and where it was put ("fixed the fence myself", "put the bins down as done")
+    "myself", "yourself", "ourselves", "themselves", "itself", "down",
     # everyday verbs said right after an item's name ("the bowls look fine", "the kiln shows hot")
     "say", "says", "show", "shows", "showing", "shown", "look", "looks", "seem", "seems", "need", "needs", "want",
     "wants", "go", "goes", "went", "come", "comes", "came", "make", "makes", "made", "let", "lets", "see", "sees",

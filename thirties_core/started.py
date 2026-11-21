@@ -26,7 +26,9 @@ STARTED_RE = re.compile(
 NOT_A_FINISH = ("started", "scheduled", "planned", "needed", "wanted", "supposed", "tired", "bored", "kicked", "turned",
                 "skipped", "bugged", "bothered", "annoyed", "irked", "nagged", "dreaded", "feared", "hated", "stalled",
                 "failed", "abandoned", "missed", "avoided", "dodged", "paused", "postponed", "delayed", "ignored",
-                "neglected", "struggled", "procrastinated")
+                "neglected", "struggled", "procrastinated",
+                # moved or called off: it didn't happen ("the visit got rescheduled", "they cancelled it")
+                "rescheduled", "cancelled", "canceled", "rebooked", "expired", "rejected", "reopened", "bumped")
 # a clause saying it's over
 FINISHED_RE = re.compile(
     r"\b(?:done|finished|finish|complete|completed|did|ate|fed|over with|wrapped up|handled|taken care of|"
@@ -126,15 +128,33 @@ def not_finished(message: Optional[str], title: str, others: Iterable[str] = ())
         return ""
     if said_not_done(message, title, others):
         return "not"
-    from thirties_core.write_guard import DONE_WORDS_RE
-    # said in so many words, in the same clause as anything under way; a done word for something else, said in the
-    # same clause after "after", "before" or "when" ("started the varnish right after I picked up the brush"),
-    # isn't said of the item
-    if any(_OVER_RE.search(s) or DONE_WORDS_RE.search(s) for c in about for s in _naming_stretches(c, title, others)):
+    # said over in so many words ("done", "finished"), in the same clause as anything under way; a done for
+    # something else, said in the same clause after "after", "before" or "when" ("started the varnish right after I
+    # picked up the brush"), isn't said of the item, and neither is one it's only getting ("I'm at the welder's
+    # getting the trailer hitch welded", "getting the shelves sanded")
+    if any(_OVER_RE.search(without_caused(s)) for c in about for s in _naming_stretches(c, title, others)):
         return ""
     if any(STARTED_RE.search(c) for c in about):  # under way beats other verbs about the item ("pulled the cover off and
         return "begun"                            # started the washer")
     return ""
+
+
+# --- getting it done is no done ---
+# "getting the trailer hitch welded", "get the permit stamped", "having the kiln vented": a done word that's what
+# the user is getting or having done, not what has happened. "Got the hitch welded" and "had the kiln vented" are
+# past, and say it happened.
+_CAUSED_RE = re.compile(
+    r"\b((?:get|gets|getting|to have|having)\s+(?:[\w']+\s+){0,5}?)"
+    r"(?!(?:" + "|".join(NOT_A_FINISH) + r"|stuck|tired|ready|going|bored)\b)"
+    r"(?:done|[a-z]{3,}ed|sorted|sent|paid|made|built|bought|written|seen|taken|set up|dealt with|taken care of)\b",
+    re.IGNORECASE)
+
+
+def without_caused(text: str) -> str:
+    """The words with each done the user is only getting done taken out ("getting the hitch welded" → "getting the
+    hitch")."""
+    return _CAUSED_RE.sub(lambda m: m.group(1), text or "")
+# --- end getting it done ---
 
 
 # a word that opens what happened before, after or when: what follows it is about something else
@@ -155,4 +175,5 @@ def only_started(message: Optional[str], title: str, others: Iterable[str] = ())
     return not_finished(message, title, others) == "begun"
 
 
-__all__ = ["STARTED_RE", "FINISHED_RE", "NOT_YET_RE", "REST_RE", "is_rest", "not_finished", "only_started", "said_not_done"]
+__all__ = ["STARTED_RE", "FINISHED_RE", "NOT_YET_RE", "REST_RE", "is_rest", "not_finished", "only_started", "said_not_done",
+           "without_caused"]

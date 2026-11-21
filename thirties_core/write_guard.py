@@ -44,38 +44,71 @@ DONE_WORDS_RE = re.compile(
     r"crossed off|all set|taken care of|took care of|sorted|wrapped up|over with|handled|did (?:it|that|them)|"
     r"got (?:it|that|them) done|"
     # the everyday ways of saying it's finished
-    r"one less thing|knocked (?:it |that |them |those |this |the (?:\w+ ){1,3})?out|squared away|sorted out|"
-    # dealt with, but not still to be, nor done badly ("dealt with it badly")
-    r"(?<!to be )(?<!be )dealt with(?![^.!?\n]{0,30}\b(?:badly|poorly|wrong(?:ly)?|later)\b)|"
+    # knocked out, said of a thing ("knocked out the thwart", "knocked it out"), never of the user ("knocked out by
+    # a headache")
+    r"one less thing|knocked (?:(?:it|that|them|those|this|the(?: \w+){1,3}) out|"
+    r"out (?=(?:the|my|that|this|those|these|it|them|all)\b))|squared away|sorted out|"
+    # dealt with, but not still to be or being dealt with, nor done badly ("dealt with it badly")
+    r"(?<!to be )(?<!be )(?<!being )(?<!need )(?<!needs )(?<!get )(?<!gets )(?<!getting )"
+    r"dealt with(?![^.!?\n]{0,30}\b(?:badly|poorly|wrong(?:ly)?|later)\b)|"
     r"(?:all|it'?s|that'?s|we'?re|i'?m) wrapped|that'?s a wrap|(?:it'?s|that'?s|is) in the bag|"
     r"nailed (?:it|that|them)|(?:it'?s|that'?s|they'?re|is|are|now) out of the way(?!\s+of\b)|"
-    r"off my (?:plate|list|back)|"
+    # off my plate when it is, or got there; wanting to get it off my plate is a plan
+    r"(?:(?:it'?s|its|that'?s|they'?re|is|are|was|were|now)\s+|got (?:[\w']+ ){0,4}?)off my (?:plate|list|back)|"
     r"(?:crossed|ticked) (?:it|that|them|those) off|put to bed|finished up|over and done)\b|"
-    # "the kiln permit is in", said as the end of what's said about it
-    r"\b(?:it'?s|its|that'?s|they'?re|is|are) in\s*[.!]*\s*$|[\u2713\u2714\u2611\u2705]", re.IGNORECASE)
+    r"[\u2713\u2714\u2611\u2705]", re.IGNORECASE)
+# "the kiln permit is in", said as the end of what's said about it: handed in. Only for something that's handed in or
+# sent off (a form, a permit, an application, an order), or an item that's about sending it (Mail the glaze samples);
+# "the loaf is in" has only gone in the oven.
+_IN_RE = re.compile(r"(?:\b(?:it'?s|its|that'?s|they'?re|is|are)|(?<=\w)'(?:s|re))\s+in\s*[.!]*\s*$", re.IGNORECASE)
+_HANDED_IN_RE = re.compile(
+    r"\b(?:permits?|forms?|applications?|orders?|claims?|paperwork|submissions?|entr(?:y|ies)|essays?|assignments?|"
+    r"requests?|renewals?|returns?|ballots?|timesheets?|bids?|proposals?|invoices?|cheques?|appeals?|"
+    r"nominations?|registrations?|enrol?ments?)\b", re.IGNORECASE)
+_SENDING_RE = re.compile(r"\b(?:mail|post|send|submit|hand|file|lodge|return|deliver|apply|enter|register|enrol|enroll)\b",
+                         re.IGNORECASE)
 # a report that something happened, in the perfect ("I've written the glaze notes", "the parcel has gone") or an
 # everyday irregular past: the model's reading of a done in words like these stands. Not said as could, would or
 # will have; "I've started", "it's left" and "I've planned" aren't reports of a finish, and neither is giving up on
 # it, putting it off or grumbling about it ("I've given up on it", "it has bugged me", "I've skipped it").
 from thirties_core.started import NOT_A_FINISH  # noqa: E402  (started.py imports nothing of this module's)
-_PARTICIPLES = (r"written|sent|gone|given(?!\s+(?:up|in)\b)|done|seen|spoken|bought|brought|built|sold|told|won|"
-                "swept|hung|wound|driven|thrown|taken|made|eaten|drunk|paid|laid|fed|found|held|kept|lent|met|ridden|"
+# Gone wrong or taking long is no report either ("the milk's gone off", "it's taken forever").
+_PARTICIPLES = (r"written|sent|gone(?!\s+(?:off|missing|wrong|bad|astray|sour|stale|mouldy|moldy|flat|dead|quiet)\b)|"
+                r"given(?!\s+(?:up|in)\b)|done|seen|spoken|bought|brought|built|sold|told|won|swept|hung|wound|driven|"
+                r"thrown|taken(?!\s+(?:ages|forever|long|so long|too long|longer|a while|ill|sick)\b)|"
+                "made|eaten|drunk|paid|laid|fed|found|held|kept|lent|met|ridden|"
                 "shaken|sewn|sown|sung|spun|struck|swum|torn|woven|worn|dug|ground|bound|fought|taught|caught|sought|"
                 "stood|swung")
 _NOT_REPORTED = tuple(dict.fromkeys(NOT_A_FINISH + (
     "asked", "wondered", "guessed", "worried", "listed", "added", "moved", "pushed", "postponed", "decided", "meant",
     "hoped", "tried", "used", "delayed")))
+# Nor what should, would or could have happened, or what the user wishes had ("should've mailed it", "wish I had
+# sent it", "if I had sent it").
 REPORTED_RE = re.compile(
     r"(?<!would )(?<!could )(?<!should )(?<!might )(?<!must )(?<!will )(?<!'ll )(?<!'d )"
+    r"(?<!would)(?<!could)(?<!should)(?<!might)(?<!must)"
+    r"(?<!wish i )(?<!wish we )(?<!if i )(?<!if we )(?<!only i )(?<!only we )"
     r"\b(?:'ve|'s|have|has|had)\s+(?:just\s+|already\s+|finally\s+|now\s+|all\s+)?(?:been\s+)?"
     r"(?:" + _PARTICIPLES + r"|(?!(?:" + "|".join(_NOT_REPORTED) + r")\b)[a-z]{3,}ed)\b|"
     r"\b(?:wrote|spoke|built|sold|drove|gave(?!\s+(?:up|in)\b)|threw|swept|dug|wove|sewed|fought|taught|caught|"
     r"swung|hung|wound|bound|ground|tore|wore|rode|shook|sang|swam|spun|struck|bought|brought|ate|drank|lent|met|"
     r"won)\b", re.IGNORECASE)
-# said, then taken back: "the permit is in, or so I thought", "I thought it was done"
-_MISTAKEN_RE = re.compile(r"\b(?:or so i (?:thought|was told|hoped)|so i thought|i thought (?:it|that|they|so)\b|"
-                          r"turns out (?:it|they|that)(?:'s| is| was| are| were)? ?n[o']t|apparently not)\b",
-                          re.IGNORECASE)
+# said, then taken back: "the permit is in, or so I thought", "I thought it was done", "I thought I'd mailed it".
+# "I thought it would take longer" takes nothing back.
+_MISTAKEN_RE = re.compile(
+    r"\b(?:or so i (?:thought|was told|hoped)|so i thought|i thought so|"
+    r"i thought (?:it|that|they|i|we|the (?:[\w']+ ){0,4}?[\w']+)(?:'s|'d|'re|\s+(?:was|were|is|are|had|has|have|did))"
+    r"(?:\s+(?:already|all|been|just|finally))*\s+(?:done|finished|complete\w*|in|over|sorted|ticked|marked|off|"
+    r"sent|paid|dealt with|taken care of|(?!(?:" + "|".join(NOT_A_FINISH) + r")\b)[a-z]{3,}ed)|"
+    r"turns out (?:it|they|that)(?:'s| is| was| are| were)? ?n[o']t|apparently not)\b",
+    re.IGNORECASE)
+# what didn't happen: should, would or could have, or wished it had ("I should've mailed it", "wish I had sent it")
+_UNREAL_RE = re.compile(r"\b(?:should|would|could|might|must)(?:'ve|\s+have|\s+of)\b|"
+                        r"\b(?:wish|if only)\s+(?:i|we)(?:'d|\s+had)\b|\bif (?:i|we)(?:'d|\s+had)\s+\w+ed\b",
+                        re.IGNORECASE)
+# moved or called off: it didn't happen ("the visit got rescheduled", "it's been cancelled")
+_CALLED_OFF_RE = re.compile(r"\b(?:re-?scheduled|postponed|cancell?ed|called off|put off|pushed back|rebooked|"
+                            r"rained off|rain-?checked|bumped)\b", re.IGNORECASE)
 # a plain yes, answering a question the user was asked
 YES_RE = re.compile(r"^\W*(?:yes|yep|yeah|yup|yea|correct|right|exactly|that one|that'?s (?:it|the one)|sure)\b",
                     re.IGNORECASE)
@@ -242,7 +275,19 @@ def _names_another_thing(part: str, title: str) -> bool:
 
 
 def _done_in(clause: str, title: str) -> bool:
-    return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title))
+    return bool(DONE_WORDS_RE.search(clause) or _past_of_title(clause, title) or _handed_in(clause, title))
+
+
+def _handed_in(clause: str, title: str) -> bool:
+    """ "The grant form is in", "it's in" for Mail the grant form: handed in, for something that's handed in or an
+    item about sending it."""
+    return bool(_IN_RE.search(clause) and (_HANDED_IN_RE.search(f"{clause} {title}") or _SENDING_RE.search(title)))
+
+
+def _own_word(word: str, title: str) -> bool:
+    """The word is one of the item's own ("cancelled" for Cancel the sander rental)."""
+    said = re.sub(r"[^a-z]", "", word.lower())
+    return any(said.startswith(w[:4]) for w in re.findall(r"[a-z]+", str(title or "").lower()) if len(w) >= 4)
 
 
 def state_not_done(message: Optional[str], title: str, others=()) -> str:
@@ -267,10 +312,11 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     if onward:
         return onward
     # --- end begun or next ---
-    from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words
+    from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words, without_caused
     others = [o for o in others if o and o != title]
-    # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it
-    told_sentences = [t for t in _SENTENCE_RE.findall(_without_record_words(message)) if not _asks(t)]
+    # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it; a
+    # done the user is only getting done ("getting the fence fixed") is no done word
+    told_sentences = [t for t in _SENTENCE_RE.findall(without_caused(_without_record_words(message))) if not _asks(t)]
     told = " ".join(told_sentences)
     # --- said, then taken back ("the permit is in, or so I thought"): about it, or naming no other item ---
     for s in told_sentences:
@@ -293,6 +339,15 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
         from thirties_core.plain_done import without_talk_to_the_app
         about = without_talk_to_the_app(about, told)
         # --- end talk to the app ---
+    # --- what should or could have happened, or was moved or called off, didn't happen ---
+    for c in about:
+        if _UNREAL_RE.search(c):
+            return (f"The user said {title} should or could have happened, not that it did, so it isn't marked "
+                    "done. Leave it open; it's done when they say it is.")
+        if any(not _own_word(m.group(0), title) for m in _CALLED_OFF_RE.finditer(c)):
+            return (f"The user said {title} was moved or called off, not that it happened, so it isn't marked "
+                    "done. Leave it open, or move it if they asked; it's done when they say it is.")
+    # --- end didn't happen ---
     for c in about:
         if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
             # --- merely all right, with a done in the same sentence: the done wins ("it went fine, all wrapped") ---
@@ -313,10 +368,11 @@ def says_done(message: Optional[str], title: str, others=(), strict: bool = Fals
     otherwise), and a question says nothing ("how come the rent got moved?")."""
     if not message:
         return False
-    from thirties_core.started import FINISHED_RE, _SENTENCE_RE, _asks, not_finished
+    from thirties_core.started import FINISHED_RE, _SENTENCE_RE, _asks, not_finished, without_caused
     others = [o for o in others if o and o != title]
     if not_finished(message, title, others) in ("begun", "not") or state_not_done(message, title, others):
         return False
+    message = without_caused(message)  # "getting the fence fixed": what the user is getting done isn't done
     if strict:
         message = " ".join(t for t in _SENTENCE_RE.findall(message) if not _asks(t))
     else:  # a done word inside a question asked outright is asked about, never said (said_for_it.asked_outright)

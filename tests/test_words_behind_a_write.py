@@ -264,5 +264,131 @@ class TestOffTodaysListOnTheSameGrounds(LeaveBase):
                 self.assertIn("Oil the hinges", self.body("n_today"))
 
 
+class ShopEvening(WordsCase):
+    """An evening of shop jobs and errands, for words that only look like a done."""
+
+    ITEMS = (("Fix the bandsaw fence", "4:10 PM"), ("Mail the studio grant form", "4:40 PM"),
+             ("Bake the rye loaf", "5:10 PM"), ("Buy oat milk", "5:40 PM"), ("Glass supplier visit", "6:10 PM"),
+             ("Renew the kiln permit", "6:40 PM"), ("Restock the clay bins", "7:10 PM"),
+             ("Check kiln wiring", "7:40 PM"))
+
+    def others(self, title):
+        return [t for t, _ in self.ITEMS if t != title]
+
+    def assertNoTick(self, cases):
+        from thirties_core.write_guard import refused
+        for title, words in cases:
+            with self.subTest(title=title, words=words):
+                self.assertNotEqual(refused({"op": "complete", "title": title}, f"[app] {words}", None), "")
+                self.assertHeld(self.tick(title, words))
+
+    def assertTicks(self, cases):
+        from thirties_core.write_guard import refused
+        for title, words in cases:
+            with self.subTest(title=title, words=words):
+                self.assertEqual(refused({"op": "complete", "title": title}, f"[app] {words}", None), "")
+                self.assertWent(self.tick(title, words))
+                self.reopen(title)
+
+    def reopen(self, title):
+        from thirties_core.models import SpanStatus
+        for s in self.planned(title):
+            s.status = SpanStatus.PLANNED
+
+
+class TestGettingItDoneIsNoDone(ShopEvening):
+    """A start with a done word in it ("getting the fence fixed") read as a finish and ticked the item."""
+
+    def test_under_way_or_being_done_ticks_nothing(self):
+        self.assertNoTick((("Fix the bandsaw fence", "I'm at the hardware shop getting the bandsaw fence fixed"),
+                           ("Fix the bandsaw fence", "getting the bandsaw fence fixed at the shop"),
+                           ("Fix the bandsaw fence", "I'm getting the bandsaw fence done"),
+                           ("Renew the kiln permit", "on my way to get the kiln permit renewed")))
+
+    def test_done_said_of_it_still_ticks(self):
+        self.assertTicks((("Fix the bandsaw fence", "got the bandsaw fence fixed"),
+                          ("Fix the bandsaw fence", "getting the bandsaw fence sorted took a while, but it's fixed"),
+                          ("Renew the kiln permit", "the kiln permit is renewed")))
+
+
+class TestWhatDidntHappenIsNoReport(ShopEvening):
+    """Wishes, guesses and things gone wrong read as reports that the item happened."""
+
+    def test_should_would_wish_and_must_tick_nothing(self):
+        self.assertNoTick((("Mail the studio grant form", "ugh, I should've mailed it at 4:40"),
+                           ("Mail the studio grant form", "would've mailed the grant form if the post was open"),
+                           ("Mail the studio grant form", "could've sent the grant form this morning"),
+                           ("Mail the studio grant form", "wish I had sent the grant form"),
+                           ("Mail the studio grant form", "I must've mailed it")))
+
+    def test_the_report_words_say_so(self):
+        from thirties_core.write_guard import REPORTED_RE
+        for words in ("I should've mailed it", "would've written it", "could've sent it", "must've posted it",
+                      "wish I had sent it", "if I had sent it", "my keys have gone missing", "the milk's gone off",
+                      "it's taken forever", "it's been rescheduled", "it has been cancelled"):
+            self.assertIsNone(REPORTED_RE.search(words), words)
+        for words in ("I've mailed it", "it's gone", "I had sent it", "they've been varnished"):
+            self.assertIsNotNone(REPORTED_RE.search(words), words)
+
+    def test_gone_off_or_called_off_ticks_nothing(self):
+        self.assertNoTick((("Buy oat milk", "the oat milk's gone off"),
+                           ("Glass supplier visit", "it's been rescheduled to Thursday"),
+                           ("Glass supplier visit", "the glass supplier visit got postponed"),
+                           ("Glass supplier visit", "the glass supplier visit has been cancelled"),
+                           ("Glass supplier visit", "they rescheduled the glass supplier visit")))
+
+    def test_the_items_own_verb_still_ticks(self):
+        from thirties_core.write_guard import says_done
+        self.assertTrue(says_done("cancelled the sander rental", "Cancel the sander rental"))
+        self.assertTrue(says_done("rescheduled the glass supplier visit", "Reschedule the glass supplier visit"))
+
+
+class TestAPlanOrAWishIsNoDone(ShopEvening):
+    """Everyday done words said of a plan, a wish or something still to come ticked the item."""
+
+    def test_wanting_it_off_the_plate_or_being_dealt_with_ticks_nothing(self):
+        self.assertNoTick((("Renew the kiln permit", "I want to get the kiln permit off my plate"),
+                           ("Renew the kiln permit", "I want to get it off my plate"),
+                           ("Renew the kiln permit", "it's being dealt with"),
+                           ("Renew the kiln permit", "the kiln permit will be dealt with"),
+                           ("Renew the kiln permit", "knocked out by a headache all afternoon")))
+
+    def test_the_everyday_dones_still_tick(self):
+        self.assertTicks((("Renew the kiln permit", "the kiln permit is off my plate"),
+                          ("Renew the kiln permit", "got the kiln permit off my plate"),
+                          ("Renew the kiln permit", "the kiln permit has been dealt with"),
+                          ("Renew the kiln permit", "knocked out the kiln permit")))
+
+
+class TestInTheOvenIsNoDone(ShopEvening):
+    """ "The loaf is in" (just gone in the oven) ticked the bake."""
+
+    def test_in_the_oven_ticks_nothing(self):
+        self.assertNoTick((("Bake the rye loaf", "the rye loaf is in"),
+                           ("Bake the rye loaf", "the rye loaf is in, ready at 5:50"),
+                           ("Bake the rye loaf", "it's in")))
+
+    def test_handed_in_still_ticks(self):
+        self.assertTicks((("Mail the studio grant form", "the grant form is in"),
+                          ("Renew the kiln permit", "the kiln permit is in")))
+        from thirties_core.write_guard import refused  # a bare "it" points at none of the planned items
+        self.assertEqual(refused({"op": "complete", "title": "Mail the studio grant form"}, "[app] it's in", None), "")
+
+
+class TestOnlyWhatIsTakenBackHolds(ShopEvening):
+    """A thought about something else, or a repeat said with once, held a done that was said."""
+
+    def test_a_done_beside_another_thought_ticks(self):
+        self.assertTicks((("Fix the bandsaw fence", "I thought it would take longer, but the bandsaw fence is done"),
+                          ("Mail the studio grant form", "Mailed the grant form. I thought it would take longer."),
+                          ("Fix the bandsaw fence", "once again I've fixed the bandsaw fence"),
+                          ("Fix the bandsaw fence", "Once again I've fixed the bandsaw fence myself")))
+
+    def test_taken_back_still_holds(self):
+        self.assertNoTick((("Fix the bandsaw fence", "I thought it was fixed, but the fence slips again"),
+                           ("Fix the bandsaw fence", "the bandsaw fence is fixed, or so I thought"),
+                           ("Mail the studio grant form", "I thought I'd mailed the grant form")))
+
+
 if __name__ == "__main__":
     unittest.main()
