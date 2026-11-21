@@ -107,9 +107,9 @@ class TestDoneFromTheUsersWords(GuardCase):
         asked = ("", "Did you get to Fold the towels?")
         self.assertFalse(self.done("yes, done", "Fold the towels", asked).startswith(NOT_DONE))
 
-    def test_pointing_back_needs_one_clear_item(self):
+    def test_pointing_back_after_a_list_is_the_models_pick(self):
         listed = ("", "Not marked yet:\nStretch routine\nFold the towels")
-        self.assertTrue(self.done("done", "Fold the towels", listed).startswith(NOT_DONE))  # which one?
+        self.assertFalse(self.done("done", "Fold the towels", listed).startswith(NOT_DONE))  # the one it picked
         self.assertFalse(self.done("both done", "Fold the towels", listed).startswith(NOT_DONE))
         self.assertFalse(self.done("both done", "Stretch routine", listed).startswith(NOT_DONE))
 

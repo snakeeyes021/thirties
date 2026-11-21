@@ -16,6 +16,8 @@ outright, where the fix is a fact Python has, or names the problem for one rewri
   the user could see them; what it keeps is "my notes".
 - **The day's end is no reason to drop things**: when something doesn't fit, it says where it goes, never offers to
   drop it, unless the user brought dropping up.
+- **A done picked from a list says which**: a bare "done" after a list ticks the item the model picked
+  (done_reference.py); the reply names it, or opens with "Marked <item> done." after its rewrite.
 - **The moon** is as computed (sky.py), never guessed.
 
 A reply that still has a made-up limit or talk of the workings after its rewrite loses those sentences. Every cut
@@ -327,10 +329,37 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
     from thirties_core import leftover_facts
     out += leftover_facts.problems(brain, turn_start, reply)
     # --- end leftovers ---
+    # --- a done the model picked from a list says which item it was (done_reference._picked) ---
+    unnamed = picked_unnamed(brain, reply)
+    if unnamed:
+        out.append("it doesn't say which item you marked done: name " + " and ".join(unnamed) + " in plain words")
+    # --- end a picked done ---
     moon = moon_wrong(reply, now)
     if moon:
         out.append(f"the moon tonight is a {moon}, as computed; say that, or nothing about the moon")
     return out
+
+
+def picked_unnamed(brain: Any, reply: str) -> List[str]:
+    """The items ticked this turn on a bare done the model picked from a list (done_reference._picked) that the
+    reply doesn't name."""
+    picks = getattr(getattr(brain, "tools", None), "picked_dones", None)
+    if not picks:
+        return []
+    from thirties_core.done_reference import _listed_items, _still_to_do, _titles
+    from thirties_core.item_facts import mentions
+    pt = brain.tools
+    still_open = {s.title for s in _still_to_do(pt)} | set(_listed_items(pt, []))
+    titles = list(dict.fromkeys(_titles(pt) + list(picks)))
+    return [t for t in sorted(picks) if t not in still_open and not mentions(reply or "", t, titles)]
+
+
+def say_picked(brain: Any, reply: str) -> str:
+    """A reply that still doesn't name an item picked from a list after its rewrite opens with what was ticked."""
+    unnamed = picked_unnamed(brain, reply)
+    if not unnamed:
+        return reply
+    return f"Marked {' and '.join(unnamed)} done." + (("\n\n" + reply) if (reply or "").strip() else "")
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
@@ -353,4 +382,4 @@ def last_resort(reply: str) -> str:
     return out or reply
 
 
-__all__ = ["fix_now_time", "problems", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE"]
+__all__ = ["fix_now_time", "problems", "picked_unnamed", "say_picked", "last_resort", "morning_fill", "unkept_promises", "promise_checks", "unseen_corrections", "strip_corrections", "drop_sentences", "EXTRAS_RE", "moon_wrong", "LIMIT_RE", "WORKINGS_RE"]

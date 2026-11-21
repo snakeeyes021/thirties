@@ -7,8 +7,8 @@ whichever way the model records it: by reopen_item, or by log_outcome with the i
 
 During a turn it needs the user's words, as a done does:
 
-- **The ask**: words to untick, reopen, put back or mark open, or words saying the item didn't happen (a "not",
-  a "never", a mistake owned up to).
+- **The ask**: words to untick, reopen, put back or mark open, words saying the item didn't happen (a "not",
+  a "never", a mistake owned up to), or a bare no ("no", "nope") right after the reply that named the item.
 - **The item**: a clause naming it or giving its id; or a clause with a pointer and no other item in it, when the
   last message the user saw (or their previous one) named the item.
 
@@ -81,23 +81,24 @@ def held(pt: "PlanTools", names: Iterable[str], ids: Iterable[str] = ()) -> str:
         if any(n in pointed for n in names) and len(set(pointed)) <= MOST_POINTED and not any(
                 names_other(c) for c in clauses):
             mine = [c for c in clauses if POINTER_RE.search(c) or not names_other(c)]
-    if any(ASK_RE.search(c) for c in mine):
+    from thirties_core.done_words import NO_RE  # a bare no calls a done off ("no", "not that one")
+    if any(ASK_RE.search(c) for c in mine) or (mine and NO_RE.match(text)):
         return ""
     return refusal
 
 
 def untick_refused(message: Optional[str], title: str) -> str:
     """For the last check before Joplin: an untick in a turn needs an ask to reopen (or a not-done) in the user's
-    words, about this item or pointing back with nothing else named. "" when it can be written."""
+    words (a bare no counts), about this item or naming nothing else. "" when it can be written."""
     if not message:
         return ""
+    from thirties_core.done_words import NO_RE
     from thirties_core.item_facts import match_words
-    from thirties_core.write_guard import _CLAUSE_RE, _POINTER_RE, _about
+    from thirties_core.write_guard import _CLAUSE_RE, _about
     text = re.sub(r"[‘’`]", "'", message)
     clauses = [c for c in _CLAUSE_RE.split(text) if c and c.strip()]
-    asks = [c for c in clauses if ASK_RE.search(c)]
-    if asks and (any(_about(c, title, []) for c in clauses)
-                 or (any(_POINTER_RE.search(c) for c in clauses) and not _names_anything(text, match_words))):
+    asks = [c for c in clauses if ASK_RE.search(c)] or ([text] if NO_RE.match(text) else [])
+    if asks and (any(_about(c, title, []) for c in clauses) or not _names_anything(text, match_words)):
         return ""
     return (f"not written: the user's words don't ask for {title} to be opened again, so its line stays ticked.")
 

@@ -121,8 +121,8 @@ class TestStillRefused(GarageCase):
 
 
 class TestAPointerSaidAgain(GarageCase):
-    """After a reply listing several open items, a pointer alone doesn't say which; said again for the item it was
-    refused for, it does."""
+    """After a reply listing several open items, a pointer alone is the model's pick of them, at once and said
+    again; an open item the reply didn't list is still refused."""
     SHOWN = ("", f"Still open: {SKIS}, Glaze the mugs and Sand the bench.")
 
     def pointed(self, message, item=SKIS, asks=None):
@@ -132,18 +132,25 @@ class TestAPointerSaidAgain(GarageCase):
         finally:
             self.t.user_message, self.t.prior_exchange, self.t.done_asks = None, None, None
 
-    def test_once_it_is_refused(self):
-        self.assertIn(REFUSED_WORDS, self.pointed("that one's finished"))
-        self.assertEqual(self.span(SKIS).status, SpanStatus.PLANNED)
+    def test_at_once_it_stands(self):
+        out = self.pointed("that one's finished")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span(SKIS).status, SpanStatus.DONE)
 
     def test_said_again_it_stands(self):
         out = self.pointed("that one's finished!", asks={SKIS: "that one's finished"})
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.span(SKIS).status, SpanStatus.DONE)
 
-    def test_said_again_for_another_item_is_still_refused(self):
+    def test_said_again_for_another_listed_item_it_stands(self):
         out = self.pointed("that one's finished!", "Glaze the mugs", asks={SKIS: "that one's finished"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span(SKIS).status, SpanStatus.PLANNED)
+
+    def test_an_item_the_reply_did_not_list_is_still_refused(self):
+        out = self.pointed("that one's finished", "Oil the gate hinge")
+        self.assertIn(REFUSED_WORDS, out)
+        self.assertEqual(self.span("Oil the gate hinge").status, SpanStatus.PLANNED)
 
 
 class TestAMealForOthers(unittest.TestCase):

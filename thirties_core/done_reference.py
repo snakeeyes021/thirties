@@ -10,6 +10,8 @@ goes through when the user's words point at the item:
 - **Pointed back to**, when this message names nothing: "that", "it", "yes", "done" for the one item the last
   message they saw named (or, if that named none, what they said just before); "both" for exactly two; "those"
   or "them" for up to MOST_POINTED of them; a count ("all three", "three of them") for exactly that many.
+- **A bare done after a list**: "that one's sorted", "done!" with no word of any item in it, right after a reply
+  listing several open items: the one of those the model picks. The reply says which, and a "no" takes it back.
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
 - **A whole routine**: its name with "all", "whole" or "everything", or "both" / "all of them" to a question about
   its parts: every step of it, in every part (whole_routine.py).
@@ -272,6 +274,21 @@ def pointed_back(pt: "PlanTools", titles: List[str]) -> List[str]:
     return [t for t in pool if _listed(shown, t)] or [t for t in titles if _named(said, t, titles)]
 
 
+def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[str]) -> bool:
+    """A done right after a reply listing several open items, with no word of an item on the plan or in that reply
+    ("that one's sorted", "done!"): which one it is is the model's pick. It stands when the item is one of the open
+    items that reply showed; the reply then has to say which one it ticked (reply_checks.picked_unnamed)."""
+    from thirties_core.done_words import _hits
+    from thirties_core.plain_done import _open_titles, _which_words, says_it_happened
+    if not says_it_happened(message) or not _listed(shown, title):
+        return False
+    shown_open = _open_items_shown(pt, shown, titles)
+    if title not in _open_titles(pt) + shown_open:
+        return False
+    which = _which_words(message)
+    return not any(_hits(which, t) for t in titles + shown_open)  # a word of the plan's items, or of those shown
+
+
 def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
           besides: Iterable[str] = ()) -> Tuple[Optional[str], Optional[str]]:
     """(why the done can't go ahead, the user's words about the item). The words are the message with a pointer
@@ -376,19 +393,27 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         ok = pointed_count(message) == many
     # --- end a count pointing back ---
     if not ok:
-        # --- no pointer, count or place said: the words themselves are the done, read as the model read them
-        # (plain_done.py), not as a pointer back at the several items just shown ---
         from thirties_core.done_counts import pointed_count
-        if not (POINTER_RE.search(message) or PLURAL_RE.search(message) or BOTH_RE.search(message)
-                or ORDINAL_RE.search(message) or pointed_count(message)):
+        counted = bool(PLURAL_RE.search(message) or BOTH_RE.search(message) or ORDINAL_RE.search(message)
+                       or pointed_count(message))
+        if counted:
+            # --- a done refused for this item before, said again: it stands (plain_done.said_again) ---
+            from thirties_core.plain_done import said_again
+            if said_again(pt, message, title):
+                return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
+            # --- end said again ---
+            return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
+        # --- a bare done after a list of several ("that one's sorted", "done!"): the model's pick (_picked) ---
+        if _picked(pt, message, title, shown, titles):
+            picks = getattr(pt, "picked_dones", None)
+            if isinstance(picks, set):
+                picks.add(title)
+        # --- end a bare done ---
+        # --- otherwise the words themselves are the done, read as the model read them (plain_done.py) ---
+        elif not POINTER_RE.search(message):
             return plain()
-        # --- end no pointer ---
-        # --- a done refused for this item before, said again: it stands, pointer or not (plain_done.said_again) ---
-        from thirties_core.plain_done import said_again
-        if said_again(pt, message, title):
-            return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
-        # --- end said again ---
-        return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
+        else:
+            return refusal, message
     if not _the_copy_meant(pt, [message, shown], ids):
         return copy_refusal, message
     return None, POINTER_RE.sub(title, message)
