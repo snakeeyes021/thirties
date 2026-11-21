@@ -7,7 +7,10 @@ for it:
 - **No done said**: nothing in the words says it happened or confirms it ("the chooks are getting watered" is
   under way, not done).
 - **Something else named**: the words name another item by its own words (checked before this, in
-  done_reference.check and done_fit.py).
+  done_reference.check and done_fit.py). Only an item that can be the done in this one's place counts
+  (rivals_named): an item already done (a routine step ticked this morning), one named only in another ask beside
+  the done ("The bench can wait, the skis got waxed") and a later item whose name is a word of this one's never
+  do.
 - **Something else fits better**: the words fit another item, done or not, a routine or a list item better than
   this one ("the chooks got watered" for Brush the goats beside Water the hens).
 - **A plain tie**: the words fit another item still to do as well as this one, and say nothing beyond what the two
@@ -102,14 +105,67 @@ def _other_names(pt: Any, title: str) -> List[str]:
     return [n for n in dict.fromkeys(names) if n and item_name(n) != item_name(title)]
 
 
+# --- the part of the message that says the done ---
+def done_clauses(message: str) -> List[str]:
+    """The clauses of the message that say something happened ("the skis got waxed" in "The bench can wait, the skis got
+    waxed"): what a done is read from. The whole message when no clause says it on its own."""
+    from thirties_core.write_guard import _CLAUSE_RE
+    clauses = [c for c in _CLAUSE_RE.split(message or "") if c and c.strip()]
+    said = [c for c in clauses if says_it_happened(c)]
+    return said or [message or ""]
+
+
+def _in_the_done(message: str) -> str:
+    return " ; ".join(done_clauses(message))
+
+
+def rivals_named(pt: Any, message: str, title: str, named: Iterable[str]) -> List[str]:
+    """Of the other items the message names, those that can be the done in this one's place: still to do, named in
+    a clause that says the done, and not fitting those words only with words this item has too, no better than it
+    does. An item already done or skipped (a routine step ticked this morning), one named only beside the done ("Skip
+    the bench"), and a later item whose name is a word of this one's (Race beside Wax the skis for the race) are
+    not."""
+    from thirties_core.done_reference import _named, _titles
+    from thirties_core.done_words import _hits, _words
+    from thirties_core.item_facts import item_name
+    open_names = {item_name(t) for t in _open_titles(pt)}
+    titles = _titles(pt)
+    clauses = done_clauses(message)
+    mine_words = {s for s, _ in _words(title)}
+    named = [o for o in named if item_name(o) != item_name(title)]
+    said = _stems(" ; ".join(clauses))
+    if not _hits(said, title):
+        return named  # the done says nothing of this item: whatever else it names is what it's about
+    out = []
+    for other in named:
+        if len(_hits(said, other)) > len(_hits(said, title)):
+            out.append(other)  # the words fit it better, done or not: never this item in its place
+            continue
+        if item_name(other) not in open_names:
+            continue
+        for clause in clauses:
+            if not _named(clause, other, titles):
+                continue
+            words = _stems(clause)
+            theirs, mine = _hits(words, other), _hits(words, title)
+            if theirs and theirs <= mine_words and len(mine) >= len(theirs):
+                continue  # every word naming it names this one too: the plain-tie check reads it
+            out.append(other)
+            break
+    return out
+# --- end the part that says the done ---
+
+
 def by_the_models_reading(pt: Any, message: str, title: str) -> bool:
     """A done said in the user's own words, fitting no other item still to do better, and with no plain tie: no
     other item the words fit as well while saying nothing beyond what the two share. Words that name another item
-    outright were refused before this (done_reference.check)."""
+    outright were refused before this (done_reference.check). Only the clauses that say the done are read: an item
+    named beside it ("the bench can wait") is no rival."""
     from thirties_core.done_words import _hits, kin
     from thirties_core.item_facts import item_name
     if not says_it_happened(message):
         return False
+    message = _in_the_done(message)
     which = _which_words(message)
     said = _stems(message)
     mine = _hits(said, title)

@@ -323,8 +323,13 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
     if _the_one_whose_time_came(pt, naming, title, titles) and not _another_in_everyday_words(naming, others, titles):
         return None, message
-    if any(_named(naming, t, titles) for t in others):
-        return refusal, message  # they're talking about other items
+    named_others = [t for t in others if _named(naming, t, titles)]
+    # --- only another item that can be the done in this one's place is a rival (plain_done.rivals_named) ---
+    if named_others:
+        from thirties_core.plain_done import rivals_named
+        if rivals_named(pt, naming, title, named_others):
+            return refusal, message  # they're talking about other items
+    # --- end rivals ---
     # --- a question about one item, and a done already asked for (done_words.py) ---
     from thirties_core.done_words import NO_RE, asked_about
     from thirties_core.item_facts import item_name
@@ -371,6 +376,13 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
         ok = pointed_count(message) == many
     # --- end a count pointing back ---
     if not ok:
+        # --- no pointer, count or place said: the words themselves are the done, read as the model read them
+        # (plain_done.py), not as a pointer back at the several items just shown ---
+        from thirties_core.done_counts import pointed_count
+        if not (POINTER_RE.search(message) or PLURAL_RE.search(message) or BOTH_RE.search(message)
+                or ORDINAL_RE.search(message) or pointed_count(message)):
+            return plain()
+        # --- end no pointer ---
         return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
     if not _the_copy_meant(pt, [message, shown], ids):
         return copy_refusal, message
