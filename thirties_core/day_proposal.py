@@ -108,7 +108,8 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Plan the free time: a few concrete items (from DAY OPTIONS, or what the user named), each "
                        "with a start. " + POLICY,
         "parameters": {"items": "A list of {item, start, duration}: item is a task_id or title, start a clock time "
-                                "in the free time, duration optional (default: how long it usually takes).",
+                                "in the free time, duration optional (default: how long it usually takes). A new "
+                                "thing not on the lists also takes because: the user's exact words it comes from.",
                        "why": "One short line on why these (optional)."},
         "required": ["items"],
     },
@@ -435,7 +436,7 @@ class DayProposal:
                 break
         return sorted(out, key=lambda i: i["start"])
 
-    def propose_day(self, items: Any = None, why: str = "", **_: Any) -> str:
+    def propose_day(self, items: Any = None, why: str = "", because: Any = None, **_: Any) -> str:
         from thirties_core.assistant_tools import ToolError
         if self.db is None:
             raise ToolError("Proposals can't be kept here.")
@@ -465,6 +466,14 @@ class DayProposal:
                 ref = words
             from thirties_core.project_pieces import piece_title
             title = piece_title(self.a.s.tasks, task) if task is not None else ref  # "Item: piece" for a piece
+            # --- a new thing, not from the lists, cites the user's words it comes from (add_source.py) ---
+            if task is None:
+                from thirties_core.add_source import refused as uncited
+                uncited_why = uncited(self.pt, "propose_day", title, raw.get("because") or because)
+                if uncited_why:
+                    problems.append(uncited_why.rstrip("."))
+                    continue
+            # --- end cites the user's words ---
             from thirties_core.traits import time_set_by  # someone else sets its day and time
             who = time_set_by(self.pt, title, task.id if task is not None else None)
             if who:

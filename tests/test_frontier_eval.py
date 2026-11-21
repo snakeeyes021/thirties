@@ -28,7 +28,7 @@ IDEAL = {
         r('CALL add_event {"title": "Gym", "start": "2:30 PM", "end": "3:00 PM"}'),
         r("Your dentist is at 3, so the gym is 2:30 to 3."),
     ],
-    "travel_buffer": [r('CALL remove_event {"event": "Work"}\nCALL add_event {"title": "Travel to dentist", "start": "2:30 PM", "end": "3:00 PM"}\nAdded.')],
+    "travel_buffer": [r('CALL remove_event {"event": "Work"}\nCALL add_event {"title": "Travel to dentist", "start": "2:30 PM", "end": "3:00 PM", "because": "30 minutes of travel time"}\nAdded.')],
     "cancel_and_replace": [r('CALL remove_event {"event": "Composing"}\nCALL add_event {"title": "Laundry", "start": "7:30 PM", "duration": "1 hour"}\nDone.')],
     "attend_ambiguous": [r('CALL resolve_calendar_event {"event": "Team dinner", "attend": true}\nHave fun!')],
     "wrap_up_without_ceremony": [
@@ -37,7 +37,7 @@ IDEAL = {
     ],
     "together_at_once": [r('CALL add_event {"title": "Dinner", "start": "6:00 PM", "end": "7:00 PM"}\n'
                            'CALL add_event {"title": "The Copper Atlas", "start": "6:00 PM", "end": "7:00 PM", "alongside": true}\nDone.')],
-    "tomorrow_not_today": [r('CALL add_event {"title": "Move bookshelf and desk", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow"}\nDone.')],
+    "tomorrow_not_today": [r('CALL add_event {"title": "Move bookshelf and desk", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow", "because": "bookshelf and desk moving"}\nDone.')],
 }
 
 

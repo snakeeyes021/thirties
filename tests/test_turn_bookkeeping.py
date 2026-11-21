@@ -74,7 +74,7 @@ class TestTurnBookkeeping(BookkeepingOn):
         """A failure used to be forgotten when another change worked: "move A refused, add B" ended with "All set"."""
         self.engine.set_next_response(reply('CALL update_event {"event": "Nonexistent chore", "start": "6:00 PM"}\n'
                                             'CALL add_event {"title": "Water the ferns", "start": "7:00 PM", '
-                                            '"duration": "30 min"}'))
+                                            '"duration": "30 min", "because": "add ferns at 7"}'))
         self.engine.set_next_response(reply("All set: moved and added."))
         self.engine.set_next_response(reply("All set: moved and added."))  # the rewrite, still claiming it
         out = self.manager.send_user_message("move the chore to 6 and add ferns at 7")

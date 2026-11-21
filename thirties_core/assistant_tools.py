@@ -189,8 +189,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "schedule_as": "A shorter name for the schedule, when the list wording is long.",
                        "kind": "What kind of thing it is, when the user said or it's clear: 'once' (done means "
                                "finished), 'ongoing' (time on a project; never rolls over) or 'daily'. Stored with "
-                               "the item."},
-        "required": ["title", "list"],
+                               "the item.",
+                       "because": "The user's exact words this task comes from, quoted from their message."},
+        "required": ["title", "list", "because"],
     },
     {
         "name": "break_down_task",
@@ -348,7 +349,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "either one ticks both. Scheduling a list item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
                                 "user's words.",
-                       "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning."},
+                       "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning.",
+                       "because": "For a new thing not on the lists: the user's exact words it comes from, quoted "
+                                  "from their message."},
         "required": ["items"],
     },
     {
@@ -820,11 +823,11 @@ class AssistantTools(KindTools):
             self._db.set_sync_meta(key, json.dumps(sorted(told)))
         return messages
 
-    def add_to_today(self, items: Any, **_: Any) -> str:
+    def add_to_today(self, items: Any, because: Any = None, **_: Any) -> str:
         """The tool: each thing gets its time today, unless the user's own words ask for none (if_time.py)."""
-        return self._add_to_today(items, "auto")
+        return self._add_to_today(items, "auto", because)
 
-    def _add_to_today(self, items: Any, timing: str = "auto") -> str:
+    def _add_to_today(self, items: Any, timing: str = "auto", because: Any = None) -> str:
         """``timing``: "auto" (a time each, or If there's time when the user asked for no time), "untimed" (under If
         there's time: the user asked), or "none" (plain lines, no time yet: the morning reset, whose proposal places
         them once the routine is on)."""
@@ -847,6 +850,14 @@ class AssistantTools(KindTools):
             items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
         on_today = {text.lower() for text, _ in note_items(note)}
         on_today |= {t.title.lower() for t in self.s.tasks if t.parent_note_id == note["id"]}
+        # --- a new thing, not from the lists, cites the user's words it comes from (add_source.py) ---
+        from thirties_core.add_source import refused as uncited
+        for name in items or []:
+            if self._exact_task(str(name)) is None and str(name).strip().lower() not in on_today:
+                why = uncited(self.pt, "add_to_today", str(name).strip(), because)
+                if why:
+                    raise ToolError(why)
+        # --- end cites the user's words ---
         added, already, queued = [], [], False
         from thirties_core import if_time
         untimed = timing == "untimed" or (timing == "auto" and if_time.asked_untimed(self.pt.user_message))
@@ -1199,8 +1210,14 @@ class AssistantTools(KindTools):
 
     def add_task(self, title: str, list: str = "", section: str = "", start: Any = None, duration: Any = None,
                  day: Any = None, schedule_as: str = "", reason: str = "", urgency: str = "", due: Any = None,
-                 kind: Any = None, **_: Any) -> str:
+                 kind: Any = None, because: Any = None, **_: Any) -> str:
         self.refuse_routine_as_item(str(title))
+        # --- a new item cites the user's words it comes from (add_source.py) ---
+        from thirties_core.add_source import refused as uncited
+        why = uncited(self.pt, "add_task", str(title).strip(), because)
+        if why:
+            raise ToolError(why)
+        # --- end cites the user's words ---
         if kind not in (None, ""):  # the item's kind, stored when it's made (the wording only ever suggests one)
             from thirties_core.kinds import KINDS
             if str(kind).strip().lower() not in KINDS:

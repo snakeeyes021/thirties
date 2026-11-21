@@ -111,16 +111,17 @@ class TestInATurn(UnaskedCase):
 class TestANewItemTheUserDidntAskFor(UnaskedCase):
 
     def test_an_item_with_no_words_for_it_isnt_added(self):
-        # what a message asks to add, and under what name, is the model's reading; only a message with nothing
-        # in it but tone words gives no basis (change_scope.add_refused)
+        # what a message asks to add, and under what name, is the model's reading; it cites the words it comes
+        # from, and with none of them to cite nothing goes on (add_source.py)
         out = self.say("thanks!", "add_event", {"title": "Polish the brass", "start": "3:00 PM",
-                                                "duration": "30 min"})
+                                                "duration": "30 min", "because": "polish the brass"})
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertFalse(any(s.title == "Polish the brass" for s in self.manager.day_plan.spans))
 
     def test_an_item_the_user_asked_for_is_added(self):
         out = self.say("polish the brass at 3 please", "add_event", {"title": "Polish the brass", "start": "3:00 PM",
-                                                                      "duration": "30 min"})
+                                                                      "duration": "30 min",
+                                                                      "because": "polish the brass at 3"})
         self.assertFalse(out.startswith(NOT_DONE), out)
 
     def test_a_second_copy_of_an_item_nobody_named(self):
@@ -130,7 +131,8 @@ class TestANewItemTheUserDidntAskFor(UnaskedCase):
 
     def test_asked_to_plan_the_day_it_may_add(self):
         out = self.say("can you plan out my afternoon?", "add_event", {"title": "Polish the brass",
-                                                                         "start": "3:00 PM", "duration": "30 min"})
+                                                                         "start": "3:00 PM", "duration": "30 min",
+                                                                         "because": "plan out my afternoon"})
         self.assertFalse(out.startswith(NOT_DONE), out)
 
 

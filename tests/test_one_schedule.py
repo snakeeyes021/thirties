@@ -48,8 +48,8 @@ class OneScheduleCase(unittest.TestCase):
         return self.manager.send_user_message(said)
 
     def add(self, text: str, said: str = "sand the stool at 5:30") -> str:
-        return self.turn('CALL add_event {"title": "Sand the stool", "start": "5:30 PM", "duration": "30 minutes"}',
-                         text, said=said)
+        return self.turn('CALL add_event {"title": "Sand the stool", "start": "5:30 PM", "duration": "30 minutes", '
+                         '"because": "sand the stool at 5:30"}', text, said=said)
 
     def assertOnce(self, out: str, *titles: str) -> None:
         for title in titles:

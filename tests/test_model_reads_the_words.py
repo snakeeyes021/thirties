@@ -236,8 +236,8 @@ class TestAWordForWhichKind(WordsCase):
 
 
 class TestAnAddTheModelNames(WordsCase):
-    """An add the model named in its own words was refused because its title wasn't the user's phrase. A name that
-    shares one of the user's words with them goes on; one that shares none has nothing in the words behind it."""
+    """An add the model named in its own words was refused because its title wasn't the user's phrase. The name is
+    the model's to choose; the words it quotes in because are what the add stands on."""
 
     def add(self, title, words, start="9:10 PM", **more):
         from thirties_core.plan_log import model_call
@@ -245,15 +245,16 @@ class TestAnAddTheModelNames(WordsCase):
             return self.said("add_event", {"title": title, "start": start, "duration": "30 min", **more}, words)
 
     def test_the_models_name_for_it_goes_on(self):
-        self.assertHeld(self.add("Hardware store run", "I need sandpaper and a tin of spar varnish before 9:10"))
-        self.assertWent(self.add("Sandpaper run", "I need sandpaper and a tin of spar varnish before 9:10"))
-        self.assertEqual(len(self.planned("Sandpaper run")), 1)
+        self.assertWent(self.add("Hardware store run", "I need sandpaper and a tin of spar varnish before 9:10",
+                                 because="need sandpaper"))
+        self.assertEqual(len(self.planned("Hardware store run")), 1)
 
     def test_tone_words_alone_add_nothing(self):
         for words in ("thanks!", "lol", "hmm"):
-            with self.subTest(words=words):
-                self.assertHeld(self.add("Hardware store run", words))
-                self.assertEqual(self.planned("Hardware store run"), [])
+            for because in ({}, {"because": "need sandpaper"}):
+                with self.subTest(words=words, because=because):
+                    self.assertHeld(self.add("Hardware store run", words, **because))
+                    self.assertEqual(self.planned("Hardware store run"), [])
 
     def test_a_second_copy_of_whats_planned_still_isnt_added(self):
         for again in (False, True):

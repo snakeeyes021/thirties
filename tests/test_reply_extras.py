@@ -199,7 +199,8 @@ class TestTheBlockLine(WhatsNextCase):
         first = self.schedule_turn("show my plan")
         self.assertEqual(len(status_lines(first)), 1)
         set_debug_time(at("17:20"))
-        again = self.turn(ADD, "CALL show_schedule {}", "Fern at 5:30; here's the plan.", said="fern at 5:30")
+        cited = ADD[:-1] + ', "because": "fern at 5:30"}'
+        again = self.turn(cited, "CALL show_schedule {}", "Fern at 5:30; here's the plan.", said="fern at 5:30")
         self.assertEqual(status_lines(again), [])  # unchanged block: left out
         self.assertIn("5:30 PM – Repot the fern", again)
         set_debug_time(at("17:40"))

@@ -15,8 +15,10 @@ from thirties_core.astronomy import set_debug_time
 
 
 class AddCase(WordsCase):
-    def add(self, title, words, start="9:10 PM", **more):
+    def add(self, title, words, start="9:10 PM", because=None, **more):
         from thirties_core.plan_log import model_call
+        if because is not None:
+            more["because"] = because
         with model_call():
             return self.said("add_event", {"title": title, "start": start, "duration": "30 min", **more}, words)
 
@@ -27,9 +29,10 @@ class TestAnAddNeedsWordsThatTouchIt(AddCase):
     def test_an_add_in_a_turn_about_something_else_is_refused(self):
         for words in ("move the paddle varnish to 8:40", "the thwart sanding is done",
                       "kiln wash went fine, all wrapped", "I need to push the paddle varnish to 8:40"):
-            with self.subTest(words=words):
-                self.assertHeld(self.add("Polish the brass hinges", words))
-                self.assertEqual(self.planned("Polish the brass hinges"), [])
+            for because in (None, "the brass hinges need a polish"):
+                with self.subTest(words=words, because=because):
+                    self.assertHeld(self.add("Polish the brass hinges", words, because=because))
+                    self.assertEqual(self.planned("Polish the brass hinges"), [])
 
     def test_a_reworded_second_copy_is_refused(self):
         for again in (True, False):
@@ -51,13 +54,16 @@ class TestAnAddNeedsWordsThatTouchIt(AddCase):
         self.assertEqual(len([s for s in self.manager.day_plan.spans if "arnish" in s.title]), 2)
 
     def test_an_errand_said_goes_on_under_the_models_name(self):
-        self.assertHeld(self.add("Hardware store run", "need a tin of spar varnish and some sandpaper tonight"))
-        for title, words, start in (("Sharpener pickup", "I still have to collect my chisels from the sharpener before 9:10", "9:10 PM"),
-                             ("Spar varnish and sandpaper", "need a tin of spar varnish and some sandpaper tonight", "9:40 PM"),
-                             ("Polish the brass hinges", "the brass hinges could use a polish later", "10:10 PM"),
-                             ("Sweep the shop", "fit something quick in after the thwart", "10:40 PM")):
+        for title, words, start, because in (
+                ("Sharpener pickup", "I still have to collect my chisels from the sharpener before 9:10", "9:10 PM",
+                 "collect my chisels from the sharpener"),
+                ("Hardware store run", "need a tin of spar varnish and some sandpaper tonight", "9:40 PM",
+                 "a tin of spar varnish and some sandpaper"),
+                ("Polish the brass hinges", "the brass hinges could use a polish later", "10:10 PM",
+                 "the brass hinges could use a polish"),
+                ("Sweep the shop", "fit something quick in after the thwart", "10:40 PM", "fit something quick in")):
             with self.subTest(words=words):
-                self.assertWent(self.add(title, words, start=start))
+                self.assertWent(self.add(title, words, start=start, because=because))
                 self.assertEqual(len(self.planned(title)), 1)
 
 

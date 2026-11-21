@@ -129,7 +129,7 @@ class TestTurnLoop(ConversationTestCase):
 
     def test_changes_to_other_days_are_not_mistaken_for_no_change(self) -> None:
         self.engine.set_next_response(reply("I've added the bookshelf move tomorrow at 9.\n"
-                                            'CALL add_event {"title": "Move bookshelf", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow"}'))
+                                            'CALL add_event {"title": "Move bookshelf", "start": "9:00 AM", "duration": "1 hour", "day": "tomorrow", "because": "bookshelf tomorrow at 9"}'))
         out = self.manager.send_user_message("bookshelf tomorrow at 9")
         self.assertEqual(out, "I've added the bookshelf move tomorrow at 9.")
 

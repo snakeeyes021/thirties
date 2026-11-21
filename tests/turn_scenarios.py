@@ -33,7 +33,7 @@ SCENARIOS = {
     "failure_then_other_success": (
         "move the chore to 6 and add ferns at 7",
         ['CALL update_event {"event": "Nonexistent chore", "start": "6:00 PM"}\n'
-         'CALL add_event {"title": "Water the ferns", "start": "7:00 PM", "duration": "30 min"}',
+         'CALL add_event {"title": "Water the ferns", "start": "7:00 PM", "duration": "30 min", "because": "add ferns at 7"}',
          "All set: moved and added.", "All set: moved and added."]),
     # no reply at all, then a refusal in the retry, then a reply
     "empty_then_refusal": (

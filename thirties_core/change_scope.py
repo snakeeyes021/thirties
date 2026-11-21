@@ -16,11 +16,10 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
   the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
   words, the message names the item, points back to it, or gives a time for it in words that fit it
   (done_reference.check, stated_times.loosely_named);
-- **a new item** (add_event): what the user's words call for is the model's reading, as long as they name it: its
-  name shares a word with them that no planned item has ("Pick up the prescription" for "I have to collect my
-  prescription at 4"), they ask to plan or fit something in, or they point back to it (``add_basis``). An add in a
-  turn about other things ("move the varnish to 8:40") has no basis, and neither does a second copy of an item
-  already planned, in its words or others, that the message doesn't name. A second session of a named item
+- **a new item** (add_event): what the user's words call for, and what to call it, is the model's reading, as long
+  as it quotes the words the item comes from (``because``: "Hardware store run" for "I need sandpaper";
+  add_source.py). A second copy of an item already planned, in its words or others, that the message doesn't name
+  is never added. A second session of a named item
   (again=true) is the model's reading; without it, adding what's already planned keeps it one item
   (change_asks.merge_readd);
 - **the usual week** (set_week): work hours change when the message talks about work, bedtime and waking when it
@@ -55,12 +54,6 @@ BULK_CHANGE_RE = re.compile(
 # a yes to what was just offered ("sounds good", "ok do that")
 AGREE_RE = re.compile(r"^\W*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|sounds (?:good|great|fine)|do (?:it|that)|go (?:ahead|for it)|"
                       r"please do|perfect|great|that works|fine|let'?s do (?:it|that))\b", re.IGNORECASE)
-# the user asking Thirties to plan (a new item from their lists may then go on)
-PLAN_ASK_RE = re.compile(
-    r"\b(?:plan|lay (?:\w+ )?out|map (?:\w+ )?out|line (?:\w+ )?up|slot|fill|schedule|organi[sz]e|set up|sort out|"
-    r"fit (?:in|it|them|what|some)|suggest|what should i|help me (?:with|plan|figure)|put together|build|find (?:me|"
-    r"something|one|a)|pick|choose|recommend|something (?:to|for|easy|quick|fun))\b",
-    re.IGNORECASE)
 _WORK_RE = re.compile(r"\b(?:work\w*|job|shift|office|clock(?:ing)? (?:in|out)|day off|days off|off (?:at|on|"
                       r"today|tomorrow|fridays?|mondays?)|hours)\b", re.IGNORECASE)
 _SLEEP_RE = re.compile(r"\b(?:sleep\w*|slept|bed\w*|wak\w*|woke|awake|up at|get(?:ting)? up|alarm|night\w*|"
@@ -139,10 +132,10 @@ def move_asked(pt: Any) -> bool:
     return asked(pt, MOVE_ASK_RE) or asked(pt, BULK_CHANGE_RE)
 
 
-def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
-    """Why add_event can't put this new item on for the user's message, or None. What the words ask to add is the
-    model's reading, as long as they name it (``add_basis``); a second copy of what's planned, however it's worded,
-    needs the user to name it."""
+def add_refused(pt: "PlanTools", title: str, because: Any = None) -> Optional[str]:
+    """Why add_event can't put this new item on for the user's message, or None. What the words ask to add, and its
+    name, is the model's reading, as long as it quotes them in ``because`` (add_source.py); a second copy of what's
+    planned, however it's worded, needs the user to name it."""
     message = _talking(pt, "add_event")
     if message is None:
         return None
@@ -154,35 +147,10 @@ def add_refused(pt: "PlanTools", title: str) -> Optional[str]:
                     "added. To change when it is, move it with update_event.")
         return None  # named: a second session the model read (again=true), or the one copy moves (merge_readd)
     # --- end a copy ---
-    if add_basis(pt, message, title) or _referred_to(pt, message, title):
-        return None
-    return (f"The user's words this turn are about other things and don't ask for {title}, so it isn't added. "
-            "Mention it in your reply if it matters, and add it when they say so.")
-
-
-# words for changing or ticking what's there, which name nothing new
-_CHANGE_WORDS_RE = re.compile(r"(?:mov|push|shift|slid|bump|delay|postpon|resched|swap|switch|defer|drop|remov|skip|"
-                              r"cancel|finish|start|tick|mark|plan|schedul)\w*|earlier|later|sooner|instead|rather|"
-                              r"redo|time", re.IGNORECASE)
-
-
-def _own_words(pt: "PlanTools", text: str) -> set:
-    """The naming words of the text that belong to no item already planned (what's new in it), as stems."""
-    from thirties_core.done_fit import _breaks, _is_its
-    from thirties_core.item_facts import _stem
-    planned = _titles(pt)
-    words = re.findall(r"[a-z]+", re.sub(r"[‘’'`]", "", str(text or "").lower()))
-    return {_stem(w) for w in words if len(w) > 2 and not _breaks(w) and not _CHANGE_WORDS_RE.fullmatch(w)
-            and not any(_is_its(w, t) for t in planned)}
-
-
-def add_basis(pt: "PlanTools", message: str, title: str) -> bool:
-    """The user's words name a new item: the model's name for it shares a word with them that no planned item has
-    (a word only a planned item has names that item, not a new one), or they ask to plan or fit something in. An add
-    in a turn about something else ("move the varnish to 8:40", "the thwart is done") has no basis."""
-    if BULK_CHANGE_RE.search(message) or PLAN_ASK_RE.search(message):
-        return True
-    return bool(_own_words(pt, title) & _own_words(pt, message))
+    # --- a new item cites the user's words it comes from (add_source.py) ---
+    from thirties_core.add_source import refused
+    return refused(pt, "add_event", str(title), because)
+    # --- end cites the user's words ---
 
 
 def reworded_copies(pt: "PlanTools", title: str) -> list:
@@ -219,5 +187,5 @@ def week_refused(pt: "PlanTools", work: bool, sleep: bool) -> Optional[str]:
     return None
 
 
-__all__ = ["move_refused", "move_asked", "add_refused", "week_refused", "MOVE_ASK_RE", "BULK_CHANGE_RE", "PLAN_ASK_RE",
+__all__ = ["move_refused", "move_asked", "add_refused", "week_refused", "MOVE_ASK_RE", "BULK_CHANGE_RE",
            "AGREE_RE", "MAKE_ROOM_REACH"]

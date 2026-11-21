@@ -75,8 +75,9 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "day": "Which day, e.g. 'tomorrow', 'Monday', 'Oct 20' (default: the day being planned).",
             "again": "true to plan a second session of something already planned that day (e.g. two dev sessions). "
                      "To move an item, use update_event instead.",
+            "because": "The user's exact words this item comes from, quoted from their message.",
         },
-        "required": ["title", "start"],
+        "required": ["title", "start", "because"],
     },
     {
         "name": "update_event",
@@ -1020,6 +1021,7 @@ class PlanTools:
         fixed: Any = None,
         again: Any = False,
         happened: Any = False,
+        because: Any = None,
         **_: Any,
     ) -> str:
         if not str(title or "").strip():
@@ -1038,7 +1040,7 @@ class PlanTools:
         # --- a new item needs the user's words for it (change_scope.py) ---
         if cat not in (SpanCategory.WORK, SpanCategory.SLEEP):
             from thirties_core.change_scope import add_refused
-            why = add_refused(self, str(title))
+            why = add_refused(self, str(title), because)
             if why:
                 raise ToolError(why)
         # --- end a new item needs the user's words ---

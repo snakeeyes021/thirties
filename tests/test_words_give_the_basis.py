@@ -86,14 +86,16 @@ class TestAnAddNeedsTheItemsOwnWords(AddCase):
 
     def test_an_add_named_from_nothing_said_is_refused(self):
         words = "the weather should clear by 3 so push the paddle varnish then"
-        for title in ("Sand the hull", "Paddle varnish coat"):
+        for title, because in (("Sand the hull", "sand the hull"), ("Paddle varnish coat", "a second coat on it")):
             with self.subTest(title=title):
-                self.assertHeld(self.add(title, words))
+                self.assertHeld(self.add(title, words, because=because))
                 self.assertEqual(self.planned(title), [])
 
     def test_an_add_in_the_users_words_goes(self):
-        self.assertWent(self.add("Buy spar varnish and sandpaper", "need a tin of spar varnish and some sandpaper"))
-        self.assertWent(self.add("Sweep the shop", "fit something quick in after the thwart", start="10:40 PM"))
+        self.assertWent(self.add("Buy spar varnish and sandpaper", "need a tin of spar varnish and some sandpaper",
+                                 because="spar varnish and some sandpaper"))
+        self.assertWent(self.add("Sweep the shop", "fit something quick in after the thwart", start="10:40 PM",
+                                 because="fit something quick in"))
 
 
 class TestASecondSessionIsTheModelsReading(AddCase):

@@ -98,7 +98,7 @@ class InConversationTest(unittest.TestCase):
                                           "duration": "2 hours"})
         self.engine.responses = [reply('CALL suggest_media {"kind": "watch", "alongside": "Fold the laundry"}'),
                                  reply('CALL add_event {"title": "Kettle Street", "start": "7:00 PM", '
-                                       '"duration": "2 hours"}'),
+                                       '"duration": "2 hours", "because": "something easy to watch"}'),
                                  reply("Put on Kettle Street while you fold the laundry.")]
         out = self.m.send_user_message("find something easy to watch while I fold the laundry")
         tool_results = " ".join(str(m.get("content")) for m in self.m.brain.messages if m.get("role") == "tool"
