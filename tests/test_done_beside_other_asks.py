@@ -120,6 +120,32 @@ class TestStillRefused(GarageCase):
         self.assertRefused("Skis were waxed a while ago; bench can wait", "Glaze the mugs")
 
 
+class TestAPointerSaidAgain(GarageCase):
+    """After a reply listing several open items, a pointer alone doesn't say which; said again for the item it was
+    refused for, it does."""
+    SHOWN = ("", f"Still open: {SKIS}, Glaze the mugs and Sand the bench.")
+
+    def pointed(self, message, item=SKIS, asks=None):
+        self.t.user_message, self.t.prior_exchange, self.t.done_asks = message, self.SHOWN, asks
+        try:
+            return self.t.execute("log_outcome", {"event": self.span(item).id, "status": "done"})
+        finally:
+            self.t.user_message, self.t.prior_exchange, self.t.done_asks = None, None, None
+
+    def test_once_it_is_refused(self):
+        self.assertIn(REFUSED_WORDS, self.pointed("that one's finished"))
+        self.assertEqual(self.span(SKIS).status, SpanStatus.PLANNED)
+
+    def test_said_again_it_stands(self):
+        out = self.pointed("that one's finished!", asks={SKIS: "that one's finished"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span(SKIS).status, SpanStatus.DONE)
+
+    def test_said_again_for_another_item_is_still_refused(self):
+        out = self.pointed("that one's finished!", "Glaze the mugs", asks={SKIS: "that one's finished"})
+        self.assertTrue(out.startswith(NOT_DONE), out)
+
+
 class TestAMealForOthers(unittest.TestCase):
 
     def test_what_is_a_meal(self):

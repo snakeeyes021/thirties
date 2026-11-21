@@ -383,6 +383,11 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
                 or ORDINAL_RE.search(message) or pointed_count(message)):
             return plain()
         # --- end no pointer ---
+        # --- a done refused for this item before, said again: it stands, pointer or not (plain_done.said_again) ---
+        from thirties_core.plain_done import said_again
+        if said_again(pt, message, title):
+            return (None, message) if _the_copy_meant(pt, [message, shown], ids) else (copy_refusal, message)
+        # --- end said again ---
         return refusal, message  # a count or "both" that doesn't fit what was shown: never read past
     if not _the_copy_meant(pt, [message, shown], ids):
         return copy_refusal, message
