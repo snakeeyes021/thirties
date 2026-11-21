@@ -436,6 +436,8 @@ class ConversationManager:
             current_turn.reset(token)
             self.tools.user_message = None  # a drag in the Agenda later isn't judged by this message
             self.tools.prior_exchange = None
+            from thirties_core.reopen import reply_before
+            reply_before.set("")
             self.tools.pending_dones = None
             self.tools.done_asks = None
             self.tools.picked_dones = None
@@ -525,6 +527,8 @@ class ConversationManager:
         self.tools.user_message = merged
         from thirties_core.done_reference import prior_exchange  # what "that" or "both" can point back to
         self.tools.prior_exchange = prior_exchange(self.brain.messages)
+        from thirties_core.reopen import reply_before  # what a bare no answers, for the check before Joplin
+        reply_before.set(self.tools.prior_exchange[1])
         from thirties_core.done_words import pending_dones  # a done asked for before and refused (done_words.py)
         self.tools.pending_dones = pending_dones(self.brain.messages)
         from thirties_core.plain_done import done_asks  # dones refused earlier, said again (plain_done.py)

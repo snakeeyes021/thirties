@@ -8,20 +8,27 @@ whichever way the model records it: by reopen_item, or by log_outcome with the i
 During a turn it needs the user's words, as a done does:
 
 - **The ask**: words to untick, reopen, put back or mark open, words saying the item didn't happen (a "not",
-  a "never", a mistake owned up to), or a bare no ("no", "nope") right after the reply that named the item.
+  a "never", a mistake owned up to), or a bare no ("no", "nope") right after the reply that named the item and
+  asked nothing else ("Marked X done." but not "Marked X done. Want the review moved to 2:40?").
 - **The item**: a clause naming it or giving its id; or a clause with a pointer and no other item in it, when the
-  last message the user saw (or their previous one) named the item.
+  last message the user saw (or their previous one) named the item; or, for words naming no item ("undo"), the
+  one the last reply announced, however many items Python listed under it.
 
 Nothing else is reopened. The app's own controls and the background aren't judged here.
 """
 
 from __future__ import annotations
 
+import contextvars
 import re
 from typing import TYPE_CHECKING, Iterable, List, Optional
 
 if TYPE_CHECKING:
     from thirties_core.plan_tools import PlanTools
+
+# the reply the user saw just before this turn, set by the conversation for the length of a turn: what a bare no
+# answers, for the last check before Joplin
+reply_before: contextvars.ContextVar[str] = contextvars.ContextVar("reply_before", default="")
 
 # what log_outcome is sometimes given for "open again"
 REOPEN_STATUSES = {"open", "planned", "not done", "not_done", "notdone", "undone", "undo", "reopen", "reopened",
@@ -38,6 +45,16 @@ ASK_RE = re.compile(
 
 def is_reopen_status(status) -> bool:
     return str(status or "").strip().lower().replace("-", " ") in REOPEN_STATUSES
+
+
+def announced(shown: str, names: Iterable[str]) -> bool:
+    """A bare no answers the reply just before: it takes a done back only when that reply named the item and every
+    question it asked names it too. A question about something else is what the no answers."""
+    from thirties_core.done_reference import _listed
+    names = [n for n in names if n]
+    if not any(_listed(shown or "", n) for n in names):
+        return False
+    return all(any(_listed(q, n) for n in names) for q in re.findall(r"[^.!?\n]*\?", shown))
 
 
 def held(pt: "PlanTools", names: Iterable[str], ids: Iterable[str] = ()) -> str:
@@ -81,15 +98,27 @@ def held(pt: "PlanTools", names: Iterable[str], ids: Iterable[str] = ()) -> str:
         if any(n in pointed for n in names) and len(set(pointed)) <= MOST_POINTED and not any(
                 names_other(c) for c in clauses):
             mine = [c for c in clauses if POINTER_RE.search(c) or not names_other(c)]
-    from thirties_core.done_words import NO_RE  # a bare no calls a done off ("no", "not that one")
-    if any(ASK_RE.search(c) for c in mine) or (mine and NO_RE.match(text)):
+    # --- a no or an ask naming nothing ("no", "undo"): the done the reply just before announced, however many
+    # items Python listed under it; a bare no is about nothing else ---
+    from thirties_core.done_words import NO_RE
+    unnamed = not any(names_mine(c) for c in clauses)
+    bare_no = unnamed and bool(NO_RE.match(text))
+    if bare_no or (unnamed and any(ASK_RE.search(c) for c in clauses)):
+        shown = (getattr(pt, "prior_exchange", None) or ("", ""))[1]
+        if announced(shown, names) and not any(names_other(c) for c in clauses):
+            return ""
+        if bare_no:
+            return refusal
+    # --- end naming nothing ---
+    if any(ASK_RE.search(c) for c in mine):
         return ""
     return refusal
 
 
 def untick_refused(message: Optional[str], title: str) -> str:
     """For the last check before Joplin: an untick in a turn needs an ask to reopen (or a not-done) in the user's
-    words (a bare no counts), about this item or naming nothing else. "" when it can be written."""
+    words, about this item or naming nothing else; a bare no only right after the reply that announced it
+    (announced). "" when it can be written."""
     if not message:
         return ""
     from thirties_core.done_words import NO_RE
@@ -97,8 +126,12 @@ def untick_refused(message: Optional[str], title: str) -> str:
     from thirties_core.write_guard import _CLAUSE_RE, _about
     text = re.sub(r"[‘’`]", "'", message)
     clauses = [c for c in _CLAUSE_RE.split(text) if c and c.strip()]
-    asks = [c for c in clauses if ASK_RE.search(c)] or ([text] if NO_RE.match(text) else [])
-    if asks and (any(_about(c, title, []) for c in clauses) or not _names_anything(text, match_words)):
+    about = any(_about(c, title, []) for c in clauses)
+    if NO_RE.match(text) and not about:
+        asks = [text] if announced(reply_before.get(), [title]) else []
+    else:
+        asks = [c for c in clauses if ASK_RE.search(c)]
+    if asks and (about or not _names_anything(text, match_words)):
         return ""
     return (f"not written: the user's words don't ask for {title} to be opened again, so its line stays ticked.")
 

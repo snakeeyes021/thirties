@@ -24,6 +24,7 @@ from thirties_core.joplin_writeback import current_turn
 from thirties_core.lists import ListCatalog
 from thirties_core.models import SpanStatus
 from thirties_core.plan_tools import NOT_DONE
+from thirties_core.reopen import reply_before
 
 BINDERS, BADGES, ROOM, TENDER = ("Collate the budget binders", "Laminate the visitor badges",
                                  "Reserve the east boardroom", "Proofread the tender summary")
@@ -234,11 +235,12 @@ class TestTakenBackInJoplin(OfficeDay):
 
     def reopen(self, message, title=BADGES):
         self.t.user_message, self.t.prior_exchange = message, self.AFTER
-        token = current_turn.set(f"[app] {message}")
+        token, before = current_turn.set(f"[app] {message}"), reply_before.set(self.AFTER[1])
         try:
             return str(self.t.execute("reopen_item", {"item": title}))
         finally:
             current_turn.reset(token)
+            reply_before.reset(before)
             self.t.user_message, self.t.prior_exchange = None, None
 
     def test_one_word_unticks_it(self):
@@ -254,6 +256,8 @@ class TestTakenBackInJoplin(OfficeDay):
 
     def test_joplin_takes_the_untick(self):
         from thirties_core.write_guard import refused
+        before = reply_before.set(self.AFTER[1])
+        self.addCleanup(reply_before.reset, before)
         for message in TestOneWordTakesItBack.UNDO:
             self.assertEqual(refused({"op": "untick", "title": BADGES, "note_id": "n_office"}, f"[app] {message}",
                                      None), "", message)
