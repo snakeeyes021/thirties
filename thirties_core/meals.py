@@ -33,10 +33,10 @@ _MEAL_WORD = re.compile(r"\b(breakfast|brunch|lunch|dinner|supper)\b", re.IGNORE
 
 
 def meal_word(title: str) -> Optional[str]:
-    """The meal a title is (``None`` for a meal with someone, which is an appointment)."""
-    from thirties_core.kinds import _MEAL_WITH_RE
+    """The meal a title is (``None`` for a meal with someone, which is an appointment, or one for something else)."""
+    from thirties_core.kinds import _MEAL_WITH_RE, meal_for_another
     m = _MEAL_WORD.search(title or "")
-    if m is None or _MEAL_WITH_RE.search(title or ""):
+    if m is None or _MEAL_WITH_RE.search(title or "") or meal_for_another(title):
         return None
     return m.group(1).lower()
 

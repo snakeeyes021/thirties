@@ -80,10 +80,21 @@ _CHORE_RE = re.compile(r"^\s*(clean|scrub|fix|repair|replace|buy|order|book|rese
                        re.IGNORECASE)
 
 
+# --- a meal for others: an item that feeds someone ("Feed the volunteers breakfast") ---
+_MEAL_FOR_ANOTHER_RE = re.compile(r"^\s*feed(?:ing)?\b.*\b(?:breakfast|brunch|lunch|dinner|supper)\b", re.IGNORECASE)
+
+
+def meal_for_another(title: str) -> bool:
+    """The meal word is what others are fed, never the user's own meal ("Feed the volunteers breakfast"). A meal
+    the user has ("Have an early breakfast") is still theirs."""
+    return bool(_MEAL_FOR_ANOTHER_RE.search(title or ""))
+# --- end a meal for something else ---
+
+
 def is_meal(title: str) -> bool:
-    """A meal of the user's own (not "dinner with Kim", which is an appointment)."""
+    """A meal of the user's own (not "dinner with Kim", which is an appointment, nor one given to something else)."""
     return bool(MEAL_RE.search(title or "")) and not _MEAL_WITH_RE.search(title or "") \
-        and not _CHORE_RE.match(title or "") and not \
+        and not _CHORE_RE.match(title or "") and not meal_for_another(title) and not \
         re.search(r"\b(cats?|kitt(y|ies)|dogs?|pets?)'?s?\b", title or "", re.IGNORECASE)
 
 
