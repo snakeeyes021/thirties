@@ -18,6 +18,9 @@ for them in plain words:
   words naming something else that shares a word with it ("the glaze order is sent" for Glaze recipe test:
   done_fit.py).
 
+A tick that follows a done log_outcome accepted on the plan this turn (its own checks read the user's words) is
+written: the plan and Joplin agree. Python marks such a tick; the model can't.
+
 Changes made outside a turn (the app's own controls, the background, this morning's housekeeping) aren't judged
 here: they have their own rules.
 """
@@ -416,8 +419,9 @@ def _is_today(db: Any, note_id: str) -> bool:
 
 def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     """Why this change can't be written on the user's words this turn; "" when it can (or isn't judged here)."""
-    if not turn or op.get("valid_until") or op.get("_twin"):
-        return ""  # outside a turn, this morning's housekeeping, or the twin of a tick that went through
+    if not turn or op.get("valid_until") or op.get("_twin") or op.get("_done_on_plan"):
+        return ""  # outside a turn, this morning's housekeeping, the twin of a tick that went through, or a done
+        # the plan accepted this turn
     message = _said(turn)
     kind = op.get("op")
     title = str(op.get("title") or "")

@@ -98,11 +98,12 @@ class KindTools:
         """Whether not doing this counts as putting it off (a daily item's doesn't)."""
         return put_off_counts(self.kind_of(span))
 
-    def _worked_on(self, task: TaskItem) -> str:
-        """Done on an ongoing item means a session: today's copy is ticked, the item itself stays open (B2)."""
+    def _worked_on(self, task: TaskItem, on_plan: bool = False) -> str:
+        """Done on an ongoing item means a session: today's copy is ticked, the item itself stays open.
+        ``on_plan``: log_outcome accepted the done on the plan this turn, so the tick follows the plan."""
         writer = self._writer()
         if task.list_role == "today":
-            return self._complete_backlog_task(task, for_good=False)
+            return self._complete_backlog_task(task, for_good=False, on_plan=on_plan)
         if writer is not None:
             self._tick_twin(task, writer)  # its Today copy, if it has one
             if writer.allowed and getattr(writer.cfg, "file_done", True) and not task.id.startswith("media:"):

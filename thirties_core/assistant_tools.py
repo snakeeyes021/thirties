@@ -609,7 +609,9 @@ class AssistantTools(KindTools):
         from thirties_core.joplin_writeback import JoplinWriter
         return JoplinWriter(self.pt.scheduler.config, self._db, self.s.joplin.api_client)
 
-    def _complete_backlog_task(self, task: TaskItem, for_good: bool = False) -> str:
+    def _complete_backlog_task(self, task: TaskItem, for_good: bool = False, on_plan: bool = False) -> str:
+        """Tick a list item done. ``on_plan``: log_outcome accepted its done on the plan this turn, so the tick
+        follows the plan (write_guard.py)."""
         self._for_good = for_good  # _tick_twin: an ongoing home item stays open unless it's finished for good
         if self._db:
             self._db.record_task_completed(task.id, self.pt.day_plan.target_date)
@@ -620,13 +622,13 @@ class AssistantTools(KindTools):
         if task.id.startswith("media:"):
             return ""
         if task.list_role == "routine":  # a template: the day's tick goes on Today's copy
-            self._tick_on_today(task.title)
+            self._tick_on_today(task.title, on_plan)
             return ""
         writer = self._writer()
         if writer is None:
             return "(not checked off in Joplin: Joplin isn't connected)"
         from thirties_core.joplin_writeback import complete_op
-        status, msg = writer.submit(complete_op(task))
+        status, msg = writer.submit({**complete_op(task), **({"_done_on_plan": True} if on_plan else {})})
         said = {"done": "and checked it off in Joplin",
                 "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
                 "not_allowed": "(not checked off in Joplin: Thirties isn't allowed to change Joplin; Preferences → Tasks)",
@@ -763,7 +765,7 @@ class AssistantTools(KindTools):
                             "something done can't end in the future. If it happened on another day, give that day "
                             "(day='yesterday').")
 
-    def _tick_on_today(self, title: str) -> None:
+    def _tick_on_today(self, title: str, on_plan: bool = False) -> None:
         from thirties_core.today import note_items
         today, writer = self._today_note(), self._writer()
         if today is None or writer is None:
@@ -773,7 +775,8 @@ class AssistantTools(KindTools):
         exact = next((text for text in open_lines if text.lower() == title.strip().lower()), None) or \
             next((text for text in open_lines if step_key(text) == step_key(title)), None)  # written with its time
         if exact:
-            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
+            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact,
+                           **({"_done_on_plan": True} if on_plan else {})})
 
     def sync_today(self) -> List[str]:
         """Catch up with edits made by hand: an item ticked on the Today note ticks its home item, and the other way
@@ -1512,10 +1515,10 @@ class AssistantTools(KindTools):
             result = f"Marked '{task.title}' {st.value}"
             kind = self.kind_of(task)
             if st == SpanStatus.DONE and kind == ONGOING and not for_good:
-                result += " " + self._worked_on(task)
+                result += " " + self._worked_on(task, on_plan=True)
                 end_dt = end_dt or (None if start_dt else self.pt._now())  # the session is recorded, as said
             elif st == SpanStatus.DONE:
-                result += " " + self._complete_backlog_task(task, for_good)
+                result += " " + self._complete_backlog_task(task, for_good, on_plan=True)
             elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):
                 self._db.record_task_deferred(task.id)
             if start_dt or end_dt:
@@ -1582,20 +1585,20 @@ class AssistantTools(KindTools):
             if st == SpanStatus.DONE and (self._routine_of(span.title) is not None
                                           or (task is not None and task.list_role == "routine")):
                 # a routine note is a template: the day's ticks go on Today's copy, never into the routine
-                self._tick_on_today(span.title)
+                self._tick_on_today(span.title, on_plan=True)
                 if self._db:
                     self._db.record_task_completed(span.task_id, self.pt.day_plan.target_date)
             elif st == SpanStatus.DONE and task and kind == ONGOING and not for_good:
-                result += " " + self._worked_on(task)  # a session: the list item stays open (B2)
+                result += " " + self._worked_on(task, on_plan=True)  # a session: the list item stays open
             elif st == SpanStatus.DONE and task:
-                result += " " + self._complete_backlog_task(task, for_good)
+                result += " " + self._complete_backlog_task(task, for_good, on_plan=True)
             elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):  # a skipped daily isn't put off
                 count = self._db.record_task_deferred(span.task_id)
                 result += f"; it has now been put off {count} times"
         elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
             result += " (a session on it; it carries on)"
         elif st == SpanStatus.DONE:  # not on any list (a routine's extra step, a meal): its Today line is ticked too
-            self._tick_on_today(span.title)
+            self._tick_on_today(span.title, on_plan=True)
         if st == SpanStatus.DONE and kind == ONCE:
             self._settle_copies(span)
         from thirties_core.meals import meal_word, respace  # the next meal is spaced from this one
