@@ -107,6 +107,7 @@ def end(db, now: datetime, why: str = "") -> bool:
 
 def said_over(data: dict, messages: List[dict]) -> bool:
     """A message from the user since the hold began says the words it waits for."""
+    from thirties_core.engineer_notes import without_note
     want = set(data.get("words") or [])
     if not want:
         return False
@@ -115,7 +116,7 @@ def said_over(data: dict, messages: List[dict]) -> bool:
         # the message that asked for the hold never ends it, even when it uses the words ("before my next message")
         if m.get("role") != "user" or m.get("hidden") or str(m.get("at") or "") <= since:
             continue
-        if want & set(_words(str(m.get("content") or ""))):
+        if want & set(_words(without_note(str(m.get("content") or "")))):  # a note to the engineers ends nothing
             return True
     return False
 

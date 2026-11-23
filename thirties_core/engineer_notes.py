@@ -83,6 +83,20 @@ def split(message: str) -> Tuple[str, str]:
     return note, re.sub(r"[ \t]{2,}", " ", rest)
 
 
+def without_note(message: str) -> str:
+    """The message with any note to the engineers taken out. Every check that reads what the user said reads
+    this, so nothing in a note can make or stop a change."""
+    note, rest = split(message)
+    return rest if note else (message or "")
+
+
+def as_said(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The conversation with each of the user's messages read through ``without_note`` (copies; the record is
+    unchanged). A message that was only a note is left empty."""
+    return [{**m, "content": without_note(str(m.get("content") or ""))}
+            if m.get("role") == "user" and isinstance(m.get("content"), str) else m for m in messages or []]
+
+
 def only_a_note(rest: str) -> bool:
     """Nothing left to act on besides the note (a greeting or "thanks" doesn't count)."""
     words = re.findall(r"[a-z']+", (rest or "").lower())
@@ -205,5 +219,6 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 
 
-__all__ = ["EngineerNotes", "EngineerNote", "split", "only_a_note", "take", "hidden_instruction", "ACK",
+__all__ = ["EngineerNotes", "EngineerNote", "split", "without_note", "as_said", "only_a_note", "take",
+           "hidden_instruction", "ACK",
            "ENGINEER_TOOL_SPECS", "ENGINEER_READ_ONLY", "list_tool", "FILE_NAME"]

@@ -429,7 +429,8 @@ class ConversationManager:
             return held, False
         # --- end usage limit ---
         from thirties_core.joplin_writeback import current_turn
-        token = current_turn.set(f"[{via}] " + " / ".join(i.text for i in batch))  # each Joplin write's cause
+        from thirties_core.engineer_notes import without_note  # each Joplin write's cause: no engineer note
+        token = current_turn.set(f"[{via}] " + " / ".join(without_note(i.text) for i in batch))
         try:
             return self._run_turn(batch, via, attempts)
         finally:
@@ -524,20 +525,23 @@ class ConversationManager:
         couldn't be reached and the messages were kept for later."""
         self._catch_up()
         merged = "\n".join(i.text for i in batch)
-        self.tools.user_message = merged
+        # the user's words about their plan, for every check this turn: never a note to the engineers
+        from thirties_core.engineer_notes import as_said, without_note
+        words, earlier = without_note(merged), as_said(self.brain.messages)
+        self.tools.user_message = words
         from thirties_core.done_reference import prior_exchange  # what "that" or "both" can point back to
-        self.tools.prior_exchange = prior_exchange(self.brain.messages)
+        self.tools.prior_exchange = prior_exchange(earlier)
         from thirties_core.reopen import reply_before  # what a bare no answers, for the check before Joplin
         reply_before.set(self.tools.prior_exchange[1])
         from thirties_core.done_words import pending_dones  # a done asked for before and refused (done_words.py)
-        self.tools.pending_dones = pending_dones(self.brain.messages)
+        self.tools.pending_dones = pending_dones(earlier)
         from thirties_core.plain_done import done_asks  # dones refused earlier, said again (plain_done.py)
-        self.tools.done_asks = done_asks(self.brain.messages)
+        self.tools.done_asks = done_asks(earlier)
         self.tools.picked_dones = set()  # dones the model picked this turn: the reply names them (reply_checks.py)
         from thirties_core.change_asks import recent_said  # a removal or move asked for just before (change_asks.py)
-        self.tools.recent_said = recent_said(self.brain.messages)
+        self.tools.recent_said = recent_said(earlier)
         from thirties_core.routine_times import earlier_today  # times given earlier today (routine_times.py)
-        self.tools.said_earlier = earlier_today(self.brain.messages)
+        self.tools.said_earlier = earlier_today(earlier)
         self.tools.shown_schedule = None
         from thirties_core import whats_next
         self._plan_before = whats_next.snapshot(self.day_plan)  # what the turn moves, for what's next
@@ -566,13 +570,13 @@ class ConversationManager:
         # --- end notes to the engineers ---
         # --- on-site work today, from the user's words: what's inside work moves out first (on_site.py) ---
         from thirties_core import on_site
-        moved_out = on_site.at_turn_start(self.tools, merged)
+        moved_out = on_site.at_turn_start(self.tools, words)
         if moved_out:
             self.brain.messages.append({"role": "user", "content": moved_out, "hidden": True})
         # --- end on-site work ---
         # --- an ask for quiet, from the user's words: kept by Python before the model replies (quiet_asks.py) ---
         from thirties_core import quiet_asks
-        quiet = quiet_asks.at_turn_start(self.scheduler.state_db if self.scheduler else None, merged,
+        quiet = quiet_asks.at_turn_start(self.scheduler.state_db if self.scheduler else None, words,
                                          get_current_time(self.day_plan.day_start.tzinfo), self.day_plan)
         if quiet is not None:
             self.brain.messages.append({"role": "user", "hidden": True, "content": (
@@ -581,7 +585,7 @@ class ConversationManager:
         # --- end ask for quiet ---
         # --- asked why about an item: where its record is, for the model's one answer (why_notes.py) ---
         from thirties_core import why_notes
-        why = why_notes.note(self.tools, merged)
+        why = why_notes.note(self.tools, words)
         if why:
             self.brain.messages.append({"role": "user", "content": why, "hidden": True})
         # --- end asked why ---
@@ -618,17 +622,17 @@ class ConversationManager:
             final = place_schedule(final, self.tools.shown_schedule)  # Python's layout, whatever the model made
             from thirties_core import one_schedule  # and no listing of the model's own beside it
             final = one_schedule.around(final, self.tools.shown_schedule, self.day_plan)
-        said = [str(m.get("content") or "") for m in self.messages if m.get("role") == "user"  # all day, the user's
+        said = [without_note(str(m.get("content") or "")) for m in self.messages if m.get("role") == "user"  # all day
                 and not m.get("hidden") and not str(m.get("content") or "").startswith("[System check")]  # not Python's
-        keep = real_times(*said, merged, spans=self.day_plan.spans)  # real item times and the user's
+        keep = real_times(*said, words, spans=self.day_plan.spans)  # real item times and the user's
         now_times = real_times(now=get_current_time(self.day_plan.day_start.tzinfo))  # said as itself, never a row's
         from thirties_core.under_way import unsaid  # when an item under way began: by its block (under_way.py)
-        keep, now_times = unsaid(keep, now_times, self.day_plan.spans, merged)
+        keep, now_times = unsaid(keep, now_times, self.day_plan.spans, words)
         # else blocks; every time keeps its AM/PM (a schedule with some times trimmed and some not was hard to read)
-        final = final if EXACT_ASKED_RE.search(merged) else to_thirties(final, keep, now=now_times)
+        final = final if EXACT_ASKED_RE.search(words) else to_thirties(final, keep, now=now_times)
         final = self._no_repeat_checkins(final)
         final = self.tools.shorten(final)  # never a whole raw item line in a reply (11-07)
-        final = self._status_as_wanted(final, merged, before)
+        final = self._status_as_wanted(final, words, before)
         from thirties_core.extras import after_reply  # a suggestion says where it's from (extras.py)
         final = after_reply(self.tools, final)
         from thirties_core import others_events  # what's on other people's calendars, said once (others_events.py)
@@ -640,7 +644,7 @@ class ConversationManager:
         # --- the morning's reply lists the day itself: no what's-next slice under it (morning_reply.py) ---
         from thirties_core import morning_reply
         final = morning_reply.without_slice(self, final) if morning_now else \
-            self._with_whats_next(final, merged, before)
+            self._with_whats_next(final, words, before)
         # --- end morning reply ---
         # --- a promise of quiet only when quiet is kept (quiet_asks.py) ---
         if self.scheduler is not None:
@@ -651,9 +655,9 @@ class ConversationManager:
                 mutes_on=CheckinMutes(self.scheduler.state_db).paused_until(now_q) is not None)
         # --- end promise of quiet ---
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
-        final = clean_message(final, self.tools, merged)
+        final = clean_message(final, self.tools, words)
         from thirties_core import repeat_lines  # an item's time said once a day, and never after "stop" (repeat_lines.py)
-        final = repeat_lines.after_reply(self, final, merged, before)
+        final = repeat_lines.after_reply(self, final, words, before)
         from thirties_core import fallback  # said once: a simpler assistant is answering, or the usual one is back
         final = fallback.with_notice(self, final)
         if final != reply:
