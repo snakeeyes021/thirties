@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from thirties_core.astronomy import get_current_time, get_diurnal_date
@@ -80,6 +80,27 @@ class FrontierBrain:
     def reset(self) -> None:
         """Start a fresh transcript with an up-to-date system prompt."""
         self.messages = [{"role": "system", "content": self.build_system_prompt()}]
+
+    def _message_times(self) -> str:
+        """For the prompt: when each earlier message the user saw was sent, so the model reads it rather than
+        guessing. Drafts the user never saw and Python's own checks are left out."""
+        tz = self.tools.day_plan.day_start.tzinfo
+        rows = []
+        for m in self.messages[1:]:
+            text = " ".join(str(m.get("content") or "").split())
+            if m.get("role") not in ("user", "assistant") or not m.get("at") or not text or m.get("hidden") \
+                    or self._is_check(m):
+                continue
+            try:
+                when = datetime.fromisoformat(str(m["at"])).astimezone(tz)
+            except ValueError:
+                continue
+            rows.append(f"- {format_clock(when)}, {'the user' if m['role'] == 'user' else 'you'}: {text[:120]}")
+        if not rows:
+            return ""
+        return ("WHEN EACH EARLIER MESSAGE WAS SENT (for you only: when you mention one, say it by this time, as its "
+                "part of the day or its half hour, never to the minute; a message not listed has no recorded time, so "
+                "never name one for it)\n" + "\n".join(rows) + "\n\n")
 
     def _is_today(self, now) -> bool:
         plan = self.tools.day_plan
@@ -155,7 +176,7 @@ Sunrise {format_clock(plan.sunrise)}, sunset {format_clock(plan.sunset)}. {self.
 This day runs from {format_clock(plan.day_start)} until {format_clock(plan.day_end)} tomorrow morning, so tonight belongs to this day.
 Open blocks (half-hour chunks) still ahead: {avail["daylight_open"]} in daylight, {avail["dark_open"]} in the dark.
 
-{now_section(self.tools) if is_today else ""}SCHEDULE
+{now_section(self.tools) if is_today else ""}{self._message_times()}SCHEDULE
 {self.tools.schedule_text(upcoming_from=now if is_today else None)}
 
 UNCONFIRMED CALENDAR INVITES
