@@ -1419,9 +1419,8 @@ class PlanTools:
         length = span.end_dt - span.start_dt
         if start not in (None, ""):
             new_start = resolve_clock(str(start), target_plan.day_start)
-        else:
-            clock = span.start_dt.timetz()
-            new_start = resolve_clock(clock.strftime("%H:%M"), target_plan.day_start)
+        else:  # its own clock time, as a time: never words that need AM or PM
+            new_start = resolve_clock(span.start_dt.time(), target_plan.day_start)
         if end not in (None, ""):
             new_end = resolve_clock(str(end), target_plan.day_start, after=new_start)
         elif duration not in (None, ""):

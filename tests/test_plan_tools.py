@@ -1,9 +1,11 @@
 """Unit tests for thirties_core.plan_tools: the shared schedule tool API."""
 
 import unittest
+from datetime import timedelta
 
 from tests.fixtures import DAY, at, event, make_scheduler, occupant
 from thirties_core.astronomy import set_debug_time
+from thirties_core.clock import format_clock
 from thirties_core.models import SpanCategory
 from thirties_core.plan_tools import NOT_DONE, PlanTools
 
@@ -232,6 +234,24 @@ class TestUpdateEvent(unittest.TestCase):
         self.assertEqual(today.status.value, "skipped")
         tomorrow = t.plan_for("tomorrow")
         self.assertEqual([s.status.value for s in tomorrow.spans if s.title == "File taxes"], ["planned"])
+
+    def test_moved_to_another_day_with_no_time_it_keeps_its_own_clock_time(self) -> None:
+        set_debug_time(at("08:10"))
+        self.addCleanup(set_debug_time, None)
+        t = tools_for()
+        times = {"Harpsichord quills": "10:20", "Madrigal": "11:40", "Fugue": "15:50"}
+        for title, hhmm in times.items():
+            t.user_message = f"{title} at {format_clock(at(hhmm))} today"  # the user's own times, kept to the minute
+            t.execute("add_event", {"title": title, "start": format_clock(at(hhmm)), "duration": "20 min"})
+        t.user_message = None
+        for title in times:
+            out = t.execute("update_event", {"event": title, "to_day": "tomorrow"})
+            self.assertFalse(out.startswith(NOT_DONE), out)
+        tomorrow = t.plan_for("tomorrow")
+        for title, hhmm in times.items():
+            moved = next(s for s in tomorrow.spans if s.title == title)
+            self.assertEqual((moved.start_dt, moved.end_dt), (at(hhmm, 1), at(hhmm, 1) + timedelta(minutes=20)))
+        self.assertFalse({"Harpsichord quills", "Madrigal", "Fugue"} & {s.title for s in t.day_plan.spans})
 
     def test_moved_to_another_day_it_can_go_alongside_something_fixed_there(self) -> None:
         t = tools_for()

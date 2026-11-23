@@ -51,14 +51,14 @@ def parse_clock(text: str) -> time:
     return time(hour, minute)
 
 
-def resolve_clock(text: str, day_start: datetime, after: Optional[datetime] = None) -> datetime:
-    """Place a clock time on the diurnal day that starts at day_start.
+def resolve_clock(text, day_start: datetime, after: Optional[datetime] = None) -> datetime:
+    """Place a clock time (words, or a ``time`` already known) on the diurnal day that starts at day_start.
 
     Without ``after``, returns the occurrence inside [day_start, day_start + 24h).
     With ``after`` (used for end times), returns the first occurrence strictly after it,
     so '10:30 PM' to '6:30 AM' ends on the following morning.
     """
-    t = parse_clock(text)
+    t = text if isinstance(text, time) else parse_clock(text)
     tz = day_start.tzinfo
     anchor = after if after is not None else day_start
     candidate = datetime.combine(anchor.date(), t, tzinfo=tz)
