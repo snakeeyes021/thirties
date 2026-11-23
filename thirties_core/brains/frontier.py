@@ -923,13 +923,16 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         plan = getattr(self.tools, "day_plan", None)
         return {s.id: (s.start_dt, s.end_dt) for s in (plan.spans if plan is not None else [])}
 
-    def _named(self, sentence: str) -> List[Any]:
-        """The plan's items a sentence names: every word of an item's title, or of a routine's name (its steps)."""
+    def _named(self, sentence: str, whole: bool = False) -> List[Any]:
+        """The plan's items a sentence names: every word of an item's title, or of a routine's name (its steps).
+        ``whole``: only by the item's whole title, as written ("the goals are done" names no item)."""
         from thirties_core.item_facts import mentions, name_words
         said = name_words(sentence)
         plan = self.tools.day_plan
         titles = {s.id: self.tools._title(s) for s in plan.spans}
-        named = [s for s in plan.spans if mentions(sentence, titles[s.id], titles.values())]
+        named = [s for s in plan.spans if (re.search(rf"(?<![\w'’]){re.escape(titles[s.id])}(?![\w'’])", sentence,
+                                                     re.IGNORECASE) if whole and titles[s.id]
+                                           else not whole and mentions(sentence, titles[s.id], titles.values()))]
         assistant = getattr(self.tools, "assistant", None)
         if assistant is not None:
             try:
@@ -1023,7 +1026,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             lead = sentence[:m.start()]
             if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
                 continue
-            named = [s for s in self._named(sentence) if not s.is_envelope and s.source != "calendar"]
+            # an item the reply says is done is named by its whole title, never by a word it shares with it
+            named = [s for s in self._named(sentence, whole=True) if not s.is_envelope and s.source != "calendar"]
             if named and all(s.status == SpanStatus.PLANNED and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED
                              for s in named):
                 out += [f"{self.tools._title(s)} isn't recorded as done" for s in named[:3]]
@@ -1033,7 +1037,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
                                    re.IGNORECASE)
                 unmarked = [s for s in self._claimed_unchanged(
                     sentence, claim, lambda s: s.status == SpanStatus.PLANNED
-                    and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED) if s.source != "calendar"]
+                    and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED) if s.source != "calendar"
+                    and s in named]
                 out += [f"{self.tools._title(s)} isn't recorded as done" for s in unmarked]
             # --- end part by part ---
         return list(dict.fromkeys(out))

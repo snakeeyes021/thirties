@@ -360,6 +360,10 @@ PUSH_WORDS_RE = re.compile(r"\b(push\w*|back|later|slid\w*|shift\w*|bump\w*|dela
                            r"after|behind|late|run(?:s|ning)? (?:over|long)|ran (?:over|long)|overr?an|reflow\w*|"
                            r"rest of|everything|resched\w*|slip\w*)\b", re.IGNORECASE)
 
+# the tools that record that something was done, skipped or dropped: a goal, an item, one someone else did
+RECORDING_TOOLS = {"log_outcome", "check_goal", "done_by_someone"}
+
+
 class PlanTools:
     """Executes schedule tool calls against a DayPlan and persists the result."""
 
@@ -380,7 +384,7 @@ class PlanTools:
         self._other_days: Dict[Any, DayPlan] = {}
         self._home_plan: Optional[DayPlan] = None  # the plan in use while a call works on another day (execute)
         self.successful_changes = 0  # every tool call that changed something, on any day or store
-        self.outcomes_logged = 0  # successful log_outcome calls
+        self.outcomes_logged = 0  # successful calls that record an outcome (RECORDING_TOOLS)
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
         self.by_hand = False  # a tool run from the app's own controls (a drag, a button): the user did it
         # (what the user said last, the last message they saw) before this turn: what their words can point back
@@ -2213,7 +2217,7 @@ class PlanTools:
                     self._learn_routine_move(args.get("event"))
             if name not in READ_ONLY_TOOLS:
                 self.successful_changes += 1
-            if name == "log_outcome":
+            if name in RECORDING_TOOLS:
                 self.outcomes_logged += 1  # "I've logged it as done" needs one of these (frontier.py)
             if self.day_plan is not saved:
                 result = f"[{self.day_plan.target_date.strftime('%A, %B %d')}] {result}"
