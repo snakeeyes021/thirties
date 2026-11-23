@@ -3,8 +3,8 @@
 Code, not a prompt line:
 - **When.** The morning's one question about an item missed three days running (backoff.py) gets a fourth choice,
   "Break it into smaller pieces", when the item can be broken down. An item put off DEFER_AFTER or more times (skipped,
-  or moved to another day: its deferral count) gets the offer on its own line, once. ``morning_question`` writes
-  both, in the morning's Before today message.
+  or moved to another day: its deferral count) gets the offer on its own line, once; kept as it is, it's offered
+  again only once it's put off again. ``morning_question`` writes both, in the morning's Before today message.
 - **Which items.** A thing to do once, on a list or a project (not a routine, a menu option, a daily or ongoing thing,
   a meal, a ticket, someday or a wishlist item), with no open pieces under it yet: one that has them is already offered
   piece by piece (project_pieces.first_pieces).
@@ -111,8 +111,8 @@ def morning_question(assistant, still: List[Dict[str, Any]], short=lambda t: t) 
         offers = _offers(db)
         today = assistant.pt.day_plan.target_date.isoformat()
         for t in assistant.s.tasks:
-            if (t.deferred_count >= DEFER_AFTER and t.id not in offers and t.id not in asked_ids
-                    and can_break(assistant, t)):
+            if (t.deferred_count >= DEFER_AFTER and t.id not in asked_ids and can_break(assistant, t)
+                    and (t.id not in offers or t.deferred_count > offers[t.id].get("count", t.deferred_count))):
                 offers[t.id] = {"title": t.title, "asked": today, "answer": ""}
                 lines.append(DEFER_QUESTION.format(title=short(t.title), n=t.deferred_count))
         _save(db, offers)
@@ -126,7 +126,9 @@ def open_offers(db) -> List[Dict[str, Any]]:
 
 def answer(assistant, item: str, choice: str) -> Optional[str]:
     """still_want's answer, where it's about breaking down: "break" for a missed item or a deferral offer, or
-    "keep" for a deferral offer (it stays as it is, never offered again). None when it's for still_want itself."""
+    "keep" for an open deferral offer (it stays as it is until it's put off again). None when it's for still_want
+    itself: a keep with no open offer, or one for an item also asked about as missed, which still_want's keep
+    answers as well."""
     choice = str(choice or "").strip().lower()
     choice = {"break it down": BREAK, "break it into smaller pieces": BREAK, "break down": BREAK,
               "keep as it is": "keep"}.get(choice, choice)
@@ -140,10 +142,13 @@ def answer(assistant, item: str, choice: str) -> Optional[str]:
     streaks = MissStreaks(db)
     rec = streaks.get(item)
     if choice == "keep":
-        if key is None or rec is not None:
+        if key is None or offers[key].get("answer"):
             return None  # a missed item's keep: still_want's own
-        offers[key]["answer"] = "keep"
+        task = _task(assistant, item, key)
+        offers[key].update(answer="keep", count=task.deferred_count if task is not None else 0)
         _save(db, offers)
+        if rec is not None and rec in streaks.asked_open():
+            return None  # asked about as missed too: still_want's keep answers that as well
         return f"{offers[key]['title']}: kept as it is."
     task = _task(assistant, item, key or (rec or {}).get("task_id", ""))
     if rec is None and key is None:

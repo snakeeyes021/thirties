@@ -31,7 +31,7 @@ ASK_HINT = "Missed several days running, so Thirties stopped offering them. Aske
 ASK_LABELS = {"keep": "Keep for this week", "park": "Park for later", "drop": "Drop", "break": "Break It Down"}
 # put off several times (break_down.py): break it into smaller pieces, or keep it as it is
 OFFER_TITLE = "Put off several times"
-OFFER_HINT = "Smaller pieces can be easier to start. Asked once."
+OFFER_HINT = "Smaller pieces can be easier to start."
 OFFER_LABELS = {"break": "Break It Down", "keep": "Keep as It Is"}
 BROKEN_NOTE = "{title} stays off the plan until it has pieces. Send the message in the chat for a few first steps."
 BREAK_ASK = "Help me break {title} into a few small first steps."  # written in the chat box, for the user to send
