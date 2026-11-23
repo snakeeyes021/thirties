@@ -8,6 +8,8 @@ sentence that followed it. So:
 
 - edits work on whole sentences only, and a sentence that introduces a list (it ends with a colon) takes its list
   with it when it goes;
+- a list line an edit rewrites stays a list line (its mark, no closing stop), so the lines under it keep their
+  lead-in and none of them is cut as a list without one;
 - a sentence Python writes starts with a capital letter;
 - ``introduced`` names what an edit broke that the model's own text didn't have (a sentence starting in lower case,
   a stranded colon, doubled punctuation, a list cut from its lead-in, a sentence ending on "and"), so the caller can
@@ -34,6 +36,10 @@ def cap(text: str) -> str:
 
 def _is_prose(line: str) -> bool:
     return line.rstrip().endswith(_STOP)
+
+
+# the start of a list line: its indent and its mark ("- ", "• ", "2. "), if it has one
+_MARK_RE = re.compile(r"^\s*([-*•]\s+|\d+[.)]\s+)?")
 
 
 def _is_lead_in(line: str) -> bool:
@@ -65,6 +71,7 @@ def edit(text: str, new_for: Callable[[str], Optional[str]],
     introduces it or ``keeps_list`` says the list stays (an opening that only announced it). Lines that are left
     empty go."""
     lines = (text or "").split("\n")
+    rows = {k for i, line in enumerate(lines) if _is_lead_in(line) for k in range(i + 1, i + 1 + list_after(lines, i))}
     out: List[str] = []
     changed = False
     i = 0
@@ -88,7 +95,11 @@ def edit(text: str, new_for: Callable[[str], Optional[str]],
             if j == len(parts) - 1 and _is_lead_in(part) and not _is_lead_in(new) and not keeps_list(part):
                 cut_list = True
         if kept:
-            out.append(" ".join(p.strip() if k else p.rstrip() for k, p in enumerate(kept)).rstrip())
+            new_line = " ".join(p.strip() if k else p.rstrip() for k, p in enumerate(kept)).rstrip()
+            if (i in rows or _MARK_RE.match(line).group(1)) and not _is_prose(line) and new_line != line.rstrip():
+                # a list line stays a list line: its mark, no closing stop, so the lines under it keep their lead-in
+                new_line = _MARK_RE.match(line).group(0) + _MARK_RE.sub("", new_line, count=1).rstrip("".join(_STOP))
+            out.append(new_line)
         i += 1 + (list_after(lines, i) if cut_list else 0)
     result = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
     return result, changed

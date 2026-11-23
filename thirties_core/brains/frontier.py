@@ -1053,6 +1053,15 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
     def _clock_key(dt) -> tuple:
         return (dt.hour % 12, dt.minute)
 
+    def _row_entry(self, part: str) -> Optional[str]:
+        """What a list line with a time in front lists ("- 1:10 PM – Varnish (until 1:40 PM)": "Varnish (until
+        1:40 PM)"); None for any other text."""
+        m = self._CLOCK_RE.search(part or "")
+        if m is None or part[:m.start()].strip(" \t-*•–—"):
+            return None
+        span = self._RANGE_RE.match(part, m.start())
+        return part[(span or m).end():].lstrip(" \t–—:-")
+
     def _said_clocks(self, text: str) -> List[tuple]:
         out = []
         for m in self._CLOCK_RE.finditer(text or ""):
@@ -1072,6 +1081,7 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         a time said alone passes when it's any time of what it names (start or end, as given or by its block, or
         when it really happened). One about another day, a reminder or a delivery is left alone."""
         from thirties_core.clock import thirty_of
+        from thirties_core.done_reference import _listed_alone
         from thirties_core.item_facts import mentions
         from thirties_core.shown_times import shown_end
         plan = getattr(self.tools, "day_plan", None)
@@ -1089,7 +1099,12 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             said = self._said_clocks(bare)
             if not said or part.rstrip().endswith("?") or self._ELSEWHERE_RE.search(part):
                 continue
-            named = [s for s in spans if mentions(part, titles[s.id], titles.values())]
+            # a list line with a time in front is about the item whose whole title is its entry, never one whose
+            # title is only part of it ("1:10 PM Varnish the kite spars" says nothing of Varnish: done_reference.py)
+            entry = None if any(re.match(rf"[\s*•-]*{re.escape(t)}", part, re.IGNORECASE) for t in timed) \
+                else self._row_entry(part)  # a line opening with a title that holds a time isn't a timed line
+            named = [s for s in spans if (_listed_alone(entry, titles[s.id]) if entry is not None
+                                          else mentions(part, titles[s.id], titles.values()))]
             if not named:
                 continue
             # --- a time from the item's own title ("Return the key by 4:30 PM") is its name, never its time ---
