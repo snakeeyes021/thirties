@@ -6,6 +6,9 @@ The background service asks once a day, at work's planned end, "Done with work? 
 reply always says what follows: the evening planned from work's real end, and after work the daylight and dark
 thirties left with a few things that fit (day_times.replan_after_work, after_work.offer). Anything longer, a no, a
 question, or an answer once the question has gone stale goes to the assistant as usual.
+
+The answer is read from the message without any note to the engineers in it (engineer_notes.without_note): a note
+is kept for them as it is from any other message, and a message that is only a note is never an answer.
 """
 
 from __future__ import annotations
@@ -83,7 +86,8 @@ def answer(manager, text: str, via: str) -> str:
     tools = manager.tools
     if tools._state_db is None or not tools.is_current(tools.day_plan):
         return ""
-    ended = work_ended_from(text)
+    from thirties_core import engineer_notes
+    ended = work_ended_from(engineer_notes.without_note(text))
     if ended is None:
         return ""
     now = tools._now()
@@ -99,11 +103,13 @@ def answer(manager, text: str, via: str) -> str:
         work = work_span(tools.day_plan)
         if work is None or work.actual_end is not None:
             return ""  # no work today, or its end is already said: the assistant answers
+        kept, _ = engineer_notes.take(tools._state_db, text, via)  # kept once, even if the assistant takes it
         result = tools.execute("log_day_times", {"work_ended": _as_said(ended, now)})
         if not result or result.startswith(NOT_DONE):
             return ""  # e.g. a time that can't be work's end: the assistant asks
         said, rest = work_reply(result)
-        reply = join_sections(f"Noted: {said[:1].lower()}{said[1:]}." if said else "Noted.", rest)
+        reply = join_sections(f"Noted: {said[:1].lower()}{said[1:]}." if said else "Noted.", rest,
+                              engineer_notes.ACK if kept is not None else "")
         tools._state_db.set_sync_meta("last_user_message_at", now.isoformat())
         manager.record_exchange(text.strip(), reply, via=via)
     if via == "app":  # the phone sees what was typed in the app and the answer (one conversation)

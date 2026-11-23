@@ -9,7 +9,9 @@ from tests.fixtures import DAY, at, make_scheduler
 from tests.test_conversation import reply
 from thirties_core.astronomy import set_debug_time
 from thirties_core.background import BackgroundService
+from thirties_core import engineer_notes
 from thirties_core.day_times import work_span
+from thirties_core.engineer_notes import EngineerNotes
 from thirties_core.inference import MockInferenceEngine
 from thirties_core.work_end_answer import work_ended_from
 
@@ -25,7 +27,8 @@ class TestTheShortAnswer(unittest.TestCase):
             self.assertIsNone(work_ended_from(said), said)
 
 
-class TestDoneWithWork(unittest.TestCase):
+class AskedDoneWithWork(unittest.TestCase):
+    """The question has just been asked, at 4:05 PM."""
 
     def setUp(self):
         set_debug_time(at("16:05"))
@@ -47,6 +50,9 @@ class TestDoneWithWork(unittest.TestCase):
 
     def work(self):
         return work_span(self.sched.build_day_plan(DAY)[0])
+
+
+class TestDoneWithWork(AskedDoneWithWork):
 
     def test_a_yes_records_now_and_offers_whats_left(self):
         set_debug_time(at("16:20"))
@@ -89,6 +95,44 @@ class TestDoneWithWork(unittest.TestCase):
         self.manager.send_user_message("yes")
         self.assertEqual(len(self.engine.call_history), 1)
         self.assertIsNone(self.work().actual_end)
+
+
+class TestAnAnswerWithANoteToTheEngineers(AskedDoneWithWork):
+    """A note to the engineers inside the answer is kept as from any other message, and the answer is read
+    without it. Invented notes about the app's own screens."""
+
+    def notes(self):
+        return EngineerNotes(self.sched.state_db).notes()
+
+    def test_the_note_is_kept_and_the_answer_recorded(self):
+        set_debug_time(at("16:40"))
+        said = "yes, at 4:10 (note to the developers: the gauge wobbles)"
+        out = self.manager.send_user_message(said)
+        self.assertEqual(self.engine.call_history, [])  # Python answered: no model turn
+        self.assertEqual(self.work().actual_end, at("16:10"))
+        self.assertTrue(out.startswith("Noted: finished work 4:10 PM."), out)
+        self.assertTrue(out.endswith(engineer_notes.ACK), out)
+        notes = self.notes()
+        self.assertEqual([(n.text, n.message) for n in notes], [("the gauge wobbles", said)])
+        self.assertIn("the gauge wobbles", EngineerNotes(self.sched.state_db).file.read_text(encoding="utf-8"))
+        history = [m["content"] for m in self.manager.brain.messages if m.get("role") in ("user", "assistant")]
+        self.assertEqual(history[-2:], [said, out])
+
+    def test_only_a_note_is_never_an_answer(self):
+        set_debug_time(at("16:20"))
+        out = self.manager.send_user_message("Note to the developers: the caret jitters after 4:10")
+        self.assertEqual(out, engineer_notes.ACK)
+        self.assertEqual(self.engine.call_history, [])
+        self.assertIsNone(self.work().actual_end)
+        self.assertEqual([n.text for n in self.notes()], ["the caret jitters after 4:10"])
+
+    def test_a_no_with_a_note_goes_to_the_assistant_and_the_note_is_kept_once(self):
+        set_debug_time(at("16:20"))
+        self.engine.set_next_response(reply("Still at it, then."))
+        self.manager.send_user_message("no (note to the developers: the gauge ripple runs off)")
+        self.assertEqual(len(self.engine.call_history), 1)
+        self.assertIsNone(self.work().actual_end)
+        self.assertEqual([n.text for n in self.notes()], ["the gauge ripple runs off"])
 
 
 if __name__ == "__main__":
