@@ -217,8 +217,10 @@ class AgendaPage(Gtk.ScrolledWindow):
             self._group("paused", "").add(row)
         theirs = [s for s in plan.spans_in_view() if s.shown_only]
         spans = [s for s in plan.spans_in_view() if not s.shown_only]  # someone else's: their own section, last
-        # gone by with nothing said (marked "not reported"): not done, so never under Done; still to sort out
-        unreported = [s for s in spans if _markable(s) and s.status == SpanStatus.UNKNOWN]
+        # gone by with nothing said (marked "not reported"): not done, so never under Done; still to sort out. What's
+        # not marked yet is the one rule the chat's list uses too (not_marked.py)
+        from thirties_core.not_marked import unmarked_spans
+        unreported = [s for s in unmarked_spans(spans, None) if _markable(s)]
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_drafts(plan)
@@ -233,8 +235,7 @@ class AgendaPage(Gtk.ScrolledWindow):
         # "past" at 9:06): an item is now through its whole last thirty, and past only once that's over.
         block = thirty_of(now)
         # a calendar event too: past its time with nothing said, it waits here rather than vanish from the day
-        behind = [s for s in spans if _markable(s) and s.status == SpanStatus.PLANNED and _block_end(s) <= block]
-        behind += unreported
+        behind = [s for s in unmarked_spans(spans, block) if _markable(s)]
         if behind:  # first: being behind is common, and these are what to sort out
             self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), behind, now, behind=True)
         current = [s for s in spans if thirty_of(s.start_dt) <= block < _block_end(s) and s.status == SpanStatus.PLANNED

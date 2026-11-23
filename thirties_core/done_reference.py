@@ -129,8 +129,13 @@ def _by_initials(text: str, title: str, others: Iterable[str]) -> bool:
 
 
 def _still_to_do(pt: "PlanTools") -> list:
+    """Items with no outcome yet: the planned ones, and the ones not marked yet (not_marked.py: one stored as
+    unknown is still the user's to mark, as on the Agenda)."""
     from thirties_core.models import SpanStatus
-    return [s for s in pt.day_plan.spans if not getattr(s, "shown_only", False) and s.status == SpanStatus.PLANNED]
+    from thirties_core.not_marked import unmarked_spans
+    spans = [s for s in pt.day_plan.spans if not getattr(s, "shown_only", False)]
+    unmarked = {s.id for s in unmarked_spans(spans, None)}
+    return [s for s in spans if s.status == SpanStatus.PLANNED or s.id in unmarked]
 
 
 def _begun(pt: "PlanTools", spans: list) -> Optional[list]:

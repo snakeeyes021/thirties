@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Callable, Iterable, List, Optional, Sequence
 
-from thirties_core.clock import agenda_lines, format_clock, slice_lines, thirty_ceil, thirty_of
+from thirties_core.clock import agenda_lines, format_clock, slice_lines, thirty_of
 from thirties_core.models import DayPlan, EventSpan, SpanCategory, SpanStatus
 from thirties_core.shown_times import exact_ends, shown_end, start_exact
 
@@ -30,18 +30,18 @@ MISSED_HEADING = "Not marked yet:"
 # --- what's behind ---
 
 def missed_items(plan: DayPlan, now: datetime, skip: Optional[Callable[[EventSpan], bool]] = None) -> List[EventSpan]:
-    """Today's planned items whose time is over with nothing said, in order, once each (an earlier day's are that
-    day's: Before today sorts them).
+    """Today's activities and tasks that are not marked yet (not_marked.py: the Agenda's rule, planned ones past
+    their block and unknown ones alike), in order, once each (an earlier day's are that day's: Before today sorts
+    them).
 
     An item counts only once the block it ends in is over: what's in the block the user is still in isn't missed
     (10-26 09:15: the user was asked about items of the block still under way). The same title
     twice (a copy left by a move, a routine step planned twice) is listed once (10-29 18:00)."""
-    block = thirty_of(now)
+    from thirties_core.not_marked import unmarked_spans
     out: List[EventSpan] = []
     seen: dict = {}  # title -> the list items listed under it (two list lines with the same words are two items)
-    for s in sorted(plan.active_spans(), key=lambda s: (s.start_dt, s.end_dt)):
-        if s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.status != SpanStatus.PLANNED \
-                or s.tentative or thirty_ceil(s.end_dt) > block or s.start_dt < plan.day_start:  # today's only
+    for s in unmarked_spans(plan.active_spans(), thirty_of(now)):
+        if s.category not in (SpanCategory.ACTIVITY, SpanCategory.TASK) or s.start_dt < plan.day_start:  # today's
             continue
         if skip is not None and skip(s):
             continue
@@ -317,14 +317,19 @@ def now_section(tools) -> str:
     lines = ["NOW", status_line(labelled_plan(plan, tasks), now)]
     if missed:
         shown = MissedTracker(tools._state_db).titles_shown(now)
-        new = [span_label(s, tasks) for s in missed if s.title.strip().lower() not in shown and s.id in askable]
+        moot = [s for s in missed if s.status == SpanStatus.UNKNOWN and s.id in askable]  # gone moot (kinds.py)
+        new = [span_label(s, tasks) for s in missed
+               if s.title.strip().lower() not in shown and s.id in askable and s not in moot]
         muted = [span_label(s, tasks) for s in missed if s.id not in askable]
         lines.append("Not marked yet (their time is over, nothing said): "
                      + ", ".join(span_label(s, tasks) for s in missed) + ". "
                      + ("The user has already been shown all of these: don't ask about them again."
                         if not new else "Not shown to the user yet: " + ", ".join(new) + ".")
                      + (" Check-ins are muted for " + ", ".join(muted) + ": never ask about those, though a schedule "
-                        "still lists them." if muted else ""))
+                        "still lists them." if muted else "")
+                     + (" Not reported and gone by: " + ", ".join(span_label(s, tasks) for s in moot)
+                        + ": never ask about those; the list still shows them, and the user can still mark them."
+                        if moot else ""))
     return "\n".join(lines) + "\n\n"
 
 

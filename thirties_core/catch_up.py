@@ -61,8 +61,10 @@ def rolls(tools, span: EventSpan) -> bool:
 
 
 def behind(tools, missed: List[EventSpan]) -> List[EventSpan]:
-    """What the evening catch-up may carry: the unmarked items that roll (``rolls``), nothing else."""
-    return [s for s in missed if rolls(tools, s)]
+    """What the evening catch-up may carry: the unmarked items that roll (``rolls``), nothing else. One stored as
+    unknown isn't asked about (kinds.py: it went moot); the Not marked yet list still shows it."""
+    from thirties_core.models import SpanStatus
+    return [s for s in missed if s.status == SpanStatus.PLANNED and rolls(tools, s)]
 
 
 def due(tools, now: datetime, items: List[EventSpan]) -> bool:

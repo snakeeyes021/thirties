@@ -2064,6 +2064,7 @@ class PlanTools:
         from thirties_core.if_time import text_for as if_time_text
         from thirties_core.not_yours import text_for as not_yours_text
         behind = missed_for(self, now, muted_too=True) if plan.day_start <= now < plan.day_end else []
+        marked = [s for s in marked if s.id not in {b.id for b in behind}]  # unknown: not marked yet, never both
         from thirties_core.calendar_engine import unread_text
         unread = unread_text(plan.calendar_unread)
         done_line = ("\nMarked already (not still to do): " + "; ".join(

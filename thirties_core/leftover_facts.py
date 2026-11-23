@@ -38,13 +38,17 @@ def _record(assistant: Any) -> Dict[str, Any]:
 
 
 def span_of(plan: Any, item: Dict[str, Any]) -> Any:
-    """The item's planned row on ``plan`` (its first), or None."""
+    """The item's planned row on ``plan`` (its first), or None. One not marked yet (not_marked.py: stored as unknown
+    too) is still on the plan: the user can still mark it."""
     from thirties_core.models import SpanStatus
+    from thirties_core.not_marked import unmarked_spans
     if plan is None:
         return None
     title = str(item.get("title") or "").strip().lower()
     task_id = item.get("task_id") or ""
-    on = sorted((s for s in plan.active_spans() if s.status == SpanStatus.PLANNED and not s.is_envelope
+    rows = [s for s in plan.active_spans() if not s.is_envelope]
+    unmarked = {s.id for s in unmarked_spans(rows, None)}
+    on = sorted((s for s in rows if (s.status == SpanStatus.PLANNED or s.id in unmarked)
                  and ((task_id and s.task_id == task_id) or s.title.strip().lower() == title)),
                 key=lambda s: s.start_dt)
     return on[0] if on else None
