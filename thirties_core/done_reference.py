@@ -34,6 +34,10 @@ item that fits all the words, or says to ask.
 
 Anything else is refused with a note to ask which item they mean. The app's own controls (a tick in the Agenda)
 and the background (nobody talking) are never held here.
+
+A skip needs a basis too (skip_check): the item named, pointed back to, asked for in bulk, listed in the last
+reply the user answers without asking anything, or planned to start inside a stretch of the day the words give by
+two times. Whether the words mean a skip is the model's to read.
 """
 
 from __future__ import annotations
@@ -445,4 +449,29 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     return None, POINTER_RE.sub(title, message)
 
 
-__all__ = ["check", "pointed_back", "prior_exchange", "BULK_RE", "MOST_POINTED"]
+def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Optional[str]:
+    """Why a skip can't go ahead: like a done, it needs the user's words to name the item, point back to it or ask
+    for many at once, read as check reads them. Besides those, words that name it, words that answer a reply
+    listing it without asking anything ("too tired, skipping this morning" after a list), and a stretch of the day
+    the words give by two times that the item's planned start (``start``) lies in ("from 1:10 to 2:40 I was out"),
+    are enough: which of those items, whether the words mean a skip, and which copy of an item with several, are
+    the model's to read. None when it stands, and when nobody is talking."""
+    picks = getattr(pt, "picked_dones", None)
+    pt.picked_dones = None  # a skip is never a done for the reply to name
+    try:
+        held, _ = check(pt, title)
+    finally:
+        pt.picked_dones = picks
+    if held is None:
+        return None
+    message, titles = pt.user_message, _titles(pt)
+    if _named(message, title, titles) or ("?" not in message and title in pointed_back(pt, titles)):
+        return None
+    from thirties_core.move_scope import stretches  # the day's stretches, read as a request to clear one reads them
+    if start is not None and any(a <= start < b for a, b in stretches(message, pt.day_plan.day_start)):
+        return None
+    return (f"The user's words don't point to {title}, so it isn't marked skipped. If they meant to skip something, "
+            "ask which item.")
+
+
+__all__ = ["check", "pointed_back", "prior_exchange", "skip_check", "BULK_RE", "MOST_POINTED"]

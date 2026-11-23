@@ -130,20 +130,22 @@ def _clock(text: str, day_start: datetime) -> List[datetime]:
     return out
 
 
+def stretches(text: str, day_start: datetime) -> List[Tuple[datetime, datetime]]:
+    """The stretches of the plan's day a text names by two clock times ("from 1:40 to 3:10", "between 2 and 4")."""
+    out = []
+    for m in _WINDOW_RE.finditer(text or ""):
+        pairs = [(a, b) for a in _clock(m.group(1), day_start) for b in _clock(m.group(2), day_start)
+                 if timedelta(0) < b - a <= timedelta(hours=12)]
+        if pairs:
+            out.append(min(pairs, key=lambda p: (p[1] - p[0], p[0])))  # the shortest, then the first
+    return out
+
+
 def windows(pt: "PlanTools", message: str) -> List[Tuple[datetime, datetime]]:
     """The stretches of the day the user's words clear ("clear 1:40 to 3:10")."""
     day_start = pt.day_plan.day_start
-    out = []
-    for text in _texts(pt, message):
-        for sentence in _SENTENCE_RE.split(text):
-            if not _CLEAR_RE.search(sentence):
-                continue
-            for m in _WINDOW_RE.finditer(sentence):
-                pairs = [(a, b) for a in _clock(m.group(1), day_start) for b in _clock(m.group(2), day_start)
-                         if timedelta(0) < b - a <= timedelta(hours=12)]
-                if pairs:
-                    out.append(min(pairs, key=lambda p: (p[1] - p[0], p[0])))  # the shortest, then the first
-    return out
+    return [w for text in _texts(pt, message) for sentence in _SENTENCE_RE.split(text)
+            if _CLEAR_RE.search(sentence) for w in stretches(sentence, day_start)]
 
 
 def asked_to_clear(pt: "PlanTools") -> bool:

@@ -1439,6 +1439,14 @@ class AssistantTools(KindTools):
             if why:
                 raise ToolError(why)
             # --- end a question, parts, or no done said ---
+        # --- a skip only for what the user's words point to, as a done (done_reference.skip_check) ---
+        if st == SpanStatus.SKIPPED and (span is not None or task is not None):
+            from thirties_core.done_reference import skip_check
+            held = skip_check(self.pt, span.title if span is not None else task.title,
+                              None if span is None else span.planned_start or span.start_dt)
+            if held:
+                raise ToolError(held)
+        # --- end a skip ---
         if span is None and task is None and st == SpanStatus.DONE and not ITEM_ID.fullmatch(str(event).strip()):
             # --- a done that's an open item on the user's lists ticks that item, never a new one (done_on_lists.py) ---
             from thirties_core.done_on_lists import on_the_lists
