@@ -121,15 +121,19 @@ def project_of(assistant, span, notes: Optional[Dict[str, str]] = None) -> Optio
 # --- 4. sub-items first ---
 
 def piece_title(tasks: Iterable[Any], task) -> str:
-    """A piece by its item and its own words ("Paint the shed: Primer coat"); an item with no parent as itself."""
+    """A piece by its item and its own words ("Paint the shed: Primer coat"); an item with no parent, or under a
+    line that only says what to do with the lines under it ("Choose one of these:"), as itself."""
     if task is None:
         return ""
     parent = next((t for t in tasks if task.parent_task_id and t.id == task.parent_task_id), None)
+    from thirties_core.item_path import is_instruction
     from thirties_core.list_reading import name_of
     if parent is None:  # a parent that's no item (ticked): the line's own path still names it
         path = getattr(task, "path", None) or []
-        return f"{str(path[-1]).rstrip(':').strip()}: {task.title}" if path else task.title
-    return f"{name_of(parent).rstrip(':').strip()}: {task.title}"  # a label line's colon isn't doubled
+        up = str(path[-1]).rstrip(":").strip() if path else ""
+    else:
+        up = name_of(parent).rstrip(":").strip()  # a label line's colon isn't doubled
+    return f"{up}: {task.title}" if up and not is_instruction(up) else task.title
 
 
 def open_children(tasks: List[Any], task, done: Iterable[str] = ()) -> List[Any]:
