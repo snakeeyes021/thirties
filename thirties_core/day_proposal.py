@@ -72,7 +72,7 @@ from thirties_core.horizons import GUESSED_WHY  # how an option only a guess bro
 
 MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
-    "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (what's pressing first; not the whole "
+    "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (they come best first; not the whole "
     "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
     "on, one plain line each (time first, never '- ' bullets), and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
     "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
@@ -333,7 +333,7 @@ class DayProposal:
         cands, slots = self.candidates(plan), self.slots(plan, until)
         if not cands or not slots:
             return ""
-        lines = ["Pressing and possible (most pressing first):"]
+        lines = ["Options, best first (each with why it's here):"]
         said = energy.line(energy.today(self.a, plan))
         if said:
             lines.insert(0, said)
