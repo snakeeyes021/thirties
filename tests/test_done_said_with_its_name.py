@@ -6,6 +6,10 @@
 - **All right somewhere else.** "ok the list still shows it open. the shawl IS done": an "ok" or "fine" in another
   sentence doesn't make the done read as merely all right. Said of the item with no done anywhere, it still does,
   and so does a word for under way.
+- **A "don't tick it" about another item.** "the heddles are done (and I found the lost shuttle). the tea towel
+  weft is still going, don't tick it": the "it" is the weft its own sentence names, so the heddles are ticked and
+  the weft isn't. Said in a sentence naming no other item ("the heddles are done, but don't tick it yet"), it still
+  holds the tick.
 
 Through the real tool path on the mock Joplin API (no real calls). Fixtures are invented: a weaving studio's day.
 """
@@ -101,6 +105,30 @@ class TestAllRightSomewhereElse(StudioDay):
             with self.subTest(message=message):
                 out = self.say(message, SHAWL, SHOWN_ALL)
                 self.assertOpen(SHAWL, out)
+
+
+HEDDLES, TOWELS = "Restring the heddles", "Tea towel weft"
+
+
+class TestDontTickAnotherItem(StudioDay):
+
+    ITEMS = ((TOWELS, "9:20 AM", "40 min", "t_towels"), (HEDDLES, "10:10 AM", "30 min", "t_heddles"),
+             (BOBBINS, "11:40 AM", "20 min", "t_bobbins"))
+    NOW = "10:50"
+    SAID = ("the heddles are done (and I found the lost shuttle lol). the tea towel weft is still going, don't tick "
+            "it. off to the bobbins")
+    SHOWN = f"Now: {HEDDLES}\n\nNot marked yet:\n{TOWELS}"
+
+    def test_the_item_named_done_is_ticked(self):
+        self.assertTicked(HEDDLES, self.say(self.SAID, HEDDLES, self.SHOWN))
+
+    def test_the_item_the_pointer_is_about_stays_open(self):
+        self.assertOpen(TOWELS, self.say(self.SAID, TOWELS, self.SHOWN))
+
+    def test_dont_tick_it_in_the_items_own_sentence_still_holds(self):
+        out = self.say("the heddles are done, but don't tick it yet", HEDDLES, self.SHOWN)
+        self.assertIn("not to tick", out)
+        self.assertOpen(HEDDLES, out)
 
 
 if __name__ == "__main__":

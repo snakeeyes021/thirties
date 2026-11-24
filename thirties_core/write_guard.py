@@ -221,7 +221,8 @@ PUT_OFF_TICK_RE = re.compile(
 def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
     """Why the user's words say not to tick this item ("leave the bowls unticked", "don't tick it", "nowhere near
     done", "can we hold off on ticking it?"), said about it: in a clause naming it, in a clause pointing back with
-    "it" or "them" that names no other item, or, when no clause names it, in any clause naming no other item. A
+    "it" or "them" whose sentence names no other item (or names this one too), or, when no clause names it, in
+    any clause naming no other item. A
     question says nothing here unless it puts the tick off. "" when nothing says so."""
     if not message:
         return ""
@@ -239,10 +240,15 @@ def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
 
     if not any(says_not(c) for c in clauses):
         return ""
+    def names_another(text: str) -> bool:
+        return any(_about(text, o, [x for x in others if x != o] + [title]) for o in others)
+
     named = [c for c in clauses if _about(c, title, others)]
-    free = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)
-            and c not in named]
-    about = named + ([c for c in free if _POINTER_RE.search(c)] if named else free)
+    free = [c for c in clauses if not names_another(c) and c not in named]
+    # --- a pointer is about what its own sentence names: "the weft is still going, don't tick it" is the weft ---
+    pointing = [c for c in free if _POINTER_RE.search(c) and not any(
+        c.strip() in s and names_another(s) and not _about(s, title, others) for s in sentences)]
+    about = named + (pointing if named else free)
     if any(says_not(c) for c in about):
         return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
                 "say it is.")
