@@ -137,7 +137,7 @@ class TestBackground(unittest.TestCase):
         self.svc.starts(at("22:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 10:00 PM: Brush teeth")  # the first was done: new
 
-    def test_a_bell_carries_no_list_of_whats_behind_and_rings_once_for_a_run(self):
+    def test_a_bell_carries_no_list_of_whats_behind(self):
         for sid, title, start in (("k", "Rinse the brushes", "11:00"), ("c", "Label the glazes", "11:10")):
             self.sched.state_db.upsert_span(EventSpan(sid, title, at(start), at(start) + timedelta(minutes=15),
                                                       SpanCategory.ACTIVITY))
@@ -149,7 +149,7 @@ class TestBackground(unittest.TestCase):
         self.svc.starts(at("12:00"))
         self.assertEqual(self.desktop[-1], ("start", "🔔 12:00 PM: Walk to the river"))  # each item is asked about
         self.svc.starts(at("12:30"))  # once, in its check-in: never a growing list under every bell
-        self.assertEqual(len(self.desktop), 1)  # the handles follow straight on: the user is already in that stretch
+        self.assertEqual(self.desktop[-1], ("start", "🔔 12:30 PM: Glue the handles"))  # its own thirty: its own bell
         self.svc.starts(at("17:00"))
         self.assertEqual(self.desktop[-1][1].split("\n")[0], "🔔 5:00 PM: Taxes")
         self.assertNotIn("Not marked yet", self.desktop[-1][1])

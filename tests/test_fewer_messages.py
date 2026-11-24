@@ -1,8 +1,8 @@
 """How much Thirties says unasked in a day (fewer_messages.py, background.py).
 
 An invented person: a late shift at a pottery studio (11:00 AM - 6:00 PM), a canoe in the morning, test tiles in
-the evening (tests/message_day.py). One rule per test: a single bell per run of items; routine steps
-by themselves ring no bell; bells carry no unmarked list; one question per item; silence during a chat; the
+the evening (tests/message_day.py). One rule per test: a bell at every thirty where an item starts, routine
+steps too; bells carry no unmarked list; one question per item; a recent message doesn't swallow a bell; the
 switch turns bells off; identical words go out once a day."""
 
 import unittest
@@ -17,16 +17,20 @@ from thirties_core.models import EventSpan, SpanCategory
 
 class TheWholeDay(unittest.TestCase):
 
-    def test_heavy_is_a_handful_of_messages(self):
-        c = count(simulate("heavy"))
-        self.assertLessEqual(c["total"], 6, c)  # 14 before: a bell for nearly every block
-        self.assertLessEqual(c.get("block start", 0), 2, c)
+    def test_heavy_rings_once_for_each_thirty_where_something_starts(self):
+        sent = simulate("heavy")
+        bells = [text.split("\n")[0] for _, _, text in sent if text.startswith("🔔")]
+        self.assertEqual([b.split(": ")[0] for b in bells],  # one per thirty where something starts, in order
+                         ["🔔 8:00 AM", "🔔 8:30 AM", "🔔 9:00 AM", "🔔 10:30 AM", "🔔 6:30 PM", "🔔 7:00 PM",
+                          "🔔 8:00 PM", "🔔 8:30 PM", "🔔 10:00 PM"], bells)
+        c = count(sent)
         self.assertEqual(c["with an unmarked list"], 0, c)
         self.assertEqual(c["repeated"], 0, c)
 
     def test_medium_is_fewer_still(self):
         c = count(simulate("medium"))
-        self.assertLessEqual(c["total"], 4, c)  # 7 before: one item asked about three times
+        self.assertLessEqual(c["total"], 5, c)  # 7 before: one item asked about three times
+        self.assertEqual(c.get("stretch start"), 2, c)  # the morning one too, though the user wrote just before
         self.assertEqual(c["with an unmarked list"], 0, c)
 
     def test_each_item_is_asked_about_once(self):
@@ -76,15 +80,16 @@ class Case(unittest.TestCase):
 
 class BlockNotices(Case):
 
-    def test_one_bell_for_a_run_of_items(self):
+    def test_a_bell_at_each_thirty_of_a_run_of_items(self):
         self.run_from("18:25", "21:35", self.svc.starts)
-        bells = self.sent("start")
-        self.assertEqual(len(bells), 1, bells)  # not again at 7:00, 8:00 and 8:30
-        self.assertEqual(bells[0].split("\n\n")[0], "🔔 6:30 PM: Supper", bells)
+        bells = [b.split("\n\n")[0] for b in self.sent("start")]
+        self.assertEqual(bells, ["🔔 6:30 PM: Supper", "🔔 7:00 PM: Glaze test tiles", "🔔 8:00 PM: Oil the paddle",
+                                 "🔔 8:30 PM: Read about kilns"])
 
-    def test_a_run_of_routine_steps_gets_no_bell(self):
-        self.run_from("21:55", "22:35", self.svc.starts)
-        self.assertEqual(self.sent("start"), [])
+    def test_a_thirty_of_routine_steps_gets_a_bell_naming_them(self):
+        self.run_from("21:55", "22:05", self.svc.starts)
+        self.assertEqual([b.split("\n\n")[0] for b in self.sent("start")],
+                         ["🔔 10:00 PM: Set out tomorrow's apron, Write three lines in the logbook"])
 
     def test_no_list_of_whats_not_marked_under_a_bell(self):
         self.add("cl", "Wedge the reclaim clay", "10:00", "10:30")
@@ -95,12 +100,13 @@ class BlockNotices(Case):
         self.assertEqual(len(self.sent("start")), 2, self.out)
         self.assertFalse([b for b in self.sent("start") if MISSED_HEADING in b], self.out)
 
-    def test_no_bell_while_the_user_is_talking(self):
+    def test_a_bell_rings_soon_after_the_user_wrote(self):
         mark_up(self.svc.scheduler.state_db, at("18:20"))
         set_debug_time(at("18:30"))
         self.svc.starts(at("18:30"))
         self.svc.starts(at("19:00"))
-        self.assertEqual(self.sent("start"), [])
+        self.assertEqual([b.split("\n\n")[0] for b in self.sent("start")],
+                         ["🔔 6:30 PM: Supper", "🔔 7:00 PM: Glaze test tiles"])
 
     def test_a_reminder_on_an_item_still_rings(self):
         from thirties_core.memory import ReminderStore

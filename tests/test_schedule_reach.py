@@ -64,8 +64,8 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
     def test_not_repeated_every_half_hour_while_nothing_changed(self):
         self.add("bat", "Wipe the bats", "19:15", "19:30")
         self.svc.starts(at("17:00"))
-        self.svc.starts(at("18:00"))  # Dinner follows straight on: no bell of its own
-        self.assertEqual(len(self.desktop), 1, self.desktop)
+        self.svc.starts(at("18:00"))  # Dinner follows straight on: its bell, with nothing new to add under it
+        self.assertEqual(self.desktop[-1], ("start", f"🔔 {format_clock(at('18:00'))}: Dinner"), self.desktop)
         self.svc.starts(at("19:00"))  # an item after a gap rings again
         self.assertEqual(self.last("start").split("\n\n")[0], f"🔔 {format_clock(at('19:00'))}: Wipe the bats")
 

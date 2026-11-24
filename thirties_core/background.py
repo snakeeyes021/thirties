@@ -6,8 +6,8 @@ window closed. Every few seconds it:
 
 - asks about planned items that ended with no outcome (once each, unless muted),
 - delivers reminders the user asked for,
-- says when a run of planned items starts (once a run, never for routine steps alone, never mid-conversation,
-  and not at all with telegram.notify_block_transitions off: fewer_messages.py),
+- rings a bell at every thirty where a planned item starts, naming what starts in it (each item once, and only
+  once its bell went out; not at all with telegram.notify_block_transitions off: fewer_messages.py),
 - ends a start notice or a check-in with what's next, when that says something new (whats_next.SentSummaries),
 - asks about each item once, whichever question asks, never lists what's not marked yet under a notice, never
   sends the same words twice in a day, and after two check-ins with no reply sends no more until the user
@@ -58,6 +58,7 @@ from thirties_core.holds import PASSES as HOLD_PASSES  # noqa: E402 (what a hold
 YES_KINDS = ("rollover",)  # messages that ask for a yes: a 👍 reaction on Telegram answers them
 STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
+BELL_WAITING = "bell_waiting"  # the thirty whose start notice waits for the assistant's answer to finish
 CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
 REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
 PANEL_QUIET = 90  # seconds with no more ticks in the app's day panel before the phone is told (one message a burst)
@@ -558,14 +559,17 @@ class BackgroundService:
             key = a.isoformat()
             items = sorted((s for s in plan.active_spans() if self._unreported(s) and a <= s.start_dt < b),
                            key=lambda s: s.start_dt)
-            if a <= now < a + timedelta(minutes=5) and key not in started and items and not self._talking(now):
-                started[key] = now.date().isoformat()
-                self._remember("stretch_started", started, now)
+            if self._bell_open(a, now) and key not in started and items:
                 # only when start notices are on, and not for a stretch of routine steps alone (fewer_messages.py)
-                if block_notices_on(self.config) and not all(is_routine_step(s) for s in items) \
-                        and not self._turn_running():
-                    self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(self._name(s) for s in items) + ".",
-                              "start", now=now, expires=thirty_of(now) + timedelta(minutes=30))
+                say = block_notices_on(self.config) and not all(is_routine_step(s) for s in items)
+                if say and self._turn_running():  # the assistant is answering: it waits for the answer
+                    self.scheduler.state_db.set_sync_meta(BELL_WAITING, a.isoformat())
+                elif not (say and self._held(now, "start")):  # a quiet the user asked for: not told yet
+                    if say:
+                        self.send(f"🗓 Until {format_clock(b)}: " + ", then ".join(self._name(s) for s in items) + ".",
+                                  "start", now=now, expires=a + timedelta(minutes=30))
+                    started[key] = now.date().isoformat()  # told (or nothing to tell): once a stretch
+                    self._remember("stretch_started", started, now)
             open_items = [s for s in items if not mutes.is_muted(s.id, now) and not once.asked(s.id)]
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
@@ -692,16 +696,18 @@ class BackgroundService:
         from thirties_core.memory import ReminderStore
         if self._held(now, "reminder"):
             return  # kept: they go out once the hold ends
-        bells_held = self._held(now, "start")  # a quiet the user asked for: their reminder rings, its bell doesn't
         store = ReminderStore(self.scheduler.state_db)
+        announced = self._remembered("starts_announced")
         for rem in store.due(now):
-            store.set_state(rem.id, "sent")  # first, so a crash can't repeat it forever
             span = None
-            if rem.span_id:  # about a planned item: not if it's done, gone, or already announced by its start
+            if rem.span_id:
                 span = next((s for s in self.manager().day_plan.spans if s.id == rem.span_id), None)
-                from thirties_core.fewer_messages import block_notices_on  # at heavy its bell is its ping
-                if span is None or span.status != SpanStatus.PLANNED or (
-                        self.level() == "heavy" and block_notices_on(self.config) and not bells_held):
+                if span is not None and span.status == SpanStatus.PLANNED and span.id not in announced \
+                        and self._bell_to_come(span, now):
+                    continue  # at heavy its bell is its ping: left due until the bell has gone out
+            store.set_state(rem.id, "sent")  # first, so a crash can't repeat it forever
+            if rem.span_id:  # about a planned item: not if it's done, gone, or its bell already went out
+                if span is None or span.status != SpanStatus.PLANNED or span.id in announced:
                     continue
             if now - rem.due > timedelta(hours=12):
                 text = f"⏰ Reminder (from {rem.due.astimezone(now.tzinfo).strftime('%a')} " \
@@ -716,6 +722,28 @@ class BackgroundService:
                 text += "\n" + details
             self.send(text, "reminder", now=now, expires=now + REMINDER_STALE)
 
+    def _bell_open(self, block: datetime, now: datetime) -> bool:
+        """Whether a start notice for the thirty starting at ``block`` may still go out now: in its first five
+        minutes, or, once it waited for the assistant's answer to finish, until the thirty is over."""
+        if block <= now <= block + timedelta(minutes=5):
+            return True
+        return block <= now < block + timedelta(minutes=30) and \
+            self.scheduler.state_db.get_sync_meta(BELL_WAITING) == block.isoformat()
+
+    def _bell_to_come(self, span, now: datetime) -> bool:
+        """At heavy with start notices on: this item's bell is still to ring (its thirty is ahead, or it's now and
+        the bell can still go out)."""
+        from thirties_core.fewer_messages import block_notices_on
+        if self.level() != "heavy" or not block_notices_on(self.config) or self._held(now, "start") \
+                or span.tentative or not self._bell_kind(span):
+            return False
+        block, own = thirty_of(now), thirty_of(span.start_dt)
+        return own > block or (own == block and self._bell_open(block, now) and not self._quiet(now))
+
+    @staticmethod
+    def _bell_kind(span) -> bool:
+        return span.category in (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR, SpanCategory.SLEEP)
+
     def _details(self, title: str, task_id: str = "") -> str:
         """An item's description (what a reminder was given to say, or the user's note on it)."""
         try:
@@ -725,19 +753,23 @@ class BackgroundService:
             return ""
 
     def starts(self, now: datetime) -> None:
-        """Heavy: at the start of a thirty, one message for what's planned to start in it; each item is
-        announced at most once (moving it doesn't announce it again), and times are told in thirties.
+        """Heavy: a bell at every thirty where a planned item starts, naming what starts in it (routine steps
+        too); times are told in thirties. Each item is announced at most once (moving it doesn't announce it
+        again), and it counts as announced only once its bell has gone out: a bell held back leaves it untold.
 
-        One message for a run of back-to-back items, at its start, naming what follows in it: never one per block
-        for a stretch the user is already in. None for a run of routine steps alone, none while the user is in a
-        conversation with the assistant, and none when start notices are switched off (fewer_messages.py)."""
+        Held: while asleep or in a firm calendar event, during a quiet the user asked for, right after the morning
+        message (it just said what's on), and when start notices are switched off (fewer_messages.py). While the
+        assistant is answering, the bell waits and goes out once the answer is done, if its thirty isn't over."""
         from thirties_core.fewer_messages import block_notices_on
         if self.level() != "heavy" or self._quiet(now) or not block_notices_on(self.config):
             return
         plan = self.manager().day_plan
         block = thirty_of(now)
-        if now - block > timedelta(minutes=5):
-            return  # only right at the start of a thirty
+        db = self.scheduler.state_db
+        if not self._bell_open(block, now):
+            return  # right at the start of a thirty (or once the answer it waited for is done)
+        if self._held(now, "start"):
+            return  # a quiet the user asked for
         announced = self._remembered("starts_announced")
         by_id = {s.id: s for s in plan.spans}
 
@@ -756,26 +788,23 @@ class BackgroundService:
 
         starting = [s for s in plan.active_spans()
                     if thirty_of(s.start_dt) == block and not told_already(s) and not s.tentative
-                    and s.status == SpanStatus.PLANNED
-                    and s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR, SpanCategory.SLEEP)]
+                    and s.status == SpanStatus.PLANNED and self._bell_kind(s)]
         if not starting:
             return
-        for s in starting:
-            announced[s.id] = now.date().isoformat()
-            announced["title:" + s.title.strip().lower()] = f"{now.date().isoformat()}|" + " ".join(ids_titled(s) + [s.id])
-        self._remember("starts_announced", announced, now)
         try:  # the morning message just said what's on: no block notice on top of it (11-02 replay)
-            morning = self.scheduler.state_db.get_sync_meta("morning_sent_at")
+            morning = db.get_sync_meta("morning_sent_at")
             if morning and timedelta(0) <= now - datetime.fromisoformat(morning) < timedelta(minutes=10):
                 return
         except ValueError:
             pass
+        if self._turn_running():  # the assistant is answering: the bell waits for it
+            db.set_sync_meta(BELL_WAITING, block.isoformat())
+            return
         sleep = [s for s in starting if s.category == SpanCategory.SLEEP]
         rest = sorted((s for s in starting if s.category != SpanCategory.SLEEP), key=lambda s: s.start_dt)
-        from thirties_core.memory import ReminderStore
-        pinged = {r["span_id"] for r in ReminderStore(self.scheduler.state_db).all_records() if r.get("span_id")}
-        rest = self._worth_a_bell(plan, rest, pinged, block, now)
         if rest:
+            from thirties_core.memory import ReminderStore
+            pinged = {r["span_id"] for r in ReminderStore(db).all_records() if r.get("span_id")}
             fixed = self.manager().tools._is_fixed  # a fixed thing is told by its real time; the rest by block
             said = [f"{self._name(s)} at {format_clock(s.start_dt)}" if s.start_dt != block and fixed(s)
                     else self._name(s) for s in rest]
@@ -789,26 +818,12 @@ class BackgroundService:
         if sleep:
             self.send(f"🌙 Bedtime ({format_clock(block)}). Wind down and rest well!", "start", now=now,
                       expires=block + timedelta(minutes=30))
-
-    def _worth_a_bell(self, plan, starting, pinged: set, block: datetime, now: datetime) -> list:
-        """Which of the items starting in this thirty get a bell (what follows in their run is in the what's next
-        under it). Left out: an item in a run of back-to-back items that began in an earlier thirty (the user is
-        already in that stretch), a run of routine steps alone, and anything while the user is in a conversation
-        with the assistant. An item with a reminder on it always rings: the bell is its reminder."""
-        from thirties_core.fewer_messages import is_routine_step, runs_of
-        quiet_now = self._talking(now) or self._turn_running()
-        kinds = (SpanCategory.ACTIVITY, SpanCategory.TASK, SpanCategory.CALENDAR)
-        runs = runs_of(s for s in plan.active_spans() if not s.tentative and s.category in kinds
-                       and s.status != SpanStatus.SKIPPED)
-        run_of = {s.id: run for run in runs for s in run}
-        ids = {s.id for s in starting}
-        ring = []
-        for s in starting:
-            run = run_of.get(s.id, [s])
-            if s.id in pinged or not (quiet_now or thirty_of(run[0].start_dt) < block
-                                      or all(is_routine_step(x) for x in run)):
-                ring.append(s)
-        return ring
+        for s in starting:  # told: never announced again
+            announced[s.id] = now.date().isoformat()
+            announced["title:" + s.title.strip().lower()] = f"{now.date().isoformat()}|" + " ".join(ids_titled(s) + [s.id])
+        self._remember("starts_announced", announced, now)
+        if db.get_sync_meta(BELL_WAITING) == block.isoformat():
+            db.set_sync_meta(BELL_WAITING, "")
 
     def panel_ticks(self, now: datetime) -> None:
         """What was ticked done or skipped in the app's day panel reaches the phone, with what's next: one message

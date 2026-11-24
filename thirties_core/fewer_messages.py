@@ -5,8 +5,8 @@ when it tells the user something new, so:
 
 - an item's status is asked about once a day, whichever duty asks (a check-in, a stretch's question, the evening
   catch-up, the before-bed question): ``AskedOnce`` is the one record they all read and write;
-- a notice at the start of a block goes out once for a run of back-to-back items, never again for each block
-  inside it (the user is already in it), and never for a run made only of routine steps (the user knows them);
+- at heavy, a bell rings at every thirty where a planned item starts, naming what starts in it (routine steps
+  too); each item is announced once, and only once its bell has really gone out;
 - the telegram.notify_block_transitions switch turns those start notices off, and nothing else;
 - the same words never go out twice in a day (``Repeats``).
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable
 
 # What a repeat is checked for: the notices and questions Thirties sends by itself. Reminders the user set (one may
 # say the same words at two times), answers to the user's own messages and the end of a hold are never held back.
@@ -33,20 +33,6 @@ def block_notices_on(config) -> bool:
 def is_routine_step(span) -> bool:
     """A step of a routine, as Thirties placed it: the user does these every day and needs no buzz for them."""
     return getattr(span, "source", "") == "routine"
-
-
-def runs_of(spans) -> List[list]:
-    """The items cut into runs of back-to-back items (one starting by the time the one before ends), in order."""
-    runs: List[list] = []
-    end = None
-    for s in sorted(spans, key=lambda s: (s.start_dt, s.end_dt)):
-        if runs and s.start_dt <= end:
-            runs[-1].append(s)
-            end = max(end, s.end_dt)
-        else:
-            runs.append([s])
-            end = s.end_dt
-    return runs
 
 
 class AskedOnce:
@@ -96,4 +82,4 @@ class Repeats:
         self.db.set_sync_meta(SENT_KEY, json.dumps(sent))
 
 
-__all__ = ["AskedOnce", "Repeats", "UNASKED_KINDS", "block_notices_on", "is_routine_step", "runs_of"]
+__all__ = ["AskedOnce", "Repeats", "UNASKED_KINDS", "block_notices_on", "is_routine_step"]
