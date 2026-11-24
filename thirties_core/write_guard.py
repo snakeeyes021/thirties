@@ -368,9 +368,10 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     # --- end didn't happen ---
     for c in about:
         if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
-            # --- merely all right, with a done in the same sentence: the done wins ("it went fine, all wrapped") ---
-            if not _NOT_DONE_RE.search(c) and not _under_way_in(c, title) \
-                    and _done_beside(c, told_sentences, title, others):
+            # --- merely all right, with a done in the same sentence or one said of the item anywhere: the done wins
+            # ("it went fine, all wrapped", "ok the list has it open. the shawl IS done") ---
+            if not _NOT_DONE_RE.search(c) and not _under_way_in(c, title) and (
+                    _done_beside(c, told_sentences, title, others) or any(_done_in(d, title) for d in about)):
                 continue
             # --- end the done wins ---
             return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "

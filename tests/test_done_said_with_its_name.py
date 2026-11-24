@@ -3,6 +3,9 @@
 - **A pointer beside the name.** "the saltmarsh shawl is done, tick it" after a reply listing several items: the
   "it" is the shawl the message just named, not one of the items listed. Which of the items its words fit is the
   model's reading. A bare "tick it" after such a list, with no word of any item, is still refused.
+- **All right somewhere else.** "ok the list still shows it open. the shawl IS done": an "ok" or "fine" in another
+  sentence doesn't make the done read as merely all right. Said of the item with no done anywhere, it still does,
+  and so does a word for under way.
 
 Through the real tool path on the mock Joplin API (no real calls). Fixtures are invented: a weaving studio's day.
 """
@@ -84,6 +87,20 @@ class TestAPointerBesideTheName(StudioDay):
         out = self.say("tick it please", BOBBINS, SHOWN_ALL)
         self.assertIn("don't point to", out)
         self.assertOpen(BOBBINS, out)
+
+
+class TestAllRightSomewhereElse(StudioDay):
+
+    def test_an_ok_in_another_sentence_leaves_the_done_standing(self):
+        message = ("hi!! ok the list still has saltmarsh as not marked. "
+                   "saltmarsh shawl IS done (hemmed at 2:50), tick that please.")
+        self.assertTicked(SHAWL, self.say(message, SHAWL, SHOWN_ALL))
+
+    def test_merely_all_right_or_under_way_with_no_done_is_still_refused(self):
+        for message in ("ok the saltmarsh shawl is fine. the bobbins are done", "the saltmarsh shawl is going ok"):
+            with self.subTest(message=message):
+                out = self.say(message, SHAWL, SHOWN_ALL)
+                self.assertOpen(SHAWL, out)
 
 
 if __name__ == "__main__":
