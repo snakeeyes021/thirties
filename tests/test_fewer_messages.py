@@ -28,9 +28,12 @@ class TheWholeDay(unittest.TestCase):
         self.assertEqual(c["repeated"], 0, c)
 
     def test_medium_is_fewer_still(self):
-        c = count(simulate("medium"))
-        self.assertLessEqual(c["total"], 5, c)  # 7 before: one item asked about three times
+        sent = simulate("medium")
+        c = count(sent)
+        self.assertLessEqual(c["total"], 7, c)  # a start and a question per stretch with something in it, one before bed
         self.assertEqual(c.get("stretch start"), 2, c)  # the morning one too, though the user wrote just before
+        since = [t.split(":")[0] + ":" + t.split(":")[1] for _, _, t in sent if t.startswith("👋 Since")]
+        self.assertEqual(since, ["👋 Since 7:30 AM", "👋 Since 9:30 AM", "👋 Since 6:30 PM"], sent)  # though they wrote
         self.assertEqual(c["with an unmarked list"], 0, c)
 
     def test_each_item_is_asked_about_once(self):
@@ -41,7 +44,7 @@ class TheWholeDay(unittest.TestCase):
                     continue
                 for title in ("Pack a pear and cheese", "Supper", "Glaze test tiles", "Oil the paddle",
                               "Mist the ferns", "Set out tomorrow's apron"):
-                    if title in text:
+                    if title in text.replace(f"have you started {title} yet", ""):  # its own question
                         asked.setdefault(title, []).append(clock)
             self.assertTrue(asked, level)
             self.assertEqual({t: c for t, c in asked.items() if len(c) > 1}, {}, level)
@@ -152,14 +155,14 @@ class AskedOnce(Case):
 
 class CatchUpWaitsForTheRun(Case):
 
-    def test_the_catch_up_leaves_an_item_to_its_runs_question(self):
+    def test_the_catch_up_leaves_an_item_to_its_own_check_in(self):
         import json  # the morning's items were asked about at midday
         self.svc.scheduler.state_db.set_sync_meta("checkins_asked", json.dumps(
             {i: "2026-10-15" for i in ("r1", "r2", "r3", "r4", "cn", "sn")}))
         self.run_from("19:55", "21:45", lambda t: (self.svc.evening_catch_up(t), self.svc.check_ins(t)))
         glaze = [q for q in self.sent("checkin") if "Glaze test tiles" in q]
         self.assertEqual(len(glaze), 1, self.out)
-        self.assertIn("Supper", glaze[0])  # asked with the rest of its run
+        self.assertTrue(glaze[0].startswith("👋 Just checking in:"), glaze)  # its own, as it ended
 
 
 class NoRepeats(Case):

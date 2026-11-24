@@ -4,7 +4,8 @@ The desktop app runs this in-process and keeps running in the background (with
 the user's permission, through the Background portal), so it works with the
 window closed. Every few seconds it:
 
-- asks about planned items that ended with no outcome (once each, unless muted),
+- at heavy, asks about each planned item with no outcome as the thirty it ends in is over (once each, unless
+  muted, and counted as asked only once the question went out),
 - delivers reminders the user asked for,
 - rings a bell at every thirty where a planned item starts, naming what starts in it (each item once, and only
   once its bell went out; not at all with telegram.notify_block_transitions off: fewer_messages.py),
@@ -60,6 +61,7 @@ STRETCH_MAX = timedelta(hours=3)
 QUIET_AFTER_TALK = timedelta(minutes=30)
 BELL_WAITING = "bell_waiting"  # the thirty whose start notice waits for the assistant's answer to finish
 CHECKIN_WINDOW = timedelta(minutes=10)  # a check-in goes out within this of its time, or not at all (11-06)
+CHECKIN_WAITING = "checkin_waiting"  # when the check-in that waits for the assistant's answer was due
 REMINDER_STALE = timedelta(hours=2)  # a reminder Telegram couldn't take within this is dropped, not sent late
 PANEL_QUIET = 90  # seconds with no more ticks in the app's day panel before the phone is told (one message a burst)
 
@@ -92,7 +94,7 @@ def day_stretches(plan) -> List[tuple]:
 
 def back_to_back(spans) -> dict:
     """Each item's run of back-to-back items (one starting by the time the one before ends), as {id: the run's
-    end}. Status is asked about once, when the run is over, for everything in it: never a question per block."""
+    end}. The evening catch-up waits until an item's run is over."""
     out: dict = {}
     run: list = []
     end = None
@@ -490,13 +492,6 @@ class BackgroundService:
             return False
         return True
 
-    def _talked_since(self, since: datetime) -> bool:
-        raw = self.scheduler.state_db.get_sync_meta("last_user_message_at")
-        try:
-            return bool(raw) and datetime.fromisoformat(raw) >= since
-        except ValueError:
-            return False
-
     def _unreported(self, span) -> bool:
         return self._plannable(span) and span.status == SpanStatus.PLANNED and not span.tentative
 
@@ -574,12 +569,10 @@ class BackgroundService:
             ask_at = b + grace
             if any(q.start_dt <= ask_at < q.end_dt for q in quiet_spans) and b - timedelta(minutes=15) > a:
                 ask_at = b - timedelta(minutes=15)  # it ends at bedtime (or a long event): ask just before
-            if ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items and self._talked_since(a):
-                asked[key] = now.date().isoformat()  # they've been talking to the assistant: it knows; don't ask
-                self._remember("stretch_asked", asked, now)
-                continue
+            # what the user reported meanwhile has its outcome and isn't open; while the assistant is answering, or
+            # during a quiet the user asked for, the question waits (it isn't counted as asked until it goes out)
             if (ask_at <= now < ask_at + timedelta(hours=2) and key not in asked and open_items
-                    and not self._talking(now) and not self._checkins_paused() and not self._turn_running()):
+                    and not self._checkins_paused() and not self._turn_running() and not self._held(now, "checkin")):
                 asked[key] = now.date().isoformat()
                 self._remember("stretch_asked", asked, now)
                 once.mark((s.id for s in open_items), now)  # asked: no other duty asks about these again today
@@ -593,7 +586,8 @@ class BackgroundService:
     def wrap_up(self, now: datetime) -> None:
         """Medium: once a day, 45 minutes before bed, one question about whatever from today still isn't reported,
         so the record stays good without asking all day."""
-        if self.level() != "medium" or self._quiet(now) or self._talking(now) or self._checkins_paused():
+        if self.level() != "medium" or self._quiet(now) or self._checkins_paused() or self._turn_running() \
+                or self._held(now, "checkin"):  # waits for an answer under way, or a quiet the user asked for
             return
         plan = self.manager().day_plan
         bed = min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start),
@@ -629,10 +623,13 @@ class BackgroundService:
         return built is not None and thirty_of(span.start_dt) + timedelta(minutes=15) <= built
 
     def check_ins(self, now: datetime) -> None:
-        """Heavy: once a stretch of back-to-back items is over (plus the grace period), ask in one message about
-        the items in it that have no outcome (back_to_back: never a question per block per item): never twice about an item, never about one already reported or muted. Each goes out at
-        its own time or not at all (CHECKIN_WINDOW): talking to the assistant then means it isn't needed, and a
-        late day build never pushes check-ins later or sends one for a block that was half over by then."""
+        """Heavy: once the thirty an item ends in is over (plus the grace period), ask about it, in one message
+        with any other item that ended in that thirty: never twice about an item, never about one already reported
+        or muted. Each goes out at its own time (CHECKIN_WINDOW) or not at all, and a late day build never pushes
+        check-ins later or sends one for a block that was half over by then. While the assistant is answering, the
+        check-in waits and goes out once the answer is done, within the half hour after its time. One held back
+        (asleep, a firm event, a quiet the user asked for) is never counted as asked: the evening catch-up
+        (catch_up.py) carries what was really missed."""
         cfg = self.config.assistant
         if self.level() != "heavy" or self._quiet(now) or self._checkins_paused():
             return
@@ -647,20 +644,20 @@ class BackgroundService:
         def thirty_end(span):  # an item is over when the thirty it ends in is over
             end = thirty_of(span.end_dt - timedelta(seconds=1)) + timedelta(minutes=30)
             return max(end, span.end_dt)
-        runs = back_to_back(s for s in plan.active_spans() if self._plannable(s) and not s.tentative)
+        db = self.scheduler.state_db
+        waited = db.get_sync_meta(CHECKIN_WAITING) or ""
 
-        def over(span):  # the run of back-to-back items it's in is over: one batched question, never per block
-            return max(thirty_end(span), runs.get(span.id, span.end_dt))
+        def on_time(span):  # at its own time, or, once it waited for an answer to finish, within the half hour
+            due_at = thirty_end(span) + grace
+            return now < due_at + CHECKIN_WINDOW or (waited == due_at.isoformat() and now < due_at + timedelta(minutes=30))
         due = [s for s in plan.active_spans()
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
-               and over(s) + grace <= now < over(s) + timedelta(hours=2) and not mutes.is_muted(s.id, now)]
-        late = [s for s in due if now >= over(s) + grace + CHECKIN_WINDOW or self._built_late(s, plan)]
-        if late:  # its moment passed (the user was talking then), or the day was built too late for it: never sent
-            for s in late:
-                asked[s.id] = now.date().isoformat()
-            self._remember("checkins_asked", asked, now)
-            due = [s for s in due if s not in late]
-        if not due or self._talking(now) or self._turn_running():  # mid-conversation: it knows already
+               and thirty_end(s) + grace <= now and on_time(s) and not mutes.is_muted(s.id, now)
+               and not self._built_late(s, plan)]
+        if not due or self._held(now, "checkin"):  # a quiet the user asked for: not asked
+            return
+        if self._turn_running():  # the assistant is answering: the check-in waits for it
+            db.set_sync_meta(CHECKIN_WAITING, (min(thirty_end(s) for s in due) + grace).isoformat())
             return
         for s in due:
             asked[s.id] = now.date().isoformat()
@@ -682,6 +679,8 @@ class BackgroundService:
         self._asked(now, titles)
         self.send(self._with_next(question, now, with_now=not current, asked=titles), "checkin", emphasis=bold, now=now,
                   expires=now + timedelta(minutes=30))
+        if waited:
+            db.set_sync_meta(CHECKIN_WAITING, "")
 
     def _on_now(self, plan, now: datetime, skip: set) -> str:
         """What's planned to be under way now (started in this thirty or before, not over): the next thing a
@@ -1092,7 +1091,8 @@ class BackgroundService:
         """B6: once a day each, "when did you wake up / start work?" and "done with work?" (day_times.due_question),
         unless the answer is already on the record."""
         from thirties_core.day_times import ASK_AT_LEVELS, due_question
-        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now) or self._checkins_paused():
+        if self.level() not in ASK_AT_LEVELS or self._quiet(now) or self._talking(now) or self._checkins_paused() \
+                or self._held(now, "checkin"):  # held back: not asked yet
             return
         plan = self.manager().day_plan
         history = self.scheduler.state_db.get_spans_between(plan.day_start - timedelta(hours=18), plan.day_start)

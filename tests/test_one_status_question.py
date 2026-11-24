@@ -1,5 +1,5 @@
-"""Ask about status once, batched: a run of back-to-back items gets one question when it's over, never one per
-block per item; work's start and end are asked together, once, at work's end.
+"""Status is asked about once: one question at the end of work covers both of work's times, and the evening
+catch-up holds off until every item in a back-to-back run has ended.
 
 Invented items for someone who throws pots on a late shift and paddles a canoe; DAY is Thu Oct 15 (Work 8:30 AM -
 4 PM)."""
@@ -12,29 +12,7 @@ from thirties_core.background import back_to_back
 from thirties_core.models import EventSpan, SpanCategory
 
 
-class TestOneQuestionPerRun(ServiceCase):
-
-    def setUp(self):
-        super().setUp()
-        self.sched.config.assistant.message_level = "heavy"
-        for sid, title, start, end in (("trim", "Trim the mugs", "16:00", "16:30"),
-                                       ("wedge", "Wedge the clay", "16:30", "17:00")):
-            self.add(sid, title, start, end)
-
-    def checkins(self):
-        return [b for k, b in self.desktop if k == "checkin"]
-
-    def test_no_question_per_block(self):
-        for t in ("16:45", "17:15", "17:45", "18:15", "18:45"):
-            self.svc.check_ins(at(t))
-        self.assertEqual(self.checkins(), [])  # the run (4:00 to 7:00) isn't over yet
-        self.svc.check_ins(at("19:15"))
-        self.svc.check_ins(at("19:20"))
-        self.assertEqual(len(self.checkins()), 1, self.checkins())
-        q = self.checkins()[0]
-        for title in ("Trim the mugs", "Wedge the clay", "Sort the receipts", "Dinner"):
-            self.assertIn(title, q)
-        self.assertNotIn("still on", q)  # one batched question, not a single-item ask
+class TestRuns(ServiceCase):
 
     def test_runs(self):
         spans = [EventSpan("a", "A", at("10:00"), at("10:30"), SpanCategory.ACTIVITY),

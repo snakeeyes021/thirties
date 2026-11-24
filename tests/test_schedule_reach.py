@@ -95,9 +95,10 @@ class TestTheBellCarriesWhatsNext(ServiceCase):
         self.assertEqual(self.last("start"), "🔔 5:00 PM: Sort the receipts")
 
     def test_the_check_in_ends_with_whats_next_without_asking_twice(self):
-        self.svc.check_ins(at("19:15"))
+        self.svc.check_ins(at("18:15"))
         text = self.last("checkin")
-        self.assertTrue(text.startswith("👋 How did it go? Did you get to Sort the receipts and Dinner?\n\n"), text)
+        self.assertTrue(text.startswith("👋 Just checking in: have you started Dinner yet, or are you still on Sort "
+                                        "the receipts?\n\nThe rest of today:\n"), text)  # it names what's on now: no "Now" line
         self.assertNotIn("Not marked yet", text)  # what it asks about isn't listed under it again
         self.assertIn("8:00 PM – Film night", lines(text))
 

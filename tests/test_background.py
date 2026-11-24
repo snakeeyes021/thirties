@@ -279,10 +279,12 @@ class TestMessageLevels(unittest.TestCase):
         checkins = [b for k, b in self.sent if k == "checkin"]
         self.assertTrue(any("Reading" in b for b in checkins), self.sent)
 
-    def test_no_stretch_check_in_after_talking_with_the_assistant(self):
+    def test_the_stretch_check_in_still_asks_after_talking_with_the_assistant(self):
         self.sched.state_db.set_sync_meta("last_user_message_at", at("17:15").isoformat())  # mid-stretch
         self.run_day("15:55", "20:30")
-        self.assertEqual([k for k, _ in self.sent if k == "checkin"], [])
+        checkins = [b for k, b in self.sent if k == "checkin"]  # what they reported has its outcome; the rest
+        self.assertEqual(len(checkins), 1, self.sent)            # is still asked about, once
+        self.assertTrue(all(title in checkins[0] for title in ("Shower", "Food")), checkins)
 
     def test_one_wrap_up_before_bed_for_what_isnt_reported(self):
         self.run_day("21:30", "23:30")
@@ -294,14 +296,13 @@ class TestMessageLevels(unittest.TestCase):
         self.run_day("14:45", "20:30")
         self.assertEqual(self.sent, [])
 
-    def test_no_check_in_while_the_user_is_talking_or_in_an_event(self):
+    def test_a_check_in_at_its_own_time_even_just_after_talking_and_none_in_an_event(self):
         self.sched.config.assistant.message_level = "heavy"
-        self.sched.state_db.set_sync_meta("last_user_message_at", at("17:30").isoformat())
-        self.svc.check_ins(at("17:45"))  # Shower's thirty ended at 5:00: but the user just wrote
+        self.svc.check_ins(at("17:45"))  # Shower's thirty ended at 5:00: its moment (5:10) has passed
         self.assertEqual(self.sent, [])
-        self.svc.check_ins(at("18:12"))  # the earlier item runs straight into the next (until 6): one question at 6:10
-        self.assertEqual([(k, "Food" in t, "Shower" in t) for k, t in self.sent], [("checkin", True, True)])  # the
-        # run of back-to-back items is asked about once, when it's over: never per block
+        self.sched.state_db.set_sync_meta("last_user_message_at", at("17:55").isoformat())
+        self.svc.check_ins(at("18:12"))  # Food's (until 6) is due at 6:10, its own time, though the user just wrote
+        self.assertEqual([(k, "Food" in t, "Shower" in t) for k, t in self.sent], [("checkin", True, False)])
         self.sched.state_db.upsert_span(EventSpan("x", "Errand", at("15:00"), at("15:20"), SpanCategory.ACTIVITY))
         before = len(self.sent)
         self.svc.starts(at("15:00"))  # during the dentist: quiet
@@ -346,9 +347,9 @@ class TestCheckInsAtTheirOwnTime(unittest.TestCase):
         sent = self.run_morning("09:02", "09:02")
         self.assertEqual([when for when, _ in sent], ["09:40", "10:10"])
 
-    def test_talking_at_its_time_means_it_isnt_sent_later(self):
-        sent = self.run_morning("09:02", "09:35")  # still talking at 9:40: the 9:00 block's moment passes
-        self.assertEqual([when for when, _ in sent], ["10:10"])
+    def test_talking_at_its_time_doesnt_swallow_it(self):
+        sent = self.run_morning("09:02", "09:35")  # the user wrote at 9:35: the 9:00 block's still asked at 9:40
+        self.assertEqual([when for when, _ in sent], ["09:40", "10:10"])
 
 
 class TestTurnsInTheBackground(unittest.TestCase):
