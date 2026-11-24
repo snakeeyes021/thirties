@@ -1349,8 +1349,9 @@ class AssistantTools(KindTools):
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
                     estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False, **_: Any) -> str:
-        """An item's outcome, as said. A done whose words may also name something else, or also say it's under way
-        or fine, carries a line saying so (done_reference.also_said_note, write_guard.going_note)."""
+        """An item's outcome, as said. A done whose words may also name something else, also say it's under way or
+        fine, or ask not to tick something they don't name, carries a line saying so (done_reference.also_said_note,
+        write_guard.going_note, write_guard.told_not_note)."""
         self._also_said = ""
         out = self._log_outcome(event, status, started, finished, duration, estimated, note, finished_for_good, new)
         said, self._also_said = self._also_said, ""
@@ -1450,8 +1451,9 @@ class AssistantTools(KindTools):
             going = state_not_done(words, name, others)
             if going:
                 raise ToolError(going)
-            from thirties_core.write_guard import going_note
-            self._also_said = " ".join(n for n in (self._also_said, going_note(words, name, others)) if n)
+            from thirties_core.write_guard import going_note, told_not_note
+            self._also_said = " ".join(n for n in (self._also_said, going_note(words, name, others),
+                                                   told_not_note(words, name, others)) if n)
             # --- end going or fine ---
             # --- a question, a pointer at an item's parts, or no done said: no done (said_for_it.py) ---
             from thirties_core.said_for_it import held_done

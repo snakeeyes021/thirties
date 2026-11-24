@@ -198,6 +198,12 @@ def _fits_level(clause: str, title: str, others: list) -> bool:
 # --- told not to tick it: no done, whatever done word is near the item's name ---
 # Asked to leave it unticked or open, not to tick or mark it, to wait with the tick, or to untick it; or told it's far
 # from done. The app's own status described in a complaint (still not ticked, though it happened) is no such thing.
+# told it's far from done, or plainly not done: "nowhere near done", "isn't done"
+_NOT_DONE_SAID = (
+    r"\b(?:nowhere near|far from|anything but|not quite|not even close to|not close to|not yet)\s+(?:being\s+)?"
+    r"(?:done|finished|complete|completed|ready|over)\b|"
+    r"\b(?:isn'?t|is not|aren'?t|are not|wasn'?t|was not|weren'?t|were not|hasn'?t been|haven'?t been|not)\s+"
+    r"(?:yet\s+|really\s+|actually\s+|even\s+)?(?:done|finished|complete|completed|over)\b")
 NEGATED_DONE_RE = re.compile(
     r"\b(?:leave|keep|let)\b[^.!?\n]{0,40}?\b(?:un(?:ticked|checked|marked|done|finished)|"
     r"not (?:yet )?(?:ticked|checked|marked|done|finished)|open|as (?:it is|is)|alone|for (?:now|later))\b|"
@@ -205,12 +211,8 @@ NEGATED_DONE_RE = re.compile(
     r"\bun(?:tick|check|mark)(?:s|ing)?\b|"
     r"\b(?:don'?t|dont|do not|never|no need to|not to|hold off(?: on)?|wait (?:on|before|to))\s+"
     r"(?!forget\b|hesitate\b)(?:\w+\s+){0,2}?(?:tick|mark|check|cross)(?:ing)?\b|"
-    r"\bno (?:tick|check ?mark)\b|"
-    r"\b(?:nowhere near|far from|anything but|not quite|not even close to|not close to|not yet)\s+(?:being\s+)?"
-    r"(?:done|finished|complete|completed|ready|over)\b|"
-    # a plain "isn't done" / "not finished": said of the item, never a done for it
-    r"\b(?:isn'?t|is not|aren'?t|are not|wasn'?t|was not|weren'?t|were not|hasn'?t been|haven'?t been|not)\s+"
-    r"(?:yet\s+|really\s+|actually\s+|even\s+)?(?:done|finished|complete|completed|over)\b", re.IGNORECASE)
+    r"\bno (?:tick|check ?mark)\b|" + _NOT_DONE_SAID, re.IGNORECASE)
+_NOT_DONE_SAID_RE = re.compile(_NOT_DONE_SAID, re.IGNORECASE)
 _POINTER_RE = re.compile(r"\b(?:it|them|that|this|those|these|both|they|theyre|they'?re)\b", re.IGNORECASE)
 # a tick put off, as it's asked in a question or said outright: "could we skip ticking the bins?", "can we not mark it
 # yet?", "shall we wait before marking it off?". "Why not tick it?" puts the tick forward.
@@ -221,13 +223,40 @@ PUT_OFF_TICK_RE = re.compile(
 
 
 def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
-    """Why the user's words say not to tick this item ("leave the bowls unticked", "don't tick it", "nowhere near
-    done", "can we hold off on ticking it?"), said about it: in a clause naming it, in a clause pointing back with
-    "it" or "them" whose sentence names no other item (or names this one too), or, when no clause names it, in
-    any clause naming no other item. A
-    question says nothing here unless it puts the tick off. "" when nothing says so."""
-    if not message:
+    """Why the user's words say not to tick this item, naming it ("leave the bowls unticked", "can we hold off on
+    ticking the bowls?"), or say it's far from done ("nowhere near done"): in a clause naming it, in a clause
+    pointing back with "it" or "them" whose sentence names no other item (or names this one too), or, when no
+    clause names it, in any clause naming no other item. A question says nothing here unless it puts the tick off.
+    Asked not to tick "it", with no name, beside a done ("Tapers: dipped. No tick on that one till they harden."),
+    which item they mean is the model's reading (``told_not_note``); with nothing said done ("leave it unticked"), it
+    stops the done. "" when nothing says so."""
+    stop, _ = _told_not(message, title, others)
+    if stop:
+        return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
+                "say it is.")
+    return ""
+
+
+def told_not_note(message: Optional[str], title: str, others=()) -> str:
+    """One plain line for the model when a done goes through though the words ask not to tick "it" without naming
+    it ("Tapers: dipped. No tick on that one till they harden."): the items it may mean, so the model can check
+    which. ""
+    when there's nothing to say, or when a hard stop holds the done (``told_not_to_tick``)."""
+    stop, unnamed = _told_not(message, title, others)
+    if stop or not unnamed:
         return ""
+    items = [title] + [o for o in others if o and o != title]
+    meant = [t for t in items if _about(message, t, [x for x in items if x != t])] or [title]
+    said = ", ".join(f'"{c.strip()}"' for c in unnamed)
+    return (f"(The user's message also asks not to tick something it doesn't name ({said}): it may mean "
+            f"{', '.join(meant)}. If it means {title}, correct it, or ask which.)")
+
+
+def _told_not(message: Optional[str], title: str, others=()) -> tuple:
+    """(whether the words say not to tick this item, naming it, or say it's far from done; the clauses asking not
+    to tick something they don't name)."""
+    if not message:
+        return False, []
     from thirties_core.started import _SENTENCE_RE, _asks
     others = [o for o in others if o and o != title]
     sentences = _SENTENCE_RE.findall(message)
@@ -241,7 +270,8 @@ def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
         return bool(PUT_OFF_TICK_RE.search(c)) if c in put_off else bool(NEGATED_DONE_RE.search(c))
 
     if not any(says_not(c) for c in clauses):
-        return ""
+        return False, []
+
     def names_another(text: str) -> bool:
         return any(_about(text, o, [x for x in others if x != o] + [title]) for o in others)
 
@@ -250,11 +280,14 @@ def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
     # --- a pointer is about what its own sentence names: "the weft is still going, don't tick it" is the weft ---
     pointing = [c for c in free if _POINTER_RE.search(c) and not any(
         c.strip() in s and names_another(s) and not _about(s, title, others) for s in sentences)]
-    about = named + (pointing if named else free)
-    if any(says_not(c) for c in about):
-        return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
-                "say it is.")
-    return ""
+    unnamed = [c for c in (pointing if named else free) if says_not(c)]
+    if any(says_not(c) for c in named) or any(c not in put_off and _NOT_DONE_SAID_RE.search(c) for c in unnamed):
+        return True, []
+    # --- a pointer's tick held off, with no done in any other clause: no basis for one ---
+    from thirties_core.plain_done import says_it_happened
+    if unnamed and not (says_it_happened(" ; ".join(c for c in clauses if not says_not(c))) or YES_RE.match(message)):
+        return True, []
+    return False, unnamed
 # --- end told not to tick it ---
 
 
@@ -520,4 +553,4 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
 
 
 __all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "PUT_OFF_TICK_RE", "REPORTED_RE", "STATE_RE", "asks_to_drop", "says_done",
-           "going_note", "state_not_done", "told_not_to_tick", "refused"]
+           "going_note", "state_not_done", "told_not_note", "told_not_to_tick", "refused"]

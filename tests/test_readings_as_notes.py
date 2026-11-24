@@ -9,6 +9,10 @@ Words that fit another item better ("the tallow got strained" for Dip the tallow
 into the moulds) are the model's to read too: the done goes on, and its result names that item. It stops when the
 words name the other item outright (all its words), or say nothing of this one. Which clauses carry the done is
 read generously: every clause with a done word or a past in it ("got to finish the tallow").
+
+Asked not to tick "it" beside a done ("Tapers: dipped. No tick on that one till they harden."), which item "it" means
+is the model's reading too: the done goes on, and its result names the items it may mean. Asked not to tick an item
+by its name, or with nothing said done at all, the done stops.
 Invented fixtures: a candle maker who also lays rope.
 """
 
@@ -182,6 +186,44 @@ class TestEveryClauseWithADoneWordCounts(NotesBase):
 
     def test_a_clause_with_no_done_word_is_still_no_basis(self):
         self.assert_held(TAPERS, self.say("the tallow can wait, the hawser got coiled", TAPERS))
+
+
+
+class TestDontTickAnUnnamedItIsANote(NotesBase):
+    """Python chose the item behind an unnamed "it" in a tick held off, and kept that done from going through."""
+
+    def test_the_done_stands_and_the_note_names_the_items_it_may_mean(self):
+        out = self.say("Tapers: dipped. No tick on that one till they harden.", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertIn("asks not to tick something it doesn't name", out)
+        self.assertIn(f"may mean {TAPERS}", out)
+
+    def test_every_item_named_is_a_candidate(self):
+        out = self.say("beeswax pillars poured and the tapers dipped, don't tick it though", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertIn(TAPERS, out.split("may mean", 1)[1])
+        self.assertIn(PILLARS, out.split("may mean", 1)[1])
+
+    def test_the_joplin_tick_follows(self):
+        from thirties_core.write_guard import refused
+        words = "Tapers: dipped. No tick on that one till they harden."
+        self.assertEqual(refused({"op": "complete", "title": TAPERS}, f"[app] {words}", _Kept(PILLARS)), "")
+
+
+class TestDontTickNamingItStillStops(NotesBase):
+    def test_the_item_named(self):
+        out = self.say("Hold off on ticking the tallow tapers, they're dipped but soft.", TAPERS)
+        self.assert_held(TAPERS, out)
+        self.assertIn("not to tick", out)
+
+    def test_the_joplin_tick_follows(self):
+        from thirties_core.write_guard import refused
+        words = "Hold off on ticking the tallow tapers, they're dipped but soft."
+        self.assertNotEqual(refused({"op": "complete", "title": TAPERS}, f"[app] {words}", None), "")
+
+    def test_an_unnamed_it_with_nothing_said_done(self):
+        shown = f"Are the tallow tapers dipped? {TAPERS} was at 1:10."
+        self.assert_held(TAPERS, self.say("leave it open for now", TAPERS, shown))
 
 
 if __name__ == "__main__":

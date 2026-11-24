@@ -133,10 +133,11 @@ class TestDontTickAnotherItem(StudioDay):
     def test_the_item_the_pointer_is_about_stays_open(self):
         self.assertOpen(TOWELS, self.say(self.SAID, TOWELS, self.SHOWN))
 
-    def test_dont_tick_it_in_the_items_own_sentence_still_holds(self):
+    def test_dont_tick_it_in_the_items_own_sentence_is_the_models_to_read(self):
         out = self.say("the heddles are done, but don't tick it yet", HEDDLES, self.SHOWN)
-        self.assertIn("not to tick", out)
-        self.assertOpen(HEDDLES, out)
+        self.assertTicked(HEDDLES, out)
+        self.assertIn("asks not to tick something it doesn't name", out)
+        self.assertIn(f"may mean {HEDDLES}", out)
 
 
 TREADLE, LATE_TREADLE, SWATCH, OILING_LOG = ("Morning treadle oiling", "Evening treadle check", "Selvedge swatch",
