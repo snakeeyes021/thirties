@@ -717,8 +717,8 @@ class HorizonPlanner:
     def _horizon_maps(self):
         return self.catalog.items(), self.catalog.notes(), _urgencies(self.db)
 
-    def horizon_of(self, t: TaskItem, maps=None) -> str:
-        return self.catalog.effective(t, self.today(), self.week_start, *(maps or self._horizon_maps()))
+    def horizon_of(self, t: TaskItem, maps=None, today: Optional[date] = None) -> str:
+        return self.catalog.effective(t, today or self.today(), self.week_start, *(maps or self._horizon_maps()))
 
     def _done_since(self, since: date) -> set:
         return self.db.completed_since(since)
@@ -779,12 +779,16 @@ class HorizonPlanner:
     def months_of(self, t: TaskItem) -> set:
         """The months an item is in season (seasons.py): what the user said, or its own text's mark; empty for
         all year."""
-        from thirties_core.item_facts import LastingFacts
+        from thirties_core.item_facts import LastingFacts, item_name
         from thirties_core.seasons import from_text, marked
         if not hasattr(self, "_months"):
             self._months: Dict[str, set] = {}
+            # every stored fact, in one query rather than one query per item
+            self._lasting = {f.name: f for f in LastingFacts(self.db).all()}
         if t.id not in self._months:
-            said = from_text(LastingFacts(self.db).for_item(t.title).months)
+            name = item_name(t.title)
+            own = self._lasting.get(name) if name else None
+            said = from_text(own.months if own is not None else "")
             self._months[t.id] = said or marked(t.title, float(self.pt.scheduler.config.general.latitude))
         return self._months[t.id]
 
@@ -1022,7 +1026,7 @@ class HorizonPlanner:
             if c is not None and _SOURCE_SCORE[c.source] >= _SOURCE_SCORE[source]:
                 return
             out[t.id] = Candidate(t.id, t.title, t.parent_note_title or "", source, why,
-                                  self.horizon_of(t, maps), t.due or "", t.deferred_count, 0, slot,
+                                  self.horizon_of(t, maps, today), t.due or "", t.deferred_count, 0, slot,
                                   sessions=share[0] if share else 0, minutes=share[1] if share else 0, task=t)
 
         from thirties_core.budgets import (DEFAULT_SESSION_MINUTES, budget_of, budget_period, session_days,
@@ -1125,7 +1129,7 @@ class HorizonPlanner:
         for t in tasks.values():
             if t.id in placed_elsewhere or not self._plannable(t):
                 continue
-            h = self.horizon_of(t, maps)
+            h = self.horizon_of(t, maps, today)
             if p.level == "day" and (finer(h, here) or h == above) and self.catalog.guessed(t, *maps):
                 add(t, "guessed", GUESSED_WHY)  # only a guess: an option for the week, never pressing today
                 continue
@@ -1140,7 +1144,7 @@ class HorizonPlanner:
             import hashlib
             from thirties_core.list_reading import offerable
             someday = [t for t in tasks.values() if t.id not in placed_elsewhere and not t.id.startswith("media:")
-                       and (t.someday or self.horizon_of(t, maps) == "someday") and t.list_role != "reference"
+                       and (t.someday or self.horizon_of(t, maps, today) == "someday") and t.list_role != "reference"
                        and offerable(t)]
             someday.sort(key=lambda t: hashlib.sha1(f"{p.key}|{t.id}".encode()).hexdigest())
             for t in someday[:SOMEDAY_PER_PERIOD]:
@@ -1345,10 +1349,10 @@ class HorizonPlanner:
         """What a change that matters to the longer plans changes: the open items (their deadlines, horizons and
         someday marks), the plans' rows, and what's been done this year."""
         import hashlib
-        maps = self._horizon_maps()
-        items = sorted((t.id, t.due or "", self.horizon_of(t, maps), int(t.someday)) for t in self.tasks)
+        maps, today = self._horizon_maps(), self.today()
+        items = sorted((t.id, t.due or "", self.horizon_of(t, maps, today), int(t.someday)) for t in self.tasks)
         rows = sorted((r["id"], r.get("sessions") or "", r["slot"]) for r in self.plans.rows())
-        done = sorted(self._done_since(period_of("year", self.today(), self.week_start).start))
+        done = sorted(self._done_since(period_of("year", today, self.week_start).start))
         return hashlib.sha1(json.dumps([items, rows, done]).encode()).hexdigest()
 
     def review(self) -> List[str]:

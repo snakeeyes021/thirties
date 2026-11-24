@@ -440,6 +440,44 @@ class TestPullingForward(PlannerCase):
         self.assertEqual(calls, ["month", "quarter"])
 
 
+class TestReviewCost(PlannerCase):
+    """The background reviews the longer plans every few seconds: its work must not grow with the lists."""
+
+    def work(self, n):
+        from unittest import mock
+        from thirties_core import astronomy, plan_tools
+        from thirties_core.scheduler import StateDatabase
+        self.tasks = [item(f"s{i}", f"Sample item {i}") for i in range(n)]
+        self.build()
+        reads, suns = [], []
+        real_conn, real_sun = StateDatabase._get_connection, astronomy.get_diurnal_date
+
+        def conn(db):
+            reads.append(1)
+            return real_conn(db)
+
+        def sun(*a, **k):
+            suns.append(1)
+            return real_sun(*a, **k)
+        with mock.patch.object(StateDatabase, "_get_connection", conn), \
+                mock.patch.object(plan_tools, "get_diurnal_date", sun):
+            self.hp.fingerprint()
+            self.hp.candidates(self.hp.period("next month"), limit=None)
+        return len(reads), len(suns)
+
+    def test_a_review_reads_the_database_and_the_sun_as_often_for_many_items_as_for_few(self):
+        few, many = self.work(10), self.work(300)
+        self.assertEqual(many, few)
+
+    def test_a_season_the_user_gave_still_counts(self):
+        from thirties_core.item_facts import Lasting, LastingFacts
+        LastingFacts(self.sched.state_db).set(Lasting(name="Clean the gutters", months="4,5"))
+        hp = HorizonPlanner(self.t)
+        gutter = next(t for t in self.tasks if t.id == "gutter")
+        self.assertEqual(hp.months_of(gutter), {4, 5})
+        self.assertEqual(hp.months_of(next(t for t in self.tasks if t.id == "door")), set())
+
+
 class TestOnTrack(PlannerCase):
     """C2: "how on track are we" at each level, counted by Python."""
 
