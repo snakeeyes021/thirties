@@ -10,6 +10,10 @@
   weft is still going, don't tick it": the "it" is the weft its own sentence names, so the heddles are ticked and
   the weft isn't. Said in a sentence naming no other item ("the heddles are done, but don't tick it yet"), it still
   holds the tick.
+- **Another item named in another clause.** "Someone shifted my selvedge swatch over to 1:10. Treadle: wrapped
+  up.": the swatch fits more of those words, but "treadle" is a word of this item the swatch lacks, so the swatch
+  is no rival in its place. Words that fit another item better and say nothing of this one beyond it are still
+  refused.
 
 Through the real tool path on the mock Joplin API (no real calls). Fixtures are invented: a weaving studio's day.
 """
@@ -129,6 +133,27 @@ class TestDontTickAnotherItem(StudioDay):
         out = self.say("the heddles are done, but don't tick it yet", HEDDLES, self.SHOWN)
         self.assertIn("not to tick", out)
         self.assertOpen(HEDDLES, out)
+
+
+TREADLE, LATE_TREADLE, SWATCH, OILING_LOG = ("Morning treadle oiling", "Evening treadle check", "Selvedge swatch",
+                                            "Treadle oiling log")
+
+
+class TestAnotherItemInAnotherClause(StudioDay):
+
+    ITEMS = ((TREADLE, "11:40 AM", "20 min", "t_treadle"), (SWATCH, "1:10 PM", "30 min", "t_swatch"),
+             (OILING_LOG, "2:40 PM", "10 min", "t_log"), (LATE_TREADLE, "8:10 PM", "20 min", "t_late"))
+    NOW = "10:50"
+    SHOWN = f"Moved along:\n11:40 AM – {TREADLE}\n1:10 PM – {SWATCH}\n8:10 PM – {LATE_TREADLE}"
+
+    def test_the_item_said_done_is_ticked(self):
+        out = self.say("Someone shifted my selvedge swatch over to 1:10. Treadle: wrapped up.", TREADLE,
+                       self.SHOWN)
+        self.assertTicked(TREADLE, out)
+
+    def test_words_that_fit_another_better_and_nothing_of_this_one_beyond_it_are_refused(self):
+        out = self.say("the treadle oiling log is done", TREADLE, self.SHOWN)
+        self.assertOpen(TREADLE, out)
 
 
 if __name__ == "__main__":

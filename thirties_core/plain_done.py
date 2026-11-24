@@ -10,9 +10,10 @@ for it:
   done_reference.check and done_fit.py). Only an item that can be the done in this one's place counts
   (rivals_named): an item already done (a routine step ticked this morning), one named only in another ask beside
   the done ("The bench can wait, the skis got waxed") and a later item whose name is a word of this one's never
-  do.
+  do; nor does any, when the words also say a word of this item that none of them has (it's named beside them).
 - **Something else fits better**: the words fit another item, done or not, a routine or a list item better than
-  this one ("the chooks got watered" for Brush the goats beside Water the hens).
+  this one ("the chooks got watered" for Brush the goats beside Water the hens), and say no word of this one that
+  the other lacks.
 - **A plain tie**: the words fit another item still to do as well as this one, and say nothing beyond what the two
   share ("the watering's done" beside Water the hens and Water the goats). A word that names no item ("the chooks
   got watered") is what the model read to pick this one, so it stands.
@@ -119,6 +120,16 @@ def _in_the_done(message: str) -> str:
     return " ; ".join(done_clauses(message))
 
 
+def _a_word_of_its_own(said: List[tuple], title: str, others: Iterable[str]) -> bool:
+    """A word of the user's (stem, word) fits a word of this item and no word of the others: the words name this
+    item beside them, however well they fit the others ("treadle" in "the treadle is done, but you moved my
+    selvedge swatch")."""
+    from thirties_core.done_words import _words, kin
+    mine = {s for s, _ in _words(title)}
+    theirs = {s for o in others for s, _ in _words(o)}
+    return any(any(kin(t, w) for t in mine) and not any(kin(t, w) for t in theirs) for w in said)
+
+
 def rivals_named(pt: Any, message: str, title: str, named: Iterable[str]) -> List[str]:
     """Of the other items the message names, those that can be the done in this one's place: still to do, named in
     a clause that says the done, and not fitting those words only with words this item has too, no better than it
@@ -136,6 +147,8 @@ def rivals_named(pt: Any, message: str, title: str, named: Iterable[str]) -> Lis
     said = _stems(" ; ".join(clauses))
     if not _hits(said, title):
         return named  # the done says nothing of this item: whatever else it names is what it's about
+    if named and _a_word_of_its_own(said, title, named):
+        return []  # it's named beside them ("the 10:10 treadle is done, but you moved my swatch"): no rival
     out = []
     for other in named:
         if len(_hits(said, other)) > len(_hits(said, title)):
@@ -171,8 +184,9 @@ def by_the_models_reading(pt: Any, message: str, title: str) -> bool:
     mine = _hits(said, title)
     if not mine:
         return False  # nothing in the words touches the item: no basis for it
-    if any(len(_hits(said, o)) > len(mine) for o in _other_names(pt, title)):
-        return False  # the words fit something else better
+    better = [o for o in _other_names(pt, title) if len(_hits(said, o)) > len(mine)]
+    if better and not _a_word_of_its_own(said, title, better):
+        return False  # the words fit something else better, and say nothing of this item that it lacks
     rivals = [o for o in _open_titles(pt) if item_name(o) != item_name(title)]
     level = [o for o in rivals if _hits(said, o) and len(_hits(said, o)) == len(mine)]
     if not level:
