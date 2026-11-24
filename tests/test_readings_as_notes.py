@@ -7,7 +7,8 @@ words say plainly the item isn't finished ("not yet"), or say it's under way wit
 
 Words that fit another item better ("the tallow got strained" for Dip the tallow tapers, beside Strain the tallow
 into the moulds) are the model's to read too: the done goes on, and its result names that item. It stops when the
-words name the other item outright (all its words), or say nothing of this one.
+words name the other item outright (all its words), or say nothing of this one. Which clauses carry the done is
+read generously: every clause with a done word or a past in it ("got to finish the tallow").
 Invented fixtures: a candle maker who also lays rope.
 """
 
@@ -156,6 +157,31 @@ class TestAnotherItemThatFitsBetterIsANote(NotesBase):
 
     def test_a_done_saying_nothing_of_it_still_stops_it(self):
         self.assert_held(TAPERS, self.say("the hawser is laid out on the ropewalk", TAPERS))
+
+
+
+class TestEveryClauseWithADoneWordCounts(NotesBase):
+    """A clause putting the done in a way that read as not saying it ("got to finish the tallow") couldn't be
+    the done's basis, so a done said there beside another clause's done was refused."""
+
+    def setUp(self):
+        super().setUp()
+        out = self.t.execute("add_event", {"title": STRAINED, "start": "12:40 PM", "duration": "20 min"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.say("strained", STRAINED)
+        self.assertEqual(self.span(STRAINED).status, SpanStatus.DONE)
+
+    def test_a_done_put_any_way_is_the_models_to_read(self):
+        out = self.say("the hawser got coiled, and finally got to finish the tallow", TAPERS)
+        self.assert_went(TAPERS, out)
+
+    def test_the_clauses_with_a_done_word(self):
+        from thirties_core.plain_done import done_clauses
+        self.assertEqual(done_clauses("the moulds can wait, got to finish the tallow"),
+                         [" got to finish the tallow"])
+
+    def test_a_clause_with_no_done_word_is_still_no_basis(self):
+        self.assert_held(TAPERS, self.say("the tallow can wait, the hawser got coiled", TAPERS))
 
 
 if __name__ == "__main__":

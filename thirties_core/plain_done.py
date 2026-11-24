@@ -108,16 +108,18 @@ def _other_names(pt: Any, title: str) -> List[str]:
 
 # --- the part of the message that says the done ---
 def done_clauses(message: str) -> List[str]:
-    """The clauses of the message that say something happened ("the skis got waxed" in "The bench can wait, the skis got
-    waxed"): what a done is read from. A list ahead of the done shares it: names alone, joined to it by commas or
-    "and" ("bobbins and dusting and shuttle oiling are all wrapped up"). The whole message when no clause says it
-    on its own."""
-    from thirties_core.write_guard import _CLAUSE_RE
+    """The clauses of the message with a done word or a past in them ("the skis got waxed" in "The bench can wait,
+    the skis got waxed"): what a done is read from. Every such clause counts, however it puts the done ("got to
+    finish the tapers"): whether it says the item happened is the model's reading. A list ahead of the done shares
+    it: names alone, joined to it by commas or "and" ("bobbins and dusting and shuttle oiling are all wrapped up").
+    The whole message when no clause has one."""
+    from thirties_core.started import FINISHED_RE
+    from thirties_core.write_guard import _CLAUSE_RE, DONE_WORDS_RE
     parts = re.split(f"({_CLAUSE_RE.pattern})", message or "", flags=re.IGNORECASE)
     pieces, seps = parts[0::2], parts[1::2]
     said = []
     for i, piece in enumerate(pieces):
-        if not piece.strip() or not says_it_happened(piece):
+        if not piece.strip() or not (DONE_WORDS_RE.search(piece) or FINISHED_RE.search(piece)):
             continue
         first = i
         while first > 0 and _LIST_SEP_RE.fullmatch(seps[first - 1]) and _a_name_alone(pieces[first - 1]):
