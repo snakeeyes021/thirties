@@ -738,6 +738,7 @@ class AssistantTools(KindTools):
     def _done_unplanned(self, title: str, started: Any, finished: Any, duration: Any, note: str = "") -> str:
         """Something done that was never planned or listed ("emptied the fish tank"): it goes on the record as done,
         when it was said unless they said when (10-30 sim: a chore was refused because it wasn't on the plan)."""
+        title = self.pt._words_for(str(title).strip())[0]  # never a raw id as the record's title
         now = self.pt._now()
         start = self.pt._start(started) if started not in (None, "") else None
         end = self.pt._end(finished, start or self.pt.day_plan.day_start) if finished not in (None, "") else None

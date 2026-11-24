@@ -902,7 +902,10 @@ class PlanTools:
         span = None
         try:
             found = self._find_span(item)
-            if found.status == SpanStatus.PLANNED and not found.is_envelope and found.source != "calendar":
+            if found.source == "calendar":  # already on the plan as it stands: nothing to add or move
+                return (f"{self._title(found)} is a calendar event, already on the plan "
+                        f"{format_clock(found.start_dt)} – {format_clock(found.end_dt)}; nothing added or moved.")
+            if found.status == SpanStatus.PLANNED and not found.is_envelope:
                 span = found
         except ToolError:
             span = None
@@ -1030,11 +1033,11 @@ class PlanTools:
     ) -> str:
         if not str(title or "").strip():
             raise ToolError("The item needs a title.")
+        title, task_id = self._words_for(str(title).strip(), task_id)
         if _as_bool(happened):
-            return self._record_past(str(title).strip(), start, end, duration, category, task_id)
+            return self._record_past(title, start, end, duration, category, task_id)
         if self.assistant is not None:
             self.assistant.refuse_routine_as_item(str(title))
-        title, task_id = self._words_for(title, task_id)
         try:
             cat = SpanCategory((category or "activity").lower())
         except ValueError:

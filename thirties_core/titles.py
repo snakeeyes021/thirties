@@ -19,7 +19,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-RAW_ID = re.compile(r"^(?:cal:)?[0-9a-f]{12}(?:[0-9a-f]{4})?$")
+RAW_ID = re.compile(r"^(?:cal:\S+|[0-9a-f]{12}(?:[0-9a-f]{4})?)$")  # a list item's id, or any calendar event's
 SHORT_LINE = 60  # a plain line this long or shorter is a title as it stands
 NOTES_KEY = "item_notes"  # {task_id or lowercased title: the description the user set}
 
