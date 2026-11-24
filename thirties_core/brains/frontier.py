@@ -1099,13 +1099,54 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
                 out.append((int(m.group(4)) % 12, 0))
         return out
 
-    def _wrong_times(self, reply: str) -> List[str]:
+    @staticmethod
+    def _opens_a_longer_title(part: str, title: str, every: List[str]) -> bool:
+        """The item's whole title is in the sentence only as part of another title on the plan: each time, the
+        word after it is that title's next word, or the words before it are all of that title's words before it
+        ("Quench the tongs is at 1:10 PM" beside Quench and Quench the tongs names the tongs, never Quench)."""
+        words, mine = re.findall(r"[\w'’]+", (part or "").lower()), re.findall(r"[\w'’]+", (title or "").lower())
+        n = len(mine)
+        longer = [w for w in (re.findall(r"[\w'’]+", t.lower()) for t in every) if len(w) > n]
+        found = [i for i in range(len(words) - n + 1) if n and words[i:i + n] == mine]
+        return bool(found) and all(
+            any(other[k:k + n] == mine and ((k + n < len(other) and words[i + n:i + n + 1] == [other[k + n]])
+                                            or (0 < k <= i and words[i - k:i] == other[:k]))
+                for other in longer for k in range(len(other) - n + 1))
+            for i in found)
+
+    def _reported_times(self, turn_start: Optional[int]) -> Dict[str, set]:
+        """The times this turn's calls gave for when an item finished or started (log_outcome's started and
+        finished, doing_now's now) and Python kept, as the call's result shows them, by the item's title in lower
+        case: what happened, never where it sits. A time Python dropped, or a call refused, gives none."""
+        out: Dict[str, set] = {}
+        turn = self.messages[turn_start:] if turn_start is not None else []
+        results = {m.get("tool_call_id"): str(m.get("content") or "") for m in turn if m.get("role") == "tool"}
+        for m in turn:
+            for call in (m.get("tool_calls") or []) if m.get("role") == "assistant" else ():
+                args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+                result = results.get(call.get("id"), "")
+                if not result or result.startswith(NOT_DONE):
+                    continue
+                if call.get("name") == "log_outcome":
+                    times = [c for k in ("started", "finished") for c in self._said_clocks(str(args.get(k) or ""))]
+                elif call.get("name") == "doing_now":
+                    times = [self._clock_key(self.tools._now())]
+                else:
+                    continue
+                kept = set(self._said_clocks(result))
+                out.setdefault(self._item_of(call), set()).update(c for c in times if c in kept)
+        return out
+
+    def _wrong_times(self, reply: str, turn_start: Optional[int] = None) -> List[str]:
         """Times the reply gives for a named item that aren't the item's on the plan after the turn ("canoe club is
         set for 2:30" with canoe club at 2:05): "Canoe club is at 2:05 PM" per item. Each time is judged by its role
         (role_times.py): a start and an end said together ("11:15 AM Pottery class (until 12:40 PM)", "11:15 AM –
         12:40 PM Pottery class") must be one item's start and its end, so a right end never covers a wrong start;
         a time said alone passes when it's any time of what it names (start or end, as given or by its block, or
-        when it really happened). One about another day, a reminder or a delivery is left alone."""
+        when it really happened). In a sentence, a title that is only part of another title on the plan isn't
+        named ("Quench the tongs is at 1:10 PM" says nothing of Quench), and a time this turn's calls recorded as
+        when the item finished or started ("marked Quench done at 9:10 PM") says what happened, never where it sits. One
+        about another day, a reminder or a delivery is left alone."""
         from thirties_core.clock import thirty_of
         from thirties_core.done_reference import _listed_alone
         from thirties_core.item_facts import mentions
@@ -1117,6 +1158,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         titles = {s.id: self.tools._title(s) for s in spans}
         # a time that's part of an item's title ("10:15 Feed the cat") is its name, never a claim about the plan
         timed = sorted((t for t in titles.values() if self._CLOCK_RE.search(t)), key=len, reverse=True)
+        every = [self.tools._title(s) for s in plan.spans_in_view()]  # someone else's shown events too
+        reported = self._reported_times(turn_start)
         out: List[str] = []
         for part in re.split(r"(?<=[.!?])\s+|\n+|[,;]|\band\b|\bthen\b", reply or ""):
             bare = part
@@ -1130,11 +1173,13 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             entry = None if any(re.match(rf"[\s*•-]*{re.escape(t)}", part, re.IGNORECASE) for t in timed) \
                 else self._row_entry(part)  # a line opening with a title that holds a time isn't a timed line
             named = [s for s in spans if (_listed_alone(entry, titles[s.id]) if entry is not None
-                                          else mentions(part, titles[s.id], titles.values()))]
+                                          else mentions(part, titles[s.id], titles.values())
+                                          and not self._opens_a_longer_title(part, titles[s.id], every))]
             if not named:
                 continue
             # --- a time from the item's own title ("Return the key by 4:30 PM") is its name, never its time ---
             own = {c for s in named for c in self._said_clocks(titles[s.id])}
+            own |= {c for s in named for c in reported.get(titles[s.id].strip().lower(), ())}  # finished or started
             said = [c for c in said if c not in own]
             if not said:
                 continue
@@ -1261,7 +1306,8 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         def facts_of(sentence: str) -> List[str]:
             return (unasked(self, turn_start, self._unmade_moves(turn_start, sentence)
                             + unmade_time_claims(self, turn_start, sentence))
-                    + self._unmade_dones(sentence) + self._wrong_times(sentence) + self._not_removed(sentence))
+                    + self._unmade_dones(sentence) + self._wrong_times(sentence, turn_start)
+                    + self._not_removed(sentence))
         claim = re.compile("|".join(f"(?:{r.pattern})" for r in (self._MOVED_RE, TIME_CLAIM_RE, self._REMOVED_RE,
                                                                   self._OUTCOME_CLAIM_RE, self._CLAIMS_RE)),
                            re.IGNORECASE)
@@ -1278,7 +1324,7 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         from thirties_core.unasked import mark as unasked
         return (unasked(self, turn_start, self._unmade_moves(turn_start, text)
                         + unmade_time_claims(self, turn_start, text)),
-                self._unmade_dones(text), self._wrong_times(text),
+                self._unmade_dones(text), self._wrong_times(text, turn_start),
                 self._not_removed(text), reply_checks.problems(self, turn_start, text, now),
                 reply_checks.unkept_promises(self, turn_start, text))
 
