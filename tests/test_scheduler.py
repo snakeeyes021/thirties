@@ -158,6 +158,24 @@ class TestDeterministicScheduler(unittest.TestCase):
         sched.attach_history_to_tasks(tasks)
         self.assertEqual(tasks[0].deferred_count, 1)
 
+    def test_a_long_backlog_gets_its_history_in_one_read(self) -> None:
+        from unittest import mock
+        from thirties_core.scheduler import StateDatabase
+        sched = make_scheduler()
+        for _ in range(2):
+            sched.state_db.record_task_deferred("s7")
+        tasks = [TaskItem(id=f"s{i}", source_notebook="1. Tasks", title=f"Sample item {i}") for i in range(500)]
+        reads = []
+        real = StateDatabase._get_connection
+
+        def conn(db):
+            reads.append(1)
+            return real(db)
+        with mock.patch.object(StateDatabase, "_get_connection", conn):
+            sched.attach_history_to_tasks(tasks)
+        self.assertEqual(len(reads), 1)  # reloaded every minute: never one read per item
+        self.assertEqual([t.deferred_count for t in tasks[6:9]], [0, 2, 0])
+
 
 if __name__ == "__main__":
     unittest.main()

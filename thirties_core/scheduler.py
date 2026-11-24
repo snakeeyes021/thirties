@@ -400,6 +400,12 @@ class StateDatabase:
 
     # --- task history ---
 
+    def deferred_counts(self) -> Dict[str, int]:
+        """How many times each item with a history was put off, by its id."""
+        with self._get_connection() as conn:
+            return {row["task_id"]: row["deferred_count"]
+                    for row in conn.execute("SELECT task_id, deferred_count FROM task_history").fetchall()}
+
     def get_task_history(self, task_id: str) -> Optional[TaskHistoryRecord]:
         with self._get_connection() as conn:
             cur = conn.cursor()
@@ -716,10 +722,10 @@ class DeterministicScheduler:
 
     def attach_history_to_tasks(self, tasks: List[TaskItem]) -> None:
         """Enrich task items with deferred counts from state database."""
+        counts = self.state_db.deferred_counts()  # one read for the whole backlog, however long it is
         for task in tasks:
-            rec = self.state_db.get_task_history(task.id)
-            if rec:
-                task.deferred_count = rec.deferred_count
+            if task.id in counts:
+                task.deferred_count = counts[task.id]
 
     def finalize_day_plan(self, plan: DayPlan, notes: Optional[str] = None) -> None:
         """Lock in the day and record how many thirties each task was given."""
