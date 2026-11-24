@@ -151,6 +151,10 @@ class BellEveryThirty(Day):
         self.assertNotIn("ha", self.announced())
         self.assertNotIn("ca", self.announced())
 
+    def test_the_bedtime_bell_rings_as_the_nights_sleep_begins(self):
+        self.ask("22:55", "23:10")  # sleep from 11:00 PM: asleep, yet its own bell rings
+        self.assertEqual(self.bells(), ["🌙 Bedtime (11:00 PM). Wind down and rest well!"])
+
     def test_start_notices_off_means_no_bells(self):
         self.sched.config.telegram.notify_block_transitions = False
         self.ask("14:50", "17:40")

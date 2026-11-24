@@ -497,8 +497,9 @@ class BackgroundService:
 
     def heads_up(self, now: datetime) -> None:
         """Light and up: fifteen minutes before a calendar event, a heads-up, naming anything planned before it
-        that isn't reported yet."""
-        if self.level() == "off":
+        that isn't reported yet. During a quiet the user asked for it waits, and counts as told only once it went
+        out (it may still go once the quiet ends, before the event starts)."""
+        if self.level() == "off" or self._held(now, "heads_up"):
             return
         plan = self.manager().day_plan
         told = self._remembered("heads_up")
@@ -756,14 +757,19 @@ class BackgroundService:
         too); times are told in thirties. Each item is announced at most once (moving it doesn't announce it
         again), and it counts as announced only once its bell has gone out: a bell held back leaves it untold.
 
-        Held: while asleep or in a firm calendar event, during a quiet the user asked for, right after the morning
-        message (it just said what's on), and when start notices are switched off (fewer_messages.py). While the
-        assistant is answering, the bell waits and goes out once the answer is done, if its thirty isn't over."""
+        Held: while asleep (apart from the bedtime bell itself) or in a firm calendar event, during a quiet the
+        user asked for, right after the morning message (it just said what's on), and when start notices are
+        switched off (fewer_messages.py). While the assistant is answering, the bell waits and goes out once the
+        answer is done, if its thirty isn't over."""
         from thirties_core.fewer_messages import block_notices_on
-        if self.level() != "heavy" or self._quiet(now) or not block_notices_on(self.config):
+        if self.level() != "heavy" or not block_notices_on(self.config):
             return
         plan = self.manager().day_plan
         block = thirty_of(now)
+        quiet = self._quiet(now)  # asleep or in a firm event: only the bedtime bell, as the night's sleep begins
+        if quiet and not any(s.category == SpanCategory.SLEEP and not s.tentative and thirty_of(s.start_dt) == block
+                             for s in plan.active_spans()):
+            return
         db = self.scheduler.state_db
         if not self._bell_open(block, now):
             return  # right at the start of a thirty (or once the answer it waited for is done)
@@ -787,7 +793,8 @@ class BackgroundService:
 
         starting = [s for s in plan.active_spans()
                     if thirty_of(s.start_dt) == block and not told_already(s) and not s.tentative
-                    and s.status == SpanStatus.PLANNED and self._bell_kind(s)]
+                    and s.status == SpanStatus.PLANNED and self._bell_kind(s)
+                    and (not quiet or s.category == SpanCategory.SLEEP)]
         if not starting:
             return
         try:  # the morning message just said what's on: no block notice on top of it (11-02 replay)
@@ -929,7 +936,10 @@ class BackgroundService:
 
     def contextual(self, now: datetime) -> None:
         """"Have you left yet?", "are you on your way?": only for the items that matter (contextual.py), once
-        each, at light and up, never while asleep."""
+        each, at light and up, never while asleep. During a quiet the user asked for they wait, and count as sent
+        only once they went out."""
+        if self._held(now, "contextual"):
+            return
         from thirties_core.contextual import due
         plan = self.manager().day_plan
         asleep = any(s.start_dt <= now < s.end_dt for s in plan.active_spans()
