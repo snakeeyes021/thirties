@@ -7,6 +7,7 @@ result starting with ``NOT_DONE`` when nothing changed.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from dataclasses import dataclass, field
@@ -448,11 +449,16 @@ def _stem_words(text: str) -> set:
     return {_stem(w) for w in _words(text)}
 
 
+@functools.lru_cache(maxsize=65536)
+def _wording(x: str) -> str:
+    """A wording with case, spacing, quotes and end punctuation set aside. Kept: matching a day's items against a
+    long list asks for the same list lines over and over."""
+    return re.sub(r"\s+", " ", x.strip().strip("\"'“”‘’").rstrip(".!?").strip()).lower()
+
+
 def _same_words(a: str, b: str) -> bool:
     """The same wording: case, spacing, quotes and end punctuation aside."""
-    def norm(x: str) -> str:
-        return re.sub(r"\s+", " ", str(x).strip().strip("\"'“”‘’").rstrip(".!?").strip()).lower()
-    return norm(a) == norm(b) != ""
+    return _wording(str(a)) == _wording(str(b)) != ""
 
 
 def rank_tasks(tasks: List[TaskItem], query: str, limit: int = 8) -> List[TaskItem]:

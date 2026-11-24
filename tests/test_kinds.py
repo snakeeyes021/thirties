@@ -160,6 +160,23 @@ class TestDoneFollowsTheKind(KindsTestCase):
 
 class TestGoingMoot(KindsTestCase):
 
+    def test_checking_the_day_again_rereads_no_list_line(self):
+        """Each minute the background reads every planned item's kind against the lists; repeating that with
+        nothing changed tidies no list line's wording a second time."""
+        from thirties_core import assistant_tools, titles
+        self.services.tasks = self.services.tasks + [item(f"s{i}", f"Sample item {i}", "n_dev") for i in range(400)]
+        self.add("Sample task", "1:00 PM")
+        self.add("Lunch", "12:00 PM")
+
+        def look():
+            self.t.assistant.settle_moot(now=at("12:10"))
+            return [self.t.assistant.kind_of(s) for s in self.t.day_plan.spans]
+        first = look()
+        words, lines = assistant_tools._wording.cache_info().misses, titles._split_title.cache_info().misses
+        self.assertEqual(look(), first)
+        self.assertEqual(assistant_tools._wording.cache_info().misses, words)
+        self.assertEqual(titles._split_title.cache_info().misses, lines)
+
     def test_lunch_is_moot_once_dinner_begins_and_is_stored_as_unknown(self):
         lunch = self.add("Lunch", "12:00 PM")
         self.add("Dinner", "6:00 PM", "1 hour")

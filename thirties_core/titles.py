@@ -14,6 +14,7 @@ one, and ``repair_raw_titles`` puts the real title back on records already affec
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -40,7 +41,13 @@ def _plain(text: str) -> str:
 
 def split_title(text: Any, limit: int = 80) -> Tuple[str, str]:
     """(short title, description) for a source line. A short line is all title."""
-    raw = str(text or "").strip()
+    return _split_title(str(text or ""), limit)
+
+
+@functools.lru_cache(maxsize=65536)
+def _split_title(text: str, limit: int) -> Tuple[str, str]:
+    """split_title's work, kept: matching a day's items against a long list asks for the same lines over and over."""
+    raw = text.strip()
     if len(raw) <= SHORT_LINE and not re.search(r"\*\*|`|\]\(|https?://", raw):
         return raw, ""  # a short plain line is all title, asides and all ("Breakfast (w/ juice)")
     raw = re.sub(r"^(?:[a-z]|\d{1,2})[.)]\s+(?=\S)", "", raw)  # "b. READY: ..." (a lettered list line)
