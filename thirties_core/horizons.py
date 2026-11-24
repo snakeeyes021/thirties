@@ -1360,20 +1360,25 @@ class HorizonPlanner:
         deadline new or moved, a budget's session done, a new item), and otherwise lightly each week (month,
         quarter) or month (year, years), pull work forward where there's room. Returns what was pulled in."""
         now, today = self.pt._now(), self.today()
-        changed = self.db.get_sync_meta("horizon_fingerprint") != self.fingerprint()
-        pulled = []
+        stored, current = self.db.get_sync_meta("horizon_fingerprint"), self.fingerprint()
+        changed = stored != current
+        pulled, reviewed = [], False
         for level in ("month", "quarter", "year", YEARS):
             key = f"horizon_reviewed:{level}"
             last = self.db.get_sync_meta(key)
             stale = not last or (today - date.fromisoformat(last[:10])).days >= REVIEW_DAYS[level]
             if not (changed or stale):
                 continue
+            reviewed = True
             try:
                 pulled += self.adjust(level)
             except Exception as e:  # one level's trouble never stops the rest
                 logger.warning("Couldn't review the %s plan: %s", level, e)
             self.db.set_sync_meta(key, today.isoformat())
-        self.db.set_sync_meta("horizon_fingerprint", self.fingerprint())  # after: its own pins are no change
+        if reviewed:  # after: its own pins are no change
+            current = self.fingerprint()
+        if current != stored:  # nothing reviewed and nothing changed: nothing to work out again or write
+            self.db.set_sync_meta("horizon_fingerprint", current)
         return pulled
 
     def pulled_text(self, since: Optional[datetime] = None) -> str:

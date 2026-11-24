@@ -469,6 +469,32 @@ class TestReviewCost(PlannerCase):
         few, many = self.work(10), self.work(300)
         self.assertEqual(many, few)
 
+    def test_a_review_with_nothing_changed_works_out_one_fingerprint_and_writes_nothing(self):
+        from unittest import mock
+        from thirties_core.scheduler import StateDatabase
+        self.hp.review()  # the first one: every level is due
+        stored = self.sched.state_db.get_sync_meta("horizon_fingerprint")
+        prints, writes = [], []
+        real_print, real_write = HorizonPlanner.fingerprint, StateDatabase.set_sync_meta
+
+        def fingerprint(hp):
+            prints.append(1)
+            return real_print(hp)
+
+        def write(db, *args, **kwargs):
+            writes.append(args[0])
+            return real_write(db, *args, **kwargs)
+        with mock.patch.object(HorizonPlanner, "fingerprint", fingerprint), \
+                mock.patch.object(StateDatabase, "set_sync_meta", write):
+            self.assertEqual(HorizonPlanner(self.t).review(), [])
+        self.assertEqual((len(prints), writes), (1, []))
+        self.tasks.append(item("s_new", "Sample item", due="2026-10-30"))  # a new item with a deadline: reviewed
+        self.build()
+        with mock.patch.object(HorizonPlanner, "adjust", return_value=[]) as adjust:
+            self.hp.review()
+        self.assertTrue(adjust.called)
+        self.assertNotEqual(self.sched.state_db.get_sync_meta("horizon_fingerprint"), stored)
+
     def test_a_season_the_user_gave_still_counts(self):
         from thirties_core.item_facts import Lasting, LastingFacts
         LastingFacts(self.sched.state_db).set(Lasting(name="Clean the gutters", months="4,5"))
