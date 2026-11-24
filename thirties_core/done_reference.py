@@ -13,6 +13,9 @@ goes through when the user's words point at the item:
 - **A bare done after a list**: "that one's sorted", "done!" with no word of any item in it, right after a reply
   listing several open items: the one of those the model picks. The reply says which, and a "no" takes it back.
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
+  With a clock time ("every 9:10 thing on the bench is wrapped up", "all of my 2:40 stuff"), it's every item
+  planned to start in the thirty it names, and only those: another item sharing their words, planned at another
+  time, is never one of them.
 - **A whole routine**: its name with "all", "whole" or "everything": every step of it, in every part; or "both" /
   "all of them" to a question about it or its parts: every step of the parts asked about (whole_routine.py). The
   reply names each step ticked so.
@@ -53,6 +56,10 @@ if TYPE_CHECKING:
 BULK_RE = re.compile(r"\b(?:everything|every (?:item|task|one|single one|thing)|all of (?:it|them|those|these|that|the|"
                      r"my|today)|all (?:those|these|the rest|the other|my)|them all|those all|the rest|each of "
                      r"(?:them|those|these))\b", re.IGNORECASE)
+# many at once by their time: a bulk word, then a clock time that says which items ("every 9:10 thing on the
+# bench", "all of my 2:40 PM stuff"); never a time something was done at ("did it all at 9:10")
+BULK_AT_RE = re.compile(r"\b(?:all|every|each)(?:\s+of)?(?:\s+(?:the|my))?\s+(?P<h>\d{1,2})(?:(?::(?P<m>\d{2}))"
+                        r"(?:\s*(?P<ap>[ap])\.?m\b\.?)?|\s*(?P<ap2>[ap])\.?m\b\.?)(?=\s+[^\W\d_])", re.IGNORECASE)
 BOTH_RE = re.compile(r"\b(?:both|the two|those two|these two)\b", re.IGNORECASE)
 PLURAL_RE = re.compile(r"\b(?:those|these|them|they|they're|theyre)\b", re.IGNORECASE)
 # a pointer back at something just said ("did that", "it's done"), resolved to the item when the check reads the
@@ -196,6 +203,40 @@ def _picked_by_time(pt: "PlanTools", message: str, title: str, titles: List[str]
     if mine != theirs:
         return mine
     return None
+
+
+def _thirty_said(pt: "PlanTools", message: str) -> Optional[Tuple[Any, Any]]:
+    """The thirty a bulk word with a clock time names ("every 9:10 thing": 9:00 to 9:30), as (start, end) on the
+    plan's day; without am or pm, the one of the two nearest now. None when the words give no such time."""
+    from datetime import timedelta
+    from thirties_core.clock import SHORT, thirty_of
+    m = BULK_AT_RE.search(message or "")
+    if m is None:
+        return None
+    hour, minute = int(m.group("h")), int(m.group("m") or 0)
+    half = (m.group("ap") or m.group("ap2") or "").lower()
+    if hour > 23 or minute > 59 or (half and not 1 <= hour <= 12):
+        return None
+    hours = [hour % 12 + (12 if half == "p" else 0)] if half else ([hour] if hour > 12 or hour == 0 else
+                                                                    [hour % 12, hour % 12 + 12])
+    base = pt.day_plan.day_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    starts = [thirty_of(base + timedelta(hours=h, minutes=minute)) for h in hours]
+    starts = [a if a >= pt.day_plan.day_start else a + timedelta(days=1) for a in starts]  # after midnight: that night
+    try:
+        now = pt._now()
+        start = min(starts, key=lambda a: abs((a - now).total_seconds()))
+    except Exception:
+        start = starts[0]
+    return start, start + SHORT
+
+
+def _planned_in(pt: "PlanTools", title: str, ids: Iterable[str], thirty: Tuple[Any, Any]) -> bool:
+    """The item being marked is planned to start in the thirty (as planned, before any outcome moved it)."""
+    spans = [s for s in pt.day_plan.spans if not getattr(s, "shown_only", False)]
+    ids = set(ids)
+    mine = [s for s in spans if s.id in ids] or [s for s in spans if s.title == title]
+    a, b = thirty
+    return any(a <= (getattr(s, "planned_start", None) or s.start_dt) < b for s in mine)
 
 
 def _copies(pt: "PlanTools", ids: Iterable[str]) -> Tuple[Optional[Any], list]:
@@ -353,6 +394,15 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
             picks.add(title)
         return None, message
     # --- end a whole routine ---
+    # --- many at once by their time: every item planned to start in that thirty, and only those ---
+    thirty = _thirty_said(pt, message)
+    if thirty is not None:
+        if _planned_in(pt, title, ids, thirty):
+            return None, message
+        from thirties_core.clock import format_clock
+        return (f"The user's words name the items planned at {format_clock(thirty[0])}, and {title} isn't planned "
+                "then, so it isn't marked done. If they meant it too, ask."), message
+    # --- end by their time ---
     if BULK_RE.search(message):
         return None, message
     copy_refusal =(f"{title} is on the plan more than once and the user's words don't say which time, so it "
@@ -474,4 +524,4 @@ def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Opti
             "ask which item.")
 
 
-__all__ = ["check", "pointed_back", "prior_exchange", "skip_check", "BULK_RE", "MOST_POINTED"]
+__all__ = ["check", "pointed_back", "prior_exchange", "skip_check", "BULK_AT_RE", "BULK_RE", "MOST_POINTED"]
