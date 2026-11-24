@@ -109,11 +109,35 @@ def _other_names(pt: Any, title: str) -> List[str]:
 # --- the part of the message that says the done ---
 def done_clauses(message: str) -> List[str]:
     """The clauses of the message that say something happened ("the skis got waxed" in "The bench can wait, the skis got
-    waxed"): what a done is read from. The whole message when no clause says it on its own."""
+    waxed"): what a done is read from. A list ahead of the done shares it: names alone, joined to it by commas or
+    "and" ("bobbins and dusting and shuttle oiling are all wrapped up"). The whole message when no clause says it
+    on its own."""
     from thirties_core.write_guard import _CLAUSE_RE
-    clauses = [c for c in _CLAUSE_RE.split(message or "") if c and c.strip()]
-    said = [c for c in clauses if says_it_happened(c)]
+    parts = re.split(f"({_CLAUSE_RE.pattern})", message or "", flags=re.IGNORECASE)
+    pieces, seps = parts[0::2], parts[1::2]
+    said = []
+    for i, piece in enumerate(pieces):
+        if not piece.strip() or not says_it_happened(piece):
+            continue
+        first = i
+        while first > 0 and _LIST_SEP_RE.fullmatch(seps[first - 1]) and _a_name_alone(pieces[first - 1]):
+            first -= 1
+        said.append("".join(parts[2 * first:2 * i + 1]))
     return said or [message or ""]
+
+
+# what joins the entries of a list
+_LIST_SEP_RE = re.compile(r",|and", re.IGNORECASE)
+
+
+def _a_name_alone(piece: str) -> bool:
+    """The stretch is nothing but a name ("bobbins", "the dusting"): one run of naming words, with only small words
+    beside it (done_fit.py reads the runs)."""
+    from thirties_core.done_fit import _phrases
+    from thirties_core.item_facts import _STOP
+    runs = _phrases(piece)
+    words = re.findall(r"[a-z0-9]+", re.sub(r"[‘’'`]", "", (piece or "").lower()))
+    return len(runs) == 1 and all(w in runs[0] or w in _STOP for w in words)
 
 
 def _in_the_done(message: str) -> str:

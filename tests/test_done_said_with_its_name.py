@@ -14,6 +14,10 @@
   up.": the swatch fits more of those words, but "treadle" is a word of this item the swatch lacks, so the swatch
   is no rival in its place. Words that fit another item better and say nothing of this one beyond it are still
   refused.
+- **A list sharing one done.** "bobbins and dusting and shuttle oiling + mordant are all wrapped up": the
+  names ahead of the done are done too, so the afternoon dusting is ticked beside the shuttle oiling. A
+  stretch that says something of its own ("the dusting can wait, ...") stays out of it, and a later dusting of
+  the evening was never said.
 
 Through the real tool path on the mock Joplin API (no real calls). Fixtures are invented: a weaving studio's day.
 """
@@ -154,6 +158,31 @@ class TestAnotherItemInAnotherClause(StudioDay):
     def test_words_that_fit_another_better_and_nothing_of_this_one_beyond_it_are_refused(self):
         out = self.say("the treadle oiling log is done", TREADLE, self.SHOWN)
         self.assertOpen(TREADLE, out)
+
+
+DUSTING, SHUTTLE, LATE_DUSTING = "Afternoon dusting + skein mordant", "Shuttle oiling + mordant", "Evening dusting"
+
+
+class TestAListSharingOneDone(StudioDay):
+
+    ITEMS = ((DUSTING, "1:10 PM", "20 min", "t_dusting"), (BOBBINS, "1:40 PM", "20 min", "t_bobbins"),
+             (SHUTTLE, "2:10 PM", "1 hour", "t_shuttle"), (LATE_DUSTING, "8:40 PM", "20 min", "t_late"))
+    NOW = "14:50"
+    LIST = "bobbins and dusting and shuttle oiling + mordant are all wrapped up"
+    SHOWN = f"Now: {SHUTTLE}\n\nNot marked yet:\n{DUSTING}\n{BOBBINS}"
+
+    def test_each_name_in_the_list_is_ticked(self):
+        for title in (DUSTING, SHUTTLE, BOBBINS):
+            with self.subTest(item=title):
+                self.assertTicked(title, self.say(self.LIST, title, self.SHOWN))
+
+    def test_a_stretch_saying_something_of_its_own_is_no_entry(self):
+        out = self.say("the dusting can wait, shuttle oiling + mordant done", DUSTING, self.SHOWN)
+        self.assertOpen(DUSTING, out)
+
+    def test_the_later_copy_of_a_name_is_not_what_was_said(self):
+        out = self.say(self.LIST, LATE_DUSTING, self.SHOWN)
+        self.assertOpen(LATE_DUSTING, out)
 
 
 if __name__ == "__main__":
