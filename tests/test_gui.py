@@ -714,6 +714,31 @@ class TimelineTests(unittest.TestCase):
         self.page.stack.set_visible_child_name("day")
         self.assertEqual(self.page.periods.get_active_name(), "day")
 
+    def test_an_idle_minute_moves_the_hand_without_laying_the_day_out_again(self) -> None:
+        from thirties.views import timeline
+        laid_out = []
+        real = timeline.day_layout
+
+        def counted(*args, **kwargs):
+            laid_out.append(args[1])
+            return real(*args, **kwargs)
+        self.addCleanup(setattr, timeline, "day_layout", real)
+        timeline.day_layout = counted
+        self.view.tick()  # the first tick lays the day out for now
+        laid_out.clear()
+        row = self.page.layout.now_row
+        for minute in range(11, 30):  # twenty idle minutes, ticked twice a minute as the window does
+            for _ in range(2):
+                set_debug_time(at(f"19:{minute:02d}"))
+                self.view.tick()
+        self.assertEqual(laid_out, [])  # nothing begun or ended, no thirty gone by: no new layout
+        self.assertGreater(self.page.layout.now_row, row)  # the hand moved all the same
+        self.assertAlmostEqual(self.page.layout.now_row, real(self.plan, at("19:29")).now_row)
+        set_debug_time(at("19:30"))  # a thirty went by: laid out once, then idle again
+        self.view.tick()
+        self.view.tick()
+        self.assertEqual(len(laid_out), 1)
+
     def test_work_is_one_hatched_card_under_the_items(self) -> None:
         work = [(lbl.get_text(), c.row, c.rows) for lbl, c in self.page.canvas.work]
         self.assertEqual(work, [("Work", 3, 15)])

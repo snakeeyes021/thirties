@@ -116,6 +116,20 @@ class TestTheDay(DayCase):
         self.assertTrue(day_layout(self.plan(), at("12:00")).now_daylight)
         self.assertIsNone(day_layout(self.plan(), at("12:00", 1)).now_row)  # not this day
 
+    def test_a_minute_on_moves_only_the_hand_until_a_thirty_ends_or_an_item_begins(self):
+        from thirties_core.timeline_layout import moment_of, now_mark
+        span(self.sched, "short", "Short task", "20:45", "21:00", SpanCategory.TASK)
+        d = day_layout(self.plan(), at("20:31"))
+        moment = moment_of(d, at("20:31"))
+        self.assertEqual(moment_of(d, at("20:44")), moment)  # the same thirty, nothing begun or ended
+        self.assertNotEqual(moment_of(d, at("20:45")), moment)  # the short task begins mid-thirty
+        self.assertNotEqual(moment_of(d, at("21:00")), moment_of(d, at("20:59")))  # a thirty went by
+        for t in ("07:00", "12:10", "19:15", "22:59", "23:00"):  # the hand where a fresh layout puts it
+            fresh = day_layout(self.plan(), at(t))
+            self.assertEqual(now_mark(d, at(t)), (fresh.now_row, fresh.now_daylight))
+        self.assertEqual(now_mark(d, None), (None, True))
+        self.assertEqual(moment_of(d, None), ())
+
     def test_ticking_now_means_it_finished_at_the_tick(self):
         d = day_layout(self.plan(), at("18:20"))
         dinner = next(c for c in d.cards if c.span.title == "Dinner")

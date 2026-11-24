@@ -42,7 +42,8 @@ from thirties_core.shown_times import span_when
 from thirties_core.plan_tools import NOT_DONE
 from thirties_core.timeline_layout import (DEFAULT_UNITS, Card, DayLayout, FreeStretch, WeekLayout, amount_text,
                                            day_layout, delete_call, free_text, mark_label_top, movable, move_call,
-                                           move_target, night_marks, pencil_marks, normalise_units, record_call, resize_call, resize_extent,
+                                           move_target, night_marks, now_mark, pencil_marks, normalise_units, record_call,
+                                           resize_call, resize_extent, moment_of,
                                            restore_call, sun_marks, week_days, week_layout)
 
 Tool = Callable[[str, dict], str]
@@ -1514,6 +1515,7 @@ class TimelinePage(Gtk.Box):
         self.plan = None
         self.today: Optional[date] = None
         self.layout: Optional[DayLayout] = None
+        self._moment: Optional[tuple] = None  # (the layout, its moment_of) when the hand last moved alone
         self.night_open = False  # the night strip, opened by a click or a drag into it
         self.show_theirs: Callable[[], bool] = lambda: True  # other people's events shown (one switch)
         # the day's things with no time: () -> (kind, titles), kind "if_time" (today's If there's time) or
@@ -1691,6 +1693,14 @@ class TimelinePage(Gtk.Box):
         if self.plan is None:
             return
         self._tick_week()
+        now = self.now()
+        held = self._moment
+        if self.layout is not None and held is not None and held[0] is self.layout and self.layout.plan is self.plan \
+                and held[1] == moment_of(self.layout, now):
+            # no thirty gone by and nothing begun or ended since the last tick: the hand moves, nothing is laid out
+            self.layout.now_row, self.layout.now_daylight = now_mark(self.layout, now)
+            self.canvas.queue_draw()
+            return
         layout = self._lay_out()
         if [(f.row, f.rows, f.kind) for f in layout.stretches] != \
                 [(f.row, f.rows, f.kind) for f in self.layout.stretches] or \
@@ -1700,6 +1710,7 @@ class TimelinePage(Gtk.Box):
         else:
             self.layout.now_row, self.layout.now_daylight = layout.now_row, layout.now_daylight
             self.canvas.queue_draw()
+        self._moment = (self.layout, moment_of(self.layout, now))
 
     def scroll_to_now(self) -> None:
         """Keep the hand in view (another day: the top)."""

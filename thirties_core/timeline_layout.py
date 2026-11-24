@@ -478,11 +478,26 @@ def day_layout(plan: DayPlan, now: Optional[datetime] = None, ongoing: Optional[
         else:
             notes.append(SlotNote(row, text, s))
 
-    now_row, now_daylight = None, True
-    if now is not None and start.timestamp() <= now.timestamp() < end.timestamp():
-        now_row = _row_at(slots, now)
-        now_daylight = plan.sunrise.timestamp() <= now.timestamp() < plan.sunset.timestamp()
-    return DayLayout(plan, slots, sky, work, cards, free, notes, now_row, now_daylight, stretches, night)
+    layout = DayLayout(plan, slots, sky, work, cards, free, notes, None, True, stretches, night)
+    layout.now_row, layout.now_daylight = now_mark(layout, now)
+    return layout
+
+
+def now_mark(layout: DayLayout, now: Optional[datetime]) -> Tuple[Optional[float], bool]:
+    """Where the hand is on a laid-out day, in rows (None when now isn't on it), and whether it's daylight then."""
+    slots, plan = layout.slots, layout.plan
+    if now is None or not slots or not slots[0].start.timestamp() <= now.timestamp() < slots[-1].end.timestamp():
+        return None, True
+    return _row_at(slots, now), plan.sunrise.timestamp() <= now.timestamp() < plan.sunset.timestamp()
+
+
+def moment_of(layout: DayLayout, now: Optional[datetime]) -> tuple:
+    """What of a laid-out day the time changes, but for its hand: the thirties gone by and the items under way. While
+    it stays the same, moving the hand (now_mark) is all a new minute needs."""
+    if now is None:
+        return ()
+    ts = now.timestamp()
+    return (sum(1 for s in layout.slots if s.end.timestamp() <= ts), tuple(c.span.covers(now) for c in layout.cards))
 
 
 # --- the week -------------------------------------------------------------------------------------------------------
