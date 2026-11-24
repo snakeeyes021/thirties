@@ -735,6 +735,15 @@ def do_now(t: Any) -> bool:
     return offerable(t) and (not getattr(t, "blocker", "") or bool(getattr(t, "blocker_last_step", False)))
 
 
+def says_what_to_do(t: Any) -> bool:
+    """A line that says what to do with the open items under it ("Decide between these medallions", "Choose one
+    of these:"): the items under it are the work, so the line itself is never on a plan and never waits for another
+    day. With nothing to do under it ("Choose a hall" over a question) it is an item like any other."""
+    from thirties_core.item_path import is_instruction
+    return (getattr(t, "line_kind", "") or ENTRY) in (ENTRY, GROUP) and is_container(t) \
+        and is_instruction(name_of(t))
+
+
 def name_of(t: Any) -> str:
     return str(getattr(t, "name", "") or getattr(t, "title", "") or "").strip()
 
@@ -902,5 +911,5 @@ __all__ = ["ENTRY", "CONDITION", "GROUP", "QUESTION", "LINK", "PLACEHOLDER", "CU
            "CLOSED", "DROPPED", "UNDECIDED", "LATER_TALK", "REFERENCE", "LEFTOVER", "OPTION", "OFFERED_STATES",
            "LineReading", "Line", "NoteReading", "BodySection", "read_text", "read_note", "section_state",
            "estimate_minutes", "is_link", "link_site", "is_condition", "apply_line", "live", "is_container", "offerable",
-           "do_now", "name_of", "match_text", "progress_count", "progress_summary", "prompt_tag", "once_lines",
-           "looks_like_id", "refused_text", "section_progress"]
+           "do_now", "says_what_to_do", "name_of", "match_text", "progress_count", "progress_summary", "prompt_tag",
+           "once_lines", "looks_like_id", "refused_text", "section_progress"]

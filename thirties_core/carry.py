@@ -243,7 +243,6 @@ def _done_titles(assistant, day: date) -> List[str]:
 
 def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     """The rules above, without recording anything."""
-    from thirties_core.kinds import ONCE
     from thirties_core.models import SpanCategory, SpanStatus
     from thirties_core.stats import unreviewed_spans
     from thirties_core.today import TodayLinks, group_items, note_items, with_done
@@ -288,7 +287,7 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
     def never_rolls(title: str, kind_src) -> bool:
         low = title.strip().lower()
         return (low in daily or low in routine_steps or low in routine_names
-                or assistant.kind_of(kind_src, ctx) != ONCE)
+                or not assistant.carries(kind_src, ctx))
 
     def home_of(title: str) -> Optional[Dict[str, str]]:
         return links.home_of(title) if links is not None else None

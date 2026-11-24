@@ -45,7 +45,7 @@ def drop_tickets(cands: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [c for c in cands if not is_ticket(c.get("task"))]
 
 
-def _refs(name: str, args: Dict[str, Any]) -> List[str]:
+def placed_refs(name: str, args: Dict[str, Any]) -> List[str]:
     if name == "add_to_today":
         items = args.get("items") or args.get("item") or args.get("title") or []
         if isinstance(items, str):
@@ -66,7 +66,7 @@ def ticket_guard(pt, name: str, args: Dict[str, Any]) -> Optional[str]:
     from thirties_core.item_facts import mentions
     others = [t.title for t in pt.assistant.s.tasks]  # a word only the ticket has names it; a shared one doesn't
     held = []
-    for ref in _refs(name, args or {}):
+    for ref in placed_refs(name, args or {}):
         ref = (ref or "").strip()
         if not ref:
             continue
@@ -97,4 +97,4 @@ def _short(title: str) -> str:
         return title[:60]
 
 
-__all__ = ["drop_tickets", "is_ticket", "reads_like_ticket", "ticket_guard", "TICKET_TOOLS"]
+__all__ = ["drop_tickets", "is_ticket", "placed_refs", "reads_like_ticket", "ticket_guard", "TICKET_TOOLS"]

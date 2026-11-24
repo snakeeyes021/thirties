@@ -21,7 +21,7 @@ from thirties_core.memory import (PROFILE_SECTIONS, CheckinMutes, ConversationSt
 from thirties_core.item_ids import line_id, new_line_id
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus, TaskItem, new_span_id
 from thirties_core.kind_tools import KindTools, rollover_question
-from thirties_core.kinds import ONCE, ONGOING, put_off_counts, rolls_over
+from thirties_core.kinds import ONCE, ONGOING, put_off_counts
 from thirties_core.stats import fact_lines, session_lines, unreviewed_spans
 
 if TYPE_CHECKING:
@@ -1719,7 +1719,7 @@ class AssistantTools(KindTools):
         lines = [f"- {format_clock(s.start_dt)} – {format_clock(s.end_dt)}: {s.title} id={s.id}" for s in pending]
         out = "No outcome recorded yet for:\n" + "\n".join(lines)
         ctx = self._kind_context()
-        tasks = [s for s in pending if s.task_id and rolls_over(self.kind_of(s, ctx))]
+        tasks = [s for s in pending if s.task_id and self.carries(s, ctx)]
         if tasks and self.pt.scheduler:
             tomorrow = plan.target_date + timedelta(days=1)
             next_plan, _ = self.pt.scheduler.build_day_plan(tomorrow)
@@ -1781,7 +1781,7 @@ class AssistantTools(KindTools):
         project ("Garden app dev", a backlog's time) come round again anyway (kinds.rolls_over; 10-18, 10-27, 10-30)."""
         if span.title.strip().lower() in self.routines.daily_titles():  # anchors happen again by themselves
             return False
-        return rolls_over(self.kind_of(span, ctx))
+        return self.carries(span, ctx)
 
     def _rollover_key(self) -> str:
         return f"rollover:{self._today().isoformat()}"
@@ -1807,7 +1807,7 @@ class AssistantTools(KindTools):
         moot = {s.title.strip().lower() for p in recent for s in p.spans if s.status == SpanStatus.UNKNOWN}
         keep = [text for text, ticked in with_done(note, done, self._db) if not ticked and text.lower() not in routine
                 and text.lower() not in done_on_plan and text.lower() not in moot
-                and rolls_over(self.kind_of(text, ctx))]  # never daily things or project time (R4)
+                and self.carries(text, ctx)]  # never daily things, project time or a line that only says what to do
         from thirties_core.today import group_items
         children = {c.lower() for k in keep for c in (group_items(note, k) or [])}
         keep = [k for k in keep if k.lower() not in children]  # 11-05: a group and each of its steps, as five lines
@@ -1818,7 +1818,7 @@ class AssistantTools(KindTools):
 
         def pressing(t: TaskItem) -> bool:
             if t.someday or t.id.startswith("media:") or t.list_role in ("today", "routine", "reference") \
-                    or not rolls_over(self.kind_of(t, ctx)):
+                    or not self.carries(t, ctx):
                 return False
             if t.due:
                 try:

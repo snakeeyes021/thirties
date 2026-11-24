@@ -52,7 +52,7 @@ def rolls(tools, span: EventSpan) -> bool:
         if tools._is_fixed(span) or tools._is_routine(span):
             return False
         assistant = getattr(tools, "assistant", None)
-        if assistant is not None and not kinds.rolls_over(assistant.kind_of(span)):
+        if assistant is not None and not assistant.carries(span):
             return False  # a routine step, a daily item or project time comes round again anyway
     except Exception as e:  # never put something on tonight that might not belong there
         logger.warning("Couldn't tell whether %r rolls: %s", span.title, e)

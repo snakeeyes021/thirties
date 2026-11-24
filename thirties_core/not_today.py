@@ -178,7 +178,7 @@ def ends_when_skipped(a: Any, title: str, span: Any = None) -> bool:
         if low in a.routines.daily_titles() or a._routine_of(title) is not None \
                 or low in {n["title"].strip().lower() for n in a._routines()}:
             return True
-        return not kinds.rolls_over(a.kind_of(span if span is not None else title))
+        return not a.carries(span if span is not None else title)
     except Exception:
         return False
 

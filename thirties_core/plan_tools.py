@@ -2197,6 +2197,10 @@ class PlanTools:
         held = ticket_guard(self, name, args)
         if held:
             return held
+        from thirties_core import instruction_lines  # only the lines under a "choose one of these" go on a plan
+        held = instruction_lines.held(self, name, args)
+        if held:
+            return held
         # --- what this turn may change, from the user's words (turn_guards.py) ---
         from thirties_core import turn_guards
         held = turn_guards.refuse(self, name, args, READ_ONLY_TOOLS, outermost=self._home_plan is None)

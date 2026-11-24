@@ -6,7 +6,8 @@ morning proposal and the brains don't have to (AGENTS.md §7: "the kinds of item
 - ``kind_of(item)``: 'once', 'ongoing' or 'daily' for a planned item, a list item or a name (kinds.py);
 - ``is_moot(span, now)`` and ``settle_moot(plan, now)``: gone moot, and storing it as "unknown";
 - ``lasting_facts(title)``: what holds every day for an item by name (item_facts.py);
-- ``put_off_counts(span)``: whether not doing it counts as putting it off.
+- ``put_off_counts(span)``: whether not doing it counts as putting it off;
+- ``carries(item)``: whether, left undone, it waits for another day.
 
 The rules themselves live in kinds.py and item_facts.py; this only gathers what they need (the user's lists,
 routines, Today links and stored facts) from the services.
@@ -66,8 +67,32 @@ class KindTools:
         """'once', 'ongoing' or 'daily' (kinds.py) for a planned item (EventSpan), a list item (TaskItem) or a
         name: the user's word if they gave one, else its list's role (a Today line's home list's), else the
         obvious wording, else once."""
-        from thirties_core.kinds import kind_of
         ctx = ctx or self._kind_context()
+        return self._kind_of_parts(self._item_and_home(item, ctx), ctx)
+
+    def carries(self, item: Any, ctx: Optional[Dict[str, Any]] = None) -> bool:
+        """Whether an item left undone waits for another day: a one-off (kinds.rolls_over) that is an item at all.
+        A line that only says what to do with the lines under it (list_reading.says_what_to_do) simply ends."""
+        from thirties_core.kinds import rolls_over
+        from thirties_core.list_reading import says_what_to_do
+        ctx = ctx or self._kind_context()
+        parts = self._item_and_home(item, ctx)
+        line = parts[2] if parts[2] is not None else parts[1]
+        if line is not None and says_what_to_do(line):
+            return False
+        return rolls_over(self._kind_of_parts(parts, ctx))
+
+    def _kind_of_parts(self, parts, ctx: Dict[str, Any]) -> str:
+        from thirties_core.kinds import kind_of
+        title, task, home, home_role, link = parts
+        names = [n for n in (title, task.title if task else None, home.title if home else None,
+                             link["home_title"] if link else None) if n]
+        stored = ctx["lasting"].kind_override(*names) if ctx["lasting"] is not None else ""
+        return kind_of(title, task, home=home, home_role=home_role, routine_steps=ctx["steps"], stored=stored)
+
+    def _item_and_home(self, item: Any, ctx: Dict[str, Any]):
+        """(title, list item, its home item, the home list's role, its Today link) for a planned item, a list item
+        or a name."""
         if isinstance(item, EventSpan):
             title = item.title
             task = next((t for t in self.s.tasks if item.task_id and t.id == item.task_id), None)
@@ -82,10 +107,7 @@ class KindTools:
         if link and (task is None or task.list_role in ("today", "")):
             home = next((t for t in self.s.tasks if t.id == link["home_id"]), None)
             home_role = (ctx["roles"].get(link["home_note_id"]) or {}).get("role", "")
-        names = [n for n in (title, task.title if task else None, home.title if home else None,
-                             link["home_title"] if link else None) if n]
-        stored = ctx["lasting"].kind_override(*names) if ctx["lasting"] is not None else ""
-        return kind_of(title, task, home=home, home_role=home_role, routine_steps=ctx["steps"], stored=stored)
+        return title, task, home, home_role, link
 
     def _link_kind(self, link: Dict[str, str], ctx: Dict[str, Any]) -> str:
         """The kind of a Today item's home item, from the link alone (the home item may be ticked already)."""
