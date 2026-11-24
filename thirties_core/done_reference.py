@@ -356,9 +356,9 @@ def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[
 
 
 def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides: Iterable[str] = ()) -> str:
-    """The line a done's result carries when the user's words may name something besides this item without
-    naming another item (done_fit.also_said), so the model can ask or put it right; "" otherwise, or when nobody
-    is talking. Read as ``check`` reads them."""
+    """The lines a done's result carries when the user's words may name something besides this item without
+    naming another item outright (done_fit.also_said), or may be meant for another item (plain_done.also_fits), so
+    the model can ask or put it right; "" otherwise, or when nobody is talking. Read as ``check`` reads them."""
     message = getattr(pt, "user_message", None)
     ids = [i for i in ids if i]
     if getattr(pt, "by_hand", False) or not message or any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
@@ -367,8 +367,13 @@ def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides
     from thirties_core.done_fit import also_said, names_of
     left_out = set(besides)
     others = [t for t in _titles(pt) if t not in left_out and t != title]
+    from thirties_core.plain_done import also_fits
     names = names_of(pt, title, ids)
-    return also_said(without_counts(message), names, others, _listed_items(pt, names))
+    naming = without_counts(message)
+    fits = also_fits(pt, naming, title, left_out)
+    meant = (f"(The user's message may also mean {', '.join(fits)}: if they meant another item, ask which, or "
+             "correct it.)") if fits else ""
+    return " ".join(n for n in (also_said(naming, names, others, _listed_items(pt, names)), meant) if n)
 
 
 def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
@@ -437,12 +442,14 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if _the_one_whose_time_came(pt, naming, title, titles) and not _another_in_everyday_words(naming, others, titles):
         return None, message
     named_others = [t for t in others if _named(naming, t, titles)]
-    # --- only another item that can be the done in this one's place is a rival (plain_done.rivals_named) ---
+    # --- other items named: the done says nothing of this one, or names one of them outright, so there's no basis
+    # for this one. Another item it may be meant for is the model's to read, with a note (plain_done.py) ---
     if named_others:
-        from thirties_core.plain_done import rivals_named
-        if rivals_named(pt, naming, title, named_others):
+        from thirties_core.plain_done import misses_it, named_outright, rivals_named
+        if misses_it(naming, title) or any(named_outright(naming, o, title)
+                                           for o in rivals_named(pt, naming, title, named_others)):
             return refusal, message  # they're talking about other items
-    # --- end rivals ---
+    # --- end other items named ---
     # --- a question about one item, and a done already asked for (done_words.py) ---
     from thirties_core.done_words import NO_RE, asked_about
     from thirties_core.item_facts import item_name

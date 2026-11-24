@@ -4,6 +4,10 @@ Words beside a done that say the item is under way or merely all right ("tapers 
 used to refuse it, though the person had said it was done. Whether those words undo the done is the model's
 reading: the done goes through, and its result says what else the words say. The done is still refused where the
 words say plainly the item isn't finished ("not yet"), or say it's under way with no done said of it at all.
+
+Words that fit another item better ("the tallow got strained" for Dip the tallow tapers, beside Strain the tallow
+into the moulds) are the model's to read too: the done goes on, and its result names that item. It stops when the
+words name the other item outright (all its words), or say nothing of this one.
 Invented fixtures: a candle maker who also lays rope.
 """
 
@@ -110,6 +114,48 @@ class TestWordsSayingItIsNotDoneStillStop(NotesBase):
 
     def test_a_done_said_only_of_something_else(self):
         self.assert_held(PILLARS, self.say("the beeswax pillars are fine, the hawser is laid", PILLARS))
+
+
+STRAIN = "Strain the tallow into the moulds"
+STRAINED = "Strain the tallow"
+
+
+class TestAnotherItemThatFitsBetterIsANote(NotesBase):
+    """Words that fit another item better, without naming it outright, used to refuse the done."""
+
+    def planned(self, title):
+        out = self.t.execute("add_event", {"title": title, "start": "1:50 PM", "duration": "20 min"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+
+    def listed(self, title, tid):
+        self.api.notes["n_errands"]["body"] += f"- [ ] {title}\n"
+        self.services.tasks.append(item(tid, title))
+        self.services.tasks[-1].list_role = "list"
+
+    def test_a_planned_item_that_fits_better_is_named_in_the_note(self):
+        self.planned(STRAIN)
+        out = self.say("the tallow got strained", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertIn(f"may also mean {STRAIN}", out)
+
+    def test_a_list_item_that_fits_better_is_named_in_the_note(self):
+        self.listed(STRAIN, "t_strain")
+        out = self.say("the tallow got strained", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertIn(STRAIN, out)
+
+    def test_a_word_of_its_own_needs_no_note(self):
+        self.planned(STRAIN)
+        out = self.say("strained the tallow and dipped the tapers", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertNotIn("may also mean", out)
+
+    def test_an_item_named_outright_still_stops_it(self):
+        self.planned(STRAINED)
+        self.assert_held(TAPERS, self.say("the tallow got strained", TAPERS))
+
+    def test_a_done_saying_nothing_of_it_still_stops_it(self):
+        self.assert_held(TAPERS, self.say("the hawser is laid out on the ropewalk", TAPERS))
 
 
 if __name__ == "__main__":

@@ -372,11 +372,11 @@ def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str
         whole = routine_meant(pt, message, shown, title)
         for s in stated:
             named = _named(s, title, others) or bool(whole and names_routine(s, whole))
-            # another item named here counts only when it can be the done in this one's place: not one already
-            # done or a later item sharing its word (plain_done.rivals_named)
-            from thirties_core.plain_done import rivals_named
-            about = named or not rivals_named(pt, s, title, [o for o in others if _named(
-                s, o, [x for x in others if x != o] + [title])])
+            # another item named here takes the done only when the done says nothing of this one
+            # (plain_done.misses_it)
+            from thirties_core.plain_done import misses_it
+            about = named or not misses_it(s, title) or not any(
+                _named(s, o, [x for x in others if x != o] + [title]) for o in others)
             reported = bool(REPORTED_RE.search(s)) and (named or bool(_POINTER_RE.search(s)))
             if about and not _MISTAKEN_RE.search(s) and (_done_in(s, title) or FINISHED_RE.search(s) or reported
                                                          or YES_RE.match(s)):
