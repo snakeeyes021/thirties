@@ -12,11 +12,13 @@ for them in plain words:
   the past ("renewed" for Renew the kiln permit), a report that it happened ("I've written them up"), or a plain
   yes to a question.
   Words that say something is under way or merely all right ("the kiln is firing", "it's running", "the glaze is
-  fine") are never a done, for the item they're said about, however loosely the words point to it; a done word in
-  the same sentence wins over merely all right ("the bisque unload went fine, all wrapped"). Neither are
-  words telling the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor
-  words naming something else that shares a word with it ("the glaze order is sent" for Glaze recipe test:
-  done_fit.py).
+  fine") are no done on their own. Beside a done said in the same message ("Glazed. Kiln left warming
+  overnight."), whether they undo it is the model's reading: the done goes through with a note saying so
+  (``going_note``); a done word in the same sentence wins over merely all right, with no note ("the bisque unload
+  went fine, all wrapped"). Words saying plainly it isn't done are never a done ("not yet"), nor are words telling
+  the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor words naming
+  another item that shares a word with it ("the glaze order is sent" for Glaze recipe test, beside a listed Send
+  the glaze order: done_fit.py).
 
 A tick that follows a done log_outcome accepted on the plan this turn (its own checks read the user's words) is
 written: the plan and Joplin agree. Python marks such a tick; the model can't.
@@ -337,26 +339,43 @@ def _own_word(word: str, title: str) -> bool:
 
 
 def state_not_done(message: Optional[str], title: str, others=()) -> str:
-    """Why the user's words say this item isn't finished: what they say about it is that it's under way, merely all
-    right, or not done ("the kiln is firing", "the glaze is fine", "kiln's on"). When no clause names it (a reply
-    like "it's running" to a question about it), the clauses that name no other item are about it. "" when no
-    such thing is said. However loosely the words point to the item, they never make a done of these."""
-    if not message:
+    """Why the user's words say this item isn't finished: what they say about it is that it's not done ("not yet",
+    "the glaze isn't dry"), or that it was only thought done, should have happened, or was called off. When no
+    clause names it (a reply like "not yet" to a question about it), the clauses that name no other item are about
+    it. "" when no such thing is said. Words saying it's under way or merely all right are no reason here: whether
+    they undo a done said beside them is the model's reading (``going_note``)."""
+    return _state_reading(message, title, others)[0]
+
+
+def going_note(message: Optional[str], title: str, others=()) -> str:
+    """One plain line for the model when a done goes through though the words about the item also say it's under
+    way or merely all right ("Glazed. Kiln left warming overnight."), so it can check the item really finished.
+    "" when there's nothing to say, or when a hard stop holds the done (``state_not_done``)."""
+    stop, going = _state_reading(message, title, others)
+    if stop or not going:
         return ""
+    return (f"(The user's message also says {title} is under way or fine: if it hasn't really finished, ask, or "
+            "correct it.)")
+
+
+def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
+    """(why the words say the item isn't finished, or "", whether they say it's under way or merely all right)."""
+    if not message:
+        return "", False
     told_not = told_not_to_tick(message, title, others)
     if told_not:
-        return told_not
+        return told_not, False
     # --- a done said ahead of time: promised, hoped for, or once something happens (done_ahead.py) ---
     from thirties_core.done_ahead import said_ahead
     ahead = said_ahead(message, title, others)
     if ahead:
-        return ahead
+        return ahead, False
     # --- end said ahead ---
     # --- begun, or coming next, beside a done for something else: no done for it (said_for_it.py) ---
     from thirties_core.said_for_it import begun_or_next
     onward = begun_or_next(message, title, others)
     if onward:
-        return onward
+        return onward, False
     # --- end begun or next ---
     from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words, without_caused
     others = [o for o in others if o and o != title]
@@ -369,14 +388,14 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
         if _MISTAKEN_RE.search(s) and (_about(s, title, others) or not any(
                 _about(s, o, [x for x in others if x != o] + [title]) for o in others)):
             return (f"The user said they only thought {title} was finished, so it isn't marked done. Leave it "
-                    "open; it's done when they say it is.")
+                    "open; it's done when they say it is."), False
     # --- end taken back ---
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
     # --- an item named only as when something else stops is no done; what a clause says is about its head
     # ("working until the kiln check": the working) (not_about_it.py) ---
     from thirties_core.not_about_it import end_refusal, head, only_as_an_end
     if only_as_an_end(clauses, title, others):
-        return end_refusal(title)
+        return end_refusal(title), False
     about = [c for c in clauses if _about(head(c), title, others) or _fits_level(head(c), title, others)]
     # --- end when something else stops ---
     if not about:
@@ -389,30 +408,39 @@ def state_not_done(message: Optional[str], title: str, others=()) -> str:
     for c in about:
         if _UNREAL_RE.search(c):
             return (f"The user said {title} should or could have happened, not that it did, so it isn't marked "
-                    "done. Leave it open; it's done when they say it is.")
+                    "done. Leave it open; it's done when they say it is."), False
         if any(not _own_word(m.group(0), title) for m in _CALLED_OFF_RE.finditer(c)):
             return (f"The user said {title} was moved or called off, not that it happened, so it isn't marked "
-                    "done. Leave it open, or move it if they asked; it's done when they say it is.")
+                    "done. Leave it open, or move it if they asked; it's done when they say it is."), False
     # --- end didn't happen ---
+    going = []
     for c in about:
-        if not _done_in(c, title) and (_state_in(c, title) or _NOT_DONE_RE.search(c)):
-            # --- merely all right, with a done in the same sentence or one said of the item anywhere: the done wins
-            # ("it went fine, all wrapped", "ok the list has it open. the shawl IS done") ---
-            if not _NOT_DONE_RE.search(c) and not _under_way_in(c, title) and (
-                    _done_beside(c, told_sentences, title, others) or any(_done_in(d, title) for d in about)):
-                continue
-            # --- end the done wins ---
-            return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
-                    "Leave it open; it's done when they say it is.")
-    return ""
+        if _done_in(c, title):
+            continue
+        if _NOT_DONE_RE.search(c):
+            return (f"The user said {title} isn't finished, so it isn't marked done. Leave it open; it's done when "
+                    "they say it is."), False
+        if _state_in(c, title):
+            going.append(c)
+    if not going:
+        return "", False
+    # --- under way or all right, and no done said of the item: no basis for one ("the varnish is fine, the dishes
+    # are done": the dishes' done) ---
+    if not any(_done_in(d, title) or _done_beside(d, told_sentences, title, others) for d in about):
+        return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
+                "Leave it open; it's done when they say it is."), False
+    # --- merely all right, with a done in the same sentence or one said of the item anywhere: the done wins, with
+    # nothing to note ("it went fine, all wrapped", "ok the list has it open. the shawl IS done") ---
+    return "", any(_under_way_in(c, title) or not (_done_beside(c, told_sentences, title, others)
+                                                    or any(_done_in(d, title) for d in about)) for c in going)
 
 
 def says_done(message: Optional[str], title: str, others=(), strict: bool = False) -> bool:
     """Whether the user's words say this item happened: a done word (everyday ones too: "squared away", "that's one
     less thing") or its verb in the past, a report that it happened ("I've written them up"), said about it (or in a
-    clause naming no other item), or a plain yes; and nothing about it says it's only under way, merely all right,
-    or not done. ``strict``: only done words and the item's own verb count (any past tense about the item counts
-    otherwise), and a question says nothing ("how come the rent got moved?")."""
+    clause naming no other item), or a plain yes; and nothing about it says it's not done (``state_not_done``).
+    ``strict``: only done words and the item's own verb count (any past tense about the item counts otherwise), and a
+    question says nothing ("how come the rent got moved?")."""
     if not message:
         return False
     from thirties_core.started import FINISHED_RE, _SENTENCE_RE, _asks, not_finished, without_caused
@@ -492,4 +520,4 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
 
 
 __all__ = ["DROP_WORDS_RE", "DONE_WORDS_RE", "NEGATED_DONE_RE", "PUT_OFF_TICK_RE", "REPORTED_RE", "STATE_RE", "asks_to_drop", "says_done",
-           "state_not_done", "told_not_to_tick", "refused"]
+           "going_note", "state_not_done", "told_not_to_tick", "refused"]

@@ -1349,8 +1349,8 @@ class AssistantTools(KindTools):
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
                     estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False, **_: Any) -> str:
-        """An item's outcome, as said. A done whose words may also name something else carries a line saying so
-        (done_reference.also_said_note)."""
+        """An item's outcome, as said. A done whose words may also name something else, or also say it's under way
+        or fine, carries a line saying so (done_reference.also_said_note, write_guard.going_note)."""
         self._also_said = ""
         out = self._log_outcome(event, status, started, finished, duration, estimated, note, finished_for_good, new)
         said, self._also_said = self._also_said, ""
@@ -1445,11 +1445,13 @@ class AssistantTools(KindTools):
                                 "Record it with doing_now; mark it done when they say it's over.")
             if said == "not":
                 raise ToolError(f"The user said {name} hasn't happened, so it isn't done. Leave it as it is.")
-            # --- going, on or fine is no done, however loosely the words point to it (write_guard.py) ---
+            # --- said plainly not done is no done; going or fine beside a done is a note (write_guard.py) ---
             from thirties_core.write_guard import state_not_done
             going = state_not_done(words, name, others)
             if going:
                 raise ToolError(going)
+            from thirties_core.write_guard import going_note
+            self._also_said = " ".join(n for n in (self._also_said, going_note(words, name, others)) if n)
             # --- end going or fine ---
             # --- a question, a pointer at an item's parts, or no done said: no done (said_for_it.py) ---
             from thirties_core.said_for_it import held_done
