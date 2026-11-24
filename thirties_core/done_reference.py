@@ -22,7 +22,8 @@ goes through when the user's words point at the item:
   exactly one of them ("Not marked yet: Glaze run" beside a Glaze run review call), it's that one.
 - **A plain done**: the app's last reply named only this item and the user confirms it or says it happened; the
   item's verb in the past with its object in everyday words ("the chooks got watered") and no other item still to
-  do fitting as well; or a done refused earlier for this item, said again (plain_done.py).
+  do fitting as well; or a done refused earlier for this item, said again (plain_done.py). A pointer beside such
+  words ("the shawl is done, tick it") is the item they name, never a pick among the items last listed.
 - **The one whose time has come**: when the words fit several items equally ("the walk's done" with three walks),
   or the item has copies under one name, it's the one still to do that began last (or is due within the half
   hour: a done is often said a little early); before any has begun, the next one. A copy named by its start time
@@ -439,11 +440,10 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
             if isinstance(picks, set):
                 picks.add(title)
         # --- end a bare done ---
-        # --- otherwise the words themselves are the done, read as the model read them (plain_done.py) ---
-        elif not POINTER_RE.search(message):
-            return plain()
+        # --- otherwise the words themselves are the done, read as the model read them (plain_done.py), a pointer
+        # among them too ("the shawl is done, mark it": "it" is the shawl, not one of the items listed) ---
         else:
-            return refusal, message
+            return plain()
     if not _the_copy_meant(pt, [message, shown], ids):
         return copy_refusal, message
     return None, POINTER_RE.sub(title, message)
