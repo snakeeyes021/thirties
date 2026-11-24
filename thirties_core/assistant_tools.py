@@ -1349,6 +1349,15 @@ class AssistantTools(KindTools):
 
     def log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
                     estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False, **_: Any) -> str:
+        """An item's outcome, as said. A done whose words may also name something else carries a line saying so
+        (done_reference.also_said_note)."""
+        self._also_said = ""
+        out = self._log_outcome(event, status, started, finished, duration, estimated, note, finished_for_good, new)
+        said, self._also_said = self._also_said, ""
+        return f"{out} {said}" if said else out
+
+    def _log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
+                     estimated: Any = False, note: str = "", finished_for_good: Any = False, new: Any = False) -> str:
         # --- reported as open again ("open", "not done"): a reopen, on the user's named ask (reopen.py) ---
         from thirties_core.reopen import is_reopen_status
         if is_reopen_status(status):
@@ -1420,6 +1429,9 @@ class AssistantTools(KindTools):
                 held, words = pointed_to(self.pt, name, [x.id for x in (span, task) if x is not None], passed_over)
                 if held:
                     raise ToolError(held)
+                from thirties_core.done_reference import also_said_note
+                self._also_said = also_said_note(self.pt, name, [x.id for x in (span, task) if x is not None],
+                                                 passed_over)
             # --- end done only for what the user's words point to ---
             # --- clearing isn't finishing: "clear X from the list" is no done (off_today.py) ---
             from thirties_core.off_today import clear_not_done

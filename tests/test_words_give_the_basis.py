@@ -121,10 +121,10 @@ class TestAWordForWhichKindKeepsTheItemsOwn(WordsCase):
         self.assertEqual(names_something_else("the old bike light is fixed", "Fix the bike light"), [])
         self.assertEqual(names_something_else("the ash paddle is varnished", "Varnish the paddle"), [])
 
-    def test_the_list_tick_is_refused(self):
+    def test_the_list_tick_stops_only_for_another_item(self):
         from thirties_core.write_guard import refused
-        self.assertNotEqual(refused({"op": "complete", "title": "Fix the bike light"},
-                                    "[app] the kitchen light is fixed", None), "")
+        self.assertEqual(refused({"op": "complete", "title": "Fix the bike light"},
+                                 "[app] the kitchen light is fixed", None), "")  # no other item: the model's reading
         self.assertEqual(refused({"op": "complete", "title": "Fix the bike light"},
                                  "[app] the bike light is fixed", None), "")
 
@@ -136,8 +136,8 @@ class TestDownIsANamingWord(WordsCase):
         from thirties_core.done_fit import names_something_else
         from thirties_core.write_guard import refused
         self.assertTrue(names_something_else("the down jacket is washed", "Wash the rain jacket"))
-        self.assertNotEqual(refused({"op": "complete", "title": "Wash the rain jacket"},
-                                    "[app] the down jacket is washed", None), "")
+        self.assertEqual(refused({"op": "complete", "title": "Wash the rain jacket"},
+                                 "[app] the down jacket is washed", None), "")  # spotted; no other item named
 
 
 class TestNoNoteReachesTheUser(unittest.TestCase):

@@ -177,8 +177,10 @@ class TestAWordForWhichKindIsAName(WordsCase):
         self.assertTrue(names_something_else("the ash paddle is varnished, the paddle rack too", "Varnish the paddle"))
         self.assertEqual(names_something_else("the ash paddle is varnished", "Varnish the paddle"), [])
 
-    def test_the_tick_is_refused(self):
-        self.assertHeld(self.tick("Kiln wash the shelves", "the car wash is done"))
+    def test_the_tick_goes_on_with_a_note(self):
+        out = self.tick("Kiln wash the shelves", "the car wash is done")
+        self.assertWent(out)
+        self.assertIn('"car wash"', out)  # no other item named: the model's reading stands, told what else was said
 
 
 class TestADoneBesideFineIsAbout(WordsCase):

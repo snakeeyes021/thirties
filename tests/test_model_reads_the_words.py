@@ -222,8 +222,10 @@ class TestAWordForWhichKind(WordsCase):
         self.assertHeld(out)
         self.assertIn("Oil the ash paddle", out)  # the list item that fits all the words is named
 
-    def test_a_different_thing_named_still_holds_it(self):
-        self.assertHeld(self.tick("Varnish the paddle", "the paddle rack is varnished"))
+    def test_a_different_thing_said_goes_on_with_a_note(self):
+        out = self.tick("Varnish the paddle", "the paddle rack is varnished")
+        self.assertWent(out)
+        self.assertIn('"paddle rack"', out)  # whether they meant another item is the model's to read
 
     def test_what_says_which_kind(self):
         from thirties_core.done_fit import names_something_else

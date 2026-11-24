@@ -28,7 +28,7 @@ here: they have their own rules.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 # the user asking for an item to be let go for good
 DROP_WORDS_RE = re.compile(
@@ -284,18 +284,40 @@ def _done_beside(clause: str, sentences: list, title: str, others: list) -> bool
         for part in _CLAUSE_RE.split(sentence):
             if part and part.strip() and _done_in(part, title) and not any(
                     _about(part, o, [x for x in others if x != o] + [title]) for o in others) \
-                    and not _names_another_thing(part, title):
+                    and not _names_another_thing(part, title, others):
                 return True
     return False
 
 
-def _names_another_thing(part: str, title: str) -> bool:
+def _names_another_thing(part: str, title: str, others: Iterable[str] = ()) -> bool:
     """The stretch names a thing that isn't the item: a phrase with none of the item's words in it ("the dishes"),
-    or one that shares a word with it but names something else (done_fit.names_something_else)."""
-    from thirties_core.done_fit import _is_its, _phrases, names_something_else
+    or one that shares a word with it and names another of the ``others`` (done_fit.named_instead)."""
+    from thirties_core.done_fit import _is_its, _phrases, named_instead
     if any(not any(_is_its(w, title) for w in p) for p in _phrases(DONE_WORDS_RE.sub(" ", part))):
         return True
-    return bool(names_something_else(part, title))
+    return bool(named_instead(part, title, others))
+
+
+def _other_items(db: Any, title: str) -> List[str]:
+    """The items besides this one the words could name: those planned around now, and the open ones Thirties
+    keeps from the lists."""
+    import json
+    from datetime import timedelta
+    from thirties_core.astronomy import get_current_time
+    from thirties_core.models import SpanStatus
+    out: List[str] = []
+    try:
+        pool = json.loads(db.get_sync_meta("open_pool") or "{}")
+        out += [str(v.get("title") or "") for v in pool.values() if isinstance(v, dict)]
+    except Exception:  # no database, or nothing kept yet
+        pass
+    try:
+        now = get_current_time()
+        out += [s.title for s in db.get_spans_between(now - timedelta(hours=18), now + timedelta(hours=18))
+                if s.status == SpanStatus.PLANNED]
+    except Exception:
+        pass
+    return [t for t in dict.fromkeys(out) if t and t != title]
 
 
 def _done_in(clause: str, title: str) -> bool:
@@ -443,9 +465,10 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     if kind == "complete" and not says_done(message, title) and not answers_the_question(message):
         return (f"not written: the user's words don't say {title} is finished, so it isn't ticked. Something "
                 "running, started or fine isn't done; it's done when they say it is.")
-    from thirties_core.done_fit import names_something_else
-    if kind == "complete" and names_something_else(message, title):  # "the glaze order is sent": not this item
-        return (f"not written: the user's words name something other than {title}, so it isn't ticked.")
+    from thirties_core.done_fit import named_instead
+    instead = named_instead(message, title, listed=_other_items(db, title)) if kind == "complete" else []
+    if instead:  # "the glaze order is sent" beside Send the glaze order: not this item
+        return f"not written: the user's words name {', '.join(instead)}, not {title}, so it isn't ticked."
     # --- a count is never a name (done_counts.py); an untick only on the user's ask (reopen.py) ---
     from thirties_core.done_counts import counted_only
     if kind == "complete" and counted_only(message, title):  # "check those two off" for Fire two test tiles

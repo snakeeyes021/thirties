@@ -3,10 +3,10 @@
 - **Said not to tick it.** "leave the soup bowls unticked", "don't tick the bowls", "bowls: not yet finished": the
   item's name with a done-ish word nearby is no done when the words around it say no. The tick doesn't happen, on
   the plan or in Joplin, however the model calls log_outcome.
-- **Said of something not on the plan.** "the glaze order is sent" while only a Glaze recipe test is planned: the
-  planned item shares a word, but the user's words name something else. It's never ticked in its place: the
-  list item that fits all the words is (Send the glaze order), or, with none, nothing is recorded and the model is
-  told to ask.
+- **Said of something not on the plan.** "the glaze order is sent" while a Glaze recipe test is planned and Send
+  the glaze order is listed: the planned item shares a word, but the user's words name the listed one. It's never
+  ticked in its place: the list item that fits all the words is. With no such item, which one they meant is the
+  model's to read: the done goes on, and its result says what else the words say.
 
 Through the real log_outcome path on the mock Joplin API, with the model calling it the careless way (by the
 planned item's id, its title, or a short form of it), and through a whole turn with a scripted model. Fixtures are
@@ -128,13 +128,14 @@ class SaidNotToTickTest(WrongDoneBase):
 
 
 class SomethingNotPlannedTest(WrongDoneBase):
-    def test_a_done_for_something_off_the_plan_never_ticks_the_nearest_title(self):
-        for message in ("the glaze order is sent", "glaze order done", "finally got the glaze order in"):
+    def test_words_for_something_off_the_plan_are_the_models_to_read(self):
+        for message in ("the glaze order is sent", "glaze order done"):
             for how in self.WAYS:
                 with self.subTest(message=message, way=how):
                     self.fresh()
                     out = self.say(message, self.way("Glaze recipe test", how))
-                    self.assert_not_ticked("Glaze recipe test", out)
+                    self.assertFalse(str(out).startswith(NOT_DONE), out)
+                    self.assertIn('"glaze order"', out)  # the result says what else the words say
 
     def test_the_list_item_that_fits_every_word_is_the_one_ticked(self):
         self.api.notes["n_errands"]["body"] += "- [ ] Send the glaze order\n"
@@ -170,14 +171,28 @@ class SomethingNotPlannedTest(WrongDoneBase):
         self.assert_not_ticked("Glaze the soup bowls", out)
 
 
+class _Kept:
+    """A database holding only the open items Thirties keeps from the lists."""
+
+    def __init__(self, *titles):
+        import json
+        self.pool = json.dumps({t.lower(): {"title": t} for t in titles})
+
+    def get_sync_meta(self, key):
+        return self.pool if key == "open_pool" else None
+
+
 class JoplinWriteTest(unittest.TestCase):
-    """The last check before Joplin: a tick for an item the words don't fit, or were told not to tick, isn't
+    """The last check before Joplin: a tick for another item the words name, or one they say not to tick, isn't
     written."""
 
-    def test_a_tick_for_something_else_or_told_not_to_is_refused(self):
+    def test_a_tick_for_another_item_or_told_not_to_is_refused(self):
         from thirties_core.write_guard import refused
-        for message, title in (("the glaze order is sent", "Glaze recipe test"),
-                               ("leave the soup bowls unticked", "Glaze the soup bowls"),
+        self.assertTrue(refused({"op": "complete", "title": "Glaze recipe test"}, "[app] the glaze order is sent",
+                                _Kept("Send the glaze order")))
+        self.assertEqual(refused({"op": "complete", "title": "Glaze recipe test"}, "[app] the glaze order is sent",
+                                 None), "")  # no other item named: the model's reading stands
+        for message, title in (("leave the soup bowls unticked", "Glaze the soup bowls"),
                                ("don't tick the soup bowls yet", "Glaze the soup bowls")):
             self.assertTrue(refused({"op": "complete", "title": title}, f"[app] {message}", None), message)
         for message, title in (("glaze recipe test is done", "Glaze recipe test"),
@@ -231,6 +246,7 @@ class WholeTurnTest(WrongDoneBase):
         self.assertNotIn("[x]", self.body("n_today") + self.body("n_errands"), results)
 
     def test_something_off_the_plan_in_a_whole_turn(self):
+        self.t.execute("add_event", {"title": "Send the glaze order", "start": "1:10 PM", "duration": "10 min"})
         m, results = self.turn("the glaze order is sent", "Glaze recipe test")
         self.assertEqual(self.status(m, "Glaze recipe test"), SpanStatus.PLANNED, results)
         self.assertNotIn("[x]", self.body("n_today") + self.body("n_errands"), results)

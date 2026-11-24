@@ -170,25 +170,30 @@ class ContainerNounTest(TrueDoneBase):
         out = self.say("clay supplier's paid, and the firing paperwork's lodged", "Pay the clay supplier")
         self.assert_ticked("Pay the clay supplier", out)
 
-    def test_an_object_noun_still_names_something_else(self):
-        for message in ("the glaze order is sent", "glaze order done", "the kiln order is lodged"):
-            for title in ("Glaze recipe test", "Lodge kiln firing permit"):
-                with self.subTest(message=message, title=title):
-                    self.fresh()
-                    self.assert_not_ticked(title, self.say(message, title))
+    def test_an_object_noun_goes_on_with_a_note(self):
+        for message, title, said in (("the glaze order is sent", "Glaze recipe test", "glaze order"),
+                                     ("the kiln order is lodged", "Lodge kiln firing permit", "kiln order")):
+            with self.subTest(message=message, title=title):
+                self.fresh()
+                out = self.say(message, title)
+                self.assert_ticked(title, out)
+                self.assertIn(f'"{said}"', out)  # no other item named: the model's reading stands
 
-    def test_a_container_noun_with_another_items_verb_does_not_tick(self):
+    def test_a_container_noun_with_another_items_verb_goes_on_with_a_note(self):
         for message in ("the kiln paperwork is paid", "the kiln forms are done"):
             with self.subTest(message=message):
                 self.fresh()
-                self.assert_not_ticked("Lodge kiln firing permit", self.say(message, "Lodge kiln firing permit"))
+                out = self.say(message, "Lodge kiln firing permit")
+                self.assert_ticked("Lodge kiln firing permit", out)
+                self.assertIn("also says", out)
 
-    def test_words_another_item_shares_keep_the_container_noun_blocking(self):
+    def test_words_two_items_fit_alike_are_the_models_to_read(self):
         self.api.notes["n_errands"]["body"] += "- [ ] Lodge kiln venting report\n"
         self.services.tasks.append(item("t_claim", "Lodge kiln venting report"))
         self.services.tasks[-1].list_role = "list"
         out = self.say("the kiln paperwork's lodged", "Lodge kiln firing permit")
-        self.assert_not_ticked("Lodge kiln firing permit", out)
+        self.assert_ticked("Lodge kiln firing permit", out)
+        self.assertIn('"kiln paperwork', out)  # fits the other no better: said, for the model to ask if unsure
 
 
 class FitWordsTest(unittest.TestCase):
@@ -206,7 +211,8 @@ class FitWordsTest(unittest.TestCase):
         from thirties_core.write_guard import refused
         self.assertEqual(refused({"op": "complete", "title": "Lodge kiln firing permit"},
                                  "[app] clay supplier's paid, and the firing paperwork's lodged", None), "")
-        self.assertTrue(refused({"op": "complete", "title": "Glaze recipe test"}, "[app] the glaze order is sent", None))
+        self.assertEqual(refused({"op": "complete", "title": "Glaze recipe test"}, "[app] the glaze order is sent",
+                                 None), "")  # no other item named: the model's reading stands
 
 
 if __name__ == "__main__":

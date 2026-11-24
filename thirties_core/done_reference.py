@@ -32,9 +32,10 @@ goes through when the user's words point at the item:
   hour: a done is often said a little early); before any has begun, the next one. A copy named by its start time
   ("the 8am walk") is that copy.
 
-Whatever points to it, words that share a word with the item but name something else ("the glaze order is sent"
-beside a planned Glaze recipe test) never mark it in that thing's place (done_fit.py): the note names the list
-item that fits all the words, or says to ask.
+Whatever points to it, words that share a word with the item but name another planned or listed item ("the glaze
+order is sent" beside Glaze recipe test and a listed Send the glaze order) never mark it in that item's place
+(done_fit.named_instead): the note names the list item that fits all the words, or says to ask. Words that only may
+name something else are the model's to read: the done goes on, and its result says what else they say.
 
 Anything else is refused with a note to ask which item they mean. The app's own controls (a tick in the Agenda)
 and the background (nobody talking) are never held here.
@@ -354,6 +355,22 @@ def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[
     return not any(_hits(which, t) for t in titles + shown_open)  # a word of the plan's items, or of those shown
 
 
+def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides: Iterable[str] = ()) -> str:
+    """The line a done's result carries when the user's words may name something besides this item without
+    naming another item (done_fit.also_said), so the model can ask or put it right; "" otherwise, or when nobody
+    is talking. Read as ``check`` reads them."""
+    message = getattr(pt, "user_message", None)
+    ids = [i for i in ids if i]
+    if getattr(pt, "by_hand", False) or not message or any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
+        return ""
+    from thirties_core.done_counts import without_counts
+    from thirties_core.done_fit import also_said, names_of
+    left_out = set(besides)
+    others = [t for t in _titles(pt) if t not in left_out and t != title]
+    names = names_of(pt, title, ids)
+    return also_said(without_counts(message), names, others, _listed_items(pt, names))
+
+
 def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
           besides: Iterable[str] = ()) -> Tuple[Optional[str], Optional[str]]:
     """(why the done can't go ahead, the user's words about the item). The words are the message with a pointer
@@ -377,13 +394,14 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     from thirties_core.done_counts import without_counts
     naming = without_counts(message)  # which item the words name; pointers, counts and times read them as said
     # --- end a count ---
-    # --- words naming something else that shares a word with it: never this item in its place (done_fit.py) ---
-    from thirties_core.done_fit import names_of, names_something_else, refusal as named_else
+    # --- words naming another item that shares a word with it: never this item in its place (done_fit.py) ---
+    from thirties_core.done_fit import named_instead, names_of, names_something_else, refusal as named_else
     names = names_of(pt, title, ids)
-    elsewhere = names_something_else(naming, names, others, _listed_items(pt, names))
-    if elsewhere:
-        return named_else(pt, title, elsewhere), message
-    # --- end something else ---
+    listed = _listed_items(pt, names)
+    instead = named_instead(naming, names, others, listed)
+    if instead:
+        return named_else(pt, title, names_something_else(naming, names, others, listed), instead), message
+    # --- end another item ---
     said, shown = getattr(pt, "prior_exchange", None) or ("", "")
     # --- a whole routine said done: every step of it, in every part; or a whole answer ("both") to a question
     # about groups of steps, each of which the reply then names (whole_routine.py) ---

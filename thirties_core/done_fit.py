@@ -4,15 +4,21 @@ People name a finished thing by a short phrase ("the glaze order is sent", "bowl
 (done_reference.py for the plan, write_guard.py for Joplin) read that phrase loosely to find the item; this reads it
 strictly the other way round: every naming word in the phrase has to be one of the item's words (in any of its
 forms, or an everyday word for it: done_words.kin). A phrase that shares a word with the item but carries a naming
-word the item doesn't have ("glaze order" beside Glaze recipe test) names something else, so the item isn't ticked
-in its place.
+word the item doesn't have ("glaze order" beside Glaze recipe test) may name something else. Whether it does is
+the model's reading: the done goes through with a note saying what else the words say, so the model can ask or put
+it right. Only when those words name another planned or listed item is the done refused here, since ticking this
+one would tick an item other than the one named.
 
 - **The phrase**: a run of words next to each other in one clause that names something; small words, done words,
   times, words for how or when ("finally", "this morning") and the like end it.
 - **Fits**: some phrase with a word of the item's in it is made only of the item's words. Then the words are about
   this item, as the other checks read them.
-- **Names something else**: phrases share the item's words, but none of them fits. Then the item isn't what was
-  done; ``elsewhere`` finds the one open list item that fits all the words, if any, for the model to mark instead.
+- **Names something else**: phrases share the item's words, but none of them fits (``names_something_else``). The
+  done goes through, and the result says the words also say that phrase (``also_said``).
+- **Names another item**: such a phrase is all another planned or listed item's words ("glaze order" beside Send
+  the glaze order), or carries that item's head noun ("the teapot lid" beside Sand the lid) (``named_instead``).
+  Then the done is refused; ``elsewhere`` finds the one open list item that fits all the words, if any, for the model
+  to mark instead.
 - **A word for which kind**: "the ash paddle is varnished" for Varnish the paddle. Extra words placed ahead of the
   item's own, in a phrase whose last word is the item's, only tell its kind or material; they count against it
   only when another planned or listed item has them. A phrase whose last word the item lacks ("glaze order" beside
@@ -143,10 +149,11 @@ def reading(message: Optional[str], names: Sequence[str],
 
 def names_something_else(message: Optional[str], names: Union[str, Sequence[str]],
                          others: Iterable[str] = (), listed: Iterable[str] = ()) -> List[str]:
-    """The words of the user's that name something other than this item: phrases share its words but none is
+    """The words of the user's that may name something other than this item: phrases share its words but none is
     made only of them ("glaze order" for Glaze recipe test). [] when a phrase fits it, or none touches it, or one
     fits it but for a container noun (``fits_but_for_a_container``). ``listed``: the open items on the user's
-    lists, besides the planned ``others``."""
+    lists, besides the planned ``others``. Spotted only: whether the words mean another thing is the model's call,
+    unless they name another item (``named_instead``)."""
     if not message:
         return []
     from thirties_core.said_for_it import without_ask_words  # "put the bins down as done" names the bins
@@ -161,6 +168,34 @@ def names_something_else(message: Optional[str], names: Union[str, Sequence[str]
     if only_said_which_kind(message, names, others + [t for t in listed if t not in names]):
         return []
     return [" ".join(p) for p in touching]
+
+
+def named_instead(message: Optional[str], names: Union[str, Sequence[str]],
+                  others: Iterable[str] = (), listed: Iterable[str] = ()) -> List[str]:
+    """The other planned or listed items the user's words name where they share a word with this item: a phrase
+    that may name something else (``names_something_else``) is all of that item's words ("glaze order" for Send
+    the glaze order, beside Glaze recipe test), or one of its words this item lacks is that item's head noun ("the
+    teapot lid" beside Sand the lid). Ticking this item then would tick one other than the one named."""
+    names = [names] if isinstance(names, str) else [n for n in names if n]
+    others, listed = list(others), list(listed)
+    pool = list(dict.fromkeys(o for o in others + listed if o and o not in names))
+    found: List[str] = []
+    for phrase in names_something_else(message, names, others, listed):
+        extra = [w for w in phrase.split() if not any(_is_its(w, n) for n in names)]
+        found += [o for o in pool if o not in found and (fits_all(phrase, o) or any(
+            _head(o) and _is_its(w, _head(o)) for w in extra))]
+    return found
+
+
+def also_said(message: Optional[str], names: Union[str, Sequence[str]],
+              others: Iterable[str] = (), listed: Iterable[str] = ()) -> str:
+    """One plain line for the model when the words may name something besides this item but name no other item:
+    what else they say, so it can ask or put it right. "" when there's nothing to say."""
+    phrases = names_something_else(message, names, others, listed)
+    if not phrases:
+        return ""
+    said = ", ".join(f'"{p}"' for p in phrases)
+    return f"(The user's message also says {said}: if they meant another item, ask which, or correct it.)"
 
 
 # --- a word for which kind: "the ash paddle is varnished" names Varnish the paddle ---
@@ -309,16 +344,15 @@ def elsewhere(assistant: Any, phrases: Iterable[str]) -> Optional[Any]:
     return found[0] if len(found) == 1 else None
 
 
-def refusal(pt: Any, title: str, named: List[str]) -> str:
-    """Why a done for this item doesn't go through when the user's words name something else."""
-    said = "; ".join(f'"{p}"' for p in named)
-    why = (f"The user's words ({said}) name something other than {title}, so it isn't marked done. ")
-    task = elsewhere(getattr(pt, "assistant", None), named)
+def refusal(pt: Any, title: str, phrases: List[str], items: List[str]) -> str:
+    """Why a done for this item doesn't go through when the user's words name another item."""
+    said = "; ".join(f'"{p}"' for p in phrases)
+    why = (f"The user's words ({said}) name {', '.join(items)}, not {title}, so {title} isn't marked done. ")
+    task = elsewhere(getattr(pt, "assistant", None), phrases)
     if task is not None:
         return why + f"{task.title} on their lists fits what they said: mark that one, with event {task.id}."
-    return why + ("No single item on the plan or their lists fits all their words: ask which item they finished, "
-                  "in one short question, and record nothing until they say.")
+    return why + "If they finished that one, mark it; if it isn't clear which, ask in one short question."
 
 
-__all__ = ["CONTAINER_NOUNS", "names_something_else", "names_of", "reading", "fits_all",
-           "fits_but_for_a_container", "only_said_which_kind", "elsewhere", "refusal"]
+__all__ = ["CONTAINER_NOUNS", "names_something_else", "named_instead", "also_said", "names_of", "reading",
+           "fits_all", "fits_but_for_a_container", "only_said_which_kind", "elsewhere", "refusal"]

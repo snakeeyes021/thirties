@@ -329,7 +329,7 @@ def tick_asked(message: Optional[str], title: str, others: Iterable[str] = ()) -
         s = without_ask_words(s)
         if any(_about(s, o, [x for x in others if x != o] + [title]) for o in others) and not _about(s, title, others):
             continue  # a tick asked for another item
-        if not _names_another_thing(s, title):
+        if not _names_another_thing(s, title, others):
             return True
     return False
 
