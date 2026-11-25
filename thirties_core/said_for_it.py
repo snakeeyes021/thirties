@@ -180,10 +180,10 @@ def asked_only(message: Optional[str], title: str, others: Iterable[str] = ()) -
     if not naming or not all(is_asking(s) for s in naming):
         return False
     # a statement beside the question that says it happened, pointing back ("why isn't it ticked? I did it at
-    # 12:40"), is the user's done
+    # 12:40"), is the user's done, and so is one the question goes on to tell ("why isn't it ticked, I did it")
     from thirties_core.started import FINISHED_RE
     from thirties_core.write_guard import _done_in
-    return not any(not is_asking(s) and (_done_in(s, title) or FINISHED_RE.search(s))
+    return not any(((not is_asking(s) and (_done_in(s, title) or FINISHED_RE.search(s))) or told_done(s, title))
                    and not any(_named(s, o, [x for x in others if x != o] + [title]) for o in others)
                    for s in sentences)
 
@@ -342,7 +342,9 @@ def told_done(message: Optional[str], title: str = "", yes: bool = False) -> boo
     """Whether anything the user's words tell this turn is a done: a done word (the everyday ones count: "squared
     away", "wrapped it up"), a past or a report that something happened, or an ask for a tick; with ``yes``, a
     plain yes too. A question only asks, so a done word in it says nothing, even in one asking for a change ("can I
-    get the bins done by 4?"); nor do a done denied in its clause ("the glaze test isn't done"), what's only getting
+    get the bins done by 4?"); a sentence that opens as a question and goes on to tell ("why isn't it ticked, I
+    did it at 2:48") tells in the clauses after it. Nor do a done denied in its clause ("the glaze test isn't done")
+    say one, while the app's own status said beside a done ("not ticked") denies nothing; nor what's only getting
     done ("getting the fence fixed"), what happened to the user ("knocked out by a headache"), what should or
     could have happened, or what's taken back ("or so I thought"). Which item the done is for is the model's
     reading: ``title`` only lets the item's own verb in the past ("lodged" for Lodge the permit) and a hand-in ("the
@@ -351,20 +353,36 @@ def told_done(message: Optional[str], title: str = "", yes: bool = False) -> boo
         return False
     from thirties_core.done_exceptions import _DENIED_RE
     from thirties_core.plain_done import says_it_happened
-    from thirties_core.started import without_caused
+    from thirties_core.started import _without_record_words, without_caused
     from thirties_core.write_guard import _CLAUSE_RE, _MISTAKEN_RE, _UNREAL_RE, REPORTED_RE, YES_RE, _done_in
-    told = [s for s in _SENTENCE_RE.findall(without_caused(message)) if s.strip() and not is_asking(s)]
-    for s in told:
-        if asked_outright(s) or asks_for_change(s) or _MISTAKEN_RE.search(s):
+    for s in _SENTENCE_RE.findall(without_caused(_without_record_words(message))):
+        if not s.strip() or _MISTAKEN_RE.search(s):
             continue
-        if yes and YES_RE.match(s):
+        clauses = [c for c in _CLAUSE_RE.split(_DONE_TO_THEM_RE.sub(" ", s)) if c and c.strip()]
+        if is_asking(s) or asked_outright(s) or asks_for_change(s):
+            clauses = [c for c in clauses[1:] if not _opens_a_question(c)]  # what it goes on to tell
+        elif yes and YES_RE.match(s):
             return True
-        for c in _CLAUSE_RE.split(_DONE_TO_THEM_RE.sub(" ", s)):
-            if not c or not c.strip() or _UNREAL_RE.search(c) or (_DENIED_RE.search(c) and not _EXCEPT_RE.search(c)):
+        for c in clauses:
+            if _UNREAL_RE.search(c) or (_DENIED_RE.search(c) and not _EXCEPT_RE.search(c)):
                 continue
             if says_it_happened(c) or REPORTED_RE.search(c) or (title and _done_in(c, title)):
                 return True
     return asks_for_a_tick(message)
+
+
+# a clause that opens a question of its own; "when" and "where" open a clause about the done as often ("when I
+# finished it")
+_CLAUSE_ASKS_RE = re.compile(
+    r"^(?:what|what'?s|which|why|how come|how|who|whose|is|isn'?t|are|aren'?t|was|wasn'?t|were|"
+    r"did(?!\s+(?:it|that|them|those|this)\b)|didn'?t|do|don'?t|does|doesn'?t|has|hasn'?t|have|haven'?t|can|can'?t|"
+    r"could|couldn'?t|will|won'?t|would|wouldn'?t|should|shouldn'?t|shall)\b", re.IGNORECASE)
+
+
+def _opens_a_question(clause: str) -> bool:
+    """The clause opens a question of its own ("or did I finish it", "what about the log")."""
+    c = re.sub(r"^\W*(?:and|but|or|so|then|while)\b", "", clause or "", flags=re.IGNORECASE).strip()
+    return bool(_CLAUSE_ASKS_RE.match(c))
 
 
 _TICK_WORD_RE = re.compile(r"\b(?:tick|mark|check|cross)\w*\b", re.IGNORECASE)

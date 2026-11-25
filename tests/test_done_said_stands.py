@@ -243,6 +243,20 @@ class TestABareDoneAnswersTheQuestionAsked(StudioBase):
         self.assert_held(LOG, self.say("finished it!", LOG, f"Which did you finish: {LOG} or {BATTS}?"))
 
 
+class TestADoneToldBesideTheAppsStatus(StudioBase):
+    """A done told in the clauses after an opening question, or beside the app's own status for the item, is a
+    done."""
+
+    def test_after_an_opening_question(self):
+        out = self.say("What a slog; the log's filled in now", LOG)
+        self.assert_went(LOG, out)
+        self.assert_held(GLAZE, self.say("why is it still open?", GLAZE, f"{GLAZE} is still open."))
+
+    def test_beside_the_apps_status(self):
+        out = self.say("Kiln log, per the app, not ticked: completed regardless", LOG)
+        self.assert_went(LOG, out)
+
+
 class TestAYesTicksTheListToo(unittest.TestCase):
     """A list item ticked outside the plan (a leftover from an earlier day) is judged on the words alone: a plain
     yes, answering the question before it, is a done there too; a no is none."""
