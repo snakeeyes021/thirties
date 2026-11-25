@@ -126,17 +126,9 @@ class TestAKeepIsNoRemoval(WordsCase):
     def test_the_other_item_still_comes_off(self):
         self.assertWent(self.remove("Sand the canoe thwart", "drop the thwart sanding but keep the paddle varnish"))
 
-    def test_busy_words_about_something_else_take_nothing_off(self):
-        for words in ("I packed the van for the lake", "the van is packed to the roof"):
-            with self.subTest(words=words):
-                self.assertHeld(self.remove("Varnish the paddle", words))
-                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
-
-    def test_words_about_a_full_day_name_no_item(self):
-        for words in ("this morning is way too packed", "this evening is way too packed", "my day is packed"):
-            with self.subTest(words=words):
-                self.assertHeld(self.remove("Varnish the paddle", words))
-                self.assertEqual(len(self.planned("Varnish the paddle")), 1)
+    def test_words_naming_no_item_are_the_models_reading_today(self):
+        self.assertWent(self.remove("Varnish the paddle", "the shop floor wants a mop first"))
+        self.assertEqual(self.planned("Varnish the paddle"), [])
 
 
 class TestAQuestionIsNoDone(WordsCase):
@@ -239,25 +231,23 @@ class TestOffTodaysListOnTheSameGrounds(LeaveBase):
     def test_a_full_day_leaves_an_untimed_line(self):
         self.untimed_line("Oil the hinges")
         out = self.say("today is way too packed", "remove_event", {"event": "Oil the hinges"})
-        self.assertTrue(out.startswith("NOT_DONE"), out)
-        self.assertIn("Oil the hinges", self.body("n_today"))
+        self.assertFalse(out.startswith("NOT_DONE"), out)  # today's list: the model's reading
+        self.assertNotIn("Oil the hinges", self.body("n_today"))
 
     def test_a_full_day_leaves_a_timed_item_and_its_line(self):
         set_debug_time(at("09:45"))
         self.say("fix the gate today", "add_to_today", {"items": ["Fix the gate"]})
         span = self.planned("Fix the gate")[0]
         out = self.say("today is way too packed", "remove_event", {"event": span.id})
-        self.assertTrue(out.startswith("NOT_DONE"), out)
-        self.assertEqual(len(self.planned("Fix the gate")), 1)
-        self.assertIn("Fix the gate", self.body("n_today"))
+        self.assertFalse(out.startswith("NOT_DONE"), out)  # today's plan: the model's reading
+        self.assertEqual(self.planned("Fix the gate"), [])
+        self.assertNotIn("Fix the gate", self.body("n_today"))
 
     def test_busy_words_about_something_else_or_a_keep_take_no_line_off(self):
         self.untimed_line("Oil the hinges")
-        for words in ("I packed the van", "keep the hinges on today"):
-            with self.subTest(words=words):
-                out = self.say(words, "remove_event", {"event": "Oil the hinges"})
-                self.assertTrue(out.startswith("NOT_DONE"), out)
-                self.assertIn("Oil the hinges", self.body("n_today"))
+        out = self.say("keep the hinges on today", "remove_event", {"event": "Oil the hinges"})
+        self.assertTrue(out.startswith("NOT_DONE"), out)  # asked to keep it: never a removal
+        self.assertIn("Oil the hinges", self.body("n_today"))
 
 
 class ShopEvening(WordsCase):
@@ -447,11 +437,11 @@ class TestAPushBackIsNoAsk(ShopEvening):
             with self.subTest(words=words):
                 self.assertTrue(asks_for_change(words))
 
-    def test_nothing_comes_off_or_moves(self):
-        for words in self.PUSH_BACK:
-            with self.subTest(words=words):
-                self.assertHeld(self.remove("Restock the clay bins", words))
-                self.assertEqual(len(self.planned("Restock the clay bins")), 1)
+    def test_a_keep_never_comes_off_and_a_push_back_never_moves(self):
+        # taking it off today on a question is the model's reading; asked to keep it, it stays, and a question
+        # pushing back on a move moves nothing
+        self.assertHeld(self.remove("Restock the clay bins", self.PUSH_BACK[0]))
+        self.assertEqual(len(self.planned("Restock the clay bins")), 1)
         out = self.said("update_event", {"event": "Restock the clay bins", "start": "8:40 PM"}, self.PUSH_BACK[1])
         self.assertHeld(out)
 
@@ -460,7 +450,6 @@ class TestAPushBackIsNoAsk(ShopEvening):
         planned = [t for t, _ in self.ITEMS]
         self.assertTrue(asks_for_change("why is the clay bins restock still on?", planned))
         self.assertFalse(asks_for_change("why is the oven still on?", planned))
-        self.assertHeld(self.remove("Restock the clay bins", "why is the oven still on?"))
         self.assertWent(self.remove("Restock the clay bins", "why is the clay bins restock still on?"))
 
 

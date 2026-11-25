@@ -1621,11 +1621,13 @@ class PlanTools:
         from thirties_core.change_asks import removal_asked  # this turn or just before (change_asks.py)
         if (not self.by_hand and not span.is_envelope and outer_tool() == "remove_event"
                 and self.user_message is not None
+                and not self.is_current(self.day_plan)  # today: the model's reading stands (off_today.py)
                 and not removal_asked(self)
                 and not mentions(self.user_message, self._title(span),
                                  [self._title(s) for s in self.day_plan.spans if s.id != span.id])):
-            # 10-28: an item vanished from the plan that nobody asked to take off. Taking something off is the
-            # user's call: they say so, or name it
+            # 10-28: an item vanished from the plan that nobody asked to take off. Taking something off a later
+            # day is the user's call: they say so, or name it. Today's plan and list can be put back, so which
+            # items the user's words mean (a reply to a list just shown) is the model's reading there
             raise ToolError(f"The user's message doesn't name {self._title(span)}, so it stays on the plan. Remove "
                             "something only when the user asks for that item; ask them if it isn't clear.")
         # --- a removal needs the user's words for that item, like a done (change_asks.py) ---

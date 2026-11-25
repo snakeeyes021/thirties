@@ -10,8 +10,8 @@ from tests.test_conversation import ConversationTestCase, reply
 from thirties_core.own_up import handled, plain_line
 
 OLD_WORDS = ("didn't go through", "recorded yet")
-# names the fern and asks for nothing to come off: the fern may go (named), Bake bread is refused (nobody asked)
-ASKED = "repotting the fern can wait till the weekend"
+# the fern may go (named); Bake bread is refused (the user asked to keep it)
+ASKED = "repotting the fern can wait till the weekend, but keep the bread baking"
 
 
 class TestPlainWords(unittest.TestCase):

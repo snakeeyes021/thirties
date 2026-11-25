@@ -40,12 +40,9 @@ class TestARestoreNeverRemoves(WordsCase):
 class TestAFullDayNamesNoItem(WordsCase):
     """Words about a full day let any item in that part of the day come off, and matched ordinary talk."""
 
-    def test_full_day_words_alone_take_nothing_off(self):
-        for words in ("this evening is way too packed", "today I had a lot of fun", "the evening is not busy",
-                      "the varnish is too thick, I'll thin it out", "tonight is overloaded"):
-            with self.subTest(words=words):
-                self.assertHeld(self.remove("Sand the canoe thwart", words))
-                self.assertEqual(len(self.planned("Sand the canoe thwart")), 1)
+    def test_full_day_words_alone_are_the_models_reading_today(self):
+        self.assertWent(self.remove("Sand the canoe thwart", "tonight is overloaded"))
+        self.assertEqual(self.planned("Sand the canoe thwart"), [])
 
     def test_a_full_day_with_the_item_named_or_a_removal_ask_goes(self):
         self.assertWent(self.remove("Sand the canoe thwart", "tonight is way too packed, the thwart sanding can go"))

@@ -127,11 +127,38 @@ class RemoveEventTest(OffBase):
         self.assertNotIn("Call the bank", self.body("n_today"))
         self.assert_guarded()
 
-    def test_nothing_asked_and_nothing_named_still_stays(self):
-        out = self.said("the rain gauge says 2 inches", "remove_event", {"event": self.planned(BEANS)[0].id})
+    def test_items_the_words_name_none_of_still_come_off_today(self):
+        # a reply to a list just shown can name no item: which ones it means is the model's
+        # reading, and the answer says what came off
+        for title in (BEANS, TINS):
+            out = self.said("the whole lot after the compost: nope, wrong day for it", "remove_event",
+                            {"event": self.planned(title)[0].id})
+            self.assertFalse(out.startswith(NOT_DONE), out)
+            self.assertIn(f"Removed {title}", out)
+            self.assertIn(f"{title} was also on today's list: taken off", out)
+            self.assertNotIn(title, self.body("n_today"))
+        self.assertTrue(self.planned(COMPOST))
+        self.assert_guarded()
+
+    def test_a_message_of_only_questions_still_takes_them_off_today(self):
+        out = self.said("beans, in this weather? and the tins as well?", "remove_event",
+                        {"event": self.planned(BEANS)[0].id})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.planned(BEANS), [])
+        self.assertNotIn(BEANS, self.body("n_today"))
+        self.assert_guarded()
+
+    def test_a_later_day_still_needs_the_users_words_for_it(self):
+        from datetime import timedelta
+        out = self.say("put the bean rows on tomorrow too", "add_event",
+                       {"title": BEANS, "start": "9:40 AM", "duration": "30 min", "day": "tomorrow",
+                        "because": "put the bean rows on tomorrow too"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        later = self.t.plan_for(DAY + timedelta(days=1))
+        span = next(s for s in later.spans if s.title == BEANS)
+        out = self.said("the rain gauge says 2 inches", "remove_event", {"event": span.id, "day": "tomorrow"})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertTrue(self.planned(BEANS))
-        self.assertIn(f"- [ ] {BEANS}", self.body("n_today"))
+        self.assertTrue(any(s.title == BEANS for s in self.t.plan_for(DAY + timedelta(days=1)).spans))
 
     def test_a_refused_write_says_its_real_reason(self):
         self.api.notes["n_today"]["body"] += "- [ ] Rinse the watering cans\n"

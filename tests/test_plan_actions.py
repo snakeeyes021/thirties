@@ -73,10 +73,10 @@ class TestClearRequestsWork(ActionsCase):
         self.assertFalse([n for n in self.api.notes.values()
                           if str(n.get("title", "")).startswith(("Dropped", "Done"))])
 
-    def test_nobody_asked_for_a_removal_it_stays(self):
+    def test_on_today_the_models_reading_stands(self):
         out = self.say("remove_event", {"event": "Wash the van"}, "the cactus looks thirsty")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Wash the van")), 1)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Removed Wash the van", out)
 
 
 class TestAStaleItemNamedByItsTime(ActionsCase):

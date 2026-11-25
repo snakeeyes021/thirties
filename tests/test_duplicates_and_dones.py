@@ -163,11 +163,13 @@ class TestTakingACopyOff(CopiesCase):
         self.assertEqual(len(self.copies(GLAZE)), 1)
         self.assertEqual(len(self.copies(GLAZE_CALL)), 1)
 
-    def test_the_item_without_copies_isnt_taken_by_it(self):
+    def test_the_item_without_copies_is_the_models_reading(self):
+        # "on there twice" is a quick yes only for the item with copies; any other item the model takes off today
+        # is its reading, and stands (the answer says what came off)
         call = self.copies(GLAZE_CALL)[0]
         out = self.say("glaze run is on there twice, just 10 to 12", "remove_event", {"event": call.id})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.copies(GLAZE_CALL)), 1)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"Removed {GLAZE_CALL}", out)
 
     def test_a_copy_inside_another_copys_time_comes_off(self):
         self.t.execute("add_event", {"title": GLAZE, "start": "11:00 AM", "duration": "30 minutes", "again": True})
@@ -176,11 +178,13 @@ class TestTakingACopyOff(CopiesCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(len(self.copies(GLAZE)), 2)
 
-    def test_a_second_session_apart_isnt_taken_off_unasked(self):
+    def test_a_second_session_apart_is_never_folded_by_itself(self):
+        # only the model's own removal takes a second session off today; nothing folds it as a duplicate
         later = max(self.copies(GLAZE), key=lambda s: s.start_dt)
         out = self.say("move the kiln tech call to 4:30", "remove_event", {"event": later.id})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.copies(GLAZE)), 2)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertNotIn("its other copy stays", out)
+        self.assertEqual(len(self.copies(GLAZE)), 1)
 
 
 class TestStartedByItsListId(ConversationTestCase):

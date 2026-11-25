@@ -383,9 +383,9 @@ def drop_meant(pt: "PlanTools", title: str) -> bool:
 
 def remove_listed(pt: "PlanTools", event: Any, today_list: Any = None) -> Optional[str]:
     """remove_event for an item on today's list with no time: off the list, as the model chose (``today_list``,
-    off by default). Which line the user meant is the model's reading; what holds is the floor: never one they
-    asked to keep, and never one when nothing they said asks for anything to come off or names it. None when the
-    event isn't such an item (the caller says it isn't on the schedule)."""
+    off by default). Which line the user meant is the model's reading, even when their words name none of them
+    (a reply to a list just shown): a line on today's list can be put back. What holds is the floor: never one
+    they asked to keep. None when the event isn't such an item (the caller says it isn't on the schedule)."""
     from thirties_core.plan_tools import ToolError
     name = str(event or "").strip()
     a = _assistant(pt)
@@ -399,16 +399,10 @@ def remove_listed(pt: "PlanTools", event: Any, today_list: Any = None) -> Option
         from thirties_core.if_time import act
         return act(a, line, "done")
     # asked for: which line is the model's reading; never one the user asked to keep (change_asks.py)
-    from thirties_core.change_asks import kept, removal_asked
+    from thirties_core.change_asks import kept
     keep = kept(pt, line, [task.id] if task is not None else [])
     if keep:
         raise ToolError(keep)
-    message = getattr(pt, "user_message", None)
-    if not getattr(pt, "by_hand", False) and message is not None and not removal_asked(pt):
-        from thirties_core.item_facts import mentions
-        if not mentions(message, line, [s.title for s in pt.day_plan.spans]):
-            raise ToolError(f"The user's message doesn't name {line} or ask for anything to come off, so it stays "
-                            "on today's list. Take something off only when they ask; ask them if it isn't clear.")
     choice = list_choice(today_list)
     if choice == "keep":
         return f"{line} has no time on the schedule; it stays on today's list."

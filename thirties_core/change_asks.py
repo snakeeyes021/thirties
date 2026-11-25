@@ -17,9 +17,10 @@ until the user was told to spell the items out. So now:
   about it ("why is the varnish coat still there, not happening"). Whether that means taking it off is the model's
   reading; the tool's answer carries a note when the words read more like a complaint about its place, so the
   model can put it back if that's what was meant (``removal_note``).
-- **No basis**: nothing the user said this turn or just before asks for anything to come off, or names or points
-  to the item. It stays, whatever they say about how full the day is ("tonight is way too packed" names no item):
-  which item to offer up is then a question for the user.
+- **No basis**, on a later day's plan: nothing the user said this turn or just before asks for anything to come
+  off, or names or points to the item. It stays, whatever they say about how full the day is ("tonight is way too
+  packed" names no item): which item to offer up is then a question for the user. Today's plan and list can be
+  put back, so there the model's reading stands, and the answer says what came off.
 
 Taking something off the plan never ticks it or files it as dropped by itself: the user's lists have their own
 guard (write_guard.py; off_today.leave_list). The app's own controls and the background (nobody talking) are never
@@ -177,7 +178,8 @@ def _kept_why(title: str) -> str:
 def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     """Why this item can't come off the plan on the user's words this turn, or None. Only the user's ask to keep it
     or put it back holds it here; whether their words (a question, a grumble, a "not yet") take it off is the
-    model's reading. A removal with no basis at all is held before this (plan_tools.remove_event)."""
+    model's reading. A removal with no basis at all from a later day is held before this
+    (plan_tools.remove_event)."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return None

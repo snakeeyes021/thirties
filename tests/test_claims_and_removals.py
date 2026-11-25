@@ -77,8 +77,8 @@ class TestRemovalNeedsTheUsersWords(PlanCase):
         self.assertIn("Note:", out)
         self.assertEqual(len(self.planned("Oil change")), 0)
         out = self.remove("Repot the fern", "how come the oil change got shoved to tonight?? not what i asked")
-        self.assertTrue(out.startswith(NOT_DONE), out)  # words about another item: no basis for this one
-        self.assertEqual(len(self.planned("Repot the fern")), 1)
+        self.assertFalse(out.startswith(NOT_DONE), out)  # today: which item is the model's reading
+        self.assertIn("Removed Repot the fern", out)
 
     def test_asked_for_a_removal_which_item_is_the_models_reading(self):
         # which items a removal the user asked for means is the model's to read (change_asks.py)
@@ -87,10 +87,10 @@ class TestRemovalNeedsTheUsersWords(PlanCase):
         self.assertFalse(self.remove("Bake bread", "drop the fern please").startswith(NOT_DONE))
         self.assertEqual(self.planned("Bake bread"), [])
 
-    def test_nobody_asked_for_a_removal_it_stays(self):
+    def test_on_today_the_models_reading_stands(self):
         out = self.remove("Bake bread", "the fern looks happier already")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Bake bread")), 1)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Removed Bake bread", out)
 
     def test_asked_for_by_name_or_pointed_back_to_it_goes(self):
         self.assertFalse(self.remove("Oil change", "take the oil change off, it's done next week").startswith(NOT_DONE))

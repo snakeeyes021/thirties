@@ -81,25 +81,17 @@ class TestARemovalTheUserAskedFor(PlannedBase):
         self.assert_lists_untouched()
 
 
-class TestARemovalNobodyAskedFor(PlannedBase):
-    def test_no_request_words_this_turn_or_before_it_stays(self):
+class TestARemovalWithNoWordsForIt(PlannedBase):
+    """On today's plan, which items the user's words mean is the model's reading even when they name none: it
+    stands, the answer says what came off, and nothing is ticked or filed as dropped."""
+
+    def test_no_request_words_the_models_reading_stands_today(self):
         out = self.said("kiln is cooling nicely, what comes after 2:20?", "remove_event",
                         {"event": "Kilnwash the shelves"}, before=["paddle went great this morning"])
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Kilnwash the shelves")), 1)
-        self.assertNotIn("exact", out.lower())
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Removed Kilnwash the shelves", out)
+        self.assertEqual(self.planned("Kilnwash the shelves"), [])
         self.assert_lists_untouched()
-
-    def test_a_no_after_a_request_isnt_one(self):
-        out = self.said("no, leave the kiln thing be", "remove_event", {"event": "Kilnwash the shelves"},
-                        before=[ASKED])
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.planned("Kilnwash the shelves")), 1)
-
-    def test_a_request_further_back_no_longer_counts(self):
-        out = self.said("ok what's the plan after the paddle", "remove_event", {"event": "Kilnwash the shelves"},
-                        before=["thanks", "sounds good", ASKED])
-        self.assertTrue(out.startswith(NOT_DONE), out)
 
 
 class TestAMoveTheUserAskedFor(PlannedBase):

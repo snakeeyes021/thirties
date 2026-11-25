@@ -88,6 +88,16 @@ def _building_the_day(pt: "PlanTools") -> bool:
 _PROPOSING = {"propose_day", "apply_day_proposal"}
 
 
+def _off_today(pt: "PlanTools", name: str, args: Dict[str, Any]) -> bool:
+    """A call taking something off today (the plan and the Today note, both can be put back): whether the user's
+    words, a question included (an exasperated "seriously??" can be the ask), mean it is the model's reading, so
+    the question rule never holds it (off_today.py). Ticks and later days keep the rule."""
+    if name in ("remove_event", "clear_time"):
+        return args.get("day") in (None, "") and pt.is_current(pt.day_plan)
+    return name == "if_there_is_time" and str(args.get("action") or "").strip().lower() in (
+        "drop", "week", "tomorrow", "not today", "later this week", "this week")
+
+
 def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, outermost: bool = True) -> Optional[str]:
     """Why a call can't go ahead this turn, or None. The question and relaxing rules hold for the model's own calls
     in a turn with the user's words; a day proposal never plans relaxing at all. The app's controls are never held
@@ -101,7 +111,8 @@ def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, out
     if pt.user_message is None or not outermost:
         return None
     from thirties_core.done_words import earlier_request  # a done asked for before isn't held by a question
-    if name not in read_only and name not in _ALWAYS_ALLOWED and is_question(pt.user_message, _planned(pt)) \
+    if name not in read_only and name not in _ALWAYS_ALLOWED and not _off_today(pt, name, args) \
+            and is_question(pt.user_message, _planned(pt)) \
             and not _building_the_day(pt) and not (name == "log_outcome" and earlier_request(pt, args)):
         return ("The user asked a question; this turn changes nothing. Answer it from what's on the plan and in "
                 "your notes; if a change would help, say what you'd do and let them ask for it.")
