@@ -67,6 +67,22 @@ class AddedTodayTest(Base):
         self.assertNotIn("If there's time", out)
         self.assertEqual(if_time.items(self.api.notes["n_today"]), [])
 
+    def test_with_several_items_the_plain_words_never_decide_for_the_others(self):
+        said = "true the spare wheel today; lube the chains if there's time"
+        out = self.say(said, "add_to_today", {"items": ["True the spare wheel", "Lube the chains"]})
+        self.assertIsNotNone(self.span("True the spare wheel"))  # no flag: each gets its time
+        self.assertIsNotNone(self.span("Lube the chains"))
+        self.assertEqual(if_time.items(self.api.notes["n_today"]), [])
+        self.assertNotIn("If there's time", out)
+
+    def test_one_at_a_time_the_plain_words_count_only_for_their_own_item(self):
+        said = "true the spare wheel today; lube the chains if there's time"
+        self.say(said, "add_to_today", {"items": ["True the spare wheel"]})
+        self.say(said, "add_to_today", {"items": ["Lube the chains"]})
+        self.assertIsNotNone(self.span("True the spare wheel"))
+        self.assertIsNone(self.span("Lube the chains"))
+        self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Lube the chains"])
+
     def test_the_models_call_puts_it_in_the_section(self):
         out = self.say("the hinges can wait for a quiet stretch", "add_to_today",
                        {"items": ["Oil the hinges"], "only_if_time": True})
@@ -106,7 +122,7 @@ class ActionsTest(Base):
     def setUp(self):
         super().setUp()
         self.say("call the bank and water the ferns if there's time", "add_to_today",
-                 {"items": ["Call the bank", "Water the ferns"]})
+                 {"items": ["Call the bank", "Water the ferns"], "only_if_time": True})
 
     def test_schedule_it_puts_it_in_the_next_gap_and_out_of_the_section(self):
         out = self.t.execute("if_there_is_time", {"item": "Water the ferns", "action": "schedule"})
@@ -151,7 +167,7 @@ class GapTest(Base):
     def setUp(self):
         super().setUp()
         self.say("water the ferns and oil the hinges if there's time", "add_to_today",
-                 {"items": ["Water the ferns", "Oil the hinges"]})
+                 {"items": ["Water the ferns", "Oil the hinges"], "only_if_time": True})
 
     def test_one_item_per_gap_each_named_once(self):
         free = [(at("16:00"), at("18:00"))]

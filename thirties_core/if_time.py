@@ -8,8 +8,9 @@ everything else. When the day is full even doubled up, the lowest-priority item 
 
 The one exception is the "If there's time" section: what the user explicitly asked to keep without a time ("if
 there's time", "if I get to it", "on deck", "no rush", "pencil it in"). The model says the user asked
-(add_to_today's only_if_time, or pencil_in for today); the plainest words are a fast yes (``asked_untimed``), never
-a no. Nothing else ever lands there: no leftovers, no removed items, no lines the plan lacks, no later day's items.
+(add_to_today's only_if_time, or pencil_in for today). When one item is added, the plainest words are a fast yes
+(``asked_untimed``), never a no; with several in one message the model's flag alone decides each. Nothing else ever
+lands there: no leftovers, no removed items, no lines the plan lacks, no later day's items.
 
 It lives in Joplin, the truth: an "If there's time" heading at the bottom of the Today note (``keep`` writes under
 it), and lines the user moves in or out of the heading by hand count. ``items`` reads it; ``open_items`` is the
@@ -78,6 +79,18 @@ def asked_untimed(message: Optional[str]) -> bool:
             return True
     return False
 
+
+
+_CLAUSE_RE = re.compile(r"[.;!?\n]+|\band\b|\bthen\b|\balso\b|\bbut\b", re.IGNORECASE)
+
+
+def asked_untimed_for(message: Optional[str], title: str) -> bool:
+    """The fast yes for one item: the plain words sit in the same part of the message as that item ("the bank at
+    3 and the ferns if there's time" says it of the ferns only). Never a no."""
+    if not message:
+        return False
+    from thirties_core.item_facts import mentions
+    return any(asked_untimed(part) and mentions(part, title) for part in _CLAUSE_RE.split(message) if part.strip())
 
 
 def _is_heading(line: str) -> bool:
@@ -523,4 +536,4 @@ def gap_line(assistant, now: datetime) -> str:
 
 
 __all__ = ["HEADING", "asked_untimed", "items", "is_listed", "first_slot", "doubled_slot", "place", "act", "ACTIONS",
-           "planned_out", "keep", "open_items", "text_for", "gap_line"]
+           "planned_out", "keep", "open_items", "text_for", "gap_line", "asked_untimed_for"]
