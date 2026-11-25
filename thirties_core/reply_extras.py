@@ -2,7 +2,7 @@
 
 Three things are Python's, never the model's: the standard view after a change (whats_next.py), the "Not marked
 yet" list under check-ins and start notices (the view after a change always has its own, whenever anything is
-unmarked), and the line saying which block the person is in ("You're in the 10:00 block: …", messages.status_line).
+unmarked), and the block line (messages.status_line).
 Each is a shared preference that Preferences shows too, so the app and chat agree. Asked in chat to stop one, the
 assistant sets it with set_reply_extras: from now on, or only for today if the person says so. Asking for the
 schedule or what's next still shows it.

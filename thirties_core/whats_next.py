@@ -5,7 +5,7 @@ Wherever the day is laid out for the user, it's this view, always in the same sh
   Now: what's in the block under way
   The rest of today: every row from the next block to the end of the day, with the Free stretches
   Not marked yet: one item per line, by its title, never a time
-  If there's time: what the user put under that heading on today's list, one title per line, never a time
+  If there's time: the titles under that heading of the Today note, one per line, never a time
 
 (each only when there's something in it; also an item a change moved out of those rows, and someone else's events
 in that stretch). Never a section of today's list lines with no time ("On today's list, no time yet"): the user

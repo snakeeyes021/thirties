@@ -148,7 +148,8 @@ def _listings(lines: List[str], protected: Set[int], titles: Sequence[str], show
 
 
 def _untimed(lines: List[str], protected: Set[int], shown_lines: Sequence[str]) -> Set[int]:
-    """Each section once: Python's when its text has one, else the model's first; never a no-time-yet one."""
+    """A single copy per section (Python's if its text holds that section, otherwise the model's first); a
+    section of list lines without times is always dropped."""
     drop: Set[int] = set()
     for head in UNTIMED_HEADS + (NO_TIME_HEAD,):
         pythons = head is NO_TIME_HEAD or any(head.match(line) for line in shown_lines)
