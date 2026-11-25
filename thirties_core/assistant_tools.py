@@ -2140,6 +2140,10 @@ class AssistantTools(KindTools):
             from thirties_core.not_today import window_unasked
             window = window_unasked(self.pt, window, item["title"])
             # --- end tomorrow ---
+            # --- a holiday only on the user's word: otherwise the next day with room (holidays.py) ---
+            from thirties_core.holidays import off_holiday
+            window = off_holiday(self.pt, window, item["title"])
+            # --- end holiday ---
             new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
             seen.add(item["title"].lower())
         for d in (drop if isinstance(drop, list) else []):
@@ -2269,6 +2273,10 @@ class AssistantTools(KindTools):
         from thirties_core.not_today import window_unasked
         window = window_unasked(self.pt, window, str(item))
         # --- end tomorrow ---
+        # --- a holiday only on the user's word: the model's own pick goes to the next day with room (holidays.py) ---
+        from thirties_core.holidays import off_holiday
+        window = off_holiday(self.pt, window, str(item), given=self.pt.user_message is None)
+        # --- end holiday ---
         h = "someday" if window["when"] == "someday" else ("today" if window["end"] == self._today().isoformat()
                                                             else "window")
         # --- due today: it leaves today only on a clear word, which the answer names (due_today.py) ---

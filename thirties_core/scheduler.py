@@ -681,6 +681,8 @@ class DeterministicScheduler:
         calendar_spans, pending = events_to_spans(events, self.state_db.get_event_decisions(),
                                                   getattr(self.config.calendar, "modes", None))
         calendar_spans = [s for s in calendar_spans if s.overlaps(plan.day_start, plan.day_end)]
+        from thirties_core.calendar_engine import holidays_on  # nothing is placed there by itself (holidays.py)
+        plan.holidays = holidays_on(events, target_date, getattr(self.config.calendar, "modes", None))
         self._holiday_off(plan, events)
         from thirties_core.days_off import apply as days_off  # no Work on a day the user is off
         days_off(self, plan)

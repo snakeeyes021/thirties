@@ -64,12 +64,16 @@ class BeforeToday:
         pool = OpenPool(self.db)
         from thirties_core.backoff import MissStreaks, stated_cant_wait
         streaks = MissStreaks(self.db)
+        holiday = bool(getattr(pt.day_plan, "holidays", None))
         for item in items:
             if not item.get("end") or item["end"] > day.isoformat() or item.get("start", "") > day.isoformat():
                 continue  # not today's
             if item["end"] < day.isoformat() and item.get("placed_by") != "user":
                 continue  # a day guessed for it went by: it waits on its list, never today by itself (carry.py)
             task = next((t for t in self.a.s.tasks if item.get("task_id") and t.id == item["task_id"]), None)
+            due = (item.get("due") or (task.due if task is not None else "") or "")[:10]
+            if holiday and item.get("placed_by") != "user" and not (due and due <= day.isoformat()):
+                continue  # a holiday: nothing goes on by itself (holidays.py)
             if streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
                             or (task.due if task is not None else ""),
                             urgent=stated_cant_wait(self.db, task, item["title"])):

@@ -69,13 +69,14 @@ def is_day_off(plan) -> bool:
 
 
 def first_day_with_room(pt, minutes: int, start: date, last: date, daylight: bool = False) -> Optional[date]:
+    """The first day from ``start`` to ``last`` with a free stretch for it; never a holiday (holidays.py)."""
     d = start
     while d <= last:
         try:
             plan = pt.plan_for(d)
         except Exception:
             plan = None
-        if plan is not None and _free_minutes(pt, plan, minutes, daylight):
+        if plan is not None and not getattr(plan, "holidays", None) and _free_minutes(pt, plan, minutes, daylight):
             return d
         d += timedelta(days=1)
     return None
@@ -102,7 +103,9 @@ def place_once(pt, title: str, minutes: int, today: date, due: Optional[date] = 
         return Placement(None, "no day this week has room")  # it waits at its horizon
     why = _day_word(d, today)
     if d != today + timedelta(days=1):
-        why += " (the days before are full)"
+        from thirties_core.holidays import is_holiday
+        holiday = any(is_holiday(pt, today + timedelta(days=n)) for n in range(1, (d - today).days))
+        why += " (the days before are full or holidays)" if holiday else " (the days before are full)"
     return Placement(d, why)
 
 

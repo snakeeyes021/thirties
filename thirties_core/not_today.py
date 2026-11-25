@@ -110,7 +110,8 @@ def later_day(pt: Any, title: str, minutes: int = 30, today: Optional[date] = No
             d = None
         if d is not None:
             return d
-    return first
+    from thirties_core.holidays import first_workable  # never a holiday by itself (holidays.py)
+    return first_workable(pt, first)
 
 
 def where_to(pt: Any, title: str, minutes: int = 30, today: Optional[date] = None) -> Tuple[date, bool]:

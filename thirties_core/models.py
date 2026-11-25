@@ -274,6 +274,7 @@ class DayPlan:
     is_finalized: bool = False
     notes: str = ""
     calendar_unread: List[str] = field(default_factory=list)  # calendars that couldn't be read ("": all of them)
+    holidays: List[str] = field(default_factory=list)  # the day's holidays, by name (calendars marked "holidays")
 
     # --- canvas ---
 

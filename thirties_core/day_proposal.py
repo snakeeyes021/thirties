@@ -265,6 +265,11 @@ class DayProposal:
                     and not (due_in is not None and due_in <= 0) and not cant_wait(self.a, t, left["title"]):
                 continue  # asked about this morning, status unknown: it waits on its list
             # --- end unmarked is unknown ---
+            # --- a holiday draws nothing from the pool by itself: only what the user placed there, or what's due
+            # (holidays.py) ---
+            if left and not users and getattr(plan, "holidays", None) and not (due_in is not None and due_in <= 0):
+                continue
+            # --- end holiday ---
             if left and left.get("start") and h != "someday":  # a window of days (carry.resolve_when)
                 start, end = date.fromisoformat(left["start"]), date.fromisoformat(left["end"])
                 if start > day:

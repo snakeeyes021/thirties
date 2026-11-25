@@ -25,6 +25,8 @@ The rules, applied once a day when the day is built (after the user's first repl
    <day>") so the user can correct it: what can't wait (urgency "now", or "as soon as possible" in its wording)
    goes on today if it fits, else the first day with room; everything else the first day from tomorrow with room,
    within this week unless it has a deadline, never past its deadline. With no room it waits at its horizon.
+   A holiday (a calendar the user marked "holidays") is never such a day: the next day with room instead
+   (holidays.py); only the user's own word puts something there.
    Missed time on an ongoing effort with a deadline is spread over its next sessions before that deadline;
    without one it simply ends (rule 2).
 4. Kept items wait at their horizon straight away; drops wait for a yes (a reply, or a 👍). The user can say
@@ -32,7 +34,7 @@ The rules, applied once a day when the day is built (after the user's first repl
    nothing is dropped. Recurring things never enter the pool: a missed one skips to its next turn.
 5. The daily proposal draws from the pool by fit: anything due or urgent first, then what's meant for today
    (or whose window ends today), then what's within its window where free time fits; never before its window,
-   never someday or dropped ones. An item leaves the pool once it's done, or after two weeks (it's still on its
+   never someday or dropped ones; on a holiday, only what the user placed there or what's due. An item leaves the pool once it's done, or after two weeks (it's still on its
    list).
 6. The Today note holds today's plan: the morning reset takes leftovers off it when their home item is still
    open on its list. An item with no other list stays, and anything put on Today today is never touched.
