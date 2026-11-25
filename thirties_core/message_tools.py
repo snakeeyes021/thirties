@@ -58,21 +58,6 @@ MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
 
 MESSAGE_READ_ONLY = {"show_schedule", "item_history"}
 
-PENCILLED_HEADING = "On today's list, no time yet"
-
-
-def pencilled_section(assistant) -> str:
-    """Today's list lines that have no time on the plan, after the timed items: a line on the list is never left out
-    of the schedule the user is sent (a line added to the list in Joplin, not yet given a time, was on the list
-    and missing from the schedule)."""
-    from thirties_core.day_lists import pencilled_in
-    try:
-        items = pencilled_in(assistant)
-    except Exception:
-        return ""
-    from thirties_core.titles import title_of
-    return (f"\n\n{PENCILLED_HEADING}:\n" + "\n".join(title_of(t) for t in items)) if items else ""
-
 
 class MessageTools:
     def __init__(self, tools: "PlanTools") -> None:
@@ -98,7 +83,7 @@ class MessageTools:
                                said=tools.user_message or "")  # the block line as the person wants it
         if live and getattr(tools, "assistant", None) is not None:  # after the day's timed items (if_time.py)
             from thirties_core.if_time import text_for
-            text += pencilled_section(tools.assistant) + text_for(tools.assistant)
+            text += text_for(tools.assistant)
         if missed:
             MissedTracker(tools._state_db).mark(now, missed)  # shown: notices and replies needn't list them again
             from thirties_core.away import LastSentList  # the list as last sent (away.py)

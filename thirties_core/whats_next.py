@@ -173,27 +173,6 @@ def untimed_lines(heading: str, titles: Sequence[str]) -> str:
     return "\n".join([heading] + list(titles))
 
 
-def untimed_for(tools) -> List[Tuple[str, List[str]]]:
-    """Today's list items with no time (11-04: the slice said "open time" while eight items sat on the list with no
-    time): what's on the Today note that no planned item stands for, and what's under its "If there's time"
-    heading. Nothing for another day, or without the task backend."""
-    assistant = getattr(tools, "assistant", None)
-    if assistant is None or not tools.is_current(tools.day_plan):
-        return []
-    out = []
-    try:
-        from thirties_core.day_lists import pencilled_in
-        out.append((NO_TIME_HEADING, pencilled_in(assistant)))
-    except Exception:
-        pass
-    try:
-        from thirties_core import if_time
-        out.append((IF_TIME_HEADING, if_time.items(assistant._today_note())))
-    except Exception:
-        pass
-    return [(h, items) for h, items in out if items]
-
-
 def bedtime(plan: DayPlan) -> datetime:
     """When the day's waking time ends: the night's sleep, else the end of the canvas."""
     return min((s.start_dt for s in plan.spans if s.category == SpanCategory.SLEEP and s.start_dt > plan.day_start
@@ -275,6 +254,17 @@ def summary(tools, now: datetime, mode: Optional[str] = None, moved: Iterable[Ev
     return render(plan, now, moved, mode, said, unmarked, config=getattr(scheduler, "config", None),
                   db=getattr(tools, "_state_db", None), untimed=untimed_for(tools), with_now=with_now)
 
+
+
+def untimed_for(tools) -> List[Tuple[str, List[str]]]:
+    """Today's If there's time section, as its clean list (if_time.open_items): only what the user asked to keep
+    without a time. Nothing for another day, or without the task backend."""
+    assistant = getattr(tools, "assistant", None)
+    if assistant is None or not tools.is_current(tools.day_plan):
+        return []
+    from thirties_core import if_time
+    listed = if_time.open_items(assistant)
+    return [(IF_TIME_HEADING, listed)] if listed else []
 
 # --- sent where: so a notice doesn't repeat the slice every half hour ---
 
