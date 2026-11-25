@@ -517,11 +517,11 @@ def _is_today(db: Any, note_id: str) -> bool:
 
 def _tick_refused(message: str, title: str, db: Any) -> str:
     """Why a tick can't be written on the user's words this turn: nothing they told is a done (said_for_it.told_done,
-    or a whole answer to a question about a routine's steps), or their words name the item as not done. Which item
-    a done is for is the model's reading. "" when it can."""
+    a plain yes to the question before it, or a whole answer to a question about a routine's steps), or their words
+    name the item as not done. Which item a done is for is the model's reading. "" when it can."""
     from thirties_core.said_for_it import told_done
     from thirties_core.whole_routine import answers_the_question
-    if not (told_done(message, title) or answers_the_question(message)):
+    if not (told_done(message, title, yes=True) or answers_the_question(message)):
         return (f"not written: nothing the user said is a done, so {title} isn't ticked. It's done when they say it "
                 "is.")
     from thirties_core.started import not_finished

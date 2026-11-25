@@ -406,6 +406,10 @@ def unanswered_which(pt: Any, title: str) -> str:
     which = _which_words(message)
     if len(listed) < 2 or any(_hits(which, t) for t in titles + shown_open):
         return ""
+    from thirties_core.done_words import asked_about
+    asked = done_question(shown)
+    if asked and len(asked_about(asked, titles + shown_open, titles)) == 1:
+        return ""  # the question was about one item: the reply answers it, whatever else the reply listed
     return (f"The user's words don't say which item they finished, and the last reply asked them, so {title} isn't "
             "ticked. Ask again which one, in one short question.")
 

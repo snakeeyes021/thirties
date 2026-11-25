@@ -233,6 +233,27 @@ class TestASkipIsReadTheSameWay(StudioBase):
         self.assertFalse(self.skip("no time for the bisque round after all", GLAZE).startswith(NOT_DONE))
 
 
+class TestABareDoneAnswersTheQuestionAsked(StudioBase):
+    """A bare done answers the app's question: about one item, it's that item's, whatever else the reply listed;
+    asking which, it doesn't say which."""
+
+    def test_a_question_about_one_item_and_one_asking_which(self):
+        shown = f"Not marked yet: {GLAZE}, {LOG}. Did you finish the glaze test?"
+        self.assert_went(GLAZE, self.say("I did, finally!", GLAZE, shown))
+        self.assert_held(LOG, self.say("finished it!", LOG, f"Which did you finish: {LOG} or {BATTS}?"))
+
+
+class TestAYesTicksTheListToo(unittest.TestCase):
+    """A list item ticked outside the plan (a leftover from an earlier day) is judged on the words alone: a plain
+    yes, answering the question before it, is a done there too; a no is none."""
+
+    def test_a_yes_is_written_and_a_no_is_not(self):
+        from thirties_core.write_guard import refused
+        for words in ("yes", "yep, that one"):
+            self.assertEqual(refused({"op": "complete", "title": LOG}, f"[app] {words}", _Kept(GLAZE)), "", words)
+        self.assertTrue(refused({"op": "complete", "title": LOG}, "[app] no", _Kept(GLAZE)))
+
+
 class TestTheRestIsReadWithoutThatPart(unittest.TestCase):
     """What the done is about is read from the sentence with its exception part taken out."""
 
