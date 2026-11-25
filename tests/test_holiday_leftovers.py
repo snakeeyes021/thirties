@@ -187,5 +187,31 @@ class PlacedAtToday(HolidayBase):
         self.assertEqual(self.api.notes["n_bench"]["body"], BENCH)  # its own list is never touched
 
 
+class ThePlateLeadsWithWhatTheUserPutOnTheDay(unittest.TestCase):
+    """4: the morning hello's "On the plate today:" lists every item the user put on the day, timed or not, before
+    anything Python picked for it."""
+
+    def test_an_untimed_item_put_on_the_day_is_on_the_plate_before_pythons_picks(self):
+        from thirties_core.background import BackgroundService
+        from thirties_core.inference import MockInferenceEngine
+        from thirties_core.not_today import set_aside
+        sched = make_scheduler()
+        joplin = MagicMock()
+        joplin.fetch_tasks.return_value, joplin.fetch_active_notes.return_value = [], []
+        svc = BackgroundService(sched.config, lambda *a: None, scheduler=sched, joplin_engine=joplin,
+                                inference_engine=MockInferenceEngine(), sync_engine=MagicMock())
+        svc.today = lambda: DAY
+        self.addCleanup(set_debug_time, None)
+        set_debug_time(at("21:10", -1))
+        a = svc.manager().tools.assistant
+        set_aside(a, "Grease the headset", None, DAY, named=False)  # Python's own later day for a skip
+        AheadLists(sched.state_db).add(DAY, "Order new spokes")  # the user's: on the day's list, no time
+        set_debug_time(at("06:50"))
+        plate = svc._plate(svc.manager().day_plan)
+        self.assertIn("Order new spokes", plate)
+        self.assertIn("Grease the headset", plate)
+        self.assertLess(plate.index("Order new spokes"), plate.index("Grease the headset"))
+
+
 if __name__ == "__main__":
     unittest.main()

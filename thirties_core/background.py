@@ -1037,9 +1037,11 @@ class BackgroundService:
         self.send(hello_text(line, titles), "morning", now=now, day=plan.target_date)  # in that day's conversation
 
     def _plate(self, plan) -> List[str]:
-        """What's on the plate today, without times and without changing anything: what's already on today's plan
-        (fixed calendar events, things planned ahead) and list items due today. Never routines, meals or anchors,
-        and never yesterday's leftovers: they aren't today's by default (carry.py)."""
+        """What's on the plate today, without times and without changing anything, every item however many: first
+        what the user put on the day (fixed calendar events and things planned ahead on today's plan, what they put
+        on the day's list without a time, list items due today), then what Python set aside for the day by itself
+        (a skip's later day, not_today.py). Never routines, meals or anchors, and never yesterday's leftovers: they
+        aren't today's by default (carry.py)."""
         from thirties_core.assistant_tools import _short
         assistant = self.manager().tools.assistant
         daily = assistant.routines.daily_titles() if assistant is not None else set()
@@ -1053,12 +1055,24 @@ class BackgroundService:
                if not s.is_envelope and s.status == SpanStatus.PLANNED and s.title.strip().lower() not in daily
                and s.source != "routine"
                and s.category in (SpanCategory.CALENDAR, SpanCategory.ACTIVITY, SpanCategory.TASK)]
+        picked: List[str] = []
+        if assistant is not None and assistant._db is not None:
+            # --- the day's list kept ahead (day_lists.AheadLists): the user's lines, and Python's set-asides last ---
+            from thirties_core.carry import OpenPool
+            from thirties_core.day_lists import AheadLists
+            pool = OpenPool(assistant._db).all()
+            day = plan.target_date.isoformat()
+            for r in AheadLists(assistant._db).for_day(plan.target_date):
+                rec = pool.get(r["title"].strip().lower()) or {}
+                by_python = bool(rec.get("set_aside")) and not rec.get("named_day") and rec.get("start") == day
+                (picked if by_python else out).append(_short(r["title"]))
+            # --- end the day's list kept ahead ---
         if assistant is not None:
             day = plan.target_date.isoformat()
             from thirties_core.list_reading import offerable
             out += [label(t, tasks) for t in assistant.s.tasks if (t.due or "")[:10] == day and not t.someday
                     and t.title.strip().lower() not in daily and offerable(t)]
-        return out
+        return out + picked
 
     def rollover(self, now: datetime) -> None:
         """The morning, if no turn did it (morning.py): normally the user's first message of the day builds the
