@@ -63,7 +63,7 @@ class TestWhatsNext(WhatsNextCase):
 
     def test_after_a_done(self) -> None:
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Nice, noted.", said="fed the cat")
-        self.assertEqual(self.tail(out)[0], "The rest of today:")  # the cat's done: nothing on now, no "Now" line
+        self.assertEqual(self.tail(out)[:2], ["Now: free until 6:00 PM", "The rest of today:"])  # the cat's done
         self.assertIn("6:00 PM – Dinner", self.tail(out))
 
     def test_a_move_that_bumps_something_names_it_where_it_went(self) -> None:
@@ -236,7 +236,7 @@ class TestNotMarkedYet(WhatsNextCase):
                         'CALL log_outcome {"event": "feed", "status": "done"}', "Nice, noted.",
                         said="fed the cat, and the parcel can wait")
         tail = self.tail(out)
-        self.assertEqual(tail[0], "The rest of today:")
+        self.assertEqual(tail[:2], ["Now: free until 6:00 PM", "The rest of today:"])
         self.assertEqual(tail[-3:], ["Not marked yet:", "Water the seedlings", "Tune the ukulele"])
         self.assertFalse(any("Post the parcel" in line or "Feed the cat" in line for line in tail))
 
