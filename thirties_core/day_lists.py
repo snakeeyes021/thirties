@@ -1,10 +1,8 @@
 """The day's list beyond the plan: things pencilled in, days ahead, and pings.
 
-- **Pencilled in** (O3, 10-29: items on today's to-do list that aren't
-  scheduled yet, written in pencil rather than pen): on today's list, with no time. Python works
-  out which Today items have no time on the plan; replies say "on today's list, no
-  time yet", the Agenda lists them, and they can be given a time later (scheduling
-  one finds it already on the list).
+- **Not yet placed** (``pencilled_in``): Today lines no planned item stands for yet, outside the "If there's
+  time" section (if_time.py). They are never shown as untimed: the user wants them today, so the next plan build
+  or sync gives each a time, or, the day full, moves the lowest item on (full_day.py).
 - **Days ahead** (O2, 10-24: where an item for tomorrow shows up): what's
   planned for another day is on that day's plan, and reaches the Today note on that
   day's morning (the morning reset), never today's. Things meant for a later day
@@ -129,7 +127,7 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     links = TodayLinks(db)
     out = []
     from thirties_core import if_time
-    untimed = {t.lower() for t in if_time.items(note)}  # If there's time is its own section, not "pencilled in"
+    untimed = {t.lower() for t in if_time.items(note)}  # the If there's time section is its own (if_time.py)
     for line in (note.get("body") or "").splitlines():
         m = CHECKBOX_REGEX.match(line)
         if not m or m.group(1):
@@ -144,19 +142,6 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     return out
 
 
-def pencilled_text(assistant, plan=None) -> str:
-    """A line for the schedule text, so replies can say what's on the list with no time yet."""
-    try:
-        items = pencilled_in(assistant, plan)
-    except Exception:
-        return ""
-    if not items:
-        return ""
-    plan = plan or assistant.pt.day_plan
-    whose = "today's list" if assistant.pt.is_current(plan) else f"{plan.target_date.strftime('%A')}'s list"
-    return f"\nOn {whose}, no time yet (pencilled in): " + "; ".join(items)
-
-
 def ahead_note(assistant, plan) -> str:
     """Said when something goes on a later day's plan: where the user will see it."""
     if plan.target_date <= assistant.pt.today() or assistant.pt.is_current(plan):
@@ -166,9 +151,11 @@ def ahead_note(assistant, plan) -> str:
 
 
 def add_ahead(assistant, items: List[str]) -> str:
-    """Things for a later day's list, with no time: kept until that morning."""
+    """Things for a later day: each waits in the open pool with that day as its window (not_today.set_aside, as a
+    day the user named) and gets its time when that day's plan is built (full_day.settle_loose). Never written to
+    the Today note without a time, and never shown as a list with no time."""
+    from thirties_core.not_today import set_aside
     plan = assistant.pt.day_plan
-    store = AheadLists(assistant._db)
     added, deadlines = [], []
     from thirties_core.due_today import move_check  # due today: only on a clear word (due_today.py)
     for name in items:
@@ -177,21 +164,21 @@ def add_ahead(assistant, items: List[str]) -> str:
         if title:
             deadlines.append(move_check(assistant.pt, title, task.id if task is not None else None,
                                         plan.target_date).strip())
-            store.add(plan.target_date, title, task)
+            set_aside(assistant, title, task, plan.target_date, True)
             added.append(title)
     if not added:
         return "Nothing to add."
     deadlines = [d for d in deadlines if d]
     from thirties_core.leave_today import after_ahead  # moved off today's list, it leaves it (leave_today.py)
     off = [o for o in (after_ahead(assistant, t, plan.target_date) for t in added) if o]
-    return (f"On {plan.target_date.strftime('%A')}'s list, no time yet: {', '.join(added)}. It goes on the Today "
-            "list that morning." + (" " + " ".join(off) if off else "") + (" " + " ".join(deadlines) if deadlines else ""))
+    return (f"Kept for {plan.target_date.strftime('%A')}: {', '.join(added)}. Each gets its time when that day's "
+            "plan is made." + (" " + " ".join(off) if off else "") + (" " + " ".join(deadlines) if deadlines else ""))
 
 
 def onto_today(assistant, day: date) -> List[str]:
     """The morning reset, for the day starting: what was planned ahead for it goes on the Today note (a list item as
-    its linked copy, a routine as its group), and so does what was waiting for that day's list. Returns what was
-    done, for the log."""
+    its linked copy, a routine as its group). What waited for the day with no time is left to the plan build, which
+    gives each its time (full_day.settle_loose). Returns what was done, for the log."""
     from thirties_core.assistant_tools import ToolError
     pt = assistant.pt
     if assistant._db is None or assistant._today_note() is None:
@@ -227,14 +214,12 @@ def onto_today(assistant, day: date) -> List[str]:
             AheadLists(assistant._db).set_state(day, r["title"], "dropped")
         waiting = [r for r in waiting if r not in gone]
         # --- end dropped ---
-        known = {t.id for t in assistant.s.tasks}  # linked by its id while its list item is still there
-        names = singles + [r["home_id"] if r["home_id"] in known else r["title"] for r in waiting]
-        if names:
-            out = assistant._add_to_today(names, "none")  # the morning's proposal gives them times
+        # what waited for this day isn't written here: the plan build gives each its time, and the plan puts it on
+        # Today (full_day.settle_loose); nothing reaches Today without a time
+        if singles:
+            out = assistant._add_to_today(singles, "none")  # already on the day's plan: their times stand
             if out.startswith("Added"):
                 done.append(out.rstrip("."))
-        for r in waiting:
-            AheadLists(assistant._db).set_state(day, r["title"], "listed")
     except ToolError as e:
         done.append(f"couldn't fill Today: {e}")
     return done
@@ -242,8 +227,8 @@ def onto_today(assistant, day: date) -> List[str]:
 
 def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
     """For the morning message: the whole day already planned, one plain line each (no bullets), time first: each
-    routine part with its steps, the meals and other anchors, and anything else on; then what's on the list with no
-    time (but not what's in ``skip``: yesterday's leftovers are offered on their own, 10-31)."""
+    routine part with its steps, the meals and other anchors, and anything else on. Nothing on today is without a
+    time (full_day.py). ``skip``: kept for callers; yesterday's leftovers are offered on their own (10-31)."""
     pt = assistant.pt
     plan = pt.day_plan
     from thirties_core.today import note_items
@@ -267,13 +252,8 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
         rows.append((s.start_dt, f"{when} {span_label(s, tasks)}"))
     rows += [(block, f"{format_clock(block)} {', '.join(titles)}") for (block, _), titles in parts.items()]
     lines = [line for _, line in sorted(rows, key=lambda r: r[0])]
-    out = ("Already planned for today:\n" + "\n".join(lines)) if lines else ""
-    skip = {t.strip().lower() for t in skip}
-    loose = [t for t in pencilled_in(assistant, plan) if t.strip().lower() not in skip]
-    if loose:
-        out += ("\n" if out else "") + "On today's list, no time yet: " + ", ".join(loose) + "."
-    return out
+    return ("Already planned for today:\n" + "\n".join(lines)) if lines else ""
 
 
-__all__ = ["AheadLists", "explicit_ping", "pencilled_in", "pencilled_text", "ahead_note", "add_ahead", "onto_today",
+__all__ = ["AheadLists", "explicit_ping", "pencilled_in", "ahead_note", "add_ahead", "onto_today",
            "planned_ahead_text"]

@@ -1,5 +1,5 @@
 """Things added for today get a real time; "If there's time" holds only what the user asked to leave untimed, and
-overflow (if_time.py). Fixtures are invented."""
+nothing else ever: a full day moves its lowest item on instead (if_time.py, full_day.py). Fixtures are invented."""
 
 import unittest
 from datetime import timedelta
@@ -13,7 +13,7 @@ from thirties_core.models import SpanStatus
 
 
 class WordingTest(unittest.TestCase):
-    def test_only_explicit_words_ask_for_no_time(self):
+    def test_the_plainest_words_are_a_fast_yes(self):
         for said in ("call the plumber if there's time", "if I get to it, water the ferns", "no rush, sometime today",
                      "don't schedule it", "squeeze it in if you can", "put the gutters on deck", "pencil in a walk",
                      "whenever today is fine"):
@@ -56,16 +56,36 @@ class AddedTodayTest(Base):
         self.assertEqual(self.body("n_today"), "- [ ] Fix the gate\n## If there's time\n- [ ] Water the ferns\n")
         self.assertIsNotNone(self.span("Fix the gate"))
 
-    def test_a_full_day_doubles_up_then_overflows_with_one_line(self):
+    def test_a_full_day_doubles_up_then_moves_an_item_on_never_into_the_section(self):
         with patch("thirties_core.if_time.first_slot", return_value=None):
             out = self.say("fix the gate today", "add_to_today", {"items": ["Fix the gate"]})
         self.assertIn("alongside another item", out)
         with patch("thirties_core.if_time.first_slot", return_value=None), \
                 patch("thirties_core.if_time.doubled_slot", return_value=None):
             out = self.say("and oil the hinges today", "add_to_today", {"items": ["Oil the hinges"]})
-        line_with(out, "Oil the hinges", "If there's time")
+        line_with(out, "No room today", "goes to")
+        self.assertNotIn("If there's time", out)
+        self.assertEqual(if_time.items(self.api.notes["n_today"]), [])
+
+    def test_the_models_call_puts_it_in_the_section(self):
+        out = self.say("the hinges can wait for a quiet stretch", "add_to_today",
+                       {"items": ["Oil the hinges"], "only_if_time": True})
         self.assertIsNone(self.span("Oil the hinges"))
         self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Oil the hinges"])
+        line_with(out, "Oil the hinges", "If there's time")
+
+    def test_nothing_else_lands_in_the_section(self):
+        from thirties_core.day_lists import pencilled_in
+        from thirties_core.full_day import settle_loose
+        self.say("water the ferns if there's time", "add_to_today", {"items": ["Water the ferns"]})
+        body = self.api.notes["n_today"]["body"]
+        self.api.notes["n_today"]["body"] = "- [ ] Sweep the porch\n" + body  # added by hand above the section
+        self.assertEqual(pencilled_in(self.t.assistant), ["Sweep the porch"])  # the section is its own
+        said = settle_loose(self.t.assistant)
+        self.assertIsNotNone(self.span("Sweep the porch"))
+        line_with("\n".join(said), "Sweep the porch", "today's plan at")
+        self.assertIsNone(self.span("Water the ferns"))  # the section's item keeps no time
+        self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Water the ferns"])
 
     def test_something_already_scheduled_keeps_its_time(self):
         self.say("bank at 3", "add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
@@ -133,7 +153,7 @@ class GapTest(Base):
         self.say("water the ferns and oil the hinges if there's time", "add_to_today",
                  {"items": ["Water the ferns", "Oil the hinges"]})
 
-    def test_one_item_per_gap_and_a_different_one_next_gap(self):
+    def test_one_item_per_gap_each_named_once(self):
         free = [(at("16:00"), at("18:00"))]
         with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: free):
             first = if_time.gap_line(self.t.assistant, at("16:00"))
@@ -143,6 +163,9 @@ class GapTest(Base):
         later = [(at("19:00"), at("20:00"))]
         with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: later):
             self.assertIn("Oil the hinges", if_time.gap_line(self.t.assistant, at("19:00")))
+        last = [(at("21:00"), at("22:00"))]
+        with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: last):
+            self.assertEqual(if_time.gap_line(self.t.assistant, at("21:00")), "")  # each named once
 
     def test_no_gap_no_line(self):
         with patch.object(type(self.t), "open_windows", lambda _self, after=None, before=None: [(at("16:00"), at("16:20"))]):

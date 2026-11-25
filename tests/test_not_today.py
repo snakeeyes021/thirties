@@ -80,12 +80,16 @@ class NotTodayBase(unittest.TestCase):
         return span
 
     def morning(self, day, hhmm="07:50"):
-        """That day's morning: the leftovers sorted, the day's list filled; the candidates for its plan."""
+        """That day's morning: the leftovers sorted, the day's list filled; the candidates for its plan. Then the
+        plan build gives what waited for the day its time (full_day.settle_loose), and Today follows."""
+        from thirties_core.full_day import settle_loose
         set_debug_time(at(hhmm, (day - DAY).days))
         self.t.day_plan = self.t.plan_for(day)
         settle(self.a, day)
         onto_today(self.a, day)
-        return [c["title"] for c in self.a.proposals.candidates(self.t.day_plan)]
+        candidates = [c["title"] for c in self.a.proposals.candidates(self.t.day_plan)]
+        settle_loose(self.a)
+        return candidates
 
     def ahead(self, day):
         return [r["title"] for r in AheadLists(self.sched.state_db).for_day(day)]

@@ -2154,10 +2154,9 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         return max(hits, key=len) if hits else None
 
     def _left_today(self) -> str:
-        """What's left today: what's past and not reported (first, as everywhere: C2), then what's ahead, and
-        what's on today's list (the Today note) with no time yet."""
+        """What's left today: what's past and not reported (first, as everywhere: C2), then what's ahead. Everything
+        on today's list has its time on the plan (full_day.py)."""
         from thirties_core.messages import MissedTracker, missed_block, missed_for
-        from thirties_core.today import note_items
         now = self._now()
         plan = self.tools.plan_for(None) if self._is_today() else self.tools.day_plan
         flexible = [s for s in plan.active_spans() if s.category in (SpanCategory.ACTIVITY, SpanCategory.TASK)
@@ -2166,16 +2165,10 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         if behind:
             MissedTracker(self.tools._state_db).mark(now, behind)
         ahead = sorted((s for s in flexible if s.end_dt > now and s not in behind), key=lambda s: s.start_dt)
-        planned = {s.title.lower() for s in flexible}
-        assistant = getattr(self.tools, "assistant", None)
-        note = assistant._today_note() if assistant else None
-        listed = [text for text, ticked in note_items(note) if not ticked and text.lower() not in planned]
         lines = []
         if ahead:
             lines.append("Still planned today:")
             lines += [f"{format_clock(thirty_of(s.start_dt))} – {s.title}" for s in ahead]
-        if listed:
-            lines.append("On today's list, no time yet: " + ", ".join(listed) + ".")
         parts = [missed_block(behind)] if behind else []  # first: one per line, no times, not the current block
         parts += ["\n".join(lines)] if lines else []
         from thirties_core.messages import join_sections

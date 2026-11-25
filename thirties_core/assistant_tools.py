@@ -345,19 +345,24 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Put things on today's list (the user's Today note), when the user says they mean to do them "
                        "today. Each one gets its time on today's plan at once (the first free time that fits); if the "
                        "user named a time, schedule it at that time instead (add_event), or move it there after. "
-                       "Only the user's own words ('if there's time', 'no rush', 'don't schedule it', 'on deck') "
-                       "leave it with no time, under If there's time. Items from their lists stay linked: ticking "
+                       "Nothing on today is left without a time: when the day is full, Python moves the "
+                       "lowest-priority item on to the next day with room and says so. Items from their lists "
+                       "stay linked: ticking "
                        "either one ticks both. Scheduling a list item for today adds it on its own.",
         "parameters": {"items": "The things, as a list: task titles or task_ids from the lists, or new things in the "
                                 "user's words.",
                        "day": "A later day's list ('tomorrow', 'Monday'): it goes on Today that morning.",
                        "because": "For a new thing not on the lists: the user's exact words it comes from, quoted "
-                                  "from their message."},
+                                  "from their message.",
+                       "only_if_time": "Set it on the user's explicit ask for no set time today ('if there's "
+                                       "time', 'if I get to it', 'on deck', 'no rush', 'pencil it in'): the item "
+                                       "goes under If there's time on today's list, off the plan, and is named "
+                                       "once when a free stretch fits it."},
         "required": ["items"],
     },
     {
         "name": "if_there_is_time",
-        "description": "Act on any item on today's list (the Today note), under If there's time or not: done; "
+        "description": "Act on any item on today's list (the Today note): done; "
                        "schedule (the next free time that fits, or the time the user names); tomorrow; week (later "
                        "this week); or drop (off today's list and today's plan; its own list is untouched). The way "
                        "to take something off today's list that the user skips or puts off. Drop only on the user's "
@@ -819,28 +824,43 @@ class AssistantTools(KindTools):
                 exact = next(t for t, _ in note_items(today) if t.lower() == link["today_title"])
                 writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact})
         messages = []
-        key = f"today_removed_told:{self._today().isoformat()}"
-        told = set(json.loads(self._db.get_sync_meta(key) or "[]"))
         plan = self.pt.plan_for(self._today())
+        gone = []
         for span in plan.spans:
             linked = links.today_title_of(span.task_id) if span.task_id else None
-            if (linked and linked not in on_today and span.status.value == "planned" and span.id not in told
-                    and span.end_dt > self.pt._now()):
-                messages.append(f"You took {span.title} off today's list; it's still planned at "
-                                f"{format_clock(thirty_of(span.start_dt))}. Should I take it off the plan too?")
-                told.add(span.id)
-        if messages:
-            self._db.set_sync_meta(key, json.dumps(sorted(told)))
+            if linked and linked not in on_today and span.status.value == "planned" and span.end_dt > self.pt._now():
+                gone.append(span)
+        # --- a line deleted from Today by hand takes its item off today's plan: Joplin wins (full_day.py) ---
+        if gone and self.pt.is_current(plan):
+            from thirties_core.full_day import unlisted_by_hand
+            messages += unlisted_by_hand(self, gone)
+        # --- end deleted by hand ---
+        # --- the Today note follows the plan: a hand-added line gets its time, a stray one is fixed (full_day.py) ---
+        try:
+            from thirties_core.full_day import mirror_today
+            messages += mirror_today(self)
+        except Exception as e:
+            logger.warning("Couldn't bring the Today note in step with the plan: %s", e)
+        # --- end follows the plan ---
         return messages
 
-    def add_to_today(self, items: Any, because: Any = None, **_: Any) -> str:
-        """The tool: each thing gets its time today, unless the user's own words ask for none (if_time.py)."""
+    def add_to_today(self, items: Any, because: Any = None, only_if_time: Any = None, **_: Any) -> str:
+        """The tool: each thing gets its time today (full_day.py); one the user wants only if there's time is kept
+        off the plan and the list (if_time.keep)."""
+        # --- only if there's time: the model's call; the plainest words are a fast yes (if_time.py) ---
+        from thirties_core import if_time
+        names = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()] if isinstance(items, str) \
+            else list(items or [])
+        if self.pt.is_current(self.pt.day_plan) and (
+                str(only_if_time).strip().lower() in ("true", "yes", "1")
+                or if_time.asked_untimed(self.pt.user_message)):
+            return if_time.keep(self, names, because)
+        # --- end only if there's time ---
         return self._add_to_today(items, "auto", because)
 
     def _add_to_today(self, items: Any, timing: str = "auto", because: Any = None) -> str:
-        """``timing``: "auto" (a time each, or If there's time when the user asked for no time), "untimed" (under If
-        there's time: the user asked), or "none" (plain lines, no time yet: the morning reset, whose proposal places
-        them once the routine is on)."""
+        """``timing``: "auto" (a time each; a full day moves its lowest item on, full_day.py) or "none" (plain lines:
+        items already on the plan, or the morning reset's, whose plan build places them: full_day.settle_loose)."""
         from thirties_core.today import TodayLinks, note_items
         if isinstance(items, str):
             items = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()]
@@ -870,7 +890,6 @@ class AssistantTools(KindTools):
         # --- end cites the user's words ---
         added, already, queued = [], [], False
         from thirties_core import if_time
-        untimed = timing == "untimed" or (timing == "auto" and if_time.asked_untimed(self.pt.user_message))
         homes: Dict[str, Any] = {}  # each line's home item, by its Today wording
         for name in items or []:
             task = self._exact_task(str(name))  # only the same item links; anything else is new, as worded
@@ -881,16 +900,9 @@ class AssistantTools(KindTools):
             title = title_of(piece_title(self.s.tasks, task)) if task is not None else str(name).strip()
             homes[title.lower()] = task
             if title.lower() in on_today:
-                if untimed and not if_time.is_listed(note, title):  # on Today with a line already: under the heading
-                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
-                                   "section": if_time.HEADING, "open_only": True})
-                    added.append(title)
-                else:
-                    already.append(title)
+                already.append(title)
                 continue
             op = {"op": "add_task", "note_id": note["id"], "title": title}
-            if untimed:
-                op["section"] = if_time.HEADING
             status, msg = writer.submit(op)
             if status in ("not_allowed", "failed"):
                 raise ToolError(msg)
@@ -906,32 +918,31 @@ class AssistantTools(KindTools):
         if added and self._db is not None:  # today's, never a leftover of an earlier day (carry.py)
             from thirties_core.carry import note_added_today
             note_added_today(self._db, self._today(), added)
-        timed, overflow = [], []
-        if added and timing == "auto" and not untimed and self.pt.is_current(self.pt.day_plan):
-            for title in added:  # each gets its time now, placed by Python; it moves only when the user moves it
+        timed, overflow, moves = [], [], []
+        if (added or already) and timing == "auto" and self.pt.is_current(self.pt.day_plan):
+            # --- every item on today gets a time; a full day moves its lowest item on (full_day.py) ---
+            from thirties_core.full_day import place_or_move
+            for title in added + list(already):  # each gets its time now, placed by Python
                 home = homes.get(title.lower()) or self._exact_task(title)  # the item it was added for
                 if if_time.on_plan_today(self.pt, title, home) is not None:
                     continue  # already on today's plan (scheduled first): it keeps that time
-                spot, doubled = if_time.place(self, title, home)
+                spot, doubled, said = place_or_move(self, title, home, protected=True)
+                moves += said
+                if title in already:
+                    already.remove(title)
                 if spot is None:
                     overflow.append(title)
-                    writer.submit({"op": "move", "note_id": note["id"], "to_note_id": note["id"], "title": title,
-                                   "section": if_time.HEADING, "open_only": True})
                 else:
                     timed.append(f"{title} at {format_clock(spot)}" + (" (alongside another item)" if doubled else ""))
+            # --- end every item gets a time ---
         parts = []
         later = " (Joplin will get it when it's open)" if queued else ""
-        if untimed and added:
-            parts.append(f"Under {if_time.HEADING} on today's list, with no time: " + ", ".join(added) + later + ".")
-        else:
-            plain = [t for t in added if t not in overflow and not any(x.startswith(t + " at ") for x in timed)]
-            if plain:
-                parts.append("Added to today's list: " + ", ".join(plain) + later + ".")
-            if timed:
-                parts.append("On today's plan: " + ", ".join(timed) + later + ".")
-        if overflow:
-            parts.append(f"Today is full, even doubled up, so {', '.join(overflow)} "
-                         f"{'is' if len(overflow) == 1 else 'are'} under {if_time.HEADING}.")
+        plain = [t for t in added if t not in overflow and not any(x.startswith(t + " at ") for x in timed)]
+        if plain:
+            parts.append("Added to today's list: " + ", ".join(plain) + later + ".")
+        if timed:
+            parts.append("On today's plan: " + ", ".join(timed) + later + ".")
+        parts += moves
         if already:
             parts.append("Already on it: " + ", ".join(already) + ".")
         return " ".join(parts) or "Nothing to add."
@@ -967,7 +978,7 @@ class AssistantTools(KindTools):
             if routine is not None:
                 out = self._routine_on_today(routine[0], [routine[1]])
             else:
-                out = self.add_to_today([task.title if task is not None else span.title])
+                out = self._add_to_today([task.title if task is not None else span.title], "none")  # it has its time
         except ToolError:
             return ""
         return "(also added to today's list)" if out.startswith("Added") else ""
@@ -2011,18 +2022,14 @@ class AssistantTools(KindTools):
             return "Nothing from yesterday is waiting: everything has an outcome or simply ended."
         day = self._today()
         left = settle(self, day)
-        # what's on today's list with no time goes on today's schedule too (11-06: no "no time yet" any more)
-        from thirties_core.day_lists import pencilled_in
-        try:
-            listed = pencilled_in(self)
-        except Exception:
-            listed = []
-        tasks_by_title = {t.title.strip().lower(): t for t in self.s.tasks}
-        _, list_overflow = self.before.place_today([
-            {"title": t, "task_id": getattr(tasks_by_title.get(t.lower()), "id", ""), "start": day.isoformat(),
-             "end": day.isoformat()} for t in listed])
+        # --- what's on today's list with no time gets one; a full day moves its lowest item on (full_day.py) ---
+        from thirties_core.full_day import settle_loose
+        moved_on = settle_loose(self)
+        list_overflow: List[Dict[str, Any]] = []
+        # --- end today's list gets its times ---
         ask = still_unknown(self, day, left["ask"])
         spread = "".join(f"\n{_short(r['title'])}: {r['why']}." for r in left.get("respread", []))  # ongoing time moved
+        spread += "".join(f"\n{line}" for line in moved_on)
         if left.get("deadlines_moved"):  # a repeating deadline that passed: its next one, its work planned back
             from thirties_core.deadlines import moved_text
             spread += "\n" + moved_text(left["deadlines_moved"], day, short=_short)

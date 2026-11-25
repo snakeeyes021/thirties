@@ -12,74 +12,77 @@ from thirties_core.plan_tools import PlanTools
 
 class TestPencilledIn(ListsTestCase):
 
-    def test_on_the_list_with_no_time_is_said_as_such(self):
+    def test_a_line_with_no_plan_item_is_never_shown_and_the_plan_build_gives_it_a_time(self):
         from tests.test_today import as_earlier_lines
+        from thirties_core.full_day import settle_loose
         with as_earlier_lines():  # lines with no time: from an earlier day, or written by hand
             self.t.execute("add_to_today", {"items": ["Call the bank", "Rinse the tank filter"]})
         bank = next(t for t in self.services.tasks if t.title == "Call the bank" and t.parent_note_id == "n_errands")
         self.t.execute("add_event", {"title": "Bank", "start": "3:00 PM", "duration": "30 min", "task_id": bank.id})
         self.assertEqual(pencilled_in(self.t.assistant), ["Rinse the tank filter"])  # the bank has a time now
-        line_with(self.t.execute("list_schedule", {}), "no time yet", "Rinse the tank filter")
-        self.assertEqual(self.t.execute("pencilled_in", {}), "On the list, no time yet:\n- Rinse the tank filter")
+        self.assertNotIn("no time yet", self.t.execute("list_schedule", {}))
+        settle_loose(self.t.assistant)
+        self.assertEqual(pencilled_in(self.t.assistant), [])
+        self.assertTrue(any(s.title == "Rinse the tank filter" for s in self.t.day_plan.spans))
 
-    def test_pencilling_out_takes_it_off_the_plan_and_keeps_it_on_the_list(self):
-        # 10-29: items asked to be pencilled in (no time) stayed on the plan, and were never on the Today note
+    def test_pencilled_in_today_comes_off_the_plan_into_if_theres_time(self):
+        # 10-29: items asked to be pencilled in stayed on the plan, and were never on the Today note
+        from thirties_core import if_time
         self.t.execute("add_event", {"title": "Walk", "start": "4:00 PM", "duration": "30 min"})
         out = self.t.execute("pencil_in", {"items": ["Walk", "Read a chapter"]})
-        self.assertEqual(out, "Under If there's time on today's list, no time: Walk, Read a chapter. Off the plan: Walk.")
-        self.assertFalse(any(s.title == "Walk" for s in self.t.day_plan.spans))
+        line_with(out, "If there's time", "Walk", "Read a chapter")
+        self.assertFalse(any(s.title == "Walk" and s.status.value == "planned" for s in self.t.day_plan.spans))
         self.assertEqual(self.body("n_today"), "## If there's time\n- [ ] Walk\n- [ ] Read a chapter\n")
-        from thirties_core import if_time
         self.assertEqual(if_time.items(self.api.notes["n_today"]), ["Walk", "Read a chapter"])
-        self.assertEqual(pencilled_in(self.t.assistant), [])  # its own section, not "pencilled in"
-        self.t.user_message = "pencil in a walk"  # the user's words: allowed
-        self.assertTrue(self.t.execute("pencil_in", {"items": ["Stretch"]}).startswith("Under If there's time"))
-        self.t.user_message = "add stretching today"  # nothing asks for no time: the model can't decide it
-        self.assertTrue(self.t.execute("pencil_in", {"items": ["Nap"]}).startswith("NOT_DONE"))
+        self.assertEqual(pencilled_in(self.t.assistant), [])  # its own section, never "no plan item"
 
 
 class TestTomorrow(ListsTestCase):
 
-    def test_planned_for_tomorrow_reaches_today_that_morning_not_now(self):
+    def test_planned_for_tomorrow_reaches_today_that_morning_with_a_time(self):
         # 10-24: an item planned for tomorrow didn't show where the user expected it
+        from thirties_core.carry import OpenPool
+        from thirties_core.full_day import settle_loose
         out = self.t.execute("add_event", {"title": "Dentist call", "start": "10:00 AM", "duration": "30 min",
                                            "day": "tomorrow"})
         line_with(out, "Today list", "that morning")
         self.assertEqual(self.body("n_today"), "")
         out = self.t.execute("add_to_today", {"items": ["Buy stamps", "Water plants"], "day": "tomorrow"})
         line_with(out, "Friday", "Buy stamps", "Water plants")
+        self.assertNotIn("no time", out)
         self.assertEqual(self.body("n_today"), "")  # never today's
+        self.assertEqual(OpenPool(self.sched.state_db).all()["buy stamps"]["start"], (DAY + timedelta(days=1)).isoformat())
         tomorrow = self.t.execute("list_schedule", {"day": "tomorrow"})
         self.assertIn("Dentist call", tomorrow)
-        line_with(tomorrow, "Friday", "no time yet", "Buy stamps", "Water plants")
+        self.assertNotIn("no time yet", tomorrow)
 
         set_debug_time(at("08:00", 1))  # the next morning
         plan, pending = self.sched.build_day_plan(DAY + timedelta(days=1))
         t2 = PlanTools(plan, pending, self.sched, services=self.services)
         t2.assistant.start_the_day()
-        self.assertEqual(self.body("n_today"), "- [ ] Dentist call\n- [ ] Buy stamps\n- [ ] Water plants\n")
-        stamps = next(t for t in self.services.tasks if t.title == "Buy stamps" and t.parent_note_id == "n_today")
-        self.assertTrue(stamps)
-        from thirties_core.today import TodayLinks
-        self.assertEqual(TodayLinks(self.sched.state_db).home_of("Buy stamps")["home_note_id"], "n_errands")
+        self.assertEqual(self.body("n_today"), "- [ ] Dentist call\n")  # nothing reaches Today without a time
+        settle_loose(t2.assistant)  # the day's plan is built: each gets its time, and Today follows the plan
+        for title in ("Buy stamps", "Water plants"):
+            self.assertTrue(any(s.title == title for s in t2.day_plan.spans), title)
+            self.assertIn(f"- [ ] {title}\n", self.body("n_today"))
         self.assertEqual(AheadLists(self.sched.state_db).for_day(DAY + timedelta(days=1)), [])
         morning = planned_ahead_text(t2.assistant)
-        self.assertIn("Already planned for today:\n10:00 AM Dentist call", morning)  # golden: exact text the user reads (plain lines, time first)
-        line_with(morning, "no time yet", "Buy stamps", "Water plants")
-        # what yesterday's offer names is said there, once (10-31 sim: four items listed three times)
-        skipped = planned_ahead_text(t2.assistant, skip=["Buy stamps"])
-        line_with(skipped, "no time yet", "Water plants")
-        self.assertNotIn("Buy stamps", skipped)
+        self.assertTrue(morning.startswith("Already planned for today:\n"), morning)  # plain lines, time first
+        self.assertIn("\n10:00 AM Dentist call", morning)
+        self.assertNotIn("no time yet", morning)
 
 
 class TestTomorrowsListItemGone(ListsTestCase):
 
     def test_a_list_item_done_in_the_meantime_goes_on_by_its_wording(self):
+        from thirties_core.full_day import settle_loose
         self.t.execute("add_to_today", {"items": ["Buy stamps"], "day": "tomorrow"})
         self.services.tasks = [t for t in self.services.tasks if t.title != "Buy stamps"]  # done and filed since
         set_debug_time(at("08:00", 1))
         plan, pending = self.sched.build_day_plan(DAY + timedelta(days=1))
-        PlanTools(plan, pending, self.sched, services=self.services).assistant.start_the_day()
+        t2 = PlanTools(plan, pending, self.sched, services=self.services)
+        t2.assistant.start_the_day()
+        settle_loose(t2.assistant)
         self.assertEqual(self.body("n_today"), "- [ ] Buy stamps\n")  # never its id
 
 

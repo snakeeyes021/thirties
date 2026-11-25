@@ -229,7 +229,7 @@ class BackgroundService:
                 return
             # counted once it reaches the user (below, or delivered_late): one dropped unseen was never asked
         # --- end quiet while the user is away ---
-        if kind in ("start", "checkin"):  # a gap now: the notice may name one thing from If there's time
+        if kind in ("start", "checkin"):  # a gap now: the notice may name one thing kept for if there's time
             try:
                 from thirties_core.if_time import gap_line
                 assistant = self.manager().tools.assistant

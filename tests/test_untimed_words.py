@@ -1,8 +1,7 @@
-"""Any clear way of saying an item gets no time today counts, read from the user's own words (if_time.py).
+"""Any clear way of saying an item gets no time today is a fast yes for If there's time (if_time.py).
 
-The pencil-in guard refused a plain request because it was worded differently from its fixed phrases ("no clock time
-on the gutters at all, just after the roofer"). Any clear statement that the item shouldn't have a time today now
-counts; when the user said nothing of the kind, the guard still refuses. Fixtures are invented.
+The words are never a no: whether the user asked is the model's call (pencil_in, or add_to_today's only_if_time).
+Fixtures are invented.
 """
 
 import unittest
@@ -79,11 +78,10 @@ class PencilInTest(ListsTestCase):
             self.assertFalse(out.startswith(NOT_DONE), out)
             self.assertIn(item, if_time.items(self.api.notes["n_today"]))
 
-    def test_nothing_said_about_time_is_still_refused(self):
-        for message in ("add oiling the hinges today", "oil the hinges at 3", "it can't be whenever"):
-            out = self.say(message, ["Oil the hinges"])
-            self.assertTrue(out.startswith(NOT_DONE), (message, out))
-        self.assertNotIn("Oil the hinges", if_time.items(self.api.notes["n_today"]))
+    def test_the_words_are_never_a_no_the_models_call_stands(self):
+        out = self.say("the hinges can wait, keep them loose today", ["Oil the hinges"])
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Oil the hinges", if_time.items(self.api.notes["n_today"]))
 
 
 if __name__ == "__main__":

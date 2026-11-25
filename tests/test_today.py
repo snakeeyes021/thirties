@@ -153,13 +153,14 @@ class TestHandEdits(TodayTestCase):
         self.assertEqual(self.body("n_errands"), "- [x] Call the bank\n- [x] Buy stamps\n")
         self.assertEqual(self.body("n_today"), "- [x] Call the bank\n- [x] Buy stamps\n")
 
-    def test_a_scheduled_item_taken_off_today_is_mentioned_once(self):
+    def test_a_line_deleted_by_hand_takes_its_item_off_todays_plan_once(self):
         self.t.execute("add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
                                      "task_id": "t_bank"})
-        self.api.notes["n_today"]["body"] = ""
+        self.api.notes["n_today"]["body"] = ""  # Joplin is the truth: the user took it off today
         self.assertEqual(self.t.assistant.sync_today(),
-                         ["You took Call the bank off today's list; it's still planned at 3:00 PM. "
-                          "Should I take it off the plan too?"])
+                         ["Call the bank came off today's list, so it's off today's plan too."])
+        self.assertFalse(any(s.title == "Call the bank" for s in self.t.day_plan.spans))
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # its own list is never touched
         self.assertEqual(self.t.assistant.sync_today(), [])
 
 
@@ -194,8 +195,7 @@ class TestWhatsLeft(TodayTestCase):
         brain._message = "back. what's still left for today?"
         out, _ = brain._do_question(Action("question", {"topic": "what's still left for today"}))
         self.assertEqual(out, "Not marked yet:\nShower\n\n"  # first, one per line, no times
-                              "Still planned today:\n2:00 PM – Call the bank\n"
-                              "On today's list, no time yet: Rinse the tank filter.")
+                              "Still planned today:\n2:00 PM – Call the bank")  # never a line without a time
 
 
 class TestSlmShortcuts(TodayTestCase):

@@ -95,7 +95,7 @@ class TestNoRawLineLeavesThirties(TodayTestCase):
         self.assertNotIn("`", text, where)
 
     def test_every_schedule_tool(self):
-        for name in ("show_schedule", "list_schedule", "pencilled_in", "day_options"):
+        for name in ("show_schedule", "list_schedule", "day_options"):
             out = self.t.execute(name, {})
             self.assertClean(out, name)
         self.assertIn("Water heater: book the yearly flush", self.t.execute("show_schedule", {}))

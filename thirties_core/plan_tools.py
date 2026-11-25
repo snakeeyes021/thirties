@@ -2062,7 +2062,6 @@ class PlanTools:
         now = self._now()
         from thirties_core.messages import missed_for, missed_lines  # one per item, not the block the user is in (C2)
         from thirties_core.item_path import labelled, tasks_of  # a nested list item with its parents
-        from thirties_core.day_lists import pencilled_text
         from thirties_core.if_time import text_for as if_time_text
         from thirties_core.not_yours import text_for as not_yours_text
         behind = missed_for(self, now, muted_too=True) if plan.day_start <= now < plan.day_end else []
@@ -2074,7 +2073,6 @@ class PlanTools:
         return ((unread + " Free time below may not be free.\n" if unread else "")
                 + "Scheduled:\n" + ("\n".join(lines) if lines else "- nothing yet") + done_line
                 + f"\n{scope}: {free}"
-                + (pencilled_text(self.assistant, plan) if self.assistant else "")
                 + (if_time_text(self.assistant) if self.assistant and self.is_current(plan) else "")
                 + ("\nNot marked yet (past their time, not assumed done):\n"
                    + "\n".join(missed_lines(labelled(behind, tasks_of(self)))) if behind else "")

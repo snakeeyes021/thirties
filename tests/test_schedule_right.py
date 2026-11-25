@@ -60,16 +60,22 @@ class TestOneFailureNeverKeepsTheDayOff(RoutineCase):
         self.assertEqual(set(starts(self.t, {"Lunch", "Feed the fish", "Vacuum"})), {"Lunch", "Feed the fish", "Vacuum"})
 
 
-class TestListItemsWithNoTimeAreShown(TodayTestCase):
-    """A line on today's list with no time on the plan (added to the list in Joplin) was in the model's schedule but
-    missing from the schedule sent to the user."""
+class TestListItemsAddedInJoplinGetATime(TodayTestCase):
+    """A line added to today's list in Joplin was missing from the schedule sent to the user. It is never shown
+    without a time: the sync gives it one (full_day.mirror_today), and then it's a row like any other."""
 
-    def test_the_schedule_sent_lists_them_after_the_timed_items(self):
+    def test_the_sync_gives_it_a_time_and_the_schedule_shows_it_as_a_row(self):
+        from thirties_core import morning
+        from thirties_core.full_day import mirror_today
         self.t.execute("add_event", {"title": "Return the drill", "start": "5:00 PM", "duration": "30 minutes"})
         self.api.notes["n_today"]["body"] += "- [ ] Pick up the dry cleaning\n"  # added in Joplin, later that day
+        self.assertNotIn("no time yet", self.t.execute("show_schedule", {}))
+        morning.mark_done(self.sched.state_db, DAY, at("09:00"))  # the day is built
+        said = mirror_today(self.t.assistant)
+        self.assertTrue(any("Pick up the dry cleaning" in line for line in said), said)
         out = self.t.execute("show_schedule", {})
-        self.assertIn("On today's list, no time yet:\nPick up the dry cleaning", out)
-        self.assertEqual(out.count("Return the drill"), 1)  # it has its time: a row, not a list line
+        self.assertEqual(out.count("Pick up the dry cleaning"), 1)
+        self.assertEqual(out.count("Return the drill"), 1)
 
 
 class TestSomeoneElsesEventsArentTheUsers(unittest.TestCase):
