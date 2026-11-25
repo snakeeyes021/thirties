@@ -118,7 +118,7 @@ class TestUntimed(StandingCase):
         from unittest.mock import MagicMock, patch
         self.manager.tools.assistant = self.manager.tools.assistant or MagicMock()
         with patch("thirties_core.day_lists.pencilled_in", return_value=["Oil the chain tool"]), \
-                patch("thirties_core.if_time.items", return_value=["Sweep the bench"]):
+                patch("thirties_core.if_time.open_items", return_value=["Sweep the bench"]):
             out = self.turn("CALL show_schedule {}",
                             "Here you go.\n\nOn today's list, no time yet:\nOil the chain tool", said="what's left?")
         self.assertOneView(out)
@@ -126,10 +126,25 @@ class TestUntimed(StandingCase):
         self.assertNotIn("Oil the chain tool", out)
         self.assertEqual(self.section(out, "If there's time:"), ["Sweep the bench"], out)
         self.assertLess(out.index("Not marked yet:"), out.index("If there's time:"))
+        self.assertTrue(out.rstrip().endswith("If there's time:\nSweep the bench"), out)  # last
 
     def test_no_if_theres_time_part_when_its_empty(self):
         out = self.turn("CALL show_schedule {}", "Here you go.", said="what's left?")
         self.assertNotIn("If there's time", out)
+
+
+class TestNowIsAlwaysSaid(StandingCase):
+
+    def test_between_items_now_says_free_until_the_next_one(self):
+        set_debug_time(at("18:40"))
+        out = self.turn("CALL show_schedule {}", "Here you go.", said="what's left?")
+        self.assertIn("Now: free until 7:00 PM", out)
+        self.assertFalse(any(line.startswith("Free until") for line in out.splitlines()), out)
+
+    def test_before_the_days_first_block(self):
+        set_debug_time(at("07:40"))
+        out = self.turn("CALL show_schedule {}", "Morning.", said="what's on?")
+        self.assertIn("Now: free until 8:30 AM", out)  # Work starts the day
 
 
 class TestHandTick(StandingCase):

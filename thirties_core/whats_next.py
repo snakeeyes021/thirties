@@ -2,7 +2,7 @@
 
 Wherever the day is laid out for the user, it's this view, always in the same shape:
 
-  Now: what's in the block under way
+  Now: what's in the block under way, or "free until …" when nothing is
   The rest of today: every row from the next block to the end of the day, with the Free stretches
   Not marked yet: one item per line, by its title, never a time
   If there's time: the titles under that heading of the Today note, one per line, never a time
@@ -118,8 +118,8 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
 
     ``mode`` given: that, whole (asked for outright). Left out: as the person wants it (reply_extras.py, from
     ``config`` and ``db``): nothing at all, or only the next few rows, when they said so. Its Not marked yet list
-    is there whenever anything is unmarked, and its "Now" line whenever something is on: the view keeps one
-    shape."""
+    is there whenever anything is unmarked, and it always has a "Now" line: what's on, or "Now: free until …" when
+    nothing is (``_free_now``). The view keeps one shape."""
     from thirties_core.messages import plain_rows, schedule_rows
     if mode is None:
         from thirties_core.reply_extras import effective
@@ -133,12 +133,14 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     here = [s for s in mine if s.start_dt < block + HALF and s.end_dt > block]
     on_top = [s for s in here if not s.is_envelope]
     here = on_top or here  # what's placed on Work is what's happening; Work alone when nothing is
-    now_line = "Now: " + ", then ".join(slice_lines([(max(s.start_dt, block), s.end_dt, s.title) for s in here])) \
-        if here else ""
     upcoming = sorted((s for s in mine if s.start_dt >= block + HALF), key=lambda s: s.start_dt.timestamp())
+    now_line = "Now: " + ", then ".join(slice_lines([(max(s.start_dt, block), s.end_dt, s.title) for s in here])) \
+        if here else _free_now(plan, now, upcoming)
     rows = plain_rows(schedule_rows(plan, block + HALF, planned_only=True))  # the whole rest: "(until" as shown
     shown_rows = rows[:NEXT_ROWS] if mode == "few" else rows  # every row to the end of the day, none cut
     listed = _with_free(plan, now, rows, len(shown_rows)) if free else shown_rows
+    if not here and with_now:  # the Now line says the open stretch under way: not again as a row
+        listed = [line for line in listed if not line.startswith("Free until ")]
     next_block = "\n".join(["Next:" if mode == "few" else "The rest of today:"] + listed) if shown_rows \
         else "\n".join(["Nothing else is planned today."] + listed)
     shown_until = block + HALF
@@ -156,6 +158,16 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
         "Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
                                   for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())) if theirs else "",
         *(untimed_lines(heading, titles) for heading, titles in untimed))
+
+
+def _free_now(plan: DayPlan, now: datetime, upcoming: Sequence[EventSpan]) -> str:
+    """The Now line when nothing is on in the block under way: "Now: free until 11:00 AM" (free_line's words),
+    until the next thing starts, or until bedtime when nothing else is planned today."""
+    nxt = min((thirty_of(s.start_dt) for s in upcoming), default=None)
+    until = nxt if nxt is not None and nxt < bedtime(plan) else bedtime(plan)
+    if until <= thirty_of(now) + HALF and nxt is None:
+        return ""  # the day's waking time is ending: nothing to say about now
+    return "Now: free" + free_line(now, until, now)[len("Free"):]
 
 
 def unmarked_lines(spans: List[EventSpan]) -> List[str]:
