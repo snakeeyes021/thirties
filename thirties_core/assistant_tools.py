@@ -831,9 +831,11 @@ class AssistantTools(KindTools):
             if linked and linked not in on_today and span.status.value == "planned" and span.end_dt > self.pt._now():
                 gone.append(span)
         # --- a line deleted from Today by hand takes its item off today's plan: Joplin wins (full_day.py) ---
-        if gone and self.pt.is_current(plan):
-            from thirties_core.full_day import unlisted_by_hand
-            messages += unlisted_by_hand(self, gone)
+        if self.pt.is_current(plan):
+            from thirties_core.full_day import hand_deleted, unlisted_by_hand
+            gone = hand_deleted(self, today, set(on_today), [(s, links.today_title_of(s.task_id)) for s in gone])
+            if gone:
+                messages += unlisted_by_hand(self, gone)
         # --- end deleted by hand ---
         # --- the Today note follows the plan: a hand-added line gets its time, a stray one is fixed (full_day.py) ---
         try:
@@ -847,13 +849,14 @@ class AssistantTools(KindTools):
     def add_to_today(self, items: Any, because: Any = None, only_if_time: Any = None, **_: Any) -> str:
         """The tool: each thing gets its time today (full_day.py); one the user wants only if there's time is kept
         off the plan and the list (if_time.keep)."""
-        # --- only if there's time: the model's call; the plainest words are a fast yes (if_time.py) ---
+        # --- only if there's time: the model's call; for a single item the plainest words are a fast yes, while
+        # with several the flag alone decides, since the words may be about one of them only (if_time.py) ---
         from thirties_core import if_time
         names = [x for x in re.split(r"\s*(?:;|\n|\|)\s*", items) if x.strip()] if isinstance(items, str) \
             else list(items or [])
         if self.pt.is_current(self.pt.day_plan) and (
                 str(only_if_time).strip().lower() in ("true", "yes", "1")
-                or if_time.asked_untimed(self.pt.user_message)):
+                or (len(names) == 1 and if_time.asked_untimed_for(self.pt.user_message, str(names[0])))):
             return if_time.keep(self, names, because)
         # --- end only if there's time ---
         return self._add_to_today(items, "auto", because)

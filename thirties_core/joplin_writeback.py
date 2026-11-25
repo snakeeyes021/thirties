@@ -32,6 +32,19 @@ from thirties_core.joplin_engine import CHECKBOX_REGEX, DONE_CHECKBOX_REGEX, HEA
 
 logger = logging.getLogger(__name__)
 
+# --- writes in flight, by note id: a sync reading a note mid-write never takes it as the user's edit (full_day.py) ---
+import threading  # noqa: E402
+
+_IN_FLIGHT: Dict[str, int] = {}
+_IN_FLIGHT_LOCK = threading.Lock()
+
+
+def writing_to(note_id: str) -> bool:
+    """A write of Thirties' own to this note is being applied right now."""
+    with _IN_FLIGHT_LOCK:
+        return _IN_FLIGHT.get(str(note_id or ""), 0) > 0
+# --- end writes in flight ---
+
 
 # --- note body edits (pure) ---
 
@@ -714,6 +727,18 @@ class JoplinWriter:
         return self._put(note_id, written, original) == "landed"
 
     def _apply(self, op: Dict[str, Any]) -> Tuple[bool, str]:
+        notes = {str(op.get(k) or "") for k in ("note_id", "to_note_id") if op.get(k)}
+        with _IN_FLIGHT_LOCK:
+            for n in notes:
+                _IN_FLIGHT[n] = _IN_FLIGHT.get(n, 0) + 1
+        try:
+            return self._apply_counted(op)
+        finally:
+            with _IN_FLIGHT_LOCK:
+                for n in notes:
+                    _IN_FLIGHT[n] = _IN_FLIGHT.get(n, 1) - 1
+
+    def _apply_counted(self, op: Dict[str, Any]) -> Tuple[bool, str]:
         self._edits: List[Tuple[Optional[str], str, str, str]] = []
         self._op = op  # what it sent, if Joplin goes away mid-write, is kept on the change itself
         ok, msg = self._apply_op(op)

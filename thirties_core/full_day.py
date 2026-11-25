@@ -366,6 +366,53 @@ def mirror_today(assistant: Any) -> List[str]:
     return settle_loose(assistant)
 
 
+SEEN_KEY = "today_note_seen"  # {"note": id, "day": iso, "lines": [lowercased open and ticked lines]}
+
+
+def _writes_pending(assistant: Any, note_id: str) -> bool:
+    """A write of Thirties' own to this note is queued in the outbox or being applied right now."""
+    import json
+    from thirties_core.joplin_writeback import writing_to
+    if writing_to(note_id):
+        return True
+    try:
+        rows = assistant._db.outbox_pending()
+    except Exception:
+        return True  # can't tell: treat it as busy, and wait
+    for row in rows:
+        try:
+            op = json.loads(row.get("op") or "{}")
+        except ValueError:
+            continue
+        if note_id in (str(op.get("note_id") or ""), str(op.get("to_note_id") or "")):
+            return True
+    return False
+
+
+def hand_deleted(assistant: Any, note: Any, lines_now: Any, gone: List[Tuple[Any, str]]) -> List[Any]:
+    """Of the planned items whose Today line is missing (``gone``: (span, its line, lowercased)), those whose line
+    the user deleted by hand: no write of Thirties' own to the note is queued or in flight, and the line was there
+    in the last note text Thirties saw itself. Anything else waits for the next sync. The note as seen now is kept
+    for next time (only while no write of Thirties' own is pending, so a line it is about to write or remove never
+    counts)."""
+    import json
+    db = assistant._db
+    if db is None or not note:
+        return []
+    note_id = str(note.get("id") or "")
+    day = assistant.pt.today().isoformat()
+    if _writes_pending(assistant, note_id):
+        return []
+    try:
+        seen = json.loads(db.get_sync_meta(SEEN_KEY) or "{}")
+    except ValueError:
+        seen = {}
+    before = set(seen.get("lines") or []) if seen.get("note") == note_id and seen.get("day") == day else set()
+    db.set_sync_meta(SEEN_KEY, json.dumps({"note": note_id, "day": day,
+                                           "lines": sorted(str(t).lower() for t in lines_now)}))
+    return [span for span, line in gone if line and str(line).lower() in before]
+
+
 def unlisted_by_hand(assistant: Any, spans: List[Any]) -> List[str]:
     """Lines the user deleted from the Today note by hand: their items come off today's plan (Joplin wins). Their
     home lists are never touched. One line each, for the user."""
@@ -384,4 +431,4 @@ def unlisted_by_hand(assistant: Any, spans: List[Any]) -> List[str]:
 
 
 __all__ = ["moved_line", "importance", "lowest", "move_span", "move_unplaced", "place_or_move", "take_line_off",
-           "loose_today", "settle_loose", "mirror_today", "unlisted_by_hand"]
+           "loose_today", "settle_loose", "mirror_today", "hand_deleted", "unlisted_by_hand"]

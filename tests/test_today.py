@@ -153,15 +153,47 @@ class TestHandEdits(TodayTestCase):
         self.assertEqual(self.body("n_errands"), "- [x] Call the bank\n- [x] Buy stamps\n")
         self.assertEqual(self.body("n_today"), "- [x] Call the bank\n- [x] Buy stamps\n")
 
-    def test_a_line_deleted_by_hand_takes_its_item_off_todays_plan_once(self):
+    def bank_at_3_seen(self):
         self.t.execute("add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
                                      "task_id": "t_bank"})
+        self.assertIn("- [ ] Call the bank", self.body("n_today"))
+        self.assertEqual(self.t.assistant.sync_today(), [])  # Thirties sees the note with the line on it
+
+    def test_a_line_deleted_by_hand_takes_its_item_off_todays_plan_once(self):
+        self.bank_at_3_seen()
         self.api.notes["n_today"]["body"] = ""  # Joplin is the truth: the user took it off today
         self.assertEqual(self.t.assistant.sync_today(),
                          ["Call the bank came off today's list, so it's off today's plan too."])
         self.assertFalse(any(s.title == "Call the bank" for s in self.t.day_plan.spans))
         self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # its own list is never touched
         self.assertEqual(self.t.assistant.sync_today(), [])
+
+    def test_a_line_thirties_never_saw_on_the_note_is_never_taken_as_deleted(self):
+        self.t.execute("add_event", {"title": "Call the bank", "start": "3:00 PM", "duration": "30 min",
+                                     "task_id": "t_bank"})
+        self.api.notes["n_today"]["body"] = ""  # gone before any sync read the note
+        self.assertEqual(self.t.assistant.sync_today(), [])
+        self.assertEqual(self.t.assistant.sync_today(), [])
+        self.assertTrue(any(s.title == "Call the bank" for s in self.t.day_plan.spans))
+
+    def test_while_a_write_of_its_own_to_the_note_is_queued_or_in_flight_it_waits_for_the_next_sync(self):
+        import json
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        self.bank_at_3_seen()
+        db = self.sched.state_db
+        db.outbox_add(json.dumps({"op": "add_task", "note_id": "n_today", "title": "Buy stamps"}),
+                      datetime.now(timezone.utc).isoformat())
+        self.api.notes["n_today"]["body"] = ""
+        self.assertEqual(self.t.assistant.sync_today(), [])  # queued: not the user's edit, wait
+        self.assertTrue(any(s.title == "Call the bank" for s in self.t.day_plan.spans))
+        db.outbox_done(db.outbox_pending()[0]["id"])
+        with patch("thirties_core.joplin_writeback.writing_to", return_value=True):
+            self.assertEqual(self.t.assistant.sync_today(), [])  # in flight: wait again
+        self.assertTrue(any(s.title == "Call the bank" for s in self.t.day_plan.spans))
+        self.assertEqual(self.t.assistant.sync_today(),
+                         ["Call the bank came off today's list, so it's off today's plan too."])
+        self.assertIn("- [ ] Call the bank", self.body("n_errands"))  # the home list is never written to
 
 
 class TestBrains(TodayTestCase):
