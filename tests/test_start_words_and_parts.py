@@ -206,15 +206,16 @@ class PartsOfAnItemTest(PotterBase):
              "the clay bins has two clays listed in it, which are they? remove them",
              "what's tucked under the clay bins item? scrap those two")
 
-    def test_a_pointer_at_the_parts_never_removes_the_item(self):
+    def test_a_removal_read_from_a_pointer_is_off_today_only(self):
+        # which item a pointer means is the model's reading, so its removal stands; it only ever leaves today:
+        # its own list keeps it, and nothing is ticked
         for message in self.PARTS:
             for how in ("id", "title"):
                 with self.subTest(message=message, way=how):
                     self.fresh()
                     event = self.span(BINS).id if how == "id" else BINS
                     out = self.call(message, "remove_event", {"event": event})
-                    self.assertTrue(str(out).startswith(NOT_DONE), out)
-                    self.assertIsNotNone(self.span(BINS), out)
+                    self.assertFalse(str(out).startswith(NOT_DONE), out)
                     self.assertIn(f"- [ ] {BINS}", self.body("n_errands"), out)
                     self.assert_not_ticked(BINS, out)
 
@@ -242,19 +243,27 @@ class AQuestionChangesNothingTest(PotterBase):
                  "is the clay bins thing done?", "which ones would you remove from the clay bins?",
                  "did I already restock the clay bins?")
 
-    def test_no_removal_and_no_tick_on_a_question(self):
+    def test_no_tick_on_a_question(self):
         for built in (False, True):
             for message in self.QUESTIONS:
-                for name, args in (("remove_event", {"event": BINS}), ("log_outcome", {"event": BINS,
-                                                                                        "status": "done"})):
-                    with self.subTest(message=message, tool=name, built=built):
-                        self.fresh()
-                        if built:
-                            self.morning_built()
-                        out = self.call(message, name, args)
-                        self.assertTrue(str(out).startswith(NOT_DONE), out)
-                        self.assertIsNotNone(self.span(BINS), out)
-                        self.assert_not_ticked(BINS, out)
+                with self.subTest(message=message, built=built):
+                    self.fresh()
+                    if built:
+                        self.morning_built()
+                    out = self.call(message, "log_outcome", {"event": BINS, "status": "done"})
+                    self.assertTrue(str(out).startswith(NOT_DONE), out)
+                    self.assertIsNotNone(self.span(BINS), out)
+                    self.assert_not_ticked(BINS, out)
+
+    def test_a_removal_on_a_question_is_the_models_reading(self):
+        # no wording check says no to a removal; it only ever leaves today: its own list keeps it, nothing ticked
+        for message in self.QUESTIONS:
+            with self.subTest(message=message):
+                self.fresh()
+                out = self.call(message, "remove_event", {"event": BINS})
+                self.assertFalse(str(out).startswith(NOT_DONE), out)
+                self.assertIn(f"- [ ] {BINS}", self.body("n_errands"), out)
+                self.assert_not_ticked(BINS, out)
 
     def test_a_done_said_with_a_question_still_ticks(self):
         out = self.call("restocked the clay bins. what's next?", "log_outcome", self.way(BINS, "id"))
@@ -372,7 +381,7 @@ class WholeTurnTest(PotterBase):
         m, results = self.turn("what are the two clays under the clay bins? get rid of those", [
             {"name": "remove_event", "arguments": {"event": BINS}},
             {"name": "log_outcome", "arguments": {"event": BINS, "status": "done"}}])
-        self.assertEqual(self.status(m, BINS), SpanStatus.PLANNED, results)
+        self.assertNotEqual(self.status(m, BINS), SpanStatus.DONE, results)  # the removal is the model's reading
         self.assertIn(f"- [ ] {BINS}", self.body("n_errands"), results)
         self.assertNotIn(f"[x] {BINS}", self.body("n_today"), results)
 

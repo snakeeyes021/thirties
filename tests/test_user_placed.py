@@ -123,11 +123,12 @@ class TestNotYet(PlacedCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
         set_debug_time(at("08:05"))
 
-    def test_not_yet_keeps_it(self):
+    def test_not_yet_is_the_models_reading(self):
+        # "not yet" is about when; whether that takes it off is the model's reading, so its call stands
         out = self.say("whoa, the lake drive isn't yet, I'm still packing the dry bag", "remove_event",
                        {"event": "Drive to the lake"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertTrue(any(s.title == "Drive to the lake" for s in self.manager.day_plan.spans))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertFalse(any(s.title == "Drive to the lake" for s in self.manager.day_plan.spans))
 
     def test_a_clear_word_still_takes_it_off(self):
         out = self.say("cancel the lake drive, the wind is up", "remove_event", {"event": "Drive to the lake"})

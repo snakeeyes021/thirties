@@ -92,12 +92,12 @@ class HeldPaths:
         self.assertIn(f"{KILN} was {self.was()}; it's on tomorrow now.", out)
         self.assertEqual(self.planned(KILN), [])
 
-    def test_a_skip_gives_it_a_new_block_today(self):
+    def test_a_skip_stands_and_says_the_deadline(self):
         span = self.kiln_today()
         out = self.say("skip the kiln permit today", "log_outcome", {"event": span.id, "status": "skipped"})
-        self.assertIn(f"{KILN} is {self.words()}, so it's on today's plan again at ", out)
-        self.assertIn(f"- [ ] {KILN}", self.body("n_today"))
-        self.assertNotIn(KILN, pencilled_in(self.a))  # anything for today has a time
+        self.assertIn(f"{KILN} is {self.words()}.", out)  # a fact for the model, never a hold
+        self.assertNotIn(KILN, self.body("n_today"))
+        self.assertNotIn(KILN, pencilled_in(self.a))
 
     def test_move_to_another_day(self):
         span = self.kiln_today()
@@ -122,15 +122,14 @@ class HeldPaths:
     def test_remove_and_clear(self):
         span = self.kiln_today()
         out = self.say("skip the kiln permit today", "remove_event", {"event": span.id})
-        self.assertIn(f"{KILN} is {self.words()}, so it's on today's plan again at ", out)
-        self.assertIn(f"- [ ] {KILN}", self.body("n_today"))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"{KILN} is {self.words()}.", out)  # a fact for the model, never a hold
+        self.assertNotIn(KILN, self.body("n_today"))
         self.due("Wax the canoe hull")  # a line that lives only on Today
         self.api.notes["n_today"]["body"] += "- [ ] Wax the canoe hull\n"
         out = self.say("skip the canoe hull today", "remove_event", {"event": "Wax the canoe hull"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn(f"Wax the canoe hull is {self.words()}, so it stays on today", out)
-        out = self.say("drop the canoe hull", "remove_event", {"event": "Wax the canoe hull"})
-        self.assertIn(f"Wax the canoe hull was {self.was()}; it's off today now.", out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"Wax the canoe hull is {self.words()}.", out)
         self.assertNotIn("Wax the canoe hull", self.body("n_today"))
 
     def test_pin_to_a_later_period(self):

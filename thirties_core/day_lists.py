@@ -118,10 +118,8 @@ def pencilled_in(assistant, plan=None) -> List[str]:
     titles = {s.title.strip().lower() for s in spans}
     task_ids = {s.task_id for s in spans if s.task_id}
     # skipped today and planned nowhere else today: not happening today, so not "no time yet" either (its line
-    # leaves Today with the skip, leave_today.py; this covers the time before Joplin has the change)
-    from thirties_core.due_today import must_stay  # due today or overdue, it stays "no time yet" (due_today.py)
-    skipped = [s for s in plan.spans if _plannable(s) and s.status == SpanStatus.SKIPPED
-               and not must_stay(pt, s.title, s.task_id)]
+    # leaves Today with the skip, leave_today.py, due today or not; this covers the time before Joplin has the change)
+    skipped = [s for s in plan.spans if _plannable(s) and s.status == SpanStatus.SKIPPED]
     routines |= {s.title.strip().lower() for s in skipped if s.title.strip().lower() not in titles}
     task_ids |= {s.task_id for s in skipped if s.task_id}
     links = TodayLinks(db)

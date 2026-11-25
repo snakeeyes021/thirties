@@ -19,10 +19,10 @@ until the user was told to spell the items out. So now:
   model can put it back if that's what was meant (``removal_note``).
 - **No basis**: nothing the user said this turn or just before asks for anything to come off, or names or points
   to the item. It stays, whatever they say about how full the day is ("tonight is way too packed" names no item):
-  which item to offer up is then a question for the user. Neither does an item the user only said isn't due yet.
+  which item to offer up is then a question for the user.
 
 Taking something off the plan never ticks it or files it as dropped by itself: the user's lists have their own
-guard (write_guard.py; off_today._off_list). The app's own controls and the background (nobody talking) are never
+guard (write_guard.py; off_today.leave_list). The app's own controls and the background (nobody talking) are never
 held here.
 """
 
@@ -175,33 +175,17 @@ def _kept_why(title: str) -> str:
 
 
 def removal_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
-    """Why this item can't come off the plan on the user's words this turn, or None."""
+    """Why this item can't come off the plan on the user's words this turn, or None. Only the user's ask to keep it
+    or put it back holds it here; whether their words (a question, a grumble, a "not yet") take it off is the
+    model's reading. A removal with no basis at all is held before this (plan_tools.remove_event)."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return None
-    # --- a question, or a pointer at an item's parts, takes nothing off (said_for_it.py) ---
-    from thirties_core.said_for_it import removal_held
-    held_here = removal_held(pt, pt._title(span))
-    if held_here:
-        return held_here
-    # --- end a question, or a pointer at parts ---
     title = pt._title(span)
     keep = kept(pt, title, (span.id, span.task_id))  # asked to keep it or put it back: never a removal
     if keep:
         return keep
-    if removal_asked(pt):
-        return None  # which items the request means is the model's reading
-    from thirties_core.done_reference import check
-    held, _ = check(pt, title, [i for i in (span.id, span.task_id) if i])
-    if held:
-        return (f"The user hasn't asked for anything to come off the plan, so {title} stays. Take something off "
-                "only when they ask; if you think they want it gone, ask them in your own words.")
-    # --- "not yet" is about when, not whether: it stays (a simulated day lost an item the user said wasn't due yet) ---
-    if NOT_YET_RE.search(message):
-        return (f"The user said it isn't time for {title} yet, not that it's off, so it stays on the plan. Leave it "
-                "where it is, or move it later if they say when.")
-    # --- end "not yet" ---
-    return None  # their words are about this item: what they mean for it is the model's reading
+    return None  # which items their words mean, and what they mean for each, is the model's reading
 
 
 def removal_note(pt: "PlanTools", span: "EventSpan") -> str:
@@ -216,11 +200,6 @@ def removal_note(pt: "PlanTools", span: "EventSpan") -> str:
         return (f" (Note: the user's words are about where {title} was or how it got there. If they meant it to "
                 "move rather than come off, put it where they want it.)")
     return ""
-
-
-# the item's time hasn't come: "the kiln run isn't yet", "not time for the paddle yet", "not now, later"
-NOT_YET_RE = re.compile(r"\bnot (?:\w+ ){0,3}yet\b|\b(?:isn'?t|is not|aren'?t|are not) (?:\w+ ){0,3}yet\b|"
-                        r"\bnot (?:right )?now\b|\bnot time (?:for|to)\b|\btoo (?:early|soon) for\b", re.IGNORECASE)
 
 
 __all__ = ["removal_refused", "removal_asked", "removal_note", "kept", "KEEP_RE", "asked", "recent_said",

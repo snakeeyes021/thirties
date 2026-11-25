@@ -80,13 +80,23 @@ class TakeOffIsNotDropTest(GuardBase):
     def test_take_off_an_untimed_today_only_item_never_files_it_dropped(self):
         self.untimed("Mix the celadon glaze")
         out = self.say("take the celadon glaze off, the oxides aren't in yet", "remove_event",
-                       {"event": "Mix the celadon glaze"})
+                       {"event": "Mix the celadon glaze", "today_list": "later"})  # the model: back another day
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertNotIn("Mix the celadon glaze", self.body("n_today"))
         self.assertIsNone(self.dropped_note())
         rec = OpenPool(self.sched.state_db).all().get("mix the celadon glaze")
         self.assertIsNotNone(rec)  # it waits for a day later this week: still to do
         self.assertNotEqual(rec.get("horizon"), "dropped")
+        self.assert_untouched_home()
+
+    def test_drop_for_good_without_a_drop_word_never_files_it_dropped(self):
+        self.untimed("Mix the celadon glaze")
+        out = self.say("take the celadon glaze off", "remove_event",
+                       {"event": "Mix the celadon glaze", "today_list": "drop"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertNotIn("Mix the celadon glaze", self.body("n_today"))  # off today all the same
+        self.assertIsNone(self.dropped_note())  # filed as dropped only on a drop word
+        self.assertIn("isn't filed as dropped for good", out)
         self.assert_untouched_home()
 
     def test_take_off_a_timed_list_item_leaves_its_list_alone(self):
@@ -118,7 +128,8 @@ class TakeOffIsNotDropTest(GuardBase):
 
     def test_drop_words_still_file_it_dropped(self):
         self.untimed("Mix the celadon glaze")
-        out = self.say("drop the celadon glaze for good", "remove_event", {"event": "Mix the celadon glaze"})
+        out = self.say("drop the celadon glaze for good", "remove_event",
+                       {"event": "Mix the celadon glaze", "today_list": "drop"})
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertIsNotNone(self.dropped_note())
         self.assertIn("Mix the celadon glaze", self.dropped_note()["body"])

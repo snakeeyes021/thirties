@@ -4,20 +4,24 @@ Unscheduling an item used to leave its Today line behind, which then reappeared 
 could remove that line: list tools work on home lists and schedule tools on spans. A request to
 clear an item from the list was also read as the item being finished. Now:
 
-- a clear ask is the user asking for an item to go: to take it off, drop, remove, clear, cancel or get rid of it,
-  or saying it isn't happening. It is no done, so a done for it is refused (clearing isn't finishing);
-- an item taken off on such words leaves today's list too. An item that has a home list keeps it there, untouched
-  (a drop, as leftover_action means it: only its copy on Today goes); an item that lives only on Today is
-  filed in the month's Dropped note, the record of what was let go, where an undrop can bring it back;
-- an item on today's list with no time can be taken off the same way (remove_event by its title).
+- whatever takes an item off today's plan on the user's words (remove_event, clear_time, a new item put in its
+  place) takes its line off today's list too, so it never lingers as "no time yet". What the user meant for each
+  line is the model's reading, passed as ``today_list`` (``leave_list``): off (the default: off today, and it
+  doesn't come back by itself), keep, later, tomorrow, or drop (for good). No wording check decides it; a
+  question or a complaint can be the ask. The answer carries the facts back: what happened to the line, and
+  whether the item is due today or overdue (a fact, never a hold);
+- an item with a home list keeps it there, untouched: only its copy on Today goes. A record of it waiting from
+  an earlier day stops offering it (Before today's archive, where it can be brought back), so it doesn't return
+  tomorrow as a leftover. A routine's group or steps are never written here;
+- dropped for good is filed in the month's Dropped note only on the user's drop word (write_guard.py); without
+  one it is off today all the same;
+- an item on today's list with no time can be taken off the same way (remove_event by its title);
+- items a redraw can't fit wait for another day, so their lines leave today's list as well (``after_no_room``).
 
-A move said with such words (dropping it to a later time instead) isn't a clear ask; neither is a title that is
-itself the verb (an item whose own name starts with clear or drop).
-
-Taking something off today isn't dropping it: without a drop word (write_guard.asks_to_drop) the item stays to do,
-on its own list or, when Today is its only place, in Before today's pool. And when the user says it happened as
-well ("the rent's paid, take it off"), taking it off is the done: it is ticked done, never filed as dropped, and
-its line is never taken away before the tick (done_instead).
+A clear ask (``asks_to_clear``) is the user asking for an item to go: to take it off, drop, remove, clear, cancel or
+get rid of it, or saying it isn't happening. It is no done, so a done for it is refused (clearing isn't
+finishing). And when the user says it happened as well ("the rent's paid, take it off"), taking it off is the done:
+it is ticked done, never filed as dropped, and its line is never taken away before the tick (done_instead).
 """
 
 from __future__ import annotations
@@ -173,16 +177,13 @@ def take_off_list(pt: "PlanTools", line: str) -> str:
     return "off today's list" if today_line(pt, line) is None else ""
 
 
-def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
-    """Once an item is off the schedule on the user's clear ask: off today's list too. A note for the tool's
-    answer ("" when there's nothing to add)."""
+def after_removal(pt: "PlanTools", span: "EventSpan", today_list: Any = None) -> str:
+    """Once an item is off today's plan on the user's words: its line on today's list goes too, or stays, as the
+    model chose (``today_list``, read by ``list_choice``; off by default). Which item the user meant, and whether
+    their words take it off the list too, is the model's reading: no wording check here. A note for the tool's
+    answer, with the facts the model needs ("" when the item has no line on today's list)."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None or span.source == "calendar" or span.is_envelope:
-        return ""
-    title = pt._title(span)
-    # a clear ask, or "skip it today" (leave_today.py), this turn or just before when this isn't a no (change_asks.py)
-    from thirties_core.change_asks import asked as asked_lately
-    if not asked_lately(pt, _ClearAsk(title)):
         return ""
     if any(s.id != span.id and (s.title == span.title or (span.task_id and s.task_id == span.task_id))
            for s in pt.day_plan.spans):
@@ -190,39 +191,154 @@ def after_removal(pt: "PlanTools", span: "EventSpan") -> str:
     line = today_line(pt, span.title, span.task_id)
     if line is None:
         return ""
-    from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
-    held = due_today.held_due(pt, line, span.task_id)  # overdue too
-    if held is not None:
-        if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
-            from thirties_core.today_times import retime_held  # held on today: a new block, never untimed
-            return retime_held(_assistant(pt), line, span.task_id, span.end_dt, held) or \
-                due_today.list_stays_note(line, held, pt.today())
-        done = _off_list(pt, line, title)
-        return f" (also {done}; {due_today.moved_line(line, None, pt.today(), held)})" if done else ""
-    done = _off_list(pt, line, title)
-    return f" (also {done})" if done else ""
+    return leave_list(pt, line, span.task_id, list_choice(today_list))
 
 
-class _ClearAsk:
-    """A clear ask for the item to go, or to skip it today, as a pattern change_asks.asked can search with."""
+def after_clear(pt: "PlanTools", gone: List["EventSpan"], today_list: Any = None) -> str:
+    """clear_time took these items off today's plan: their lines on today's list follow, as for remove_event
+    (``after_removal``). Notes for the tool's answer."""
+    choice = list_choice(today_list)
+    out = ""
+    for span in gone:
+        try:
+            out += after_removal(pt, span, choice)
+        except Exception as e:  # one item's list never costs the others theirs
+            out += f" ({pt._title(span)} is still on today's list: {e})"
+    return out
 
-    def __init__(self, title: str) -> None:
-        self.title = title
 
-    def search(self, text: Optional[str]) -> bool:
-        from thirties_core.leave_today import asks_to_skip
-        return asks_to_clear(text, self.title) or asks_to_skip(text)
+# --- an item's line on today's list when it comes off today: the model's call (today_list) ---
+# off: taken off today's list, and it doesn't come back by itself (the default: the user took it off today);
+# keep: it stays on today's list with no time; later: off, and back on a later day this week (or the day the user
+# named); tomorrow: off, and on tomorrow's list; drop: off and dropped for good (filed as dropped only on the
+# user's drop word, write_guard.py)
+TODAY_LIST = ("off", "keep", "later", "tomorrow", "drop")
+_LIST_SAID = {"": "off", "true": "off", "yes": "off", "remove": "off", "false": "keep", "no": "keep", "stay": "keep",
+              "stays": "keep", "week": "later", "this week": "later", "later this week": "later",
+              "another day": "later", "for good": "drop", "dropped": "drop"}
 
 
-def _off_list(pt: "PlanTools", line: str, title: str) -> str:
-    """Off today's list as the user put it: dropped only when their words drop that item for good (drop_meant;
-    take_off_list), else just not today (leave_today.skip_line: an item that lives only on Today waits for a day
-    later this week). "Take it off" is about today: the item stays to do."""
-    from thirties_core.leave_today import skip_line
-    message = getattr(pt, "user_message", None)
-    if message is not None and _assistant(pt) is not None and not drop_meant(pt, title):
-        return skip_line(_assistant(pt), line)
-    return take_off_list(pt, line)
+def list_choice(value: Any) -> str:
+    """What the model asked for the item's line on today's list (TODAY_LIST); off when it said nothing."""
+    from thirties_core.plan_tools import ToolError
+    if isinstance(value, bool):
+        return "off" if value else "keep"
+    said = str(value if value is not None else "").strip().lower()
+    said = _LIST_SAID.get(said, said)
+    if said not in TODAY_LIST:
+        raise ToolError("today_list must be off, keep, later, tomorrow or drop.")
+    return said
+
+
+def leave_list(pt: "PlanTools", line: str, task_id: Optional[str], choice: str, also: bool = True) -> str:
+    """The item's line on today's list (its copy on the Today note), as the model chose. Its home list, project or
+    routine is never written to. The facts go back in the answer (" X was also on today's list: taken off."), with
+    its deadline when it's due today or overdue; the call stands either way. A write Joplin refused raises with the
+    real reason."""
+    from thirties_core.plan_tools import ToolError
+    from thirties_core import due_today
+    a = _assistant(pt)
+    if a is None:
+        return ""
+    held = due_today.held_due(pt, line, task_id)  # due today or overdue: a fact for the model, never a hold
+    due = f" {line} is {due_today.deadline_words(held, pt.today())}." if held is not None else ""
+    head = f"{line} was also on today's list: taken off" if also else f"Took {line} off today's list"
+    if choice == "keep":
+        return f" {line} is still on today's list, with no time.{due}"
+    if _of_a_routine(a, line):  # a routine's group or step comes and goes with the routine: today's simply ends
+        return ""
+    from thirties_core.leave_today import has_home, remove_copy_why
+    homed = has_home(a, line)
+    stays = " (it stays on its own list)" if homed else ""
+    if choice == "drop":
+        from thirties_core.write_guard import asks_to_drop
+        said_drop = homed or getattr(pt, "by_hand", False) or asks_to_drop(getattr(pt, "user_message", None))
+        if said_drop:
+            done = take_off_list(pt, line)
+            if done:
+                filed = "" if homed else "; it's filed in this month's Dropped note"
+                return f" {head} and dropped for good{filed}{stays}.{due}"
+            if today_line(pt, line) is None:
+                return f" {line} is off today's list.{due}"
+        # only the user's drop word files it as dropped for good; it's off today all the same
+        why = remove_copy_why(a, line)
+        if why:
+            raise ToolError(f"{line} is off today's plan but still on today's list: {why}.")
+        _stop_rolling(a, line)
+        unfiled = "the user's words have no drop word" if not said_drop else "Joplin didn't take the filing"
+        return (f" {head}, and it won't come back by itself. It isn't filed as "
+                f"dropped for good: {unfiled}.{due}")
+    why = remove_copy_why(a, line)
+    if why:
+        raise ToolError(f"{line} is off today's plan but still on today's list: {why}.")
+    task = _home_item(a, line, task_id) if homed else None
+    if choice == "tomorrow":
+        from datetime import timedelta
+        from thirties_core.day_lists import AheadLists
+        AheadLists(a._db).add(pt.today() + timedelta(days=1), line, task)
+        return f" {head}; it's on tomorrow's list{stays}.{due}"
+    if choice == "later":
+        from thirties_core.not_today import minutes_for, set_aside, when_words, where_to
+        day, named = where_to(pt, line, minutes_for(a, line, task))
+        set_aside(a, line, task, day, named)
+        return f" {head}; it waits for {when_words(pt, day, named)}{stays}.{due}"
+    _stop_rolling(a, line)
+    gone = "it stays on its own list" if homed else "it lived only on today's list, so it's gone (add it back if " \
+                                                    "the user wants it)"
+    return f" {head}, and it won't come back by itself; {gone}.{due}"
+
+
+def _of_a_routine(a: Any, line: str) -> bool:
+    """The line is a routine's group on Today, or one of its steps: never written here (it ends with the day)."""
+    try:
+        low = line.strip().lower()
+        return low in {n["title"].strip().lower() for n in a._routines()} or a._routine_of(line) is not None
+    except Exception:
+        return False
+
+
+def after_no_room(pt: "PlanTools", spans: List["EventSpan"]) -> List[str]:
+    """Items a redraw took off today's plan for lack of room: they wait for a later day (the open pool), so their
+    lines leave today's list too, never left behind as "no time yet". The lines taken off."""
+    a = _assistant(pt)
+    if a is None or not pt.is_current(pt.day_plan):
+        return []
+    from thirties_core.leave_today import remove_copy
+    gone = []
+    for span in spans:
+        if span.source == "calendar" or span.is_envelope:
+            continue
+        line = today_line(pt, span.title, span.task_id)
+        if line is None or _of_a_routine(a, line):
+            continue
+        try:
+            if remove_copy(a, line):
+                gone.append(line)
+        except Exception:
+            continue
+    return gone
+
+
+def _home_item(a: Any, line: str, task_id: Optional[str]) -> Any:
+    from thirties_core.not_today import home_task
+    try:
+        return home_task(a, line, task_id)
+    except Exception:
+        return None
+
+
+def _stop_rolling(a: Any, line: str) -> None:
+    """Taken off today on the user's word: a record of it waiting from an earlier day (Before today) stops offering
+    it, and the next morning has nothing of it to offer. Its record moves to Before today's archive, where it can be
+    brought back; nothing is written when it has no such record."""
+    from thirties_core.carry import DROPPED, OpenPool
+    if getattr(a, "_db", None) is None:
+        return
+    pool = OpenPool(a._db)
+    if pool.all().get(line.strip().lower()) is None:
+        return
+    pool.set(line, horizon=DROPPED, pending_drop=False, dropped_on=a.pt.today().isoformat(), dropped_by="user")
+# --- end an item's line on today's list ---
 
 
 # --- dropped for good only on words for that item, and never when the drop is said for today ---
@@ -265,9 +381,11 @@ def drop_meant(pt: "PlanTools", title: str) -> bool:
 # --- end dropped for good ---
 
 
-def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
-    """remove_event for an item on today's list with no time: off the list, on the user's clear ask for it. None
-    when the event isn't such an item (the caller says it isn't on the schedule)."""
+def remove_listed(pt: "PlanTools", event: Any, today_list: Any = None) -> Optional[str]:
+    """remove_event for an item on today's list with no time: off the list, as the model chose (``today_list``,
+    off by default). Which line the user meant is the model's reading; what holds is the floor: never one they
+    asked to keep, and never one when nothing they said asks for anything to come off or names it. None when the
+    event isn't such an item (the caller says it isn't on the schedule)."""
     from thirties_core.plan_tools import ToolError
     name = str(event or "").strip()
     a = _assistant(pt)
@@ -277,13 +395,6 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     line = today_line(pt, task.title if task is not None else name, task.id if task is not None else None)
     if line is None:
         return None
-    # --- a question, or a pointer at an item's parts, takes nothing off (said_for_it.py) ---
-    from thirties_core.said_for_it import removal_held
-    held_here = removal_held(pt, line)
-    if held_here:
-        from thirties_core.plan_tools import ToolError as _Held
-        raise _Held(held_here)
-    # --- end a question, or a pointer at parts ---
     if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
         from thirties_core.if_time import act
         return act(a, line, "done")
@@ -292,25 +403,17 @@ def remove_listed(pt: "PlanTools", event: Any) -> Optional[str]:
     keep = kept(pt, line, [task.id] if task is not None else [])
     if keep:
         raise ToolError(keep)
-    if not getattr(pt, "by_hand", False) and getattr(pt, "user_message", None) is not None \
-            and not removal_asked(pt):
-        from thirties_core.done_reference import check
-        held, _ = check(pt, line, [task.id] if task is not None else [])
-        from thirties_core.leave_today import asks_to_skip  # "skip it today" too (leave_today.py)
-        if held or not (asks_to_clear(pt.user_message, line) or asks_to_skip(pt.user_message)):
-            raise ToolError(f"{line} is on today's list with no time. It comes off the list only when the user "
-                            "asks for that; ask them if it isn't clear.")
-    from thirties_core import due_today  # due today: off the list only on a clear ask, said (due_today.py)
-    deadline = ""
-    held = due_today.held_due(pt, line, task.id if task is not None else None)  # overdue too
-    if held is not None:
-        if not due_today.clear_ask(pt, line, due_today.others_on(pt, line)):
-            raise ToolError(due_today.stays_line(line, held, pt.today()))
-        deadline = " " + due_today.moved_line(line, None, pt.today(), held)
-    done = _off_list(pt, line, line)
-    if not done:
-        raise ToolError(f"{line} couldn't be taken off today's list just now.")
-    return f"Took {line} off today's list (it had no time on the schedule).{deadline}"
+    message = getattr(pt, "user_message", None)
+    if not getattr(pt, "by_hand", False) and message is not None and not removal_asked(pt):
+        from thirties_core.item_facts import mentions
+        if not mentions(message, line, [s.title for s in pt.day_plan.spans]):
+            raise ToolError(f"The user's message doesn't name {line} or ask for anything to come off, so it stays "
+                            "on today's list. Take something off only when they ask; ask them if it isn't clear.")
+    choice = list_choice(today_list)
+    if choice == "keep":
+        return f"{line} has no time on the schedule; it stays on today's list."
+    said = leave_list(pt, line, task.id if task is not None else None, choice, also=False).strip()
+    return f"{said} (It had no time on the schedule.)"
 
 
 # a reply saying something is off today's list ("moved the towels off today's list", "cleared it from the list")

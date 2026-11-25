@@ -48,7 +48,13 @@ logger = logging.getLogger(__name__)
 NOT_DONE = "NOT_DONE"
 # The user saying the time is now ("starting it now", "right now"): that minute is theirs, never rounded.
 _NOW_SAID_RE = re.compile(r"\b(?:right )?now\b|\bjust (?:started|starting|began|got going)\b", re.IGNORECASE)
-
+# --- what happens to an item's line on today's list when it comes off today's plan (off_today.leave_list) ---
+TODAY_LIST_PARAM = ("What happens to its line on today's list, by what the user meant: 'off' (default: off "
+                    "today's list too, and it doesn't come back by itself; its own list, if it has one, keeps it), "
+                    "'keep' (it stays on today's list with no time), 'later' (off today, back on a later day this "
+                    "week or the day the user named), 'tomorrow' (on tomorrow's list), or 'drop' (dropped for good; "
+                    "only when the user says to drop it for good).")
+# --- end today's list ---
 
 # Tool contract shared by every brain. Times are clock strings like "4:30 PM";
 # durations and shifts are phrases like "90 minutes" or "+1 hour".
@@ -105,8 +111,10 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "remove_event",
         "description": "Take an item off the schedule (including work or sleep, e.g. for a day off). Taking "
                        "something off today isn't dropping it: it stays to do on its list. If the user says it "
-                       "happened (done, paid, sent), mark it done with log_outcome instead.",
-        "parameters": {"event": "The item's id (or its exact title).", "day": "The day the item is on (default: the day being planned)."},
+                       "happened (done, paid, sent), mark it done with log_outcome instead. Its line on today's "
+                       "list goes with it unless you say otherwise (today_list).",
+        "parameters": {"event": "The item's id (or its exact title).", "day": "The day the item is on (default: the day being planned).",
+                       "today_list": TODAY_LIST_PARAM},
         "required": ["event"],
     },
     {
@@ -177,6 +185,7 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "include_work": "true to also clear work in that stretch.",
             "include_sleep": "true to also clear sleep in that stretch.",
             "day": "Which day (default: the day being planned).",
+            "today_list": "For the items it takes off the plan: " + TODAY_LIST_PARAM,
         },
         "required": ["start", "end"],
     },
@@ -774,6 +783,15 @@ class PlanTools:
                 notes.append(f"{self.describe(s)} keeps its usual length, so it stays alongside")
             else:
                 notes.append(self._carve(s, span.start_dt, span.end_dt))
+        # --- what the new item replaced leaves today's list too (off_today.py) ---
+        kept_ids = {s.id for s in self.day_plan.spans}
+        replaced = [s for s in sharing if s.id not in kept_ids]
+        if replaced:
+            from thirties_core.off_today import after_clear
+            also = after_clear(self, replaced).strip()
+            if also:
+                notes.append(also)
+        # --- end today's list ---
         return notes
 
     def _cut_short(self, span: EventSpan, by: EventSpan) -> bool:
@@ -1567,13 +1585,13 @@ class PlanTools:
             raise ToolError(f"{span.title} only changes when the user talks about it; leave it as it is and fit the "
                             "rest around it (items can sit alongside work).")
 
-    def remove_event(self, event: Any, **_: Any) -> str:
+    def remove_event(self, event: Any, today_list: Any = None, **_: Any) -> str:
         # --- an item on today's list with no time comes off the list (off_today.py) ---
         try:
             span = self._find_span(event)
         except ToolError:
             from thirties_core.off_today import remove_listed
-            listed = remove_listed(self, event)
+            listed = remove_listed(self, event, today_list)
             if listed is None:
                 raise
             return listed
@@ -1623,7 +1641,7 @@ class PlanTools:
         also = ""
         if outer_tool() == "remove_event":
             from thirties_core.off_today import after_removal
-            also = after_removal(self, span)
+            also = after_removal(self, span, today_list)  # its line on today's list: the model's call
             from thirties_core.change_asks import removal_note  # read from a complaint about its place: noted
             also += removal_note(self, span)
         # --- end off today's list ---
@@ -1633,7 +1651,8 @@ class PlanTools:
         # --- end no work that day ---
         return f"Removed {self.describe(span)}.{also}"
 
-    def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False, **_: Any) -> str:
+    def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False,
+                   today_list: Any = None, **_: Any) -> str:
         start_dt = self._start(start)
         end_dt = self._end(end, start_dt)
         allowed = {SpanCategory.ACTIVITY, SpanCategory.TASK}
@@ -1647,7 +1666,15 @@ class PlanTools:
             return f"Nothing to clear between {format_clock(start_dt)} and {format_clock(end_dt)}."
         changes = [self._carve(s, start_dt, end_dt) for s in targets]
         self._save_plan_after_change()
-        return f"Cleared {format_clock(start_dt)} – {format_clock(end_dt)}: " + "; ".join(changes) + "."
+        # --- what came off the plan leaves today's list too, as the model chose (off_today.py) ---
+        also = ""
+        from thirties_core.plan_log import outer_tool
+        if outer_tool() == "clear_time":
+            from thirties_core.off_today import after_clear
+            kept_ids = {s.id for s in self.day_plan.spans}
+            also = after_clear(self, [s for s in targets if s.id not in kept_ids and not s.is_envelope], today_list)
+        # --- end off today's list ---
+        return f"Cleared {format_clock(start_dt)} – {format_clock(end_dt)}: " + "; ".join(changes) + "." + also
 
     def open_windows(self, after: Optional[datetime] = None, before: Optional[datetime] = None) -> List[Tuple[datetime, datetime]]:
         """Free stretches within the canvas, in whole thirties (a thirty with anything in it isn't free),
@@ -1907,6 +1934,11 @@ class PlanTools:
         waiting = self._wait_for_tomorrow(no_room)  # off today's plan, never lost: they wait in the open pool
         for span in no_room:  # it can't stay where it was: something else may be there now
             self._drop(span)
+        # --- what waits for another day leaves today's list too (off_today.py) ---
+        if no_room:
+            from thirties_core.off_today import after_no_room
+            after_no_room(self, no_room)
+        # --- end today's list ---
         plan.spans.sort(key=lambda s: s.start_dt)
         self._save_plan_after_change()
         from thirties_core.clock import agenda_lines  # things moved together still read as one entry (A + B)

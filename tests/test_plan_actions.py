@@ -109,8 +109,8 @@ class TestOffTodaysList(ActionsCase):
         it goes (filed as dropped, never ticked as done)."""
         span = self.add("Fold the towels", "2:00 PM")
         self.assertIn("- [ ] Fold the towels", self.body("n_today"))
-        self.say("remove_event", {"event": span.id}, "no towels before the guests leave")
-        self.assertIn("- [ ] Fold the towels", self.body("n_today"))  # off the schedule, still on the list
+        self.say("remove_event", {"event": span.id, "today_list": "keep"}, "no towels before the guests leave")
+        self.assertIn("- [ ] Fold the towels", self.body("n_today"))  # off the schedule, kept on the list
         out = self.say("remove_event", {"event": "Fold the towels"}, "take the towels off the list completely")
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertNotIn("Fold the towels", self.body("n_today"))

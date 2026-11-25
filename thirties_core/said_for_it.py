@@ -1,4 +1,4 @@
-"""What the user's words do for one item: a done only when said, a removal only when asked, never by pointing past it.
+"""What the user's words do for one item: a done only when said, never by pointing past it.
 
 - **Begun or next is no done.** "the mugs are trimmed, on to the gunwales", "mugs done, gunwales up next",
   "finished the mugs. Now the gunwales": the done is the mugs'; the gunwales have only begun, or come next. A
@@ -6,16 +6,16 @@
   "working on", "about to", "heading into") or that says it comes next, with no done word of its own, is never a
   done for it, whatever else the message says (``begun_or_next``).
 - **A plain question changes nothing.** An item named only in questions that only ask ("is the clay bins thing
-  done?", "did I already restock the bins?") is neither ticked nor taken off for it; a removal said only inside such
-  a question ("which would you take off?") isn't asked for. A question that asks for a change is an ask, and what
-  it means is the model's reading: worded as a request ("could you take the bins off?"), as a suggestion or a
+  done?", "did I already restock the bins?") isn't ticked for it. A question that asks for a change is an ask, and
+  what it means is the model's reading: worded as a request ("bins off the plan, please?"), as a suggestion or a
   request for leave ("shouldn't we drop the bins today?", "can the bins go?"), or as an objection to the item still
   being there ("why are the bins still on?"). A question asking an opinion ("should the bins come off?"), or one
   pushing back on a change ("why not keep the bins on today?", "wouldn't pushing the bins overload Friday?"), only
-  asks (``asks_for_change``, ``asked_only``, ``removal_in_question``).
-- **Pointing at an item's parts isn't pointing at the item.** "what are the two clays under the clay bins? get rid
-  of those": the pointer is about what's under, in or listed inside the item, not the item. Nothing is taken off
-  or ticked on such words; an item named outright still is (``parts_only``).
+  asks (``asks_for_change``, ``asked_only``). Taking something off is always the model's reading, a question
+  included: no wording here holds a removal.
+- **Pointing at an item's parts isn't pointing at the item.** "what are the two clays under the clay bins? mark
+  those off": the pointer is about what's under, in or listed inside the item, not the item. Nothing is ticked on
+  such words; an item named outright still is (``parts_only``).
 - **The user's own done.** During a turn a tick needs the user's words to say it happened, or a reply to a
   question about it (``no_done_said``); something finished by itself at its end needs the user to have asked for
   that (``auto_done_asked``).
@@ -193,15 +193,6 @@ def only_questions(message: Optional[str], planned: Optional[Iterable[str]] = No
     return bool(said) and all(is_asking(s, planned) for s in said)
 
 
-def removal_in_question(message: Optional[str], planned: Optional[Iterable[str]] = None) -> bool:
-    """The words asking for something to come off are only inside questions ("which would you take off?")."""
-    if not message:
-        return False
-    from thirties_core.change_asks import _removal_words
-    words = _removal_words()
-    planned = None if planned is None else list(planned)
-    asking = [s for s in _SENTENCE_RE.findall(message) if s.strip() and words.search(s)]
-    return bool(asking) and all(is_asking(s, planned) for s in asking)
 # --- end a question changes nothing ---
 
 
@@ -246,28 +237,6 @@ def _about_parts(text: str, title: str) -> bool:
     from thirties_core.item_facts import name_words
     own = name_words(title)
     return any(not (name_words(m.group(0)) & own) for m in _PARTS_RE.finditer(text))
-
-
-def removal_held(pt: Any, title: str) -> str:
-    """Why an item can't come off on the user's words this turn: they only asked a question, the words asking for
-    it are inside a question, or they point at what's under or in it. "" when nothing here holds it."""
-    message = getattr(pt, "user_message", None)
-    if getattr(pt, "by_hand", False) or message is None:
-        return ""
-    titles = []
-    for s in getattr(getattr(pt, "day_plan", None), "spans", None) or []:
-        try:
-            titles.append(pt._title(s))
-        except Exception:
-            titles.append(s.title)
-    planned = list(dict.fromkeys([title] + titles))
-    if only_questions(message, planned) or removal_in_question(message, planned):
-        return (f"The user only asked about taking things off; a question changes nothing, so {title} stays. "
-                "Answer them; take it off when they ask for it.")
-    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
-    if parts_only(message, title, shown, list(dict.fromkeys([title] + titles))):
-        return parts_refusal(title)
-    return ""
 
 
 def parts_refusal(title: str) -> str:
@@ -429,4 +398,4 @@ def auto_done_asked(pt: Any) -> bool:
 
 
 __all__ = ["asked_only", "asks_for_change", "auto_done_asked", "begun_or_next", "is_asking", "no_done_said", "only_questions",
-           "parts_only", "parts_refusal", "removal_in_question"]
+           "parts_only", "parts_refusal"]

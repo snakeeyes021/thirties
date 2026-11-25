@@ -100,16 +100,24 @@ def has_home(a: Any, line: str) -> bool:
 def remove_copy(a: Any, line: str) -> bool:
     """Take the line off the Today note, and only there: its home list (if any) is never written to. The link
     between the two goes with it. True when the removal was sent."""
+    return not remove_copy_why(a, line)
+
+
+def remove_copy_why(a: Any, line: str) -> str:
+    """remove_copy, saying why when the line couldn't be taken off (the real reason, so the model can act on it);
+    "" when the removal was sent."""
     from thirties_core.today import TodayLinks
     note, writer = a._today_note(), a._writer()
-    if note is None or writer is None or not getattr(writer, "allowed", True):
-        return False
-    status, _ = writer.submit({"op": "remove", "note_id": note["id"], "title": line, "state": "open"})
+    if note is None:
+        return "there's no Today note to take it off"
+    if writer is None or not getattr(writer, "allowed", True):
+        return "Thirties isn't allowed to change Joplin (Preferences → Tasks)"
+    status, why = writer.submit({"op": "remove", "note_id": note["id"], "title": line, "state": "open"})
     if status not in ("done", "queued"):
-        return False
+        return str(why or status)
     a.s.tasks = [x for x in a.s.tasks if not (x.parent_note_id == note["id"] and x.title == line)]
     TodayLinks(a._db).unlink(line)
-    return True
+    return ""
 
 
 def _still_planned_today(pt: "PlanTools", span: "EventSpan") -> bool:
@@ -146,11 +154,14 @@ def after_skip(pt: "PlanTools", span: "EventSpan") -> str:
     line = top_line(pt, span.title, span.task_id)
     if a is None:
         return ""
-    from thirties_core.due_today import held_due, list_stays_note  # due today or overdue: a skip never takes it off
+    from thirties_core.due_today import deadline_words, held_due  # due today or overdue: a fact, never a hold
     held = held_due(pt, line or span.title, span.task_id)
-    if held is not None and line is not None:  # held on today: a new block, never an untimed line (today_times)
-        from thirties_core.today_times import retime_held
-        return retime_held(a, line, span.task_id, span.end_dt, held) or list_stays_note(line, held, pt.today())
+    due = f" {line or span.title} is {deadline_words(held, pt.today())}." if held is not None else ""
+    return _skipped(pt, a, span, line) + due
+
+
+def _skipped(pt: "PlanTools", a: Any, span: "EventSpan", line: Optional[str]) -> str:
+    """after_skip once the item's facts are known: where it goes now that it isn't happening today."""
     # --- not today: it ends, it's dropped on the user's drop words, or it waits for a later day (not_today.py) ---
     from thirties_core.not_today import ends_when_skipped, skipped_off
     from thirties_core.write_guard import asks_to_drop
@@ -240,4 +251,4 @@ def _day_word(pt: "PlanTools", day: date) -> str:
     return "tomorrow" if gap == 1 else f"on {day.strftime('%A')}" if gap < 7 else f"on {day.strftime('%b %-d')}"
 
 
-__all__ = ["asks_to_skip", "skip_line", "top_line", "has_home", "remove_copy", "after_skip", "after_move", "after_ahead"]
+__all__ = ["asks_to_skip", "skip_line", "top_line", "has_home", "remove_copy", "remove_copy_why", "after_skip", "after_move", "after_ahead"]

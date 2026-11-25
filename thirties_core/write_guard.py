@@ -540,16 +540,14 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
         from thirties_core.reopen import untick_refused
         return untick_refused(message, title)
     # --- end a count, and an untick ---
-    # --- a question, or a pointer at an item's parts, writes nothing for the item (said_for_it.py) ---
-    from thirties_core.said_for_it import only_questions, parts_only, removal_in_question
-    if kind in ("complete", "remove", "file_dropped") and parts_only(message, title):
+    # --- a question, or a pointer at an item's parts, ticks nothing for the item (said_for_it.py) ---
+    # A removal is the model's reading of the user's words, a question included (an exasperated "seriously??"):
+    # the floors for it are the drop word above (Dropped, a home list); a line on Today comes off and can go back.
+    from thirties_core.said_for_it import only_questions, parts_only
+    if kind == "complete" and parts_only(message, title):
         return f"not written: the user's words point at what's under or in {title}, not at the item itself."
     if kind == "complete" and only_questions(message) and not DONE_WORDS_RE.search(message):
         return f"not written: the user only asked about {title}, so it isn't ticked."
-    # a question about the item still being on ("why is it still on?") asks for a change only when it names it
-    if kind in ("remove", "file_dropped") and (only_questions(message, [title])
-                                                or removal_in_question(message, [title])):
-        return f"not written: the user only asked about taking {title} off, so its line stays."
     # --- end a question, or a pointer at parts ---
     return ""
 

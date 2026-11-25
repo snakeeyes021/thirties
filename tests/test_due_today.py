@@ -82,14 +82,12 @@ class IfTheresTimeActionsTest(DueBase):
 
 
 class SkipTest(DueBase):
-    def test_a_skip_gives_it_a_new_block_today_and_says_so(self):
+    def test_a_skip_stands_and_says_it_was_due(self):
         span = self.bank_today()
         out = self.say("skip the bank today", "log_outcome", {"event": span.id, "status": "skipped"})
-        self.assertIn("Call the bank is due today, so it's on today's plan again at ", out)
-        self.assertIn("- [ ] Call the bank", self.body("n_today"))
-        again = self.planned("Call the bank")
-        self.assertEqual(len(again), 1)  # anything for today has a time (never an untimed line)
-        self.assertGreaterEqual(again[0].start_dt, span.end_dt)  # later than the time it lost
+        self.assertIn("Call the bank is due today.", out)  # a fact for the model, never a hold
+        self.assertNotIn("Call the bank", self.body("n_today"))
+        self.assertEqual(self.planned("Call the bank"), [])
         self.assertNotIn("Call the bank", pencilled_in(self.a))
 
 
@@ -118,20 +116,19 @@ class MoveToAnotherDayTest(DueBase):
 
 
 class RemoveTest(DueBase):
-    def test_skip_words_keep_the_line_a_clear_drop_takes_it_and_says_the_deadline(self):
+    def test_the_removal_stands_and_says_the_deadline(self):
         span = self.bank_today()
         out = self.say("skip the bank today", "remove_event", {"event": span.id})
-        self.assertIn("Call the bank is due today, so it's on today's plan again at ", out)  # a new block today
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Call the bank is due today.", out)  # a fact for the model, never a hold
         self.assertNotIn("Call the bank", pencilled_in(self.a))
-        self.assertTrue(self.planned("Call the bank"))
-        self.assertIn("- [ ] Call the bank", self.body("n_today"))
+        self.assertEqual(self.planned("Call the bank"), [])
+        self.assertNotIn("Call the bank", self.body("n_today"))
         self.due_today("Oil the hinges")
         self.api.notes["n_today"]["body"] += "- [ ] Oil the hinges\n"
         out = self.say("skip the hinges today", "remove_event", {"event": "Oil the hinges"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("due today", out)
-        out = self.say("drop the hinges", "remove_event", {"event": "Oil the hinges"})
-        self.assertIn("Oil the hinges was due today; it's off today now.", out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Oil the hinges is due today.", out)
         self.assertNotIn("Oil the hinges", self.body("n_today"))
 
 

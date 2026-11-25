@@ -85,11 +85,14 @@ class TestAQuestionThatAsksForAChange(WordsCase):
     def test_a_tick_asked_for_in_a_question_goes_ahead(self):
         self.assertWent(self.tick("Varnish the paddle", "can we mark the paddle varnish off?"))
 
-    def test_a_plain_question_still_takes_nothing_off(self):
+    def test_a_question_asking_for_nothing_to_come_off_takes_nothing_off(self):
         self.assertHeld(self.remove("Kiln wash the shelves", "is the kiln wash at 4:40?"))
         self.assertEqual(len(self.planned("Kiln wash the shelves")), 1)
-        self.assertHeld(self.remove("Kiln wash the shelves", "which would you take off?"))
-        self.assertEqual(len(self.planned("Kiln wash the shelves")), 1)
+
+    def test_a_removal_said_in_a_question_is_the_models_reading(self):
+        # no wording check says no to a removal: the model read the user's question as the ask, and it stands
+        self.assertWent(self.remove("Kiln wash the shelves", "why on earth is the kiln wash still there? take it off?"))
+        self.assertEqual(self.planned("Kiln wash the shelves"), [])
 
     def test_a_plain_question_still_ticks_nothing(self):
         self.assertHeld(self.tick("Varnish the paddle", "did I already varnish the paddle?"))

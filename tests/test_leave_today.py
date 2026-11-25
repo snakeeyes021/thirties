@@ -169,7 +169,7 @@ class AnyLineOnTodayTest(LeaveBase):
 
     def test_skip_said_takes_an_untimed_line_off_with_remove_event(self):
         self.untimed_line("Oil the hinges")
-        out = self.say("skip the hinges today", "remove_event", {"event": "Oil the hinges"})
+        out = self.say("skip the hinges today", "remove_event", {"event": "Oil the hinges", "today_list": "later"})
         self.assertFalse(out.startswith("NOT_DONE"), out)
         self.assertNotIn("Oil the hinges", self.body("n_today"))
         self.assertIsNotNone(OpenPool(self.sched.state_db).all().get("oil the hinges"))  # skipped, not dropped
