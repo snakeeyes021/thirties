@@ -111,7 +111,7 @@ class AssistantConfig:
     # row to the end of today: whats_next.py) or "few" (only the next few rows); rendered by Python, never by the
     # model. "next" (kept by earlier versions) reads as "rest" (whats_next.mode_of).
     after_change: str = "rest"
-    after_change_unmarked: bool = True  # its Not marked yet section
+    after_change_unmarked: bool = True  # the Not marked yet list under check-ins and start notices
     status_line: bool = True  # "You're in the 10:00 block: …" in replies (reply_extras.py); again only once it changed
     # When the chosen model's usage limit is reached, a simpler assistant answers until it resets (fallback.py):
     # a second model through the same subscription, capped per 5 hours; then the on-device one if it's offered

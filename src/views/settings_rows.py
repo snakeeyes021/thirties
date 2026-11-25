@@ -1194,7 +1194,8 @@ def messages_group(ctx: SettingsContext) -> Adw.PreferencesGroup:
             pass
     after.connect("notify::selected",
                   lambda r, _p: choose("assistant.after_change", "whats_next", afters[r.get_selected()][0]))
-    unmarked = Adw.SwitchRow(title="With what's not marked yet", subtitle="Under what's next after a change",
+    unmarked = Adw.SwitchRow(title="Unmarked items under check-ins",
+                             subtitle="Under check-ins and start notices",
                              active=bool(getattr(cfg.assistant, "after_change_unmarked", True)))
     unmarked.connect("notify::active",
                      lambda r, _p: choose("assistant.after_change_unmarked", "not_marked", r.get_active()))

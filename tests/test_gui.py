@@ -1241,7 +1241,8 @@ class SetupAndPreferencesTests(unittest.TestCase):
         from thirties_core.settings import SETTINGS
         group = settings_rows.messages_group(settings_rows.SettingsContext(self.core))
         switches = {r.get_title(): r for r in _rows_of_type(group, Adw.SwitchRow)}
-        for title, key in (("With what's not marked yet", "assistant.after_change_unmarked"),
+        unmarked_title = "Unmarked items under check-ins"
+        for title, key in ((unmarked_title, "assistant.after_change_unmarked"),
                            ("Say which block I'm in", "assistant.status_line")):
             row = switches[title]
             self.assertTrue(row.get_active())  # on by default
