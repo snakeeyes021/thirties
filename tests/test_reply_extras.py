@@ -216,7 +216,9 @@ class TestTheBlockLine(WhatsNextCase):
         self.assertEqual(status_lines(out), [])
         self.assertIn(f"{format_clock(at('18:00'))} – Dinner", out)
         self.assertFalse(settings_for(self.sched.state_db).get("assistant.status_line"))
-        self.assertIn("Now:", self.schedule_turn("where am i?"))  # the view still says what's on now
+        asked = self.schedule_turn("where am i?")
+        self.assertEqual(status_lines(asked), [])  # the view answers it, with no block line
+        self.assertIn("The rest of today:", asked)
 
 
 class TestSayingSoMatchesDoingSo(WhatsNextCase):
