@@ -264,10 +264,21 @@ def _names(assistant: Any, line: str, task: Any = None) -> Tuple[set, set]:
         note = assistant._today_note()
     except Exception:
         pass
+    tasks = list(getattr(assistant.s, "tasks", []) or [])
     if note is not None:
-        ids |= {t.id for t in getattr(assistant.s, "tasks", []) or []
+        ids |= {t.id for t in tasks
                 if t.parent_note_id == note.get("id") and t.title.strip().lower() == line.strip().lower()}
-    return {n for n in names if n}, {i for i in ids if i}
+    # --- one title, several ids: every item worded the same stands for the line (titles.py: raw ids too) ---
+    from thirties_core.titles import is_raw_id, resolve_raw
+    if is_raw_id(line):
+        real = resolve_raw(assistant._db, line, tasks)
+        if real and not is_raw_id(real):
+            names |= {real.strip().lower(), title_of(real).strip().lower()}
+        ids.add(line.strip())
+    names = {n for n in names if n}
+    ids |= {t.id for t in tasks if t.title.strip().lower() in names or title_of(t.title).strip().lower() in names}
+    # --- end one title, several ids ---
+    return names, {i for i in ids if i}
 
 
 def stands_for(assistant: Any, line: str, task: Any = None) -> Any:
@@ -370,17 +381,36 @@ def _place_lines(assistant: Any, told: List[str]) -> List[str]:
       left alone: never re-placed, never moved.
     - A line whose item left today's plan earlier today (removed, cleared, moved off, skipped, dropped) is no
       hand add: it is taken off the Today note quietly (the user took the item off), logged, never told.
-    - One resting after missed days (backoff.py) waits for the leftovers question."""
+    - One resting after missed days (backoff.py) waits for the leftovers question.
+    - A line that is only an item's id (an old write put one there) is matched by its item's title first, and is
+      never written to; one whose id can't be resolved is left as it is, logged, never placed or shown."""
     from thirties_core import if_time
     from thirties_core.backoff import MissStreaks, stated_cant_wait
     from thirties_core.clock import format_clock, thirty_of
+    from thirties_core.titles import is_raw_id, resolve_raw
     streaks = MissStreaks(assistant._db)
     lines: List[str] = []
     for title in loose_today(assistant):
+        # --- a line that is only an item's id (an old write put one there): matched by its item's title, never
+        # written to; one that can't be resolved is left as it is, logged, never placed or shown ---
+        id_line = is_raw_id(title)
+        if id_line:
+            real = resolve_raw(assistant._db, title, getattr(assistant.s, "tasks", []) or [])
+            if not real or is_raw_id(real):
+                logger.info("Today sync: id-only line with no known item, untouched")
+                continue
+            if stands_for(assistant, real) is not None or had_item_today(assistant, real):
+                logger.info("Today sync: id-only line resolves to %r, which today's plan already holds or held; "
+                            "untouched", real)
+                continue
+            title = real
+        # --- end a line that is only an id ---
         task = _task_of(assistant, title)
         if stands_for(assistant, title, task) is not None:
             continue
         if had_item_today(assistant, title, task):
+            if id_line:
+                continue  # never written to
             if take_line_off(assistant, title):
                 logger.info("Today note: %r left today's plan earlier today; its leftover line was taken off", title)
             continue
@@ -397,7 +427,8 @@ def _place_lines(assistant: Any, told: List[str]) -> List[str]:
             continue
         logger.info("Today note: %r had no plan item; placed at %s", title, spot.isoformat())
         try:
-            if_time.planned_out(assistant, title)  # off an older note's untimed heading, if it was there
+            if not id_line:
+                if_time.planned_out(assistant, title)  # off an older note's untimed heading, if it was there
         except Exception:
             pass
         if title not in told:

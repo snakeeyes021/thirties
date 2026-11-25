@@ -137,6 +137,30 @@ class JoplinIsTheTruth(Base):
         for day in (DAY + timedelta(days=1), SATURDAY):  # never moved on to a later day either
             self.assertFalse(any(s.task_id == "t_wheel" for s in self.t.plan_for(day).spans), day)
 
+    def test_an_id_only_line_for_an_item_already_planned_under_another_id_is_left_alone(self):
+        from tests.test_holiday_leftovers import bench_item
+        self.a.s.tasks.append(bench_item("a1b2c3d4e5f6", "Replace the brake cables"))  # one title, two ids
+        self.t.execute("add_event", {"title": "Cable swap on the commuter", "start": "9:40 AM",  # planned in other
+                                     "duration": "40 min", "task_id": "t_cables", "category": "task"})  # words
+        self.assertTrue(any(s.task_id == "t_cables" for s in self.t.day_plan.spans))
+        set_debug_time(at("15:10"))  # its block went by, nothing said: unknown
+        self.api.notes["n_today"]["body"] += "- [ ] a1b2c3d4e5f6\n"  # an old write left the other id as a line
+        body, writes = self.api.notes["n_today"]["body"], len(self.api.updates)
+        before = [(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope]
+        said = full_day.mirror_today(self.a)
+        self.assertEqual(said, [])  # never shown
+        self.assertEqual([(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope], before)
+        self.assertEqual(self.api.notes["n_today"]["body"], body)  # never written to
+        self.assertEqual(len(self.api.updates), writes)
+
+    def test_an_id_only_line_that_cant_be_resolved_is_never_placed_removed_or_shown(self):
+        self.api.notes["n_today"]["body"] += "- [ ] 0f0e0d0c0b0a\n"
+        body = self.api.notes["n_today"]["body"]
+        before = [(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope]
+        self.assertEqual(full_day.mirror_today(self.a), [])
+        self.assertEqual([(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope], before)
+        self.assertEqual(self.api.notes["n_today"]["body"], body)
+
     def test_a_refused_write_with_free_time_left_is_never_read_as_a_full_day(self):
         self.on_today("spoke bins today", "Sort the spoke bins")
         self.api.notes["n_today"]["body"] += "- [ ] Lube the chains\n"
