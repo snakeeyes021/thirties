@@ -182,6 +182,33 @@ def _skipped(pt: "PlanTools", a: Any, span: "EventSpan", line: Optional[str]) ->
     return f" (also {done})" if done else ""
 
 
+def after_task_skip(a: Any, task: Any) -> str:
+    """A list item skipped for today that isn't on today's plan (log_outcome skipped on the task itself): its line
+    on today's list goes the same way a planned item's does (after_skip; not_today.skipped_off), never left there.
+    A note for the tool's answer ("" when it had no line on today's list)."""
+    pt = getattr(a, "pt", None)
+    if pt is None or not _talking_or_hand(pt) or not pt.is_current(pt.day_plan):
+        return ""
+    from thirties_core.models import SpanStatus
+    if any(s.status == SpanStatus.PLANNED and s.end_dt > pt._now() and (s.task_id == task.id or
+           s.title.strip().lower() == task.title.strip().lower()) for s in pt.day_plan.spans):
+        return ""  # still planned today: its line stays with it
+    line = top_line(pt, task.title, task.id)
+    if line is None:
+        return ""
+    from thirties_core.due_today import deadline_words, held_due  # due today or overdue: a fact, never a hold
+    held = held_due(pt, line, task.id)
+    due = f" {line} is {deadline_words(held, pt.today())}." if held is not None else ""
+    try:
+        from thirties_core.not_today import skipped_off
+        done = skipped_off(a, task.title, line)
+    except Exception as e:
+        return f" ({line} is still on today's list: {e})"
+    if not done:
+        return f" ({line} is still on today's list: Joplin didn't take the change.)"
+    return f" (also {done}){due}"
+
+
 def after_move(pt: "PlanTools", span: "EventSpan", source_plan: Any, target_plan: Any) -> str:
     """An item moved from today's plan to a later day leaves today's list; that day's morning puts it back on Today.
     A note for the tool's answer ("" when nothing changed)."""

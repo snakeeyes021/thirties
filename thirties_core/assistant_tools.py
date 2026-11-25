@@ -1567,6 +1567,9 @@ class AssistantTools(KindTools):
                 result += " " + self._complete_backlog_task(task, for_good, on_plan=True)
             elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):
                 self._db.record_task_deferred(task.id)
+            if st == SpanStatus.SKIPPED:  # skipped for today: its line leaves today's list too (leave_today.py)
+                from thirties_core.leave_today import after_task_skip
+                result += after_task_skip(self, task)
             if start_dt or end_dt:
                 usual = self.pt._lasting().for_item(task.title).minutes if self._db else 0
                 end_dt = end_dt or start_dt + timedelta(minutes=usual or 30)
