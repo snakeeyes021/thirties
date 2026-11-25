@@ -75,7 +75,7 @@ class TestStoppingWhatsNext(WhatsNextCase):
         clear_today(self.sched.state_db, "whats_next")
         self.assertEqual(effective(self.sched.config, self.sched.state_db, DAY)["whats_next"], "rest")
 
-    def test_not_marked_yet_can_go_on_its_own(self) -> None:
+    def test_not_marked_yet_stays_in_the_view_after_a_change(self) -> None:
         set_debug_time(at("19:40"))  # the cat and dinner went by with nothing said
         out = self.turn(ADD.replace("5:30 PM", "8:30 PM"), "Fern at 8:30.", said="fern at 8:30")
         self.assertIn("Not marked yet:", out)
@@ -83,7 +83,7 @@ class TestStoppingWhatsNext(WhatsNextCase):
                   said="stop listing what's not marked")
         out = self.turn('CALL log_outcome {"event": "glaze", "status": "done"}', "Noted.", said="glazing's done")
         self.assertIn("The rest of today:", out)
-        self.assertNotIn("Not marked yet:", out)
+        self.assertIn("Not marked yet:", out)  # the switch only quiets the list under check-ins
 
 
 class TestWhereTheChoiceIsKept(WhatsNextCase):
@@ -97,7 +97,7 @@ class TestWhereTheChoiceIsKept(WhatsNextCase):
         self.assertIn("Not marked yet:", render(plan, at("19:40"), config=cfg, db=db))
         self.manager.tools.user_message = "stop listing what's not marked yet, from now on"
         self.manager.tools.execute("set_reply_extras", {"part": "not_marked", "show": "off"})
-        self.assertNotIn("Not marked yet:", render(plan, at("19:40"), config=cfg, db=db))
+        self.assertIn("Not marked yet:", render(plan, at("19:40"), config=cfg, db=db))  # the view keeps it
         self.manager.tools.user_message = "stop sending what's next from now on"
         self.manager.tools.execute("set_reply_extras", {"part": "whats_next", "show": "off"})
         self.assertEqual(render(plan, at("19:40"), config=cfg, db=db), "")
@@ -195,19 +195,18 @@ class TestTheBlockLine(WhatsNextCase):
     def schedule_turn(self, said: str) -> str:
         return self.turn("CALL show_schedule {}", "Here's the plan.", said=said)
 
-    def test_said_once_per_block_unless_asked(self) -> None:
+    def test_the_schedule_says_now_never_the_block_line(self) -> None:
+        def nows(out):
+            return [line for line in out.splitlines() if line.startswith("Now:")]
         first = self.schedule_turn("show my plan")
-        self.assertEqual(len(status_lines(first)), 1)
+        self.assertEqual((status_lines(first), len(nows(first))), ([], 1))
         set_debug_time(at("17:20"))
         cited = ADD[:-1] + ', "because": "fern at 5:30"}'
         again = self.turn(cited, "CALL show_schedule {}", "Fern at 5:30; here's the plan.", said="fern at 5:30")
-        self.assertEqual(status_lines(again), [])  # unchanged block: left out
+        self.assertEqual((status_lines(again), len(nows(again))), ([], 1))
         self.assertIn("5:30 PM – Repot the fern", again)
-        set_debug_time(at("17:40"))
-        later = self.schedule_turn("show my plan")
-        self.assertEqual(len(status_lines(later)), 1)  # a new block: said again
         asked = self.schedule_turn("where am i right now?")
-        self.assertEqual(len(status_lines(asked)), 1)  # asked: always
+        self.assertEqual((status_lines(asked), len(nows(asked))), ([], 1))
 
     def test_stop_saying_block(self) -> None:
         self.turn('CALL set_reply_extras {"part": "status_line", "show": "off"}', "Okay, no block line.",
@@ -217,7 +216,7 @@ class TestTheBlockLine(WhatsNextCase):
         self.assertEqual(status_lines(out), [])
         self.assertIn(f"{format_clock(at('18:00'))} – Dinner", out)
         self.assertFalse(settings_for(self.sched.state_db).get("assistant.status_line"))
-        self.assertEqual(len(status_lines(self.schedule_turn("where am i?"))), 1)  # asked outright: still answered
+        self.assertIn("Now:", self.schedule_turn("where am i?"))  # the view still says what's on now
 
 
 class TestSayingSoMatchesDoingSo(WhatsNextCase):

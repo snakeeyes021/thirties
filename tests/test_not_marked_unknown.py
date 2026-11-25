@@ -92,7 +92,8 @@ class TestListedLikeTheAgenda(BenchDay):
         self.assertLess(after.index(BEZEL), after.index(PENDULUM))
         part = summary(self.t, at(NOW), "all")
         self.assertIn(MISSED_HEADING, part)
-        self.assertIn(f"9:30 AM – {BEZEL}", part.split(MISSED_HEADING)[1])
+        self.assertIn(f"\n{BEZEL}\n", part.split(MISSED_HEADING)[1])  # its title alone, never a time
+        self.assertNotIn("9:30 AM", part.split(MISSED_HEADING)[1])
         text = self.t.schedule_text()
         self.assertIn(BEZEL, text.split("Not marked yet")[1])
         self.assertNotIn(BEZEL, line_with(text, "Marked already") if "Marked already" in text else "")

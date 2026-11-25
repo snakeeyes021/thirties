@@ -93,7 +93,7 @@ class TestShowSchedule(StandingCase):
         self.manager.tools.shown_schedule = None
         out = self.turn("CALL show_schedule {}", "Here's where things stand:\n\n" + view, said="what's left?")
         self.assertOneView(out)
-        self.assertTrue(out.rstrip().endswith("Lock up the tool wall"), out)
+        self.assertTrue(out.rstrip().endswith("Restock brake pads"), out)  # the view is the last thing
 
     def test_the_model_writing_a_layout_of_its_own(self):
         out = self.turn("CALL show_schedule {}",

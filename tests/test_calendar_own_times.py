@@ -49,7 +49,7 @@ class TestTheUsersOwnEnd(OwnTimesCase):
     def test_shown_as_the_user_said_it(self):
         self.change("dentist is 2 to 3:15", end="3:15 PM")
         shown = self.t.execute("show_schedule", {"whole_day": True})
-        self.assertIn("2:00 PM – 3:15 PM Dentist check-up", shown)
+        self.assertIn("2:00 PM – Dentist check-up", shown)  # the standard view: the day's last row has no end
         self.assertNotIn("2:45 PM", shown)
 
     def test_a_start_the_user_says_too(self):

@@ -142,11 +142,12 @@ class TestInTheConversation(MessagesCase):
                                       reply("Here you go:\n- 10:00 – Shower\n- 12:00 – Lunch\nAnything else?")])
         manager = self.manager(engine)
         out = manager.send_user_message("what's left?")
-        line_with(out, "10:00", "Shower, then Journal")  # where the user is, from the plan, not the model
+        line_with(out, "Now:", "Shower, then Journal")  # where the user is, from the plan, not the model
         line_with(out.split("Not marked yet")[1], "Feed the fish")
         self.assertIn("\n\nNot marked yet", out)  # its own section, a blank line above
-        self.assertTrue(out.startswith("Here you go:\n") and out.endswith("Anything else?"), out)
-        self.assertNotIn("- 10:00 – Shower", out)
+        self.assertTrue(out.startswith("Anything else?"), out)  # the model's own words; its rows and their intro go
+        self.assertTrue(out.endswith("Make bed"), out)  # Python's view, under the model's words
+        self.assertNotIn("10:00 – Shower", out)
         self.assertFalse(MissedTracker(self.sched.state_db).anything_new(at("10:10"), missed_items(self.plan, at("10:10"))))
 
     def test_a_reply_doesnt_ask_again_about_what_a_notice_listed(self):

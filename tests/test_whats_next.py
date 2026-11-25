@@ -117,7 +117,7 @@ class TestWhatsNext(WhatsNextCase):
     def test_never_two_schedules_in_one_reply(self) -> None:
         out = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',
                         "Added, here's the evening.", said="add quilting at 5:30 and what's next after that?")
-        self.assertNotIn("The rest of today:", out)  # asked for the schedule: the reply shows it its own way
+        self.assertEqual(out.count("The rest of today:"), 1, out)  # the words of the ask never keep it away
         self.manager.tools.shown_schedule = None
         out = self.turn('CALL add_event {"title": "Sanding", "start": "10:00 PM", "duration": "30 minutes"}',
                         'CALL show_schedule {}', "Here you go.", said="sanding at 10")
@@ -237,7 +237,7 @@ class TestNotMarkedYet(WhatsNextCase):
                         said="fed the cat, and the parcel can wait")
         tail = self.tail(out)
         self.assertEqual(tail[0], "The rest of today:")
-        self.assertEqual(tail[-3:], ["Not marked yet:", "7:00 AM – Water the seedlings", "4:00 PM – Tune the ukulele"])
+        self.assertEqual(tail[-3:], ["Not marked yet:", "Water the seedlings", "Tune the ukulele"])
         self.assertFalse(any("Post the parcel" in line or "Feed the cat" in line for line in tail))
 
     def test_every_one_listed_however_many(self) -> None:
@@ -245,8 +245,7 @@ class TestNotMarkedYet(WhatsNextCase):
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         tail = self.tail(out)
         section = tail[tail.index("Not marked yet:"):]
-        self.assertEqual(section, ["Not marked yet:"] + [f"{format_clock(at(f'{7 + n:02d}:00'))} – Chore {n}"
-                                                         for n in range(10)])
+        self.assertEqual(section, ["Not marked yet:"] + [f"Chore {n}" for n in range(10)])  # titles, no times
         self.assertFalse(any("more" in line for line in tail))
 
     def test_the_assistant_never_claims_a_limit_it_hasnt_checked(self) -> None:
@@ -290,7 +289,7 @@ class TestNotMarkedYet(WhatsNextCase):
         second = self.turn('CALL add_event {"title": "Quilting", "start": "5:30 PM", "duration": "30 minutes"}',
                            "Added.", said="quilting at 5:30")
         for out in (first, second):  # nothing ticked: listed again, fresh from the plan, not hidden as "shown"
-            self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+            self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "Tune the ukulele"])
         svc = BackgroundService(self.sched.config, None, scheduler=self.sched, joplin_engine=MagicMock(),
                                 inference_engine=self.engine, sync_engine=MagicMock())
         svc.today, svc._manager, svc._day = (lambda: DAY), self.manager, DAY
@@ -309,7 +308,7 @@ class TestNotMarkedYet(WhatsNextCase):
         self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))  # today's own unmarked item still shows
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
         self.assertNotIn("Re-pot the fern", out)
-        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "Tune the ukulele"])
         from thirties_core.whats_next import render
         plan = self.manager.day_plan
         plan.spans.append(EventSpan("late", "Re-pot the fern", plan.day_start - timedelta(hours=2),
@@ -324,7 +323,7 @@ class TestNotMarkedYet(WhatsNextCase):
         self.earlier(("tune", "Tune the ukulele", "16:00", "16:30"))
         self.assertIn("Check-ins paused until", self.manager.execute_tool("mute_checkins", {}))
         out = self.turn('CALL log_outcome {"event": "feed", "status": "done"}', "Noted.", said="fed the cat")
-        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "4:00 PM – Tune the ukulele"])
+        self.assertEqual(self.tail(out)[-2:], ["Not marked yet:", "Tune the ukulele"])
 
     def test_a_notice_still_lists_what_no_slice_showed(self) -> None:
         from unittest.mock import MagicMock

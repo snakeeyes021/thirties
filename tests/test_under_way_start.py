@@ -112,8 +112,8 @@ class TestTheUserSeesTheBlock(UnderWayCase):
         rows = self.lines_with("\n".join(whole_day_lines(self.t.day_plan, now=at("11:40"))))
         self.assertTrue(rows)
         self.assertTrue(all(row.startswith("10:30 AM") for row in rows), rows)
-        text = summary(self.t, at("11:40"), mode="rest")  # not marked yet: in its block
-        self.assertIn("10:30 AM – Throw the teapot", text)
+        text = summary(self.t, at("11:40"), mode="rest")  # not marked yet: its title, never a time
+        self.assertIn("Not marked yet:\nThrow the teapot", text)
         self.assertBlocksOnly(text, "10:50")
 
 

@@ -176,8 +176,8 @@ class TestWithShowSchedule(OneScheduleCase):
         out = self.turn('CALL show_schedule {"whole_day": true}', "All set.\n\nThe rest of today:\n"
                         "6:00 PM – Repot the cactus\n7:00 PM – Tune the ukulele\n8:00 PM – Bake soda bread",
                         said="the whole day please")
-        self.assertIn("The whole day:", out)
-        self.assertNotIn("The rest of today:", out)
+        self.assertIn("Earlier today:", out)  # what today held before now, above the standard view
+        self.assertEqual(out.count("The rest of today:"), 1, out)
         self.assertOnce(out, *LATER)
 
 
