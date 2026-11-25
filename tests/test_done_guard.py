@@ -3,8 +3,9 @@
 - Asking why an item still shows as not marked, quoting the app's status ("not marked yet"), and saying "I did it
   at 6:40" is no denial: the done goes through. Saying it hasn't happened still holds it, and being in the
   middle of it is under way, not done (started.py).
-- A done for an item the user's words don't point to is refused, and nothing is ticked in Joplin: the model has to
-  ask which one they mean (done_reference.py). A tick in the app, and a request for many at once, go through.
+- A done for an item the user's words don't point to goes on as the model read it, and its result names the items
+  the words do name, so the model can ask or put it right (done_reference.py). A tick in the app, and a request
+  for many at once, go through.
 """
 
 import unittest
@@ -96,12 +97,11 @@ class TestDoneFromTheUsersWords(GuardCase):
         out = self.done("I'm in the middle of it", "Stretch routine", ("", "Next up: Stretch routine at 7:30."))
         self.assertTrue(out.startswith(NOT_DONE) and "doing_now" in out, out)  # "it" is the stretch
 
-    def test_an_item_the_user_never_mentioned_is_refused(self):
+    def test_an_item_the_user_never_mentioned_carries_a_note(self):
         message = "why do the seedlings and the stretch still say 'not marked yet'? I did both at 7:10"
         out = self.done(message, "Fold the towels")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("ask which", out)
-        self.assertEqual(self.span("Fold the towels").status, SpanStatus.PLANNED)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("nothing of Fold", out)
 
     def test_pointing_back_at_what_was_just_shown(self):
         asked = ("", "Did you get to Fold the towels?")
@@ -113,9 +113,9 @@ class TestDoneFromTheUsersWords(GuardCase):
         self.assertFalse(self.done("both done", "Fold the towels", listed).startswith(NOT_DONE))
         self.assertFalse(self.done("both done", "Stretch routine", listed).startswith(NOT_DONE))
 
-    def test_both_means_two(self):
+    def test_both_after_three_is_the_models_reading(self):
         listed = ("", "7:00 Water the tomato seedlings\n7:30 Stretch routine\n8:00 Fold the towels")
-        self.assertTrue(self.done("did both", "Fold the towels", listed).startswith(NOT_DONE))
+        self.assertFalse(self.done("did both", "Fold the towels", listed).startswith(NOT_DONE))
 
     def test_what_the_user_said_just_before(self):
         said = ("folding the towels now", "")
@@ -168,17 +168,15 @@ class TestNoJoplinTickForAnItemNotNamed(ListsTestCase):
         finally:
             self.t.user_message = None
 
-    def test_only_the_named_item_is_ticked(self):
+    def test_the_named_item_is_ticked_and_another_carries_a_note(self):
         message = "why does call the bank still say 'not marked yet'? I did it at 12:40"
-        writes = len(self.api.updates)
-        out = self.done(message, "Buy stamps")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(len(self.api.updates), writes)  # nothing written to Joplin
-        self.assertIn("- [ ] Buy stamps", self.body("n_errands"))
         out = self.done(message, "Call the bank")
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertIn("- [x] Call the bank", self.body("n_errands"))
         self.assertIn("- [ ] Buy stamps", self.body("n_errands"))
+        out = self.done(message, "Buy stamps")  # the model's reading: it goes on, with a note naming the bank
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Call the bank and says nothing of Buy stamps", out)
 
     def test_a_leftover_marked_done_needs_naming_too(self):
         from thirties_core.done_reference import check

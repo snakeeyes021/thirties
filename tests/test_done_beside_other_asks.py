@@ -4,7 +4,8 @@
   no open item fits them better: an item already done (a routine step ticked earlier), an item named only in
   another ask beside the done ("the bench sanding can wait") and a later item whose name is a word of this one's
   are no rivals.
-- Words that fit an open item as well or better, or name nothing of this one, are still refused.
+- Words that fit an open item as well or better, or name nothing of this one, go on as the model read them, with a
+  note naming what they fit; words with no done in them are refused.
 - An item that gives others their meal ("Feed the volunteers breakfast") is no meal of the user's own: ticking it
   never moves the user's own meal.
 - A reply that moved one item and skipped two never has a line added saying a skipped one couldn't move.
@@ -31,7 +32,7 @@ SKIS = "Wax the skis for the race"
 ROUND = ["Wax the skis", "Oil the gate hinge", "Sweep the porch"]
 ITEMS = ((SKIS, "10:40 AM"), ("Sand the bench", "11:10 AM"), ("Glaze the mugs", "1:30 PM"), ("Race", "3:50 PM"))
 NOW = "12:30"
-REFUSED_WORDS = "don't point to"
+NOTHING_DONE = "Nothing the user said this turn is a done"
 
 
 class GarageCase(RoutineCase):
@@ -107,22 +108,29 @@ class TestTheDoneStands(GarageCase):
 class TestStillRefused(GarageCase):
 
     def test_only_the_other_ask(self):
-        self.assertIn(REFUSED_WORDS, self.assertRefused("The bench sanding can wait"))
+        self.assertIn(NOTHING_DONE, self.assertRefused("The bench sanding can wait"))
+
+
+class TestAnotherItemsDoneIsANote(GarageCase):
+    """Wording that fits another entry better leaves the tick standing, with a note naming that entry."""
 
     def test_another_open_item_said_done(self):
-        self.assertRefused("the bench got sanded")
-        self.assertRefused("The mugs got glazed, the bench sanding can wait")
+        self.assertIn(f"fits Sand the bench and says nothing of {SKIS}", self.assertMarked("the bench got sanded"))
+        self.span(SKIS).status = SpanStatus.PLANNED
+        out = self.assertMarked("The mugs got glazed, the bench sanding can wait")
+        self.assertIn(f"Glaze the mugs and says nothing of {SKIS}", out)
 
     def test_the_later_item_said_done(self):
-        self.assertRefused("finished the race")
+        self.assertIn(f"fits Race as well as {SKIS}", self.assertMarked("finished the race"))
 
     def test_the_other_open_item_is_still_its_own(self):
-        self.assertRefused("Skis were waxed a while ago; bench can wait", "Glaze the mugs")
+        out = self.assertMarked("Skis were waxed a while ago; bench can wait", "Glaze the mugs")
+        self.assertIn("says nothing of Glaze the mugs", out)
 
 
 class TestAPointerSaidAgain(GarageCase):
     """After a reply listing several open items, a pointer alone is the model's pick of them, at once and said
-    again; an open item the reply didn't list is still refused."""
+    again; an open item the reply didn't list goes on with a note naming the items the reply listed."""
     SHOWN = ("", f"Still open: {SKIS}, Glaze the mugs and Sand the bench.")
 
     def pointed(self, message, item=SKIS, asks=None):
@@ -147,10 +155,10 @@ class TestAPointerSaidAgain(GarageCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.span(SKIS).status, SpanStatus.PLANNED)
 
-    def test_an_item_the_reply_did_not_list_is_still_refused(self):
+    def test_an_item_the_reply_did_not_list_goes_on_with_a_note(self):
         out = self.pointed("that one's finished", "Oil the gate hinge")
-        self.assertIn(REFUSED_WORDS, out)
-        self.assertEqual(self.span("Oil the gate hinge").status, SpanStatus.PLANNED)
+        self.assertIn("points back to a reply that named", out)
+        self.assertEqual(self.span("Oil the gate hinge").status, SpanStatus.DONE)
 
 
 class TestAMealForOthers(unittest.TestCase):

@@ -1,8 +1,8 @@
 """A whole routine said done marks every step of it, in every part of the day, in one go.
 
-The done guard lets a done through only for what the user's words point to. A routine's name points to all of its
-steps: its name with "whole", "all" or "everything", or "both" / "all of them" to a question that asked about its
-parts. Nothing else is widened.
+A routine's name points to all of its steps: its name with "whole", "all" or "everything", or "both" / "all of
+them" to a question that asked about its parts. Which items a done is for is the model's reading: a step left out
+by an exception isn't ticked, and an item outside the routine goes on as the model read it.
 
 Invented: a potter whose Kiln check is split in two parts, one before the firing and one after it, with a canoe trip
 and a permit to renew on the side."""
@@ -91,16 +91,20 @@ class TestTheWholeRoutineByName(KilnCase):
     def test_everything_in_it(self):
         self.assert_every_step_done(self.all_done("kiln check: everything in it got done"))
 
-    def test_another_routine_and_a_list_item_stay_open(self):
+    def test_another_routine_and_a_list_item_are_the_models_reading(self):
         self.all_done("kiln check wrapped up, all parts")
         for title in ("Wax the canoe hull", "Renew the kiln permit"):
             out = self.done("kiln check wrapped up, all parts", title)
-            self.assertTrue(out.startswith(NOT_DONE), f"{title}: {out}")
-            self.assertEqual(self.span(title).status, SpanStatus.PLANNED, title)
+            self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
+        self.assertIn("may also mean Kiln check", out)
 
-    def test_with_an_exception_it_isnt_the_whole(self):
-        out = self.done("kiln check wrapped up, all parts except the sweep", "Wipe the glaze bench")
+    def test_with_an_exception_the_step_it_names_stays_open(self):
+        message = "kiln check wrapped up; the sweep is still to do"
+        out = self.done(message, "Sweep the kiln shelf")
         self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span("Sweep the kiln shelf").status, SpanStatus.PLANNED)
+        out = self.done(message, "Wipe the glaze bench")
+        self.assertFalse(out.startswith(NOT_DONE), out)
 
     def test_running_is_still_no_done(self):
         out = self.done("the whole kiln check is running now", "Read the pyrometer")
@@ -127,9 +131,10 @@ class TestBothPartsAnswered(KilnCase):
         for title, out in self.all_done("both", shown).items():
             self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
 
-    def test_both_never_reaches_beyond_the_routine(self):
+    def test_both_beyond_the_routine_carries_a_note(self):
         out = self.done("Both", "Renew the kiln permit", self.QUESTION)
-        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Renew the kiln permit wasn't in it", out)
 
     def test_both_without_a_question_about_it_is_unchanged(self):
         out = self.done("both", "Sweep the kiln shelf", "Next: Renew the kiln permit at 1:00 PM.")
@@ -138,7 +143,7 @@ class TestBothPartsAnswered(KilnCase):
 
 class TestTheWholeExchange(unittest.TestCase):
     """A mock conversation through the app's own service: the user says the routine is done once, and every step
-    is marked in that turn. The same calls for words about something else are refused."""
+    is marked in that turn. The same calls for words with no done in them are refused."""
 
     def setUp(self):
         set_debug_time(at("10:00"))
@@ -187,8 +192,8 @@ class TestTheWholeExchange(unittest.TestCase):
         for title in EARLY + LATE:
             self.assertEqual(self.span(title).status, SpanStatus.DONE, title)
 
-    def test_words_about_something_else_mark_nothing(self):
-        self.turn("the canoe trip is booked", EARLY + LATE, "Noted.")
+    def test_words_with_no_done_mark_nothing(self):
+        self.turn("the canoe trip is next week", EARLY + LATE, "Noted.")
         for title in EARLY + LATE:
             self.assertEqual(self.span(title).status, SpanStatus.PLANNED, title)
 

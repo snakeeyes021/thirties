@@ -16,9 +16,14 @@
 - **Pointing at an item's parts isn't pointing at the item.** "what are the two clays under the clay bins? mark
   those off": the pointer is about what's under, in or listed inside the item, not the item. Nothing is ticked on
   such words; an item named outright still is (``parts_only``).
-- **The user's own done.** During a turn a tick needs the user's words to say it happened, or a reply to a
-  question about it (``no_done_said``); something finished by itself at its end needs the user to have asked for
-  that (``auto_done_asked``).
+- **The user's own done.** During a turn a tick needs something the user told this turn to be a done: a done word,
+  a past or a report that something happened, a yes, an ask for a tick, or a reply to the app's question about
+  whether something is done, or which (``no_done_said``, ``told_done``). Which item that done is for is the
+  model's reading, never Python's. Python stops a tick only of an item the words name as not done: left out
+  of the done or still open (done_exceptions.py); not yet, still going or only started (write_guard.state_not_done
+  and started.not_finished); told not to tick it; only asked about; its parts pointed at; or answered no to the
+  app's question about it. Something finished by itself at its end needs the user to have asked for that
+  (``auto_done_asked``).
 
 The app's own controls (by hand) and the background (nobody talking) aren't judged here.
 """
@@ -308,62 +313,197 @@ _SPAN_RE = re.compile(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*(?:to|
                       r"\d{1,2}(?::\d{2})?\b", re.IGNORECASE)
 
 
+def asks_for_a_tick(message: Optional[str]) -> bool:
+    """A told sentence asks for a tick ("mark it off", "can we tick those?", "put them down as done"): not one put
+    off ("don't tick it yet", "can we hold off on ticking?") or left for later ("remind me to mark it off"). Which
+    item it's for is the model's reading."""
+    if not message:
+        return False
+    from thirties_core.write_guard import NEGATED_DONE_RE, PUT_OFF_TICK_RE
+    for s in _SENTENCE_RE.findall(message):
+        if not s.strip() or is_asking(s):
+            continue
+        if not any(not _LATER_TICK_RE.search(s[:m.start()]) for m in _TICK_ASK_RE.finditer(s)):
+            continue
+        if NEGATED_DONE_RE.search(re.sub(r"\bwhy don'?t\b", "why", s, flags=re.IGNORECASE)) \
+                or PUT_OFF_TICK_RE.search(s):
+            continue
+        return True
+    return False
+
+
+# something that happened to the user, not a thing they did ("knocked out by a headache", "held up by the courier")
+_DONE_TO_THEM_RE = re.compile(r"\b[a-z]{3,}ed\s+(?:out\s+|up\s+|over\s+)?by\b", re.IGNORECASE)
+# a word that leaves something out of a denied done: what it leaves out is done ("did none save for the log")
+_EXCEPT_RE = re.compile(r"\b(?:except|apart from|aside from|other than|but|besides|save for)\b", re.IGNORECASE)
+
+
+def told_done(message: Optional[str], title: str = "", yes: bool = False) -> bool:
+    """Whether anything the user's words tell this turn is a done: a done word (the everyday ones count: "squared
+    away", "wrapped it up"), a past or a report that something happened, or an ask for a tick; with ``yes``, a
+    plain yes too. A question only asks, so a done word in it says nothing, even in one asking for a change ("can I
+    get the bins done by 4?"); nor do a done denied in its clause ("the glaze test isn't done"), what's only getting
+    done ("getting the fence fixed"), what happened to the user ("knocked out by a headache"), what should or
+    could have happened, or what's taken back ("or so I thought"). Which item the done is for is the model's
+    reading: ``title`` only lets the item's own verb in the past ("lodged" for Lodge the permit) and a hand-in ("the
+    form's in") count too."""
+    if not message:
+        return False
+    from thirties_core.done_exceptions import _DENIED_RE
+    from thirties_core.plain_done import says_it_happened
+    from thirties_core.started import without_caused
+    from thirties_core.write_guard import _CLAUSE_RE, _MISTAKEN_RE, _UNREAL_RE, REPORTED_RE, YES_RE, _done_in
+    told = [s for s in _SENTENCE_RE.findall(without_caused(message)) if s.strip() and not is_asking(s)]
+    for s in told:
+        if asked_outright(s) or asks_for_change(s) or _MISTAKEN_RE.search(s):
+            continue
+        if yes and YES_RE.match(s):
+            return True
+        for c in _CLAUSE_RE.split(_DONE_TO_THEM_RE.sub(" ", s)):
+            if not c or not c.strip() or _UNREAL_RE.search(c) or (_DENIED_RE.search(c) and not _EXCEPT_RE.search(c)):
+                continue
+            if says_it_happened(c) or REPORTED_RE.search(c) or (title and _done_in(c, title)):
+                return True
+    return asks_for_a_tick(message)
+
+
+_TICK_WORD_RE = re.compile(r"\b(?:tick|mark|check|cross)\w*\b", re.IGNORECASE)
+# every one of them: an answer to which
+_ALL_RE = re.compile(r"\b(?:all|everything|every\s+one|each|the\s+(?:whole\s+)?lot|whole)\b", re.IGNORECASE)
+
+
+def done_question(shown: Optional[str]) -> str:
+    """The last question in the message the user was shown, when it asks whether something is done, which item, or
+    whether to tick it ("Did you finish the glaze test?", "Which one?", "Shall I tick it off?"); "" otherwise."""
+    from thirties_core.done_words import _last_question
+    asked = _last_question(shown or "")
+    if asked:
+        return asked
+    last = re.findall(r"[^.!?\n]+\?", shown or "")
+    return last[-1] if last and _TICK_WORD_RE.search(last[-1]) else ""
+
+
+def unanswered_which(pt: Any, title: str) -> str:
+    """Why no tick goes ahead when the last reply asked which of several open items the user finished and their
+    words name none of them, point at none by place or count, and only say it's done ("done!", "that one's
+    sorted"): nothing says which. "" otherwise."""
+    message = getattr(pt, "user_message", None)
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    if getattr(pt, "by_hand", False) or not message or "?" not in (shown or ""):
+        return ""
+    from thirties_core.done_counts import pointed_count
+    from thirties_core.done_reference import (BOTH_RE, BULK_RE, ORDINAL_RE, PLURAL_RE, _listed_alone,
+                                              _open_items_shown, _titles)
+    from thirties_core.done_words import _hits
+    from thirties_core.plain_done import _open_titles, _which_words, says_it_happened
+    if not says_it_happened(message) or ORDINAL_RE.search(message) or BOTH_RE.search(message) \
+            or PLURAL_RE.search(message) or BULK_RE.search(message) or _ALL_RE.search(message) \
+            or pointed_count(message):
+        return ""
+    titles = list(dict.fromkeys(_titles(pt) + [title]))
+    shown_open = _open_items_shown(pt, shown, titles)
+    listed = [t for t in dict.fromkeys(_open_titles(pt) + shown_open) if _listed_alone(shown, t)]
+    which = _which_words(message)
+    if len(listed) < 2 or any(_hits(which, t) for t in titles + shown_open):
+        return ""
+    return (f"The user's words don't say which item they finished, and the last reply asked them, so {title} isn't "
+            "ticked. Ask again which one, in one short question.")
+
+
+# a question asking which item, not whether ("Which one?", "what did you finish?")
+_WHICH_ASKED_RE = re.compile(r"\b(?:which|what)\b", re.IGNORECASE)
+
+
+def _asks_which(pt: Any, asked: str) -> bool:
+    """The question asks which item: a which or what, or a choice between two or more items it names. A question
+    naming one item asks whether."""
+    if _WHICH_ASKED_RE.search(asked):
+        return True
+    if not re.search(r"\bor\b", asked, re.IGNORECASE):
+        return False
+    from thirties_core.done_reference import _open_items_shown, _titles
+    from thirties_core.done_words import asked_about
+    titles = _titles(pt)
+    return len(asked_about(asked, titles + _open_items_shown(pt, asked, titles), titles)) >= 2
+
+
+def _reply_carries_done(pt: Any, message: str) -> bool:
+    """The words reply to the app's question about a done (``done_question``), and the question carries the done:
+    any reply but a no to whether something is done ("yep", "go ahead"); to which item, one that says which (names
+    an item, picks one by its place, or takes in several: "the first one", "both", "all of them"). A no that names
+    the item it means instead ("no, the kiln log") answers which."""
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    asked = done_question(shown)
+    if not asked:
+        return False
+    from thirties_core.done_words import NO_RE
+    named = _names_an_item(pt, message)
+    if NO_RE.match(message) and not named:
+        return False
+    if not _asks_which(pt, asked):
+        return True
+    from thirties_core.done_counts import pointed_count
+    from thirties_core.done_reference import BOTH_RE, BULK_RE, ORDINAL_RE, PLURAL_RE
+    return named or any(r.search(message) for r in (ORDINAL_RE, BOTH_RE, PLURAL_RE, BULK_RE, _ALL_RE)) \
+        or bool(pointed_count(message))
+
+
+def _names_an_item(pt: Any, message: str) -> bool:
+    """True when the message names a title on the plan, or an open list entry shown in the last reply."""
+    from thirties_core.done_reference import _named, _open_items_shown, _titles
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    titles = _titles(pt)
+    pool = list(dict.fromkeys(titles + _open_items_shown(pt, shown, titles)))
+    return any(_named(message, t, [x for x in pool if x != t]) for t in pool)
+
+
 def no_done_said(pt: Any, title: str, others: Iterable[str], words: Optional[str], spanned: bool = False) -> str:
-    """Why a done in this turn can't go ahead because nothing the user said is a done for it: no done word (the
-    everyday ones count: "squared away", "it's in"), no past tense or report that it happened, no yes about it, no
-    ask for a tick, and no reply to a question about whether it's done. When the words report something finished,
-    the model's reading of which item stands. "" when it can."""
+    """Why a done in this turn can't go ahead: nothing the user said this turn is a done (``told_done``), and their
+    words aren't a reply to the app's question about whether something is done, or which. A no to such a question
+    carries no done, unless it names the item it means instead ("no, the kiln log"). Which item a done is for is
+    the model's reading: when anything they told is a done, the model's choice stands. "" when it can go ahead."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return ""
-    from thirties_core.done_words import _last_question
-    from thirties_core.write_guard import says_done
-    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
-    if _last_question(shown):
+    if _reply_carries_done(pt, message):
         return ""  # a reply to a question about which item, or whether it's done: the question carries the done
-    from thirties_core.done_reference import _named
-    from thirties_core.started import FINISHED_RE, without_caused
-    from thirties_core.write_guard import _MISTAKEN_RE, _POINTER_RE, REPORTED_RE, YES_RE, _done_in
+    if any(told_done(text, title) for text in dict.fromkeys(t for t in (words, message) if t)):
+        return ""
     others = [o for o in others if o and o != title]
-    for text in dict.fromkeys(t for t in (words, message) if t):
-        # what the user is only getting done ("getting the fence fixed") is no done
-        told = [s for s in _SENTENCE_RE.findall(without_caused(text)) if s.strip() and not is_asking(s)]
-        # a done word inside a question is asked about, never said, even in one asking for a change ("can I get
-        # the bins done by 4?"): only what's told carries a done
-        stated = [s for s in told if not asked_outright(s) and not asks_for_change(s)]
-        if (stated and says_done(" ".join(stated), title, others)) or tick_asked(text, title, others):
-            return ""
-        # a done said once for several things in one sentence ("the mugs and the gunwales are done"): the sentence
-        # naming it carries it (what only began, or comes next, was refused before this). A report without a done
-        # word counts where it names the item or points back to it; nothing counts once it's taken back.
-        # a routine said done as a whole ("wrapped up the kiln check, all parts") is said of each of its steps
-        from thirties_core.whole_routine import _names as names_routine, routine_meant
-        whole = routine_meant(pt, message, shown, title)
-        for s in stated:
-            named = _named(s, title, others) or bool(whole and names_routine(s, whole))
-            # another item named here takes the done only when the done says nothing of this one
-            # (plain_done.misses_it)
-            from thirties_core.plain_done import misses_it
-            about = named or not misses_it(s, title) or not any(
-                _named(s, o, [x for x in others if x != o] + [title]) for o in others)
-            reported = bool(REPORTED_RE.search(s)) and (named or bool(_POINTER_RE.search(s)))
-            if about and not _MISTAKEN_RE.search(s) and (_done_in(s, title) or FINISHED_RE.search(s) or reported
-                                                         or YES_RE.match(s)):
-                return ""
     from thirties_core.work_sessions import reading
     if reading(message, title, others) == "session":
         return ""  # time on it, said: recorded as a session, never a tick (work_sessions.py)
     if spanned and _SPAN_RE.search(message):
         return ""  # when it happened, said from start to end ("the birdhouse from 1:40 to 4:10"): a report
-    return (f"The user's words don't say {title} is finished, so it isn't marked done. It's done when they say it "
+    return (f"Nothing the user said this turn is a done, so {title} isn't marked done. It's done when they say it "
             "is; if it isn't clear, ask.")
+
+
+def said_no(pt: Any, title: str) -> str:
+    """Why a done can't go ahead when the user said no to the app's question about this item ("Is the kiln log
+    filled in?" "no"), without naming it again: "" otherwise."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or not message:
+        return ""
+    from thirties_core.done_words import NO_RE, asked_about
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    if not shown or not NO_RE.match(message):
+        return ""
+    from thirties_core.done_reference import _named, _titles
+    titles = list(dict.fromkeys(_titles(pt) + [title]))
+    if title not in asked_about(shown, titles, titles) or _named(message, title, [t for t in titles if t != title]):
+        return ""
+    return (f"The user said no to the question about {title}, so it isn't marked done. It's done when they say it "
+            "is.")
 
 
 def held_done(pt: Any, title: str, others: Iterable[str], words: Optional[str], event: Any = None,
               spanned: bool = False) -> str:
     """Why a done in this turn can't go ahead (log_outcome): the item is only asked about, the words point at its
-    parts, or nothing said is a done for it. A done the user asked for in an earlier message isn't held by a
-    question (done_words.earlier_request). "" when it can go ahead."""
+    parts, a reply to the app's question leaves it out ("both, except the bailers"), the user said no to the app's
+    question about it, the app asked which and the words don't say (``unanswered_which``), or nothing said is a
+    done. A done the user asked for in an earlier message isn't held by a question (done_words.earlier_request). ""
+    when it can go ahead."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return ""
@@ -377,7 +517,34 @@ def held_done(pt: Any, title: str, others: Iterable[str], words: Optional[str], 
     _, shown = getattr(pt, "prior_exchange", None) or ("", "")
     if parts_only(message, title, shown, [title] + others):
         return parts_refusal(title)
-    return no_done_said(pt, title, others, words, spanned)
+    if done_question(shown):  # a reply carries the question's done: what it leaves out isn't done (done_exceptions.py)
+        from thirties_core.done_exceptions import left_out
+        left = left_out(message, title, others, answered=True)
+        if left:
+            return left
+    return said_no(pt, title) or unanswered_which(pt, title) or no_done_said(pt, title, others, words, spanned)
+
+
+def done_refused(pt: Any, title: str, others: Optional[Iterable[str]] = None, event: Any = None) -> str:
+    """Why a done of this item in this turn stops, for the done paths besides log_outcome (which reads the same
+    things one by one): the user's words name it as not done (started.not_finished, write_guard.state_not_done),
+    or ``held_done`` holds it. "" when it can go ahead, and when nobody is talking."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or message is None:
+        return ""
+    if others is None:
+        from thirties_core.done_reference import _titles
+        others = _titles(pt)
+    others = [o for o in others if o and o != title]
+    from thirties_core.started import not_finished
+    from thirties_core.write_guard import state_not_done
+    said = not_finished(message, title, others)
+    if said == "begun":
+        return (f"The user said {title} has started, not that it's finished, so it isn't done yet. Mark it done "
+                "when they say it's over.")
+    if said == "not":
+        return f"The user said {title} hasn't happened, so it isn't done. Leave it as it is."
+    return state_not_done(message, title, others) or held_done(pt, title, others, message, event)
 
 
 # asking for the item to be marked done by itself at its end
@@ -397,5 +564,6 @@ def auto_done_asked(pt: Any) -> bool:
 # --- end the user's own done ---
 
 
-__all__ = ["asked_only", "asks_for_change", "auto_done_asked", "begun_or_next", "is_asking", "no_done_said", "only_questions",
-           "parts_only", "parts_refusal"]
+__all__ = ["asked_only", "asks_for_a_tick", "asks_for_change", "auto_done_asked", "begun_or_next", "done_question",
+           "done_refused", "held_done", "is_asking", "no_done_said", "only_questions", "parts_only", "parts_refusal",
+           "said_no", "told_done", "unanswered_which"]

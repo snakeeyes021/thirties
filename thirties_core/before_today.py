@@ -256,8 +256,8 @@ class BeforeToday:
         if action == "done":  # the normal done path: ticked in Joplin, filed in the month's Done note
             task = next((t for t in self.a.s.tasks if rec.get("task_id") and t.id == rec["task_id"]), None)
             if task is not None and self._on_plan(rec) is None:
-                from thirties_core.done_reference import check as pointed_to  # only what the user's words name
-                held, _ = pointed_to(self.a.pt, title, [task.id])
+                from thirties_core.said_for_it import done_refused  # a done said; which item is the model's reading
+                held = done_refused(self.a.pt, title)
                 if held:
                     raise ToolError(held)
                 out =f"Marked {title} done " + self.a._complete_backlog_task(task, for_good=True) + "."

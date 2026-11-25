@@ -1,14 +1,15 @@
-"""Which item the user means is the model's call; a done is refused only when the words give it no basis
-(plain_done.py).
+"""Which item the user means is the model's call; a done is refused only when nothing said is a done, or the words
+name the item as not done (said_for_it.py).
 
 - The model's reading: "the chooks got watered" marks Water the hens beside Water the sourdough starter and
   Water the goats, which share only the verb; a nickname does too.
 - Answering the app: after a reply naming only this item, a yes, a request for the tick or an insisting word marks
   it.
-- Said again: a done refused earlier for this item, said again, marks it.
+- Said again: a done said again after the app asked which marks it.
 - Talk to the app beside a done ("quit checking on that one") never makes it read as under way.
-- Still refused: words that fit two items still to do as well and say nothing more, words that name another item
-  or fit it better, no done said, a bare "go ahead and tick that" with nothing named, and a no.
+- What else the words fit is a note, never a stop: words that fit two items still to do as well, words that name
+  another item or fit it better, a pointer back to a reply that named two items, a reply about another item.
+- Still refused: no done said, and a no.
 
 Every case goes through the real log_outcome path, alone and as whole turns with a mock model.
 """
@@ -30,7 +31,7 @@ ITEMS = (("Brush the goats", "9:50 AM"), ("Glaze the mugs", "10:50 AM"), ("Water
 NOW = "11:40"
 # the same verb on two animals: words saying nothing beyond it fit both
 BOTH_ANIMALS = ITEMS + (("Water the goats", "3:40 PM"),)
-REFUSED_WORDS = "don't point to"
+NOTHING_DONE = "Nothing the user said this turn is a done"
 
 
 class PlainCase(unittest.TestCase):
@@ -60,6 +61,7 @@ class PlainCase(unittest.TestCase):
         out = self.done(message, item, *args)
         self.assertFalse(out.startswith(NOT_DONE), (message, out))
         self.assertEqual(self.span(item).status, SpanStatus.DONE, message)
+        return out
 
     def assertRefused(self, message, item, *args):
         out = self.done(message, item, *args)
@@ -79,34 +81,37 @@ class TestTheModelsReading(PlainCase):
     def test_fits_another_item_better(self):
         self.assertTrue(by_the_models_reading(self.t, "chickens watered", HENS))
         self.assertFalse(by_the_models_reading(self.t, "chickens watered", "Brush the goats"))
-        self.assertRefused("the chooks got watered", "Brush the goats")
+        out = self.assertMarked("the chooks got watered", "Brush the goats")
+        self.assertIn(f"{HENS} and says nothing of Brush the goats", out)
 
-    def test_another_item_named_is_still_refused(self):
-        self.assertRefused("the hens got watered", "Water the sourdough starter")
-        self.assertRefused("the mugs are glazed", HENS)
+    def test_another_item_named_goes_on_with_a_note(self):
+        self.assertIn(f"may also mean {HENS}", self.assertMarked("the hens got watered", "Water the sourdough starter"))
+        self.assertIn("fits Glaze the mugs", self.assertMarked("the mugs are glazed", HENS))
 
     def test_no_done_words_no_done(self):
         self.assertRefused("the chooks are getting watered", HENS)
         self.assertRefused("the chooks still need watering", HENS)
 
     def test_nothing_to_go_on(self):
-        self.assertIn(REFUSED_WORDS, self.assertRefused("go on, tick it off", HENS))
+        self.assertIn(NOTHING_DONE, self.assertRefused("hm, ok", HENS))
 
 
 class TestTwoItemsFit(PlainCase):
     items = BOTH_ANIMALS
 
-    def test_words_that_say_nothing_beyond_the_tie_are_refused(self):
-        for message in ("the watering's all done", "all watered now"):
-            self.assertIn(REFUSED_WORDS, self.assertRefused(message, HENS))
-            self.assertRefused(message, "Water the goats")
+    def test_words_that_say_nothing_beyond_the_tie_go_on_with_a_note(self):
+        out = self.assertMarked("the watering's all done", HENS)
+        self.assertIn(f"Water the goats as well as {HENS}", out)
+        out = self.assertMarked("all watered now", "Water the goats")
+        self.assertIn("as well as Water the goats", out)
 
     def test_a_word_beyond_the_tie_is_the_models_to_read(self):
-        self.assertMarked("the chooks got watered", HENS)
+        out = self.assertMarked("the chooks got watered", HENS)
+        self.assertNotIn("as well as", out)
         self.assertEqual(self.span("Water the goats").status, SpanStatus.PLANNED)
 
-    def test_the_other_animal_named_is_refused(self):
-        self.assertRefused("the goats got watered", HENS)
+    def test_the_other_animal_named_goes_on_with_a_note(self):
+        self.assertIn("may also mean Water the goats", self.assertMarked("the goats got watered", HENS))
 
 
 class TestAnsweringTheApp(PlainCase):
@@ -133,11 +138,13 @@ class TestAnsweringTheApp(PlainCase):
         self.assertMarked("as I wrote. tick it", HENS, shown)
 
     def test_another_item_than_the_one_asked_about(self):
-        self.assertRefused("go ahead and tick that", "Water the goats", self.asked())
+        out = self.assertMarked("go ahead and tick that", "Water the goats", self.asked())
+        self.assertIn(f"answers the question about {HENS}, and Water the goats wasn't in it", out)
 
     def test_a_reply_naming_two_open_items(self):
         shown = ("", "Water the hens and Water the goats are both still open.")
-        self.assertRefused("go ahead and tick that", HENS, shown)
+        out = self.assertMarked("go ahead and tick that", HENS, shown)
+        self.assertIn("points back to a reply that named", out)
 
     def test_a_no(self):
         self.assertRefused("no, not that one", HENS, self.asked())
@@ -152,10 +159,15 @@ class TestSaidAgain(PlainCase):
 
     def test_said_again_for_another_item(self):
         asks = {HENS: "the watering's all done"}
-        self.assertRefused("the watering's all done", "Water the goats", ("", "Which one did you finish?"), asks)
+        out = self.assertMarked("the watering's all done", "Water the goats", ("", "Which one did you finish?"), asks)
+        self.assertIn(f"{HENS} as well as Water the goats", out)
 
     def test_nothing_asked_before(self):
-        self.assertRefused("the watering's all DONE", HENS, ("", "Which one did you finish?"))
+        out = self.assertMarked("the watering's all DONE", HENS, ("", "Which one did you finish?"))
+        self.assertIn(f"as well as {HENS}", out)
+
+    def test_a_reply_that_doesnt_say_which(self):
+        self.assertIn(NOTHING_DONE, self.assertRefused("ok", HENS, ("", "Which one did you finish?")))
 
     def test_the_record_of_dones_asked_for(self):
         refusal = f"NOT_DONE: The user's words don't point to {HENS}, so it isn't marked done. Ask."
@@ -205,19 +217,22 @@ class TestWholeTurns(ConversationTestCase):
     def status(self, title):
         return next(s for s in self.manager.day_plan.spans if s.title == title).status
 
-    def turn(self, said, title, answer):
-        item = next(s for s in self.manager.day_plan.spans if s.title == title)
-        self.engine.set_next_response(reply(f'CALL log_outcome {{"event": "{item.id}", "status": "done"}}'))
+    def turn(self, said, title, answer, call=True):
+        """One turn: the model calls log_outcome for the item (or, with call=False, only asks), then replies."""
+        if call:
+            item = next(s for s in self.manager.day_plan.spans if s.title == title)
+            self.engine.set_next_response(reply(f'CALL log_outcome {{"event": "{item.id}", "status": "done"}}'))
         self.engine.set_next_response(reply(answer))
         self.manager.send_user_message(said)
-        return [m for m in self.manager.brain.messages if m.get("role") == "tool"][-1]["content"]
+        tools = [m for m in self.manager.brain.messages if m.get("role") == "tool"]
+        return tools[-1]["content"] if call else ""
 
     def test_everyday_name_in_one_turn(self):
         self.assertFalse(self.turn("chooks got watered", HENS, "Marked.").startswith(NOT_DONE))
         self.assertEqual(self.status(HENS), SpanStatus.DONE)
 
     def answered(self, answer):
-        self.assertTrue(self.turn("the watering's all done", HENS, f"Did you mean {HENS}?").startswith(NOT_DONE))
+        self.turn("the watering's all done", HENS, f"Did you mean {HENS}?", call=False)
         out = self.turn(answer, HENS, "Marked.")
         self.assertFalse(out.startswith(NOT_DONE), (answer, out))
         self.assertEqual(self.status(HENS), SpanStatus.DONE)
@@ -233,23 +248,26 @@ class TestWholeTurns(ConversationTestCase):
         self.answered("yes, that one")
 
     def test_the_done_said_again_after_which_one(self):
-        self.turn("the watering's all done", HENS, "Which one did you finish?")
+        self.turn("the watering's all done", HENS, "Which one did you finish?", call=False)
         self.assertNotEqual(self.status(HENS), SpanStatus.DONE)
         self.turn("the watering's all DONE!", HENS, "Marked.")
         self.assertEqual(self.status(HENS), SpanStatus.DONE)
 
     def test_a_complaint_beside_the_answer(self):
-        self.turn("the watering's all done", HENS, f"Did you mean {HENS}?")
+        self.turn("the watering's all done", HENS, f"Did you mean {HENS}?", call=False)
         out = self.turn("yes obviously, you can skip the check", HENS, "Marked.")
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.status(HENS), SpanStatus.DONE)
 
     def test_two_items_fit_and_nothing_was_asked(self):
-        out = self.turn("the watering's all done", "Water the goats", "Which one?")
-        self.assertIn(REFUSED_WORDS, out)
-        self.turn("ok", "Water the goats", "Which one?")
-        self.assertEqual(self.status("Water the goats"), SpanStatus.PLANNED)
+        out = self.turn("the watering's all done", "Water the goats", "Marked the goats; was it the hens too?")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"{HENS} as well as Water the goats", out)
+        self.assertEqual(self.status("Water the goats"), SpanStatus.DONE)
         self.assertEqual(self.status(HENS), SpanStatus.PLANNED)
+        out = self.turn("ok", HENS, "Which one?")
+        self.assertFalse(out.startswith(NOT_DONE), out)  # a yes to whether the hens were done too
+        self.assertEqual(self.status(HENS), SpanStatus.DONE)
 
 
 if __name__ == "__main__":

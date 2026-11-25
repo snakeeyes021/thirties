@@ -4,8 +4,9 @@ the whole batch back.
 - **The groups asked about, every step of them.** The question before listed steps from two parts of the day's
   routines; "both, yes", "yep, both done" or "all of them" ticks each step of those two parts, whichever routine
   each part is in. "Both" means exactly two groups; "all" or "everything" takes in two or more.
-- **Nothing outside them.** A step of a part the question didn't ask about, or a list item, is refused. So is
-  every step when the answer makes an exception ("both, except the bailers").
+- **Outside them, the model's reading with a note.** A step of a part the question didn't ask about, or a list
+  item, goes on as the model read the answer, and its result says the question didn't ask about it. An answer
+  that makes an exception ("both, except the bailers") leaves out what it names; the other steps go on.
 - **The reply names each step.** A reply that only says "Marked both done." is sent back once to name them; one
   that names the groups and every step goes as written.
 - **One no takes them all back.** "no" or "undo" right after the reply that announced the batch reopens every
@@ -128,25 +129,34 @@ class TestTheGroupsAskedAbout(ClubDay):
                 self.fresh()
                 self.assert_done({t: self.say(message, t, TWO_PARTS) for t in BATCH})
 
-    def test_a_part_it_did_not_ask_about_and_a_list_item_stay_open(self):
+    def assert_noted(self, outs):
+        for title, out in outs.items():
+            self.assertIn(f"{title} wasn't in it", out)
+
+    def test_a_part_it_did_not_ask_about_and_a_list_item_go_on_with_a_note(self):
         for message in ("both, yes", "yep, both done"):
             with self.subTest(message=message):
                 self.fresh()
-                self.assert_refused({t: self.say(message, t, TWO_PARTS) for t in EVENING + DECK + [BURGEES]})
+                outs = {t: self.say(message, t, TWO_PARTS) for t in EVENING + DECK + [BURGEES]}
+                self.assert_done(outs)
+                self.assert_noted(outs)
 
     def test_two_parts_of_two_routines(self):
         self.assert_done({t: self.say("both, yes", t, ACROSS) for t in PACKING + DECK})
-        self.assert_refused({t: self.say("both, yes", t, ACROSS) for t in RIGGING})
+        outs = {t: self.say("both, yes", t, ACROSS) for t in RIGGING}
+        self.assert_done(outs)
+        self.assert_noted(outs)
 
-    def test_both_takes_in_exactly_two_groups(self):
-        self.assert_refused({t: self.say("yep, both done", t, THREE_PARTS) for t in RIGGING + PACKING + EVENING})
+    def test_both_for_three_groups_is_the_models_reading(self):
+        self.assert_done({t: self.say("yep, both done", t, THREE_PARTS) for t in RIGGING + PACKING + EVENING})
 
     def test_all_takes_in_three(self):
         self.assert_done({t: self.say("yes, all done", t, THREE_PARTS) for t in RIGGING + PACKING + EVENING})
 
-    def test_an_exception_is_not_the_whole(self):
-        self.assert_refused({t: self.say("both, except the bailers", t, TWO_PARTS)
-                             for t in ("Tension the stays", "Rinse the sails")})
+    def test_an_exception_leaves_out_what_it_names(self):
+        self.assert_refused({"Check the bailers": self.say("both, except the bailers", "Check the bailers", TWO_PARTS)})
+        self.assert_done({t: self.say("both, except the bailers", t, TWO_PARTS)
+                          for t in ("Tension the stays", "Rinse the sails")})
 
     def test_the_not_marked_yet_list_under_it_is_not_a_group(self):
         from thirties_core.messages import join_sections
@@ -154,7 +164,9 @@ class TestTheGroupsAskedAbout(ClubDay):
         behind = [self.span(t) for t in BATCH + EVENING + DECK]
         shown = join_sections(TWO_PARTS, "\n".join(unmarked_lines(behind)))
         self.assert_done({t: self.say("yep, both done", t, shown) for t in BATCH})
-        self.assert_refused({t: self.say("yep, both done", t, shown) for t in EVENING})
+        outs = {t: self.say("yep, both done", t, shown) for t in EVENING}
+        self.assert_done(outs)
+        self.assert_noted(outs)
 
     def test_without_a_question_both_points_nowhere(self):
         shown = f"Next up: the rigging ({', '.join(RIGGING)}) and the packing ({', '.join(PACKING)})."

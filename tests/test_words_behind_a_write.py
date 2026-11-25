@@ -201,11 +201,11 @@ class TestATickAskedInAQuestion(WordsCase):
         self.assertEqual(refused(op, "[app] can we mark the paddle varnish off?", None), "")
         self.assertWent(self.tick("Varnish the paddle", "can we mark the paddle varnish off?"))
 
-    def test_a_tick_asked_for_another_item_is_not_this_ones(self):
+    def test_a_tick_asked_for_another_item_is_the_models_reading(self):
         from thirties_core.write_guard import refused
         op = {"op": "complete", "title": "Varnish the paddle"}
-        self.assertNotEqual(refused(op, "[app] can we mark the thwart sanding off?", None), "")
-        self.assertHeld(self.tick("Varnish the paddle", "can we mark the thwart sanding off?"))
+        self.assertEqual(refused(op, "[app] can we mark the thwart sanding off?", None), "")
+        self.assertWent(self.tick("Varnish the paddle", "can we mark the thwart sanding off?"))
 
 
 class TestStartedBesideAnotherDone(WordsCase):

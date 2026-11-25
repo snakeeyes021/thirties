@@ -1,22 +1,23 @@
-"""A done the model read goes through, unless the user's words give it no basis at all.
+"""How a done's words fit the items: what the notes on a done say, and what the asks that change the plan read.
 
 Which item the user means is the model's call: an everyday name or a nickname for it, a reply that refers back
-to what the app asked, the done said again in exasperation. done_reference.check refuses a done only when the words
-give no basis for it:
+to what the app asked, the done said again in exasperation. A done never stops here (said_for_it.py holds the only
+stops: nothing said is a done, or the item named as not done); what this module finds goes in the done's result as
+a note (done_reference.also_said_note), and done_reference.check reads it for the asks that change the plan
+without a done. What it finds:
 
 - **No done said**: nothing in the words says it happened or confirms it ("the chooks are getting watered" is
   under way, not done).
-- **Something else named**: the words name another item outright (all its words, or its head noun: checked before
-  this, in done_reference.check and done_fit.named_instead), or the clauses that say the done name other items and
-  say nothing of this one ("The bench can wait, the skis got waxed" for Fix the bench: ``misses_it``).
+- **Something else named**: the words name another item outright (all its words, or its head noun: done_fit.py),
+  or the clauses that say the done name other items and say nothing of this one ("The bench can wait, the skis got
+  waxed" for Fix the bench: ``misses_it``).
 - **A plain tie**: the words fit another item still to do as well as this one, and say nothing beyond what the two
-  share ("the watering's done" beside Water the hens and Water the goats). A word that names no item ("the chooks
-  got watered") is what the model read to pick this one, so it stands.
+  share ("the watering's done" beside Water the hens and Water the goats: ``tied_with_open``). A word that names no
+  item ("the chooks got watered") is what the model read to pick this one.
 - **Nothing about it**: no word of the item, in any of its forms ("laundry done" for a vet visit, a bare "mark it
   done"), and no reply of the app's naming it to answer.
 
-So these go through on the model's reading, as long as the words still say it happened (write_guard.py and
-said_for_it.py stay as strict as before):
+The words point to the item, on the model's reading (``trusted``):
 
 - **Answering the app**: the app's last reply named this item and no other one still to do, and the user confirms
   (a yes, a request for the tick, an insisting word) or says it happened.
@@ -260,6 +261,25 @@ def by_the_models_reading(pt: Any, message: str, title: str) -> bool:
         return True
     shared = [w for t in [title] + level for w, _ in _stems(t)]
     return any(not any(kin(t, sw) for t in shared) for sw in which)  # a word beyond the tie: the model's to read
+
+
+def tied_with_open(pt: Any, message: str, title: str) -> List[str]:
+    """The other items still to do that the clauses saying the done fit as well as this one, when they say nothing
+    beyond what those items share ("the watering's done" beside Water the hens and Water the goats): a plain tie,
+    which item is the model's reading, with a note. [] when there's none, or the words say a word beyond it."""
+    from thirties_core.done_words import _hits, kin
+    from thirties_core.item_facts import item_name
+    done = _in_the_done(message)
+    said = _stems(done)
+    mine = _hits(said, title)
+    if not mine:
+        return []
+    level = [o for o in _open_titles(pt) if item_name(o) != item_name(title)
+             and _hits(said, o) and len(_hits(said, o)) == len(mine)]
+    shared = [w for t in [title] + level for w, _ in _stems(t)]
+    if any(not any(kin(t, sw) for t in shared) for sw in _which_words(done)):
+        return []  # a word beyond the tie
+    return level
 
 
 def _named_in(shown: str, pool: Sequence[str], titles: Sequence[str]) -> List[str]:

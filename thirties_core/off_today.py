@@ -113,13 +113,16 @@ def _other_titles(pt: "PlanTools", title: str) -> List[str]:
 
 
 def said_done_too(pt: "PlanTools", title: str) -> bool:
-    """The user asks to take the item off and says it happened ("the rent's paid, take it off"), with no drop word:
-    the take-off is a done."""
+    """The user asks to take the item off and says it happened ("the rent's paid, take it off"), with no drop word,
+    in words that point to it (done_reference.check: "lunch done" says nothing of the rent): the take-off is a
+    done."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return False
+    from thirties_core.said_for_it import told_done  # a yes to taking it off says nothing happened
     from thirties_core.write_guard import asks_to_drop, says_done
-    return not asks_to_drop(message) and says_done(message, title, _other_titles(pt, title), strict=True)
+    return not asks_to_drop(message) and says_done(message, title, _other_titles(pt, title), strict=True) \
+        and told_done(message, title) and _words_point_to(pt, title)
 
 
 def done_instead(pt: "PlanTools", span: "EventSpan") -> Optional[str]:

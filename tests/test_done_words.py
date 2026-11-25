@@ -2,9 +2,11 @@
 
 - Word forms and common household words: "varnishing done" for Varnish, "calibration done" for Calibrate the
   kiln, "dog agility done" for Take the puppy to agility beside Agility drills.
-- Across turns: after a refused done, "Did you mean X?" answered with anything but a no marks X; and a done asked
-  for earlier stays asked for, so a "yes", "yes, the class" or a complaint ending in "?" completes it.
-- Words that never pointed to an item still refuse it, and nothing is ticked in Joplin.
+- Across turns: the app asking whether they meant one item, answered with anything but a no, marks that item; and
+  a done asked for earlier and refused stays asked for, so a "yes", "yes, the class" or a complaint ending in "?"
+  completes it.
+- Words that fit another item go on as the model read them, with a note naming that item; words that say no done
+  tick nothing, on the plan or in Joplin.
 """
 
 import unittest
@@ -83,12 +85,19 @@ class TestDoneInEverydayWords(WordsCase):
             self.assertFalse(out.startswith(NOT_DONE), (message, out))
             self.assertEqual(self.span(item).status, SpanStatus.DONE, message)
 
-    def test_still_refused(self):
-        for message, item in (("dog agility done", "Agility drills"), ("calibration done", "Rake the gravel"),
-                              ("varnishing done", "Surgeon visit"), ("kayak is clean", "Calibrate the kiln")):
+    def test_words_for_another_item_go_on_with_a_note_naming_it(self):
+        for message, item, fits in (("dog agility done", "Agility drills", PUP),
+                                    ("calibration done", "Rake the gravel", "Calibrate the kiln"),
+                                    ("varnishing done", "Surgeon visit", "Varnish")):
             out = self.done(message, item)
-            self.assertTrue(out.startswith(NOT_DONE), (message, out))
-            self.assertEqual(self.span(item).status, SpanStatus.PLANNED, message)
+            self.assertFalse(out.startswith(NOT_DONE), (message, out))
+            self.assertIn(fits, out[out.index("(The user's"):], message)
+            self.assertEqual(self.span(item).status, SpanStatus.DONE, message)
+
+    def test_no_done_word_is_still_refused(self):
+        out = self.done("kayak is clean", "Calibrate the kiln")
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span("Calibrate the kiln").status, SpanStatus.PLANNED)
 
 
 class TestAQuestionAboutOneItem(WordsCase):
@@ -98,13 +107,17 @@ class TestAQuestionAboutOneItem(WordsCase):
         out = self.done("yep", PUP, asked)
         self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_a_no_or_another_item_is_refused(self):
+    def test_a_no_is_refused(self):
         asked = ("the furball had a great class", "Did you mean Take the puppy to agility?")
-        for message, item in (("no", PUP), ("nope, the other thing", PUP), ("yes", "Agility drills"),
-                              ("no, the kiln", PUP)):
+        for message, item in (("no", PUP), ("nope, the other thing", PUP), ("no, the kiln", PUP)):
             out = self.done(message, item, asked)
             self.assertTrue(out.startswith(NOT_DONE), (message, item, out))
         self.assertEqual(self.span(PUP).status, SpanStatus.PLANNED)
+
+    def test_a_yes_for_another_item_goes_on_with_a_note(self):
+        out = self.done("yes", "Agility drills", ("", f"Did you mean {PUP}?"))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"answers the question about {PUP}, and Agility drills wasn't in it", out)
 
     def test_an_offer_is_no_such_question(self):
         offered = ("", "Want me to move the kiln to 10:00?")
@@ -119,9 +132,10 @@ class TestAQuestionAboutOneItem(WordsCase):
 class TestADoneAskedForBefore(WordsCase):
 
     def history(self, said, item, *after):
-        """The conversation after the user asked for a done that was refused."""
-        refused = self.done(said, item)
-        self.assertTrue(refused.startswith(NOT_DONE), refused)
+        """The conversation after the user asked for a done that was refused as not pointing to the item, as an
+        earlier conversation holds such a refusal."""
+        refused = (f"NOT_DONE: The user's words don't point to {item}, so it isn't marked done. If they meant it, "
+                   "ask which item they finished.")
         messages = [{"role": "system", "content": "rules"}, {"role": "user", "content": said},
                     {"role": "assistant", "content": "", "tool_calls": [{"name": "log_outcome"}]},
                     {"role": "tool", "name": "log_outcome", "content": refused},
@@ -170,8 +184,8 @@ class TestADoneAskedForBefore(WordsCase):
 
 
 class TestTheWholeExchange(ConversationTestCase):
-    """The user's clear request, a refusal and a question, then their reply: the item ends up done. An item their
-    words never pointed to stays open."""
+    """The user's done goes through on the model's reading at once; when the model asks which first, the reply
+    finishes it. Words that say no done mark nothing."""
 
     def setUp(self):
         super().setUp()
@@ -184,41 +198,41 @@ class TestTheWholeExchange(ConversationTestCase):
     def status(self, title):
         return next(s for s in self.manager.day_plan.spans if s.title == title).status
 
-    def turn(self, said, title, answer):
-        item = next(s for s in self.manager.day_plan.spans if s.title == title)
-        self.engine.set_next_response(reply(f'CALL log_outcome {{"event": "{item.id}", "status": "done"}}'))
+    def turn(self, said, title, answer, call=True):
+        """One turn: the model calls log_outcome for the item (or, with call=False, only asks), then replies."""
+        if call:
+            item = next(s for s in self.manager.day_plan.spans if s.title == title)
+            self.engine.set_next_response(reply(f'CALL log_outcome {{"event": "{item.id}", "status": "done"}}'))
         self.engine.set_next_response(reply(answer))
         self.manager.send_user_message(said)
 
-    def test_request_then_yes(self):
-        self.turn("the furball had a great class", PUP, f"Did you mean {PUP}?")
+    def test_the_models_reading_goes_through_at_once(self):
+        self.turn("the furball had a great class", PUP, "Marked the puppy's class.")
+        self.assertEqual(self.status(PUP), SpanStatus.DONE)
+        self.assertNotEqual(self.status("Agility drills"), SpanStatus.DONE)
+
+    def test_asked_first_then_yes(self):
+        self.turn("the furball had a great class", PUP, f"Did you mean {PUP}?", call=False)
         self.assertNotEqual(self.status(PUP), SpanStatus.DONE)
         self.turn("yes", PUP, "Marked.")
         self.assertEqual(self.status(PUP), SpanStatus.DONE)
 
-    def test_request_then_a_complaint(self):
-        self.turn("the furball had a great class", PUP, "Did you mean the puppy's class?")
-        self.turn("ok", "Agility drills", "Which one?")
-        self.assertNotEqual(self.status(PUP), SpanStatus.DONE)
-        self.turn("is it still not ticked?", PUP, "Marked.")
-        self.assertEqual(self.status(PUP), SpanStatus.DONE)
-        self.assertNotEqual(self.status("Agility drills"), SpanStatus.DONE)
-
-    def test_an_item_never_pointed_to_stays_open(self):
-        self.turn("the furball had a great class", "Rake the gravel", "Which one did you finish?")
+    def test_no_done_said_marks_nothing(self):
+        self.turn("the furball's class is at seven", "Rake the gravel", "Noted.")
         self.turn("ok", "Rake the gravel", "Which one?")
         self.turn("is it still not ticked?", "Rake the gravel", "Which one?")
         self.assertNotEqual(self.status("Rake the gravel"), SpanStatus.DONE)
 
     def test_a_no_calls_it_off(self):
-        self.turn("the furball had a great class", PUP, f"Did you mean {PUP}?")
+        self.turn("the furball had a great class", PUP, f"Did you mean {PUP}?", call=False)
         self.turn("no", PUP, "Which one, then?")
         self.turn("ok", PUP, "Which one?")
         self.assertNotEqual(self.status(PUP), SpanStatus.DONE)
 
 
 class TestNoJoplinTickForWordsThatNeverPointed(ListsTestCase):
-    """Data guard: neither everyday words nor an earlier request tick an item the words never pointed to."""
+    """Data guard: words that say no done tick nothing in Joplin, even with an earlier request standing; a done the
+    model read for another item goes on with a note naming the item the words fit."""
 
     def setUp(self):
         super().setUp()
@@ -237,8 +251,7 @@ class TestNoJoplinTickForWordsThatNeverPointed(ListsTestCase):
 
     def test_nothing_written(self):
         writes = len(self.api.updates)
-        for message, pending in (("the banking call is finished", None), ("yes", ["Call the bank"]),
-                                 ("is it still not ticked?", ["Call the bank"])):
+        for message, pending in (("yes", ["Call the bank"]), ("is it still not ticked?", ["Call the bank"])):
             out = self.done(message, "Buy stamps", pending)
             self.assertTrue(out.startswith(NOT_DONE), (message, out))
         self.assertEqual(len(self.api.updates), writes)
@@ -246,6 +259,11 @@ class TestNoJoplinTickForWordsThatNeverPointed(ListsTestCase):
         out = self.done("yes", "Call the bank", ["Call the bank"])
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertIn("- [x] Call the bank", self.body("n_errands"))
+
+    def test_a_done_read_for_another_item_carries_a_note(self):
+        out = self.done("the banking call is finished", "Buy stamps")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("fits Call the bank and says nothing of Buy stamps", out)
 
 
 if __name__ == "__main__":

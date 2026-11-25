@@ -88,11 +88,19 @@ class NowAboutTheDisplayTest(TrueDoneBase):
                     self.fresh()
                     self.assert_ticked(title, self.say(message, title, prior=("", self.SHOWN)))
 
-    def test_the_item_the_other_clause_is_about_does_not_tick(self):
-        for message in self.MESSAGES:
+    def test_the_item_named_only_as_an_end_does_not_tick(self):
+        for message in self.MESSAGES[:3]:
             with self.subTest(message=message):
                 self.fresh()
                 self.assert_not_ticked("Kiln check", self.say(message, "Kiln check", prior=("", self.SHOWN)))
+
+    def test_an_item_the_words_dont_name_is_the_models_reading_with_a_note(self):
+        for message in self.MESSAGES[3:]:
+            with self.subTest(message=message):
+                self.fresh()
+                out = self.say(message, "Kiln check", prior=("", self.SHOWN))
+                self.assertIn("says nothing of Kiln check", out)
+                self.assert_ticked("Kiln check", out)
 
     def test_now_about_the_item_itself_still_holds(self):
         for message in ("lunch now", "tucking into lunch now", "the mugs are trimmed, now lunch"):
@@ -136,13 +144,13 @@ class CountPointingBackTest(TrueDoneBase):
                     self.fresh()
                     self.assert_ticked(title, self.say(message, title, prior=("", self.THREE)))
 
-    def test_a_count_that_does_not_match_what_was_shown_ticks_nothing(self):
+    def test_a_count_that_does_not_match_what_was_shown_is_the_models_reading(self):
         for title in ("Trim the mugs", "Lunch", "Kiln check"):
             with self.subTest(title=title):
                 self.fresh()
-                self.assert_not_ticked(title, self.say("Finished all three.", title, prior=("", self.FOUR)))
+                self.assert_ticked(title, self.say("Finished all three.", title, prior=("", self.FOUR)))
                 self.fresh()
-                self.assert_not_ticked(title, self.say("finished those two", title, prior=("", self.THREE)))
+                self.assert_ticked(title, self.say("finished those two", title, prior=("", self.THREE)))
 
     def test_pointed_count(self):
         from thirties_core.done_counts import pointed_count

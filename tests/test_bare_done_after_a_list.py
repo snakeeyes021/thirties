@@ -3,8 +3,9 @@
 - **The model's pick stands.** "that one's sorted", "done!", "finished it": no word of any item in it, so which of
   the open items just listed it is, is the model's to pick. Whichever listed item it ticks is ticked, on the plan
   and in Joplin.
-- **Only within what was listed.** An item the reply didn't list, a count or "both" that doesn't fit the list, words
-  that name another item, or no done word at all are still refused. So is any pick after a reply that asked which.
+- **Outside what was listed, a note.** An item the reply didn't list, a count or "both" that doesn't fit the list,
+  or words that name another item go on as the model read them, with a note when there's something to name. No done
+  word at all is still refused, and so is any pick after a reply that asked which.
 - **The reply says which.** A reply that doesn't name the ticked item is sent back once; if it still doesn't, it
   opens with what was ticked. A reply that names it goes as written.
 - **One word takes it back.** "no", "not that one", "undo" right after such a tick reopens it, on the plan and in
@@ -33,7 +34,7 @@ ITEMS = ((BINDERS, "9:20 AM", "t_binders"), (BADGES, "9:50 AM", "t_badges"), (RO
 LISTED = (BINDERS, BADGES, ROOM)
 SHOWN = f"Still open: {BINDERS}, {BADGES} and {ROOM}."
 BARE = ("that one's sorted", "done!", "finished it", "that's done now")
-REFUSED_WORDS = "don't point to"
+POINTED_BACK = "points back to a reply that named"
 
 
 class OfficeDay(TodayTestCase):
@@ -105,29 +106,42 @@ class TestThePickStands(OfficeDay):
         self.assertOpen(ROOM, out)
 
 
-class TestStillRefused(OfficeDay):
+class TestOutsideTheListIsANote(OfficeDay):
+    """A done the model read for an item outside what the reply listed goes on; its result says what else fits."""
 
     def test_an_item_the_reply_did_not_list(self):
         out = self.say("that one's sorted", TENDER)
-        self.assertIn(REFUSED_WORDS, out)
-        self.assertOpen(TENDER, out)
+        self.assertIn(POINTED_BACK, out)
+        self.assertTicked(TENDER, out)
 
     def test_nothing_listed_before(self):
         out = self.say("done!", BADGES, shown="Good to hear from you.")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertOpen(BADGES, out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertTicked(BADGES, out)
 
     def test_a_count_that_does_not_fit(self):
         for message in ("both done", "those two are finished"):
             with self.subTest(message=message):
+                self.fresh()
                 out = self.say(message, BADGES)
-                self.assertTrue(out.startswith(NOT_DONE), out)
-                self.assertOpen(BADGES, out)
+                self.assertFalse(out.startswith(NOT_DONE), out)
+                self.assertTicked(BADGES, out)
 
     def test_words_that_name_another_item(self):
         out = self.say("the binders are collated", BADGES)
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertOpen(BADGES, out)
+        self.assertIn(f"fits {BINDERS} and says nothing of {BADGES}", out)
+        self.assertTicked(BADGES, out)
+
+    def test_an_item_already_done_is_still_listed(self):
+        self.t.by_hand = True
+        self.t.execute("log_outcome", {"event": self.span(BINDERS).id, "status": "done"})
+        self.t.by_hand = False
+        out = self.say("finished it", TENDER)
+        self.assertIn(POINTED_BACK, out)
+        self.assertTicked(TENDER, out)
+
+
+class TestStillRefused(OfficeDay):
 
     def test_no_done_word(self):
         for message in ("that one", "ok", "that one isn't done yet"):
@@ -135,14 +149,6 @@ class TestStillRefused(OfficeDay):
                 out = self.say(message, BADGES)
                 self.assertTrue(out.startswith(NOT_DONE), out)
                 self.assertOpen(BADGES, out)
-
-    def test_an_item_already_done_is_not_picked_again(self):
-        self.t.by_hand = True
-        self.t.execute("log_outcome", {"event": self.span(BINDERS).id, "status": "done"})
-        self.t.by_hand = False
-        out = self.say("finished it", TENDER)
-        self.assertTrue(out.startswith(NOT_DONE), out)
-
 
 class WholeTurns(OfficeDay):
     """Whole turns with a scripted model, one conversation across turns: what the plan and the reply say."""

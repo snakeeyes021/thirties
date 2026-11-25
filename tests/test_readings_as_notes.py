@@ -6,9 +6,9 @@ reading: the done goes through, and its result says what else the words say. The
 words say plainly the item isn't finished ("not yet"), or say it's under way with no done said of it at all.
 
 Words that fit another item better ("the tallow got strained" for Dip the tallow tapers, beside Strain the tallow
-into the moulds) are the model's to read too: the done goes on, and its result names that item. It stops when the
-words name the other item outright (all its words), or say nothing of this one. Which clauses carry the done is
-read generously: every clause with a done word or a past in it ("got to finish the tallow").
+into the moulds) are the model's to read too: the done goes on, and its result names that item, also when the words
+name the other item outright (all its words), or say nothing of this one. Which clauses carry the done is read
+generously: every clause with a done word or a past in it ("got to finish the tallow").
 
 Asked not to tick "it" beside a done ("Tapers: dipped. No tick on that one till they harden."), which item "it" means
 is the model's reading too: the done goes on, and its result names the items it may mean. Asked not to tick an item
@@ -155,9 +155,11 @@ class TestAnotherItemThatFitsBetterIsANote(NotesBase):
         self.assert_went(TAPERS, out)
         self.assertNotIn("may also mean", out)
 
-    def test_an_item_named_outright_still_stops_it(self):
+    def test_an_item_named_outright_goes_on_with_a_note(self):
         self.planned(STRAINED)
-        self.assert_held(TAPERS, self.say("the tallow got strained", TAPERS))
+        out = self.say("the tallow got strained", TAPERS)
+        self.assert_went(TAPERS, out)
+        self.assertIn(f"may also mean {STRAINED}", out)
 
     def test_a_done_saying_nothing_of_it_still_stops_it(self):
         self.assert_held(TAPERS, self.say("the hawser is laid out on the ropewalk", TAPERS))
@@ -184,7 +186,7 @@ class TestEveryClauseWithADoneWordCounts(NotesBase):
         self.assertEqual(done_clauses("the moulds can wait, got to finish the tallow"),
                          [" got to finish the tallow"])
 
-    def test_a_clause_with_no_done_word_is_still_no_basis(self):
+    def test_named_as_waiting_it_stops(self):
         self.assert_held(TAPERS, self.say("the tallow can wait, the hawser got coiled", TAPERS))
 
 

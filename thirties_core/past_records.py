@@ -5,8 +5,8 @@
 
 - **Which list item**: its id, or its exact list wording, or (while the user is talking) the one open list item
   their words name (done_on_lists.py); several match: the model is told to ask which.
-- **Only what the user's words point to** (done_reference.py): a list item they didn't name is refused, and
-  nothing is recorded.
+- **A done the user said** (said_for_it.done_refused): which list item it is for is the model's reading; it stops,
+  and nothing is recorded, only when nothing the user said is a done or their words name the item as not done.
 - **Working on it isn't finishing it** (work_sessions.py): a session on something that isn't finished stays open
   on its list, its time on the record as partly done; a session on an ongoing item ticks only today's copy.
 - **Done is done everywhere**: a finished list item is ticked in Joplin like any other done; something on no list
@@ -32,7 +32,7 @@ def _talking(pt: "PlanTools") -> bool:
 
 def resolve(pt: "PlanTools", title: str, task_id: Optional[str]) -> Tuple[Optional[str], Any, SpanStatus]:
     """Before anything is stored: (the task id to link, the list item it is or None, done or partly done). Raises
-    ToolError when the user's words don't point to the item, or point to several."""
+    ToolError when the user's words give no done for the item, or name it as not done, or several items match."""
     a = getattr(pt, "assistant", None)
     if a is None:
         return task_id, None, SpanStatus.DONE
@@ -48,8 +48,8 @@ def resolve(pt: "PlanTools", title: str, task_id: Optional[str]) -> Tuple[Option
             from thirties_core.done_on_lists import on_the_lists
             task = on_the_lists(a, title)  # several: the model is told to ask which
     if task is not None and _talking(pt):
-        from thirties_core.done_reference import check
-        held, _ = check(pt, task.title, [task.id])
+        from thirties_core.said_for_it import done_refused
+        held = done_refused(pt, task.title)
         if held:
             raise ToolError(held)
     status = SpanStatus.DONE

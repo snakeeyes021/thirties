@@ -16,10 +16,14 @@ there stops.
   is itself denied ("did none save for the kiln log") leaves nothing out: what follows is the done. "Besides" with
   "also", "too" or "as well" adds; it leaves nothing out.
 - **Said to be still open**: names said to be still open, still waiting, left, to do, pending, outstanding or not
-  done, on their own or as a list sharing those words ("the glaze test, the kiln log and the batts order are still
-  open"). Words about the app's record ("still shows open", "still open on the list") aren't about the work, and
+  done, or put off ("the tallow can wait", "the kiln log later", "the batts order tomorrow"), on their own or as a
+  list sharing those words ("the glaze test, the kiln log and the batts order are still open"). A name counts
+  only where it starts its stretch: "wedged the stoneware, the glaze test is still open" leaves out only the glaze
+  test. Words about the app's record ("still shows open", "still open on the list") aren't about the work, and
   neither is a still-open said beside a done that names the item or points back to it ("the glaze test is still
   open, I finished it at 2:10").
+- **A reply to the app's question** about which items are done carries the done itself: "both, except the
+  bailers" leaves out the bailers (``answered``).
 - **A skip** leaves out the same way: "skip the bisque round except the wedging" keeps the wedging (``kind="skip"``).
 
 Questions say nothing here. Whether a name is the item's is read as the other not-done checks read it
@@ -74,6 +78,9 @@ _OPEN_RE = re.compile(
     r"\bstill\s+(?:open|waiting|left|to\s+do|to\s+go|pending|outstanding|undone|unfinished)\b|"
     r"\b(?:left|yet)\s+to\s+(?:do|go|be\s+done)\b|\b(?:is|are|'s|'re)\s+left\b|\bto\s+go\b|"
     r"\b(?:pending|outstanding|undone|unfinished)\b|"
+    # put off: "the tallow can wait", "the kiln log later", "the batts order tomorrow"
+    r"\b(?:can|will|could|has\s+to|have\s+to|gets\s+to)\s+wait\b|\b(?:for\s+)?later\b|\btomorrow\b|"
+    r"\banother\s+day\b|\bnext\s+time\b|"
     r"(?:\b(?:isn|aren|wasn|weren|haven|hasn)['’]?t|\bnot)\s+(?:yet\s+|really\s+|quite\s+|even\s+)?(?:been\s+)?"
     r"(?:done|finished|complete|completed|started|happening|happened)\b|\bnot\s+yet\b", re.IGNORECASE)
 # the words between a list and what's said of it ("are", "'re", "both")
@@ -151,9 +158,11 @@ def _says(kind: str, text: str) -> bool:
     return any(says_it_happened(c) and not _DENIED_RE.search(c) for c in _CLAUSE_RE.split(text) if c and c.strip())
 
 
-def _exception_spans(sentence: str, kind: str) -> List[Tuple[int, int, int, List[Tuple[int, int]]]]:
+def _exception_spans(sentence: str, kind: str,
+                     answered: bool = False) -> List[Tuple[int, int, int, List[Tuple[int, int]]]]:
     """Each exception part of a told sentence: (start, end, where what it leaves out starts, the names it leaves
-    out; [] when it's a clause)."""
+    out; [] when it's a clause). ``answered``: the sentence replies to the app's question about a done, which
+    carries the done ("both, except the bailers"), unless the reply denies it."""
     out: List[Tuple[int, int, int, List[Tuple[int, int]]]] = []
     marks = [(m.start("but"), m.end(), "bulk", False) for m in _BULK_BUT_RE.finditer(sentence)]
     marks += [(m.start(), m.end(), "strong" if m.group("strong") else "weak", bool(m.group("that")))
@@ -177,7 +186,10 @@ def _exception_spans(sentence: str, kind: str) -> List[Tuple[int, int, int, List
             about = _ABOUT_THEM_RE.match(sentence, end)
             if about and about.group(0).strip(" ,"):
                 end = about.end()
-        if not (_says(kind, sentence[:a]) or _says(kind, sentence[end:])):
+        if answered:
+            if _DENIED_RE.search(sentence[:a] + " " + sentence[end:]):
+                continue  # "none of them, except the bailers": what it leaves out is the done
+        elif not (_says(kind, sentence[:a]) or _says(kind, sentence[end:])):
             continue  # no done beside it, or one it denies ("did none save for the kiln log")
         out.append((a, end, b, names))
     return out
@@ -230,15 +242,21 @@ def _record_complaint(message: str, sentence: str, start: int, end: int, title: 
                for c in _CLAUSE_RE.split(text) if c and c.strip())
 
 
-def left_out(message: Optional[str], title: str, others: Iterable[str] = (), kind: str = "done") -> str:
+def left_out(message: Optional[str], title: str, others: Iterable[str] = (), kind: str = "done",
+             answered: bool = False) -> str:
     """Why the user's words leave this item out of their done (or skip): it's named in an exception part of it, or
-    said to be still open. "" when they don't."""
+    said to be still open. A name another item shares just as much ("the dusting" beside Afternoon dusting and
+    Evening dusting) names both. ``answered``: the words reply to the app's question about a done
+    (said_for_it.py). "" when they don't."""
     if not message:
         return ""
-    from thirties_core.write_guard import _about
+    from thirties_core.write_guard import _about as _named_here, _fits_level
     others = [o for o in others if o and o != title]
+
+    def _about(text: str, item: str, rest: List[str]) -> bool:
+        return _named_here(text, item, rest) or _fits_level(text, item, rest)
     for _, sentence in _sentences(message):
-        for a, end, b, names in _exception_spans(sentence, kind):
+        for a, end, b, names in _exception_spans(sentence, kind, answered):
             if names:
                 hit = any(_about(sentence[x:y], title, others) for x, y in names)
             else:  # a clause: the items it names without a done of their own

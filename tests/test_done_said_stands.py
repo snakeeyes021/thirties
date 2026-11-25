@@ -1,9 +1,14 @@
 """A done the user said is marked done; Python stops only what their words name as not done.
 
 Someone says a whole round of work is finished, and names the few things in it that aren't, said on their
-own. The model ticks the other items in that stretch: a correct reading. An item named in the part of the
-sentence that leaves things out ("except", "apart from", "but not", "though ... are still open") is never what the
-done is about, so a tick of it stops; the rest of the sentence is read without that part.
+own. The model ticks the other items in that stretch: a correct reading. The done checks used to ask, for
+each item, whether the done in that sentence was about it; the item wasn't named and the names said were other
+items, so they refused it. Which items a done is for is the model's reading. Python keeps one gate (something the user
+told this turn is a done: a done word, a report, a yes to a done question, an ask for a tick) and stops a tick only
+of an item the words name as not done: left out of the done ("except", "apart from", "but not", "though ... are
+still open", read with that part taken out of the rest), not yet, still going, told not to tick it, asked about
+only in a question, or answered no to the app's question about it. What else the words say goes in the result as a
+note.
 
 Invented fixtures: a pottery studio's afternoon, with five short jobs planned from 2:40.
 """
@@ -124,6 +129,79 @@ class TestNamedAsLeftOutStops(StudioBase):
         from thirties_core.done_exceptions import left_out
         self.assertEqual(left_out("is the bisque round done except the kiln log?", LOG, [WEDGE, GLAZE]), "")
         self.assertTrue(left_out("the bisque round's done except the kiln log", LOG, [WEDGE, GLAZE]))
+
+
+class TestTheModelsReadingStands(StudioBase):
+    """Ticks the model chose stand; Python holds one back only where the words leave that item open."""
+
+    def test_the_two_items_left_in_are_marked_done_on_the_plan_and_in_joplin(self):
+        for title in (WEDGE, SWEEP):
+            self.assert_went(title, self.say(OPEN_THREE, title))
+        for title in (GLAZE, LOG, BATTS):
+            self.assert_held(title, self.say(OPEN_THREE, title))
+
+    def test_the_joplin_tick_goes_by_the_same_reading(self):
+        from thirties_core.write_guard import refused
+        db = _Kept(*(t for t, _, _ in BLOCK))
+        for title in (WEDGE, SWEEP):
+            self.assertEqual(refused({"op": "complete", "title": title}, f"[app] {OPEN_THREE}", db), "", title)
+        for message in ("is the kiln log done?", "running a little behind on the wheel"):
+            self.assertTrue(refused({"op": "complete", "title": WEDGE}, f"[app] {message}", db), message)
+        # which item a done is for is the model's reading there too: words naming another item don't stop it
+        self.assertEqual(refused({"op": "complete", "title": GLAZE}, "[app] the glaze samples are ordered",
+                                 _Kept("Order glaze samples")), "")
+
+    def test_a_done_naming_no_item_ticks_the_one_in_this_block_and_no_done_ticks_nothing(self):
+        set_debug_time(at("16:25"))
+        for message in ("running a little behind on the wheel", "the wax pot needs another stir",
+                        "is the wax resist mixed?"):
+            self.assert_held(WAX, self.say(message, WAX))
+        self.assert_went(WAX, self.say("wrapped it up", WAX))
+
+    def test_a_question_ticks_only_what_the_rest_says_is_done(self):
+        message = "Is the kiln log filled in? Bisque round wrapped up; the glaze test still to do."
+        self.assert_held(LOG, self.say(message, LOG))
+        self.assert_held(GLAZE, self.say(message, GLAZE))
+        self.assert_went(WEDGE, self.say(message, WEDGE))
+
+    def test_not_yet_for_a_named_item_stops_it(self):
+        self.assert_held(GLAZE, self.say("not yet", GLAZE, shown="Is the glaze test done?"))
+        message = "Bisque round wrapped up. The glaze test isn't done yet."
+        self.assert_held(GLAZE, self.say(message, GLAZE))
+        self.assert_went(WEDGE, self.say(message, WEDGE))
+
+    def test_still_going_on_a_named_item_stops_it(self):
+        message = "Glaze test: still going. Rest of the bisque round: wrapped up."
+        self.assert_held(GLAZE, self.say(message, GLAZE))
+        self.assert_went(SWEEP, self.say(message, SWEEP))
+
+    def test_a_dont_tick_naming_an_item_stops_it(self):
+        message = "Bisque round wrapped up; don't tick the kiln log yet."
+        self.assert_held(LOG, self.say(message, LOG))
+        self.assert_went(WEDGE, self.say(message, WEDGE))
+
+    def test_a_no_to_the_question_about_an_item_stops_it(self):
+        shown = "Is the kiln log filled in?"
+        self.assert_held(LOG, self.say("no", LOG, shown))
+        self.assert_held(WEDGE, self.say("nope", WEDGE, shown))
+        message = "no, bisque round wrapped up; the kiln log and the glaze test are still open"
+        self.assert_held(LOG, self.say(message, LOG, shown))
+        self.assert_went(SWEEP, self.say(message, SWEEP, shown))
+
+    def test_words_naming_another_item_go_on_with_a_note_naming_it(self):
+        samples = "Order glaze samples"
+        self.api.notes["n_errands"]["body"] += f"- [ ] {samples}\n"
+        self.services.tasks.append(item("t_samples", samples))
+        self.services.tasks[-1].list_role = "list"
+        out = self.say("the glaze samples are ordered", GLAZE)
+        self.assert_went(GLAZE, out)
+        self.assertIn(f"names {samples}", out)
+        self.assertIn("t_samples", out)
+        out = self.say("the kiln batts are ordered", LOG)
+        self.assert_went(LOG, out)
+        self.assertIn(BATTS, out)
+        from thirties_core.internal_text import strip_internal
+        self.assertEqual(strip_internal(out[out.index("(The user's"):]).strip(), "")
 
 
 class TestTheRestIsReadWithoutThatPart(unittest.TestCase):

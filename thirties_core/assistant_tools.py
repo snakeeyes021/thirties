@@ -1439,16 +1439,13 @@ class AssistantTools(KindTools):
             name = span.title if span is not None else (task.title if task is not None else str(event))
             others = [s.title for s in self.pt.day_plan.spans if span is None or s.id != span.id]
             words = getattr(self.pt, "user_message", None)
-            # --- done only for what the user's words point to (done_reference.py) ---
+            # --- which item a done is for is the model's reading: what else the words say is a note
+            # (done_reference.done_reading) ---
             if span is not None or task is not None:
-                from thirties_core.done_reference import check as pointed_to
-                held, words = pointed_to(self.pt, name, [x.id for x in (span, task) if x is not None], passed_over)
-                if held:
-                    raise ToolError(held)
-                from thirties_core.done_reference import also_said_note
-                self._also_said = also_said_note(self.pt, name, [x.id for x in (span, task) if x is not None],
-                                                 passed_over)
-            # --- end done only for what the user's words point to ---
+                from thirties_core.done_reference import done_reading
+                self._also_said, words = done_reading(self.pt, name, [x.id for x in (span, task) if x is not None],
+                                                      passed_over)
+            # --- end which item ---
             # --- clearing isn't finishing: "clear X from the list" is no done (off_today.py) ---
             from thirties_core.off_today import clear_not_done
             cleared = clear_not_done(self.pt, name)

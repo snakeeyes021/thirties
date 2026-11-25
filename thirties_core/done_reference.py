@@ -1,7 +1,15 @@
-"""Done only for what the user is talking about.
+"""Which item the user's words point to.
 
-Marking something done ticks it off in the user's lists, so which item it is is never the model's guess. A done
-goes through when the user's words point at the item:
+For a done during a turn, which item it is for is the model's reading (``done_reading``): Python never refuses it
+for pointing elsewhere. What the words say besides goes in the done's result as a note, so the model can ask or
+put it right: another item they name or fit better, the items a clock time names when this one isn't planned
+then, another copy of the item whose time has come (``also_said_note``). A done stops only on the user's words:
+nothing they said is a done, or they name the item as not done (said_for_it.py, write_guard.state_not_done,
+done_exceptions.py).
+
+``check`` reads whether the words point to an item, for the asks that change the plan without a done (taking
+something off, dropping it for good); for a done it gives only the user's words about the item (a pointer back read
+as its name) and the items the reply has to name. The words point at the item when it is:
 
 - **Named in this message**: by its words ("walked the dog" for Walk the dog), by everyday words for them ("dog
   agility done" for Take the puppy to agility, "varnishing done" for Varnish: done_words.py) or by its id.
@@ -15,7 +23,7 @@ goes through when the user's words point at the item:
 - **Asked for in bulk**: "tick off everything from this morning", "all of those": which ones is then the model's to say.
   With a clock time ("every 9:10 thing on the bench is wrapped up", "all of my 2:40 stuff"), it's every item
   planned to start in the thirty it names, and only those: another item sharing their words, planned at another
-  time, is never one of them.
+  time, is never one of them (for a done, the note says so).
 - **A whole routine**: its name with "all", "whole" or "everything": every step of it, in every part; or "both" /
   "all of them" to a question about it or its parts: every step of the parts asked about (whole_routine.py). The
   reply names each step ticked so.
@@ -33,12 +41,11 @@ goes through when the user's words point at the item:
   ("the 8am walk") is that copy.
 
 Whatever points to it, words that share a word with the item but name another planned or listed item ("the glaze
-order is sent" beside Glaze recipe test and a listed Send the glaze order) never mark it in that item's place
-(done_fit.named_instead): the note names the list item that fits all the words, or says to ask. Words that only may
-name something else are the model's to read: the done goes on, and its result says what else they say.
-
-Anything else is refused with a note to ask which item they mean. The app's own controls (a tick in the Agenda)
-and the background (nobody talking) are never held here.
+order is sent" beside Glaze recipe test and a listed Send the glaze order) don't point at it
+(done_fit.named_instead); for a done, the note names that item, and the list item that fits all the words. Words
+that only may name something else are the model's to read: the done goes on, and its result says what else they
+say. Anything else doesn't point at it. The app's own controls (a tick in the Agenda) and the background (nobody
+talking) are never held here.
 
 A skip needs a basis too (skip_check): the item named, pointed back to, asked for in bulk, listed in the last
 reply the user answers without asking anything, or planned to start inside a stretch of the day the words give by
@@ -250,24 +257,32 @@ def _copies(pt: "PlanTools", ids: Iterable[str]) -> Tuple[Optional[Any], list]:
     return target, [s for s in todo if s.id != target.id and item_name(s.title) == item_name(target.title)]
 
 
-def _the_copy_meant(pt: "PlanTools", texts: Sequence[str], ids: Iterable[str]) -> bool:
-    """Whether a done meant this copy of an item with several copies still to do: the one named by its start time,
-    else the one whose time came last, else (none has come yet) the next one. True when it has no copies."""
+def _copy_meant(pt: "PlanTools", texts: Sequence[str], ids: Iterable[str]) -> Optional[Any]:
+    """The copy a done meant, of an item with several copies still to do, when it isn't this one: the one named by
+    its start time, else the one whose time came last, else (none has come yet) the next one. None when it's this
+    one, or the item has no copies."""
     from thirties_core.facts import gave_time
     target, copies = _copies(pt, ids)
     if target is None or not copies:
-        return True
+        return None
     for text in texts:
         if gave_time(text, target.start_dt):
-            return True
-        if any(gave_time(text, c.start_dt) for c in copies):
-            return False
+            return None
+        named = [c for c in copies if gave_time(text, c.start_dt)]
+        if named:
+            return named[0]
     group = [target] + copies
     begun = _begun(pt, group)
     if begun is None:
-        return True
+        return None
     meant = max(begun, key=lambda s: s.start_dt) if begun else min(group, key=lambda s: s.start_dt)
-    return meant.id == target.id
+    return None if meant.id == target.id else meant
+
+
+def _the_copy_meant(pt: "PlanTools", texts: Sequence[str], ids: Iterable[str]) -> bool:
+    """Whether a done meant this copy of an item with several copies still to do (``_copy_meant``). True when it
+    has no copies."""
+    return _copy_meant(pt, texts, ids) is None
 
 
 def _by_place(message: str, shown: str, pointed: List[str], title: str) -> Optional[bool]:
@@ -356,24 +371,177 @@ def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[
 
 
 def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides: Iterable[str] = ()) -> str:
-    """The lines a done's result carries when the user's words may name something besides this item without
-    naming another item outright (done_fit.also_said), or may be meant for another item (plain_done.also_fits), so
-    the model can ask or put it right; "" otherwise, or when nobody is talking. Read as ``check`` reads them."""
+    """The lines a done's result carries when the user's words may name something besides this item
+    (done_fit.also_said), name another item outright (done_fit.named_note), may be meant for another item
+    (plain_done.also_fits), give a clock time this item isn't planned at, or fit another copy of it whose time has
+    come, so the model can ask or put it right; "" otherwise, or when nobody is talking. The names the words leave
+    out of the done are never read as what it's about (done_exceptions.py)."""
     message = getattr(pt, "user_message", None)
     ids = [i for i in ids if i]
     if getattr(pt, "by_hand", False) or not message or any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
         return ""
     from thirties_core.done_counts import without_counts
-    from thirties_core.done_fit import also_said, names_of
+    from thirties_core.done_exceptions import without_exceptions
+    from thirties_core.done_fit import also_said, named_instead, named_note, names_of, names_something_else
     left_out = set(besides)
     others = [t for t in _titles(pt) if t not in left_out and t != title]
     from thirties_core.plain_done import also_fits
     names = names_of(pt, title, ids)
+    message = without_exceptions(message) or ""
     naming = without_counts(message)
-    fits = also_fits(pt, naming, title, left_out)
+    listed = _listed_items(pt, names)
+    instead = named_instead(naming, names, others, listed)
+    said = (named_note(pt, title, names_something_else(naming, names, others, listed), instead) if instead
+            else also_said(naming, names, others, listed))
+    fits = [f for f in also_fits(pt, naming, title, left_out) if f not in instead]
     meant = (f"(The user's message may also mean {', '.join(fits)}: if they meant another item, ask which, or "
              "correct it.)") if fits else ""
-    return " ".join(n for n in (also_said(naming, names, others, _listed_items(pt, names)), meant) if n)
+    if not said and not meant:
+        meant = _elsewhere_note(pt, naming, title, others, message)
+    return " ".join(n for n in (said, meant, _time_note(pt, message, title, ids), _copy_note(pt, message, title, ids),
+                                _place_note(pt, message, title) or _asked_note(pt, message, title)) if n)
+
+
+def _place_note(pt: "PlanTools", message: str, title: str) -> str:
+    """A note when the words pick an item by its place in the list the last reply gave ("the first one") and it
+    isn't this one; "" otherwise."""
+    m = ORDINAL_RE.search(message or "")
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    if not m or not shown:
+        return ""
+    titles = [t for t in _titles(pt) if t]
+    if title not in titles:
+        titles.append(title)
+    listed = [t for t in dict.fromkeys(titles + _open_items_shown(pt, shown, titles)) if _listed(shown, t)]
+    if title not in listed or _by_place(message, shown, listed, title) is not False:
+        return ""
+    low = shown.lower()
+    ordered = sorted(listed, key=lambda t: low.find(t.lower()))
+    place = _PLACE[m.group(1).lower()]
+    if place >= len(ordered):
+        return ""
+    return (f"(The user's message picks {ordered[place]} by its place in the last reply, not {title}: if they meant "
+            "that one, correct it.)")
+
+
+def _asked_note(pt: "PlanTools", message: str, title: str) -> str:
+    """A note when the words answer the app's question about whether items are done, or which: the items it asked
+    about, when this one wasn't among them, or when it asked about several and the words don't say which; ""
+    otherwise."""
+    from thirties_core.said_for_it import done_question
+    from thirties_core.done_words import asked_about
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    if not done_question(shown):
+        return ""
+    titles = [t for t in _titles(pt) if t]
+    if title not in titles:
+        titles.append(title)
+    pool = titles + _open_items_shown(pt, shown, titles)
+    asked = asked_about(shown, pool, titles) or [t for t in pool if _listed(shown, t)]  # a question naming none
+    if not asked or _named(message, title, [t for t in titles if t != title]):
+        return ""
+    if title not in asked:
+        return (f"(The user's message answers the question about {', '.join(asked)}, and {title} wasn't in it: if "
+                "they didn't mean it, correct it.)")
+    if len(asked) > 1 and not (BOTH_RE.search(message) or PLURAL_RE.search(message) or BULK_RE.search(message)
+                               or ORDINAL_RE.search(message)):
+        return (f"(The user's message answers a question about {', '.join(asked)} without saying which: if it "
+                "isn't clear, ask.)")
+    return ""
+
+
+def _elsewhere_note(pt: "PlanTools", message: str, title: str, others: List[str], said_as: str = "") -> str:
+    """A note when the done's words fit other items and say nothing of this one ("the mugs are glazed" for Water
+    the hens), fit another item still to do just as well (a plain tie), or point back ("that", "those two") to a
+    reply that named items; "" otherwise. ``message``: the words with counts taken out, for which item they name;
+    ``said_as``: the words as said, for the pointers and counts."""
+    from thirties_core.done_words import _hits
+    from thirties_core.plain_done import _in_the_done, _stems, misses_it, tied_with_open
+    said_as = said_as or message
+    if misses_it(message, title):
+        said = _stems(_in_the_done(message))
+        fit = [t for t in others if _hits(said, t)]
+        if not fit and POINTER_RE.search(message):  # a pointer: what the rest of the message names
+            fit = [t for t in others if _named(message, t, [x for x in others + [title] if x != t])]
+        if fit:
+            return (f"(The user's message fits {', '.join(fit)} and says nothing of {title}: if they didn't mean it, "
+                    "correct it.)")
+        return _pointer_note(pt, said_as, title, message)
+    tied = tied_with_open(pt, message, title)
+    if tied:
+        return (f"(The user's message fits {', '.join(tied)} as well as {title}: if it isn't clear which, ask, or "
+                "correct it.)")
+    return ""
+
+
+def _pointer_note(pt: "PlanTools", message: str, title: str, naming: str = "") -> str:
+    """A note when the words name no item and point back ("that", "it", "those two") to a reply that named items:
+    this one wasn't among them, or "that" could be several of them. ``naming``: the words with counts taken out
+    ("those two" never names Fire two test tiles)."""
+    from thirties_core.done_counts import pointed_count
+    if not (POINTER_RE.search(message) or BOTH_RE.search(message) or pointed_count(message)) \
+            or ORDINAL_RE.search(message):
+        return ""
+    titles = [t for t in _titles(pt) if t]
+    if title not in titles:
+        titles.append(title)
+    naming = naming or message
+    if any(_named(naming, t, [x for x in titles if x != t]) for t in titles):
+        return ""
+    pointed = list(dict.fromkeys(pointed_back(pt, titles)))
+    if not pointed:
+        return ""
+    if title not in pointed:
+        return (f"(The user's message points back to a reply that named {', '.join(pointed)}, and {title} wasn't "
+                "among them: if they didn't mean it, correct it.)")
+    if len(pointed) < 2 or BOTH_RE.search(message) or PLURAL_RE.search(message) or pointed_count(message):
+        return ""
+    return (f"(The user's message points back to a reply that named {', '.join(pointed)}: if it isn't clear which, "
+            "ask, or correct it.)")
+
+
+def _time_note(pt: "PlanTools", message: str, title: str, ids: Iterable[str]) -> str:
+    """A note when the words name the items planned at a clock time ("every 2:40 thing") and this one isn't
+    planned then, or give a time that fits another item they fit as well ("the 11am one"); "" otherwise."""
+    from thirties_core.clock import format_clock
+    thirty = _thirty_said(pt, message)
+    if thirty is not None:
+        if _planned_in(pt, title, ids, thirty):
+            return ""
+        return (f"(The user's message names the items planned at {format_clock(thirty[0])}, and {title} isn't "
+                "planned then: if they didn't mean it, ask, or correct it.)")
+    titles = [t for t in _titles(pt) if t]
+    if title not in titles:
+        titles.append(title)
+    if _picked_by_time(pt, message, title, titles) is False:
+        return (f"(The user's message gives a time that fits another item its words fit as well as {title}: if "
+                "they meant that one, correct it.)")
+    return ""
+
+
+def _copy_note(pt: "PlanTools", message: str, title: str, ids: Iterable[str]) -> str:
+    """A note when this item is on the plan more than once and the done looks meant for another copy of it: the
+    one named by its time, or whose time has come; "" otherwise."""
+    from thirties_core.clock import format_clock
+    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
+    meant = _copy_meant(pt, [message, shown], ids)
+    if meant is None:
+        return ""
+    return (f"(The user's message may mean the {title} at {format_clock(meant.start_dt)} [id {meant.id}]: it's on "
+            "the plan more than once; if they meant that one, correct it.)")
+
+
+def done_reading(pt: "PlanTools", title: str, ids: Iterable[str] = (),
+                 besides: Iterable[str] = ()) -> Tuple[str, Optional[str]]:
+    """For a done during a turn: (the lines its result carries, the user's words about the item, with a pointer
+    back read as its name). Which item a done is for is the model's reading, so nothing here refuses it; what else
+    the words say is a note (``also_said_note``). A done the model picked on words naming no item is kept for the
+    reply to name (``check``)."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or message is None:
+        return "", message
+    _, words = check(pt, title, ids, besides)
+    return also_said_note(pt, title, ids, besides), words
 
 
 def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
@@ -549,4 +717,5 @@ def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Opti
             "ask which item.")
 
 
-__all__ = ["check", "pointed_back", "prior_exchange", "skip_check", "BULK_AT_RE", "BULK_RE", "MOST_POINTED"]
+__all__ = ["also_said_note", "check", "done_reading", "pointed_back", "prior_exchange", "skip_check", "BULK_AT_RE",
+           "BULK_RE", "MOST_POINTED"]

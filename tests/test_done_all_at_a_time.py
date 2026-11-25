@@ -1,10 +1,9 @@
-""""Every 9:10 thing on the bench is wrapped up" ticks every item planned to start in the thirty it names, and only
-those.
+""""Every 9:10 thing on the bench is wrapped up" ticks every item planned to start in the thirty it names.
 
 A bulk word followed by an hour picks out the items by their planned start. An item whose title starts another item's
-title ("Mix the grout" beside a later "Mix the grout for the pavers") is one of them like any other, the later item
-is never its rival, and an item planned at another time is never ticked by those words. With nothing planned in
-the thirty they name, the words name nothing, and every done is refused.
+title ("Mix the grout" beside a later "Mix the grout for the pavers") is one of them like any other, and the later
+item is never its rival. A done the model reads for an item planned at another time, or with nothing planned in the
+thirty the words name, goes on as its reading, and its result says which thirty the words name.
 
 Invented: someone setting smalti and pavers, with two short grout jobs in the morning."""
 
@@ -86,17 +85,17 @@ class TestAllAtATime(GroutCase):
             out = self.done("all of my 9:10 am jobs are done", title)
             self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
 
-    def test_an_item_at_another_time_stays_unticked(self):
+    def test_an_item_at_another_time_carries_a_note(self):
         for title in (SPONGES, LATER):
             out = self.done("every 9:10 thing on the bench is wrapped up", title)
-            self.assertTrue(out.startswith(NOT_DONE), f"{title}: {out}")
-            self.assertEqual(self.span(title).status, SpanStatus.PLANNED, title)
+            self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
+            self.assertIn(f"names the items planned at 9:00 AM, and {title} isn't planned then", out)
 
-    def test_with_nothing_planned_at_that_time_it_refuses(self):
+    def test_with_nothing_planned_at_that_time_it_carries_a_note(self):
         for title in PREP + [SPONGES]:
             out = self.done("every 8:40 thing on the bench is wrapped up", title)
-            self.assertTrue(out.startswith(NOT_DONE), f"{title}: {out}")
-            self.assertEqual(self.span(title).status, SpanStatus.PLANNED, title)
+            self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
+            self.assertIn("8:30 AM", out)
 
     def test_a_time_it_was_done_at_is_not_which_items(self):
         self.assertIsNone(BULK_AT_RE.search("did it all at 10:40"))

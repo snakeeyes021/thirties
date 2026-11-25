@@ -7,18 +7,18 @@ for them in plain words:
   from one of the user's lists (any note but Today), needs a drop word: "drop it", "I'm not doing it", "forget it",
   "cross it off for good", "delete it", "never going to". Taking something off today ("take that off", "skip it",
   "not today") only changes today's plan and the Today note; the item stays to do on its list.
-- **Ticked done.** A tick needs the user saying it happened: a done word ("done", "finished", "paid", "sent",
-  "all set", and everyday ones like "squared away", "knocked it out", "the permit is in"), the item's own verb in
-  the past ("renewed" for Renew the kiln permit), a report that it happened ("I've written them up"), or a plain
-  yes to a question.
+- **Ticked done.** A tick needs something the user told this turn to be a done: a done word ("done", "finished",
+  "paid", "sent", "all set", and everyday ones like "squared away", "knocked it out", "the permit is in"), the
+  item's own verb in the past ("renewed" for Renew the kiln permit), a report that it happened ("I've written them
+  up"), a plain yes, or an ask for a tick (said_for_it.told_done). Which item that done is for is the model's
+  reading, never this check's: it stops a tick only when the words name the item as not done.
   Words that say something is under way or merely all right ("the kiln is firing", "it's running", "the glaze is
   fine") are no done on their own. Beside a done said in the same message ("Glazed. Kiln left warming
   overnight."), whether they undo it is the model's reading: the done goes through with a note saying so
   (``going_note``); a done word in the same sentence wins over merely all right, with no note ("the bisque unload
   went fine, all wrapped"). Words saying plainly it isn't done are never a done ("not yet"), nor are words telling
-  the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor words naming
-  another item that shares a word with it ("the glaze order is sent" for Glaze recipe test, beside a listed Send
-  the glaze order: done_fit.py).
+  the app not to tick it ("leave the bowls unticked", "don't tick it", "nowhere near done"), nor a done that leaves
+  the item out ("the glazing round is wrapped up save for the bowls", "the bowls are still open": done_exceptions.py).
 
 A tick that follows a done log_outcome accepted on the plan this turn (its own checks read the user's words) is
 written: the plan and Joplin agree. Python marks such a tick; the model can't.
@@ -515,6 +515,23 @@ def _is_today(db: Any, note_id: str) -> bool:
         return False
 
 
+def _tick_refused(message: str, title: str, db: Any) -> str:
+    """Why a tick can't be written on the user's words this turn: nothing they told is a done (said_for_it.told_done,
+    or a whole answer to a question about a routine's steps), or their words name the item as not done. Which item
+    a done is for is the model's reading. "" when it can."""
+    from thirties_core.said_for_it import told_done
+    from thirties_core.whole_routine import answers_the_question
+    if not (told_done(message, title) or answers_the_question(message)):
+        return (f"not written: nothing the user said is a done, so {title} isn't ticked. It's done when they say it "
+                "is.")
+    from thirties_core.started import not_finished
+    others = _other_items(db, title)
+    if not_finished(message, title, others) in ("begun", "not") or state_not_done(message, title, others):
+        return (f"not written: the user's words say {title} isn't finished, so it isn't ticked. Something running, "
+                "started or fine isn't done; it's done when they say it is.")
+    return ""
+
+
 def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     """Why this change can't be written on the user's words this turn; "" when it can (or isn't judged here)."""
     if not turn or op.get("valid_until") or op.get("_twin") or op.get("_done_on_plan"):
@@ -535,31 +552,22 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
             and not asks_to_drop(message):
         return (f"not written: the user didn't ask to drop {title}, so its line stays on its list. Taking it off "
                 "today changes only today's plan and the Today note.")
-    from thirties_core.whole_routine import answers_the_question
-    if kind == "complete" and not says_done(message, title) and not answers_the_question(message):
-        return (f"not written: the user's words don't say {title} is finished, so it isn't ticked. Something "
-                "running, started or fine isn't done; it's done when they say it is.")
-    from thirties_core.done_fit import named_instead
-    instead = named_instead(message, title, listed=_other_items(db, title)) if kind == "complete" else []
-    if instead:  # "the glaze order is sent" beside Send the glaze order: not this item
-        return f"not written: the user's words name {', '.join(instead)}, not {title}, so it isn't ticked."
-    # --- a count is never a name (done_counts.py); an untick only on the user's ask (reopen.py) ---
-    from thirties_core.done_counts import counted_only
-    if kind == "complete" and counted_only(message, title):  # "check those two off" for Fire two test tiles
-        return (f"not written: the user's words only count items; they don't name {title}, so it isn't ticked.")
+    if kind == "complete":
+        why = _tick_refused(message, title, db)
+        if why:
+            return why
+    # --- an untick only on the user's ask (reopen.py) ---
     if kind in ("untick", "unfile_done"):
         from thirties_core.reopen import untick_refused
         return untick_refused(message, title)
-    # --- end a count, and an untick ---
-    # --- a question, or a pointer at an item's parts, ticks nothing for the item (said_for_it.py) ---
+    # --- end an untick ---
+    # --- a pointer at an item's parts ticks nothing for the item (said_for_it.py) ---
     # A removal is the model's reading of the user's words, a question included (an exasperated "seriously??"):
     # the floors for it are the drop word above (Dropped, a home list); a line on Today comes off and can go back.
-    from thirties_core.said_for_it import only_questions, parts_only
+    from thirties_core.said_for_it import parts_only
     if kind == "complete" and parts_only(message, title):
         return f"not written: the user's words point at what's under or in {title}, not at the item itself."
-    if kind == "complete" and only_questions(message) and not DONE_WORDS_RE.search(message):
-        return f"not written: the user only asked about {title}, so it isn't ticked."
-    # --- end a question, or a pointer at parts ---
+    # --- end a pointer at parts ---
     return ""
 
 

@@ -1,11 +1,13 @@
 """Every way of saying something is done follows the same rules.
 
 - A record after the fact (add_event with happened=true) is a done like any other: a list item it names is ticked
-  in Joplin, a session on something that goes on leaves it open, and it needs the user's words to point to it.
+  in Joplin, a session on something that goes on leaves it open, and it needs something the user said to be a done.
 - A done whose name only matches an item already settled earlier today (done, skipped, a session) still looks for
   the open list item the user's words name.
-- An answer to "which one?" picks the item it points to.
-- With several items sharing a word, or copies of one item, a done is for the one whose time has come.
+- An answer to "which one?" picks the item it points to; a done the model read for another goes on with a note
+  naming the one picked, and a reply that doesn't say which ticks nothing.
+- With several items sharing a word, or copies of one item, the done goes on for the one the model read, with a
+  note naming the one whose time has come.
 
 Invented lists, on a fake Joplin.
 """
@@ -115,9 +117,9 @@ class TestARecordAfterTheFact(DoneCase):
         self.assertIn("- [ ] Tide chart app", self.body("n_tide"))
         self.assertIn("stays open", out)
 
-    def test_an_item_the_users_words_dont_point_to_is_refused(self):
+    def test_a_record_needs_a_done_said(self):
         door = self.task("Fix the closet door")
-        out = self.call("cleaned the gutters from 3 to 4", "add_event",
+        out = self.call("the gutters are next, 3 to 4", "add_event",
                         {"title": "Fix the closet door", "start": "3:00 PM", "end": "4:00 PM", "task_id": door.id,
                          "happened": True})
         self.assertTrue(out.startswith(NOT_DONE), out)
@@ -166,24 +168,21 @@ class TestTheAnswerToWhichOne(DoneCase):
             self.t.execute("add_event", {"title": title, "start": start, "duration": "15 minutes",
                                          "task_id": self.task(title).id})
         asked = ("watered the fern", "Which one: Water the fern by the window, or Water the fern in the hall?")
-        out = self.done("the first one", self.spans("Water the fern in the hall")[0].id, asked)
-        self.assertTrue(out.startswith(NOT_DONE), out)  # the first one is the window's
-        self.assertEqual(self.ticks(), [])
         out = self.done("the first one", self.spans("Water the fern by the window")[0].id, asked)
         self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertNotIn("by its place", out)
         self.assertIn("- [x] Water the fern by the window", self.body("n_garden"))
         self.assertIn("- [ ] Water the fern in the hall", self.body("n_garden"))
 
-    def test_the_wrong_one_of_two_unplanned_list_items_is_refused(self):
+    def test_another_one_than_the_place_picks_goes_on_with_a_note(self):
         asked = ("watered the fern, that's finished",
                  "Which fern did you water: Water the fern by the window, or Water the fern in the hall?")
-        out = self.done("the first one", self.task("Water the fern in the hall").id, asked)
-        self.assertTrue(out.startswith(NOT_DONE), out)
         out = self.done("yes", self.task("Water the fern in the hall").id, asked)
         self.assertTrue(out.startswith(NOT_DONE), out)  # which one is still unclear
         self.assertEqual(self.ticks(), [])
-        out = self.done("the last one", self.task("Water the fern in the hall").id, asked)
+        out = self.done("the first one", self.task("Water the fern in the hall").id, asked)
         self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("picks Water the fern by the window by its place", out)
         self.assertEqual(self.ticks(), ["Water the fern in the hall"])
 
 
@@ -197,22 +196,21 @@ class TestTheOneWhoseTimeCame(DoneCase):
         for title, start in (("Morning stroll", "8:00 AM"), ("Afternoon stroll", "1:00 PM"),
                              ("Evening stroll", "6:00 PM")):
             self.t.execute("add_event", {"title": title, "start": start, "duration": "30 minutes"})
-        out = self.done("the stroll's done", self.spans("Evening stroll")[0].id)
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        out = self.done("the stroll's done", self.spans("Morning stroll")[0].id)
-        self.assertTrue(out.startswith(NOT_DONE), out)  # the current one is the one meant
         out = self.done("the stroll's done", self.spans("Afternoon stroll")[0].id)
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.spans("Morning stroll")[0].status, SpanStatus.PLANNED)
+        out = self.done("the stroll's done", self.spans("Evening stroll")[0].id)
+        self.assertFalse(out.startswith(NOT_DONE), out)  # the model's reading, with a note naming the others
+        self.assertIn("as well as Evening stroll", out)
 
     def test_copies_with_one_title_are_the_one_whose_time_came(self):
         for start in ("8:00 AM", "1:00 PM", "9:00 PM"):
             self.t.execute("add_event", {"title": "Stroll", "start": start, "duration": "30 minutes", "again": True})
+        now = next(s for s in self.spans("Stroll") if s.start_dt == at("13:00"))
         late = next(s for s in self.spans("Stroll") if s.start_dt == at("21:00"))
         out = self.done("stroll done", late.id)
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(late.status, SpanStatus.PLANNED)
-        now = next(s for s in self.spans("Stroll") if s.start_dt == at("13:00"))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"may mean the Stroll at 1:00 PM [id {now.id}]", out)
         out = self.done("stroll done", now.id)
         self.assertFalse(out.startswith(NOT_DONE), out)
 
@@ -228,8 +226,9 @@ class TestTheOneWhoseTimeCame(DoneCase):
         for start in ("8:00 AM", "1:00 PM"):
             self.t.execute("add_event", {"title": "Stroll", "start": start, "duration": "30 minutes", "again": True})
         first, second = sorted(self.spans("Stroll"), key=lambda s: s.start_dt)
-        self.assertTrue(self.done("stroll done early", second.id).startswith(NOT_DONE))
-        self.assertFalse(self.done("stroll done early", first.id).startswith(NOT_DONE))
+        out = self.done("stroll done early", second.id)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"may mean the Stroll at 8:00 AM [id {first.id}]", out)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 
 - **A pointer beside the name.** "the saltmarsh shawl is done, tick it" after a reply listing several items: the
   "it" is the shawl the message just named, not one of the items listed. Which of the items its words fit is the
-  model's reading. A bare "tick it" after such a list, with no word of any item, is still refused.
+  model's reading. A bare "tick it" after such a list, with no word of any item, goes on as the model picked it,
+  with a note naming the items the list named.
 - **All right somewhere else.** "ok the list still shows it open. the shawl IS done": an "ok" or "fine" in another
   sentence doesn't make the done read as merely all right. Said of the item with no done anywhere, it still does,
   and so does a word for under way.
@@ -12,8 +13,8 @@
   holds the tick.
 - **Another item named in another clause.** "Someone shifted my selvedge swatch over to 1:10. Treadle: wrapped
   up.": the swatch fits more of those words, but "treadle" is a word of this item the swatch lacks, so the swatch
-  is no rival in its place. Words that fit another item better and say nothing of this one beyond it are still
-  refused.
+  is no rival in its place. Words that fit another item better and say nothing of this one beyond it go on as the
+  model read them, with a note naming that item.
 - **A list sharing one done.** "bobbins and dusting and shuttle oiling + mordant are all wrapped up": the
   names ahead of the done are done too, so the afternoon dusting is ticked beside the shuttle oiling. A
   stretch that says something of its own ("the dusting can wait, ...") stays out of it, and a later dusting of
@@ -95,10 +96,10 @@ class TestAPointerBesideTheName(StudioDay):
                 self.setUp()
                 self.assertTicked(SHAWL, self.say(message, SHAWL, SHOWN_ALL))
 
-    def test_a_bare_pointer_after_the_list_is_still_refused(self):
+    def test_a_bare_pointer_after_the_list_carries_a_note(self):
         out = self.say("tick it please", BOBBINS, SHOWN_ALL)
-        self.assertIn("don't point to", out)
-        self.assertOpen(BOBBINS, out)
+        self.assertIn("points back to a reply that named", out)
+        self.assertTicked(BOBBINS, out)
 
 
 class TestAllRightSomewhereElse(StudioDay):
@@ -156,9 +157,10 @@ class TestAnotherItemInAnotherClause(StudioDay):
                        self.SHOWN)
         self.assertTicked(TREADLE, out)
 
-    def test_words_that_fit_another_better_and_nothing_of_this_one_beyond_it_are_refused(self):
+    def test_words_that_fit_another_better_and_nothing_of_this_one_beyond_it_carry_a_note(self):
         out = self.say("the treadle oiling log is done", TREADLE, self.SHOWN)
-        self.assertOpen(TREADLE, out)
+        self.assertIn("may also mean Treadle oiling log", out)
+        self.assertTicked(TREADLE, out)
 
 
 DUSTING, SHUTTLE, LATE_DUSTING = "Afternoon dusting + skein mordant", "Shuttle oiling + mordant", "Evening dusting"
@@ -181,9 +183,10 @@ class TestAListSharingOneDone(StudioDay):
         out = self.say("the dusting can wait, shuttle oiling + mordant done", DUSTING, self.SHOWN)
         self.assertOpen(DUSTING, out)
 
-    def test_the_later_copy_of_a_name_is_not_what_was_said(self):
+    def test_the_later_item_of_a_name_carries_a_note_naming_the_one_said(self):
         out = self.say(self.LIST, LATE_DUSTING, self.SHOWN)
-        self.assertOpen(LATE_DUSTING, out)
+        self.assertIn(f"may also mean {DUSTING}", out)
+        self.assertTicked(LATE_DUSTING, out)
 
 
 if __name__ == "__main__":
