@@ -2293,15 +2293,9 @@ class AssistantTools(KindTools):
         rec = pool.place(str(item), h, window)
         if rec is None:
             raise ToolError(f"'{item}' isn't waiting from an earlier day. To plan it, add it to the plan instead.")
-        if h == "today":
-            placed, overflow = self.before.place_today([rec])
-            if overflow:
-                return f"{rec['title']}: today, but there's no free time left for it."
-            from thirties_core.today_times import time_of  # the reply says when, not just "today"
-            at = time_of(self, rec["title"])
-            if at:
-                return f"{rec['title']}: on today's plan at {at}."
-        elif rec.get("slot"):
+        if h == "today":  # on today's plan, or on today's list without a time; the answer says which (before_today.py)
+            return self.before.place_asked_today(rec)
+        if rec.get("slot"):
             self.before.take_off_today(rec)  # not today's any more
         self._someday_in_joplin(rec, h == "someday")
         return f"{rec['title']}: {window['when']}.{due}"

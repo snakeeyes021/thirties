@@ -16,6 +16,7 @@ Later, a week plan can feed ``place_today`` (what's meant for today) the same wa
 
 from __future__ import annotations
 
+import logging
 import re
 
 from datetime import date, datetime, timedelta
@@ -27,6 +28,8 @@ ACTIONS = ("accept", "done", "drop", "keep", "undrop", "archive")
 # An archive takes the item off its list in Joplin: allowed in chat only when the user's words ask for it (11-11:
 # "drop" means stop rolling it over; a real removal only on an explicit ask). Anything else is a plain drop.
 from thirties_core.intents import EXPLICIT_REMOVAL  # noqa: E402  (one source: intents.py)
+
+logger = logging.getLogger(__name__)
 
 
 class BeforeToday:
@@ -53,9 +56,11 @@ class BeforeToday:
         return next((s for s in self.a.pt.day_plan.spans if s.status != SpanStatus.SKIPPED and not s.is_envelope
                      and (s.title.strip().lower() == title or (task_id and s.task_id == task_id))), None)
 
-    def place_today(self, items: List[Dict[str, Any]]) -> Tuple[List[str], List[Dict[str, Any]]]:
+    def place_today(self, items: List[Dict[str, Any]],
+                    asked: bool = False) -> Tuple[List[str], List[Dict[str, Any]]]:
         """Each Keep meant for today goes on today's schedule, in the first free time it fits from now (the
-        user can move it). Returns (titles placed, items that don't fit: the morning's one question)."""
+        user can move it). Returns (titles placed, items that don't fit: the morning's one question). ``asked``:
+        placed at today by a word for it (place_leftover), so a rest after missed days doesn't hold it back."""
         from thirties_core.clock import format_clock, thirty_ceil
         from thirties_core.day_proposal import usual_minutes
         from thirties_core.plan_tools import NOT_DONE
@@ -74,7 +79,7 @@ class BeforeToday:
             due = (item.get("due") or (task.due if task is not None else "") or "")[:10]
             if holiday and item.get("placed_by") != "user" and not (due and due <= day.isoformat()):
                 continue  # a holiday: nothing goes on by itself (holidays.py)
-            if streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
+            if not asked and streaks.held(day, item["title"], item.get("task_id") or "", due=item.get("due", "")
                             or (task.due if task is not None else ""),
                             urgent=stated_cant_wait(self.db, task, item["title"])):
                 continue  # resting after missed days (backoff.py): Thirties doesn't put it on, from any list
@@ -108,6 +113,22 @@ class BeforeToday:
             pool.set(item["title"], slot=spot.isoformat())
             placed.append(item["title"])
         return placed, overflow
+
+    def place_asked_today(self, rec: Dict[str, Any]) -> str:
+        """A leftover placed at "today" (place_leftover, by the user's word or the model's): on today's plan in the
+        next free time that fits, as the morning places what can't wait. With no free time that fits, it goes on
+        today's list (the Today note) without a time. Where it is now, in a few words."""
+        from thirties_core.clock import format_clock
+        self.place_today([rec], asked=True)
+        span = self._on_plan(rec)
+        if span is not None:
+            return f"{rec['title']}: on today's plan at {format_clock(span.start_dt)}."
+        try:
+            self.a._add_to_today([rec["title"]], "none")
+        except Exception as e:  # no Today note, or Joplin can't take it: said plainly
+            logger.warning("Today note write failed for %s: %s", rec["title"], e)
+            return f"{rec['title']}: kept for today, but no free time today fits it and it isn't on today's list."
+        return f"{rec['title']}: on today's list without a time (no free time today fits it)."
 
     def take_off_today(self, rec: Dict[str, Any]) -> None:
         """A leftover moved off today (or dropped, or done elsewhere): its slot on today's plan goes."""

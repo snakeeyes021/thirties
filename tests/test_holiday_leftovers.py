@@ -160,5 +160,32 @@ class TheMorningModelSeesTheHolidays(HolidayBase):
         self.assertIn("Saturday", brief[brief.index("Lantern Day") - 60:brief.index("Lantern Day") + 60])
 
 
+class PlacedAtToday(HolidayBase):
+    """3: a leftover placed at "today" goes on today's plan in the next free time that fits, and the result says
+    where it is."""
+
+    def test_today_lands_on_todays_plan_even_while_it_rests_after_a_miss(self):
+        self.missed_yesterday("Replace the brake cables", "t_cables")
+        out = self.say("cables: today", "place_leftover", {"item": "Replace the brake cables", "horizon": "today"})
+        span = self.planned("Replace the brake cables")
+        self.assertEqual(len(span), 1)
+        self.assertIn("on today's plan at", out)
+
+    def test_the_models_today_lands_too(self):
+        self.missed_yesterday("Replace the brake cables", "t_cables")
+        out = self.t.execute("place_leftover", {"item": "Replace the brake cables", "horizon": "today"})
+        self.assertEqual(len(self.planned("Replace the brake cables")), 1)
+        self.assertIn("on today's plan at", out)
+
+    def test_no_room_today_says_its_on_todays_list_without_a_time(self):
+        self.missed_yesterday("Replace the brake cables", "t_cables")
+        with patch.object(self.t, "open_windows", return_value=[]):
+            out = self.say("cables: today", "place_leftover", {"item": "Replace the brake cables", "horizon": "today"})
+        self.assertEqual(self.planned("Replace the brake cables"), [])
+        self.assertIn("on today's list without a time", out)
+        self.assertIn("- [ ] Replace the brake cables", self.api.notes["n_today"]["body"])
+        self.assertEqual(self.api.notes["n_bench"]["body"], BENCH)  # its own list is never touched
+
+
 if __name__ == "__main__":
     unittest.main()
