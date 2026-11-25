@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Sequence, Set, Tuple
 
-_TIME = r"\d{1,2}(?::\d{2})?\s*[AaPp]\.?\s?[Mm]\.?"
+_TIME = r"(?:\d{1,2}(?::\d{2})?\s*[AaPp]\.?\s?[Mm]\.?|\d{1,2}:\d{2})"  # "6:00 PM", "6 pm", "10:00"
 _ROW_RE = re.compile(rf"^\s*(?:[-•*]\s*|\d+[.)]\s+)?(?:at\s+)?{_TIME}(?:\s*(?:[–—-]|to)\s*{_TIME})?"
                      r"\s*(?:[–—:-]\s*)?(?P<rest>\S.*)$")
 _OPEN_RE = re.compile(r"^\s*(?:[-•*]\s*)?(?:free|open|nothing (?:planned|else))\b[^.!?]*$", re.IGNORECASE)
@@ -217,9 +217,9 @@ def place(reply: str, view: str, plan) -> str:
     view = (view or "").strip()
     if not view:
         return reply
+    from thirties_core.messages import join_sections
     text = (reply or "").replace(view, "") if reply else ""
     text = tidy(text, view, plan) if text.strip() else ""
-    from thirties_core.messages import join_sections
     return join_sections(text.strip(), view)
 
 
