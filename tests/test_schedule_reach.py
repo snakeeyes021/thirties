@@ -142,12 +142,13 @@ class TestTheUsersSayOverIt(ServiceCase):
         self.svc.starts(at("19:30"))  # just the bell: no list under it either
         self.assertEqual(self.last("start"), "🔔 7:30 PM: Call the plumber")
 
-    def test_block_line_off_means_no_now_line_in_a_check_in(self):
+    def test_block_line_off_leaves_the_views_now_line(self):
         self.extras("status_line", "off")
         self.svc.check_ins(at("21:45"))
         text = self.last("checkin")
         self.assertIn("Nothing else is planned today.", text)
-        self.assertNotIn("Now:", text)
+        self.assertIn("Now: free until 11:00 PM", text)  # the view keeps its shape
+        self.assertNotIn("You're in the", text)
 
     def test_asked_for_it_always_shows(self):
         from thirties_core import whats_next
