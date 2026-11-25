@@ -60,13 +60,14 @@ class ClearTimeTest(OffBase):
             self.assertNotIn(title, pencilled_in(self.a))  # never "no time yet"
         self.assert_guarded()
 
-    def test_keep_leaves_the_lines(self):
+    def test_keep_is_no_choice_nothing_stays_without_a_time(self):
+        # a line left on today's list without a time would just be given one again: keeping it today is a move
         out = self.said("open a gap 4:20 to 5:50 but leave their lines be", "clear_time",
                         {"start": "4:20 PM", "end": "5:50 PM", "today_list": "keep"})
-        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertTrue(out.startswith(NOT_DONE), out)  # said before anything changes
+        self.assertIn("update_event", out)
+        self.assertTrue(self.planned(COMPOST))
         self.assertIn(f"- [ ] {COMPOST}", self.body("n_today"))
-        self.assertIn(f"{COMPOST} is still on today's list", out)
-        self.assertIn(f"- [ ] {TINS}", self.body("n_today"))  # never cleared: untouched
         self.assert_guarded()
 
     def test_a_trimmed_item_keeps_its_line(self):
@@ -111,7 +112,7 @@ class RemoveEventTest(OffBase):
         self.assertIsNotNone(OpenPool(self.sched.state_db).all().get(BEANS.lower()))
         out = self.said("compost bays tomorrow then", "remove_event",
                         {"event": self.planned(COMPOST)[0].id, "today_list": "tomorrow"})
-        self.assertIn("tomorrow's list", out)
+        self.assertIn("kept for tomorrow", out)
         from datetime import timedelta
         self.assertEqual([r["title"] for r in AheadLists(self.sched.state_db).for_day(DAY + timedelta(days=1))],
                          [COMPOST])

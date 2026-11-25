@@ -7,7 +7,8 @@ clear an item from the list was also read as the item being finished. Now:
 - whatever takes an item off today's plan on the user's words (remove_event, clear_time, a new item put in its
   place) takes its line off today's list too, so it never lingers as "no time yet". What the user meant for each
   line is the model's reading, passed as ``today_list`` (``leave_list``): off (the default: off today, and it
-  doesn't come back by itself), keep, later, tomorrow, or drop (for good). No wording check decides it; a
+  doesn't come back by itself), later, tomorrow, or drop (for good). A line never stays on today's list without a
+  time (full_day.py), so keeping it today means moving it to another time. No wording check decides it; a
   question or a complaint can be the ask. The answer carries the facts back: what happened to the line, and
   whether the item is due today or overdue (a fact, never a hold);
 - an item with a home list keeps it there, untouched: only its copy on Today goes. A record of it waiting from
@@ -209,24 +210,26 @@ def after_clear(pt: "PlanTools", gone: List["EventSpan"], today_list: Any = None
 
 # --- an item's line on today's list when it comes off today: the model's call (today_list) ---
 # off: taken off today's list, and it doesn't come back by itself (the default: the user took it off today);
-# keep: it stays on today's list with no time; later: off, and back on a later day this week (or the day the user
-# named); tomorrow: off, and on tomorrow's list; drop: off and dropped for good (filed as dropped only on the
-# user's drop word, write_guard.py)
-TODAY_LIST = ("off", "keep", "later", "tomorrow", "drop")
-_LIST_SAID = {"": "off", "true": "off", "yes": "off", "remove": "off", "false": "keep", "no": "keep", "stay": "keep",
-              "stays": "keep", "week": "later", "this week": "later", "later this week": "later",
-              "another day": "later", "for good": "drop", "dropped": "drop"}
+# later: off, and back on a later day this week (or the day the user named); tomorrow: off, and kept for
+# tomorrow's plan; drop: off and dropped for good (filed as dropped only on the user's drop word, write_guard.py).
+# A line never stays on today's list without a time (full_day.py): to keep it today, it moves to another time.
+TODAY_LIST = ("off", "later", "tomorrow", "drop")
+_LIST_SAID = {"": "off", "true": "off", "yes": "off", "remove": "off", "week": "later", "this week": "later",
+              "later this week": "later", "another day": "later", "for good": "drop", "dropped": "drop"}
+_KEEP_SAID = {"keep", "false", "no", "stay", "stays"}
 
 
 def list_choice(value: Any) -> str:
     """What the model asked for the item's line on today's list (TODAY_LIST); off when it said nothing."""
     from thirties_core.plan_tools import ToolError
-    if isinstance(value, bool):
-        return "off" if value else "keep"
-    said = str(value if value is not None else "").strip().lower()
+    said = ("off" if value else "keep") if isinstance(value, bool) else \
+        str(value if value is not None else "").strip().lower()
+    if said in _KEEP_SAID:
+        raise ToolError("Nothing on today's list stays there without a time. To keep it today, move it to another "
+                        "time with update_event; for \"only if there's time\", use pencil_in.")
     said = _LIST_SAID.get(said, said)
     if said not in TODAY_LIST:
-        raise ToolError("today_list must be off, keep, later, tomorrow or drop.")
+        raise ToolError("today_list must be off, later, tomorrow or drop.")
     return said
 
 
@@ -243,8 +246,6 @@ def leave_list(pt: "PlanTools", line: str, task_id: Optional[str], choice: str, 
     held = due_today.held_due(pt, line, task_id)  # due today or overdue: a fact for the model, never a hold
     due = f" {line} is {due_today.deadline_words(held, pt.today())}." if held is not None else ""
     head = f"{line} was also on today's list: taken off" if also else f"Took {line} off today's list"
-    if choice == "keep":
-        return f" {line} is still on today's list, with no time.{due}"
     if _of_a_routine(a, line):  # a routine's group or step comes and goes with the routine: today's simply ends
         return ""
     from thirties_core.leave_today import has_home, remove_copy_why
@@ -272,11 +273,11 @@ def leave_list(pt: "PlanTools", line: str, task_id: Optional[str], choice: str, 
     if why:
         raise ToolError(f"{line} is off today's plan but still on today's list: {why}.")
     task = _home_item(a, line, task_id) if homed else None
-    if choice == "tomorrow":
+    if choice == "tomorrow":  # kept for tomorrow: it gets its time when that day's plan is made (full_day.py)
         from datetime import timedelta
-        from thirties_core.day_lists import AheadLists
-        AheadLists(a._db).add(pt.today() + timedelta(days=1), line, task)
-        return f" {head}; it's on tomorrow's list{stays}.{due}"
+        from thirties_core.not_today import set_aside
+        set_aside(a, line, task, pt.today() + timedelta(days=1), True)
+        return f" {head}; it's kept for tomorrow and gets its time when that day's plan is made{stays}.{due}"
     if choice == "later":
         from thirties_core.not_today import minutes_for, set_aside, when_words, where_to
         day, named = where_to(pt, line, minutes_for(a, line, task))
@@ -404,8 +405,6 @@ def remove_listed(pt: "PlanTools", event: Any, today_list: Any = None) -> Option
     if keep:
         raise ToolError(keep)
     choice = list_choice(today_list)
-    if choice == "keep":
-        return f"{line} has no time on the schedule; it stays on today's list."
     said = leave_list(pt, line, task.id if task is not None else None, choice, also=False).strip()
     return f"{said} (It had no time on the schedule.)"
 

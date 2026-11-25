@@ -51,9 +51,9 @@ _NOW_SAID_RE = re.compile(r"\b(?:right )?now\b|\bjust (?:started|starting|began|
 # --- what happens to an item's line on today's list when it comes off today's plan (off_today.leave_list) ---
 TODAY_LIST_PARAM = ("What happens to its line on today's list, by what the user meant: 'off' (default: off "
                     "today's list too, and it doesn't come back by itself; its own list, if it has one, keeps it), "
-                    "'keep' (it stays on today's list with no time), 'later' (off today, back on a later day this "
-                    "week or the day the user named), 'tomorrow' (on tomorrow's list), or 'drop' (dropped for good; "
-                    "only when the user says to drop it for good).")
+                    "'later' (off today, back on a later day this week or the day the user named), 'tomorrow' "
+                    "(kept for tomorrow's plan), or 'drop' (dropped for good; only when the user says to drop it "
+                    "for good). Nothing stays on today's list without a time: to keep it today, move it instead.")
 # --- end today's list ---
 
 # Tool contract shared by every brain. Times are clock strings like "4:30 PM";
@@ -1586,6 +1586,8 @@ class PlanTools:
                             "rest around it (items can sit alongside work).")
 
     def remove_event(self, event: Any, today_list: Any = None, **_: Any) -> str:
+        from thirties_core.off_today import list_choice
+        list_choice(today_list)  # a choice that can't be had is said before anything changes
         # --- an item on today's list with no time comes off the list (off_today.py) ---
         try:
             span = self._find_span(event)
@@ -1655,6 +1657,8 @@ class PlanTools:
 
     def clear_time(self, start: Any, end: Any, include_work: Any = False, include_sleep: Any = False,
                    today_list: Any = None, **_: Any) -> str:
+        from thirties_core.off_today import list_choice
+        list_choice(today_list)  # a choice that can't be had is said before anything changes
         start_dt = self._start(start)
         end_dt = self._end(end, start_dt)
         allowed = {SpanCategory.ACTIVITY, SpanCategory.TASK}
