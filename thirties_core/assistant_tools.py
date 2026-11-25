@@ -2344,10 +2344,11 @@ class AssistantTools(KindTools):
             links.unlink(t)
         return titles
 
-    def _archive_in_joplin(self, items: List[Dict[str, Any]]) -> List[str]:
+    def _archive_in_joplin(self, items: List[Dict[str, Any]], drop_asked: bool = False) -> List[str]:
         """An explicit archive ("delete it", "archive it", "I'm never doing that"): the item is ticked and filed in
         the month's Dropped note beside the Done notes, with the reason, from its home list (or from Today, when
-        that's its only place). Undrop puts it back where it was."""
+        that's its only place). Undrop puts it back where it was. ``drop_asked``: the user's own drop of a leftover
+        (Before today's drop action) is the ask, whatever words came with it (write_guard.py)."""
         from thirties_core.carry import OpenPool
         from thirties_core.done_log import FILED_ROLES, file_dropped_op
         from thirties_core.today import TodayLinks, note_items
@@ -2377,6 +2378,8 @@ class AssistantTools(KindTools):
             elif note is not None and t in open_today:
                 op = file_dropped_op(note["id"], t, note.get("title", ""), self._today(), 0, rec.get("why") or "")
             if op is not None:
+                if drop_asked:
+                    op["_drop_asked"] = True
                 status, _ = writer.submit(op)
                 if status in ("done", "queued"):
                     pool.set(t, filed_key=op["key"])

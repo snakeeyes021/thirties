@@ -517,7 +517,10 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     message = _said(turn)
     kind = op.get("op")
     title = str(op.get("title") or "")
-    if kind == "file_dropped" and not op.get("ticked") and not asks_to_drop(message):
+    # the user's own drop of a leftover that lives only on Today (Before today's drop action) is the ask: filed from
+    # the Today note, never from a home list, whatever words came with it
+    drop_asked = bool(op.get("_drop_asked")) and _is_today(db, str(op.get("note_id") or ""))
+    if kind == "file_dropped" and not op.get("ticked") and not drop_asked and not asks_to_drop(message):
         return (f"not written: the user didn't ask to drop {title} for good, so it isn't filed as dropped. Taking "
                 "it off today leaves it on its own list.")
     if kind == "remove" and op.get("note_id") and not _is_today(db, str(op["note_id"])) \

@@ -37,7 +37,11 @@ The rules, applied once a day when the day is built (after the user's first repl
    never someday or dropped ones; on a holiday, only what the user placed there or what's due. An item leaves the pool once it's done, or after two weeks (it's still on its
    list).
 6. The Today note holds today's plan: the morning reset takes leftovers off it when their home item is still
-   open on its list. An item with no other list stays, and anything put on Today today is never touched.
+   open on its list. An item with no other list stays, and anything put on Today today is never touched. When
+   the user drops a leftover whose only place is Today (Before today's drop), its line is filed in the month's
+   Dropped note instead, so it leaves Today and undrop puts it back; one with a home list loses only its Today
+   copy. A dropped item is never offered again, even while a line of it is still on Today, unless it was put on
+   Today again after the drop.
 """
 
 from __future__ import annotations
@@ -371,6 +375,26 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         except ValueError:
             return False
 
+    # --- dropped stays dropped: a line the user dropped (the pool's archive) is never offered again, unless it was
+    # put on Today again on a later day than the drop (undrop takes it out of the archive) ---
+    pool_recs = OpenPool(db).all() if db is not None else {}
+
+    def dropped_still(low: str) -> bool:
+        rec = pool_recs.get(low) or {}
+        if rec.get("horizon") != DROPPED:
+            return False
+        try:
+            since = date.fromisoformat(rec.get("dropped_on") or "")
+        except ValueError:
+            return True
+        d = since + timedelta(days=1)
+        while d <= day:
+            if low in set(json.loads(db.get_sync_meta(f"today_added:{d.isoformat()}") or "[]")):
+                return False
+            d += timedelta(days=1)
+        return True
+    # --- end dropped stays dropped ---
+
     # the Today note: what's still open on it from an earlier day
     for title in today_lines:
         low = title.lower()
@@ -393,6 +417,8 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         if low in seen:
             continue
         seen.add(low)
+        if dropped_still(low):
+            continue  # the user dropped it, and nobody put it on Today again since: never offered again
         item = rollable_item(title, low)
         # --- a label isn't an item: a Today line with none of its home item's words (the heading above it) is
         # kept and asked about by the item's own name ---

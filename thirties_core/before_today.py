@@ -399,4 +399,28 @@ class BeforeToday:
         OpenPool(self.db).set(rec["title"], horizon=DROPPED, pending_drop=False, dropped_on=self._today().isoformat(),
                               dropped_by=by)
         self.a._drop_leftovers([{"title": rec["title"]}])  # off the Today note; its own list keeps it, untouched
+        # --- one that lives only on Today: filed in the month's Dropped note, never left on Today to come back ---
+        if by == "user":
+            filed = self._file_today_only(rec["title"])
+            if filed:
+                return f"Dropped {rec['title']}: it won't come back by itself; it's filed in this month's Dropped note."
+        # --- end only on Today ---
         return f"Dropped {rec['title']}: it won't come back by itself, and it stays on its own list."
+
+    def _file_today_only(self, title: str) -> bool:
+        """The user dropped a leftover whose only place is its line on the Today note: that line is filed in the
+        month's Dropped note (taken off Today there), so nothing is lost and undrop puts it back. True when filed.
+        A line with a home list is never filed here (its Today copy went with _drop_leftovers)."""
+        from thirties_core.leave_today import has_home
+        from thirties_core.today import note_items
+        try:
+            note = self.a._today_note()
+        except Exception:
+            return False
+        if note is None:
+            return False
+        low = title.strip().lower()
+        line = next((t for t, ticked in note_items(note) if not ticked and t.strip().lower() == low), None)
+        if line is None or has_home(self.a, line):
+            return False
+        return bool(self.a._archive_in_joplin([{"title": line}], drop_asked=True))
