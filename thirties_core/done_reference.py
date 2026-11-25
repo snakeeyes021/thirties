@@ -47,9 +47,11 @@ that only may name something else are the model's to read: the done goes on, and
 say. Anything else doesn't point at it. The app's own controls (a tick in the Agenda) and the background (nobody
 talking) are never held here.
 
-A skip needs a basis too (skip_check): the item named, pointed back to, asked for in bulk, listed in the last
-reply the user answers without asking anything, or planned to start inside a stretch of the day the words give by
-two times. Whether the words mean a skip is the model's to read.
+A skip is read as a done is (skip_check): which items the user means, and whether the words mean a skip, are the
+model's reading. It goes ahead when the words point at the item, or when anything they tell is a skip (skipping,
+not doing, off, can wait, a negation), or give a stretch of the day by two times that the item's planned start lies
+in; it stops for an item their words leave out of the skip ("apart from the stoneware, not getting to the
+bisque round": done_exceptions.py) or ask to keep.
 """
 
 from __future__ import annotations
@@ -693,12 +695,25 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
 
 
 def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Optional[str]:
-    """Why a skip can't go ahead: like a done, it needs the user's words to name the item, point back to it or ask
-    for many at once, read as check reads them. Besides those, words that name it, words that answer a reply
-    listing it without asking anything ("too tired, skipping this morning" after a list), and a stretch of the day
-    the words give by two times that the item's planned start (``start``) lies in ("from 1:10 to 2:40 I was out"),
-    are enough: which of those items, whether the words mean a skip, and which copy of an item with several, are
-    the model's to read. None when it stands, and when nobody is talking."""
+    """Why a skip can't go ahead. Which items a skip is for, and whether the words mean one, are the model's to read,
+    as for a done: it stops only when the user's words name the item as not skipped (left out of the skip: "apart
+    from the stoneware, not getting to the bisque round", done_exceptions.py; or asked to keep it, change_asks.kept),
+    or when nothing gives it a basis: the words don't name the item, point back to it, ask for many at once, answer
+    a reply listing it without asking anything ("too tired, skipping this morning" after a list), give a stretch of
+    the day by two times that its planned start (``start``) lies in ("from 1:10 to 2:40 I was out"), or tell of a
+    skip at all (said_for_it.told_skip). None when it stands, and when nobody is talking."""
+    message = getattr(pt, "user_message", None)
+    if getattr(pt, "by_hand", False) or message is None:
+        return None
+    titles = _titles(pt)
+    from thirties_core.done_exceptions import left_out
+    left = left_out(message, title, [t for t in titles if t != title], kind="skip")
+    if left:
+        return left
+    from thirties_core.change_asks import kept
+    keep = kept(pt, title)
+    if keep:
+        return keep
     picks = getattr(pt, "picked_dones", None)
     pt.picked_dones = None  # a skip is never a done for the reply to name
     try:
@@ -707,13 +722,15 @@ def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Opti
         pt.picked_dones = picks
     if held is None:
         return None
-    message, titles = pt.user_message, _titles(pt)
     if _named(message, title, titles) or ("?" not in message and title in pointed_back(pt, titles)):
         return None
     from thirties_core.move_scope import stretches  # the day's stretches, read as a request to clear one reads them
     if start is not None and any(a <= start < b for a, b in stretches(message, pt.day_plan.day_start)):
         return None
-    return (f"The user's words don't point to {title}, so it isn't marked skipped. If they meant to skip something, "
+    from thirties_core.said_for_it import told_skip
+    if told_skip(message):
+        return None
+    return (f"Nothing the user said is a skip, so {title} isn't marked skipped. If they meant to skip something, "
             "ask which item.")
 
 

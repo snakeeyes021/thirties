@@ -204,6 +204,35 @@ class TestTheModelsReadingStands(StudioBase):
         self.assertEqual(strip_internal(out[out.index("(The user's"):]).strip(), "")
 
 
+class TestASkipIsReadTheSameWay(StudioBase):
+    """Which items a skip is for is the model's reading; an item the words leave out of it, or keep, stays."""
+
+    def skip(self, message, title):
+        self.t.user_message, self.t.prior_exchange = message, None
+        try:
+            return self.t.execute("log_outcome", {"event": self.span(title).id, "status": "skipped"})
+        finally:
+            self.t.user_message = None
+
+    def test_the_items_left_in_are_skipped_and_the_one_left_out_stays(self):
+        message = "Apart from the stoneware, not getting to the bisque round today."
+        for title in (GLAZE, BATTS):
+            out = self.skip(message, title)
+            self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
+            self.assertEqual(self.span(title).status, SpanStatus.SKIPPED, out)
+        out = self.skip(message, WEDGE)
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span(WEDGE).status, SpanStatus.PLANNED, out)
+
+    def test_kept_by_name_or_no_skip_said_stays(self):
+        out = self.skip("The bisque round can go, but keep the kiln log.", LOG)
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        out = self.skip("what's next after the wheel bay?", GLAZE)
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.span(GLAZE).status, SpanStatus.PLANNED)
+        self.assertFalse(self.skip("no time for the bisque round after all", GLAZE).startswith(NOT_DONE))
+
+
 class TestTheRestIsReadWithoutThatPart(unittest.TestCase):
     """What the done is about is read from the sentence with its exception part taken out."""
 

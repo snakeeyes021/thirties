@@ -1,12 +1,13 @@
-"""A skip is only for what the user's words are about, as a done is.
+"""A skip needs a basis in the user's words, as a done does; which items it's for is the model's reading.
 
 - **Named, pointed back to, or asked for in bulk**: the item named in the message, "those" or "skip it" after a reply
   that listed it, "skip the rest" after a list, or words answering a list without asking anything: the skip stands.
   Whether the words mean a skip, and which of the listed items, is the model's to read.
 - **A stretch of the day**: words giving it by two times ("from 2:10 to 3:20 PM I was at the dye works") are a basis
-  for an item planned to start inside it, never for one outside it; one time alone gives no stretch.
-- **No basis**: a question that names no item ("what's left this morning?"), or an item the words don't name and the
-  last reply didn't list, skips nothing; the model is told to ask.
+  for an item planned to start inside it; for one outside it, or with one time alone, the skip said is the basis,
+  and which items it's for is the model's reading.
+- **No basis**: a question that names no item ("what's left this morning?"), or words with no skip in them, skip
+  nothing; the model is told to ask.
 - **Nobody judged**: the app's own controls and the background (nobody talking) skip as before.
 
 Through the real log_outcome on a built day. Fixtures are invented: a morning of fibre work.
@@ -91,14 +92,15 @@ class TestAStretchOfTheDay(FibreMorning):
                 self.setUp()
                 self.assert_skipped(self.skip(said, SPINDLE), SPINDLE)
 
-    def test_an_item_planned_outside_it_is_refused(self):
+    def test_an_item_planned_outside_it_is_the_models_reading(self):
         for said in SPAN:
             with self.subTest(said=said):
-                self.assert_held(self.skip(said, SHAWL), SHAWL)
+                self.assert_skipped(self.skip(said, SHAWL), SHAWL)
+                self.span(SHAWL).status = SpanStatus.PLANNED
 
-    def test_one_time_alone_is_no_stretch(self):
-        self.assert_held(self.skip("from 2:10 PM I was at the dye works, so skip whatever fell after", SPINDLE),
-                         SPINDLE)
+    def test_one_time_alone_is_the_models_reading(self):
+        self.assert_skipped(self.skip("from 2:10 PM I was at the dye works, so skip whatever fell after", SPINDLE),
+                            SPINDLE)
 
 
 class TestASkipWithNoBasis(FibreMorning):
@@ -111,8 +113,14 @@ class TestASkipWithNoBasis(FibreMorning):
         self.assert_held(self.skip("What's left this afternoon?", SPINDLE, LISTED), SPINDLE)
         self.assert_held(self.skip("What's left this morning?", SKEINS, LISTED), SKEINS)
 
-    def test_an_answer_to_a_list_isnt_for_an_item_it_didnt_list(self):
-        self.assert_held(self.skip("too tired, skipping this morning", SPINDLE, LISTED), SPINDLE)
+    def test_words_with_no_skip_in_them(self):
+        self.assert_held(self.skip("the dye works were busy this morning", SPINDLE, LISTED), SPINDLE)
+
+
+class TestASkipForAnItemTheListDidntShow(FibreMorning):
+
+    def test_the_skip_said_is_the_basis(self):
+        self.assert_skipped(self.skip("too tired, skipping this morning", SPINDLE, LISTED), SPINDLE)
 
 
 class TestNobodyJudged(FibreMorning):

@@ -448,6 +448,26 @@ def _reply_carries_done(pt: Any, message: str) -> bool:
         or bool(pointed_count(message))
 
 
+# an item said not to happen, besides the skip and removal words: missed, out of time, too tired
+_SKIPPED_RE = re.compile(r"\b(?:miss(?:ed|ing)|ran out of time|run out of time|out of time|no time|too tired|"
+                         r"too wiped|bail(?:ed|ing)?|give (?:it|that|them) a miss|pass(?:ed|ing)? on)\b", re.IGNORECASE)
+
+
+def told_skip(message: Optional[str]) -> bool:
+    """Whether anything the user's words tell this turn is a skip: a skip or removal word ("skipping", "not doing",
+    "forget it"), something not happening or not done ("didn't get to", "never happened"), put off ("can wait",
+    "later", "tomorrow": done_exceptions.py), or missed or out of time. Which items it is for is
+    the model's reading. A question only asks."""
+    if not message:
+        return False
+    from thirties_core.change_asks import _removal_words
+    from thirties_core.done_exceptions import _OPEN_RE
+    from thirties_core.started import NOT_YET_RE
+    words = _removal_words()
+    return any(words.search(s) or NOT_YET_RE.search(s) or _OPEN_RE.search(s) or _SKIPPED_RE.search(s)
+               for s in _SENTENCE_RE.findall(message) if s.strip() and not is_asking(s))
+
+
 def _names_an_item(pt: Any, message: str) -> bool:
     """True when the message names a title on the plan, or an open list entry shown in the last reply."""
     from thirties_core.done_reference import _named, _open_items_shown, _titles
@@ -566,4 +586,4 @@ def auto_done_asked(pt: Any) -> bool:
 
 __all__ = ["asked_only", "asks_for_a_tick", "asks_for_change", "auto_done_asked", "begun_or_next", "done_question",
            "done_refused", "held_done", "is_asking", "no_done_said", "only_questions", "parts_only", "parts_refusal",
-           "said_no", "told_done", "unanswered_which"]
+           "said_no", "told_done", "told_skip", "unanswered_which"]
