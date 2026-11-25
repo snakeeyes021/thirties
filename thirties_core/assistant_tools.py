@@ -1550,6 +1550,12 @@ class AssistantTools(KindTools):
             if now < span.start_dt and soon and not span.is_envelope:
                 from thirties_core.placement import early_tick_times
                 start_dt, end_dt = early_tick_times(self.pt.day_plan, span, now)
+            # --- a tick in the app on an item whose time is over: it stays in its planned block ---
+            # (a tick is no report of when it finished: two past items ticked together later landed in the block
+            # of the tick, as if done then). One under way when ticked comes with its finish time (the app's own).
+            elif getattr(self.pt, "by_hand", False) and now >= span.end_dt:
+                pass
+            # --- end a tick on a past item ---
             elif span.start_dt - timedelta(hours=3) <= now <= span.end_dt + timedelta(hours=2):
                 end_dt = now
 
