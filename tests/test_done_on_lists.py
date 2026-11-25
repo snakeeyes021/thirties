@@ -1,5 +1,6 @@
 """A done for something not on today's plan ticks the matching open item on the user's lists (done_on_lists.py),
-never a new unplanned item beside it; when several items match, the model is told to ask which. Data guard: only
+never a new unplanned item beside it; when several items match, the model marks the likeliest and says so. Data
+guard: only
 the one line the user's words point to is ticked. Invented lists, on a fake Joplin."""
 
 from tests.fixtures import at
@@ -44,12 +45,13 @@ class TestTheListItemIsTicked(DoneOnListsCase):
         self.assertEqual(self.unplanned(), [])
         self.assertIn("Sew the quilt binding", out)
 
-    def test_several_matches_ask_which(self):
+    def test_several_matches_the_likeliest_is_marked_and_said(self):
         out = self.say("watered the fern, that's finished", "Water the fern")
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertIn("Water the fern by the window", out)
         self.assertIn("Water the fern in the hall", out)
-        self.assertIn("Ask which", out)
+        self.assertIn("Mark the likeliest by its task_id", out)
+        self.assertNotIn("Ask", out)
         self.assertEqual(self.ticks(), [])
         self.assertEqual(self.unplanned(), [])
 

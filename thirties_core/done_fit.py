@@ -190,12 +190,12 @@ def named_instead(message: Optional[str], names: Union[str, Sequence[str]],
 def also_said(message: Optional[str], names: Union[str, Sequence[str]],
               others: Iterable[str] = (), listed: Iterable[str] = ()) -> str:
     """One plain line for the model when the words may name something besides this item but name no other item:
-    what else they say, so it can ask or put it right. "" when there's nothing to say."""
+    what else they say, so it can put it right. "" when there's nothing to say."""
     phrases = names_something_else(message, names, others, listed)
     if not phrases:
         return ""
     said = ", ".join(f'"{p}"' for p in phrases)
-    return f"(The user's message also says {said}: if they meant another item, ask which, or correct it.)"
+    return f"(The user's message also says {said}: if they meant another item, correct it.)"
 
 
 # --- a word for which kind: "the ash paddle is varnished" names Varnish the paddle ---
@@ -351,7 +351,7 @@ def refusal(pt: Any, title: str, phrases: List[str], items: List[str]) -> str:
     task = elsewhere(getattr(pt, "assistant", None), phrases)
     if task is not None:
         return why + f"{task.title} on their lists fits what they said: mark that one, with event {task.id}."
-    return why + "If they finished that one, mark it; if it isn't clear which, ask in one short question."
+    return why + "If they finished that one, mark it."
 
 
 __all__ = ["CONTAINER_NOUNS", "names_something_else", "named_instead", "also_said", "names_of", "reading",

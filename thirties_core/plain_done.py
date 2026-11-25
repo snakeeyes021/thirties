@@ -25,7 +25,7 @@ The words point to the item, on the model's reading (``trusted``):
   words, with nothing that names another item and no plain tie. When another item may be the one meant (it fits
   the words better, done or not, a routine or a list item: "the goats got watered" for Brush the goats beside
   Water the goats; or it's named in the done and still to do), the done goes on and its result names that item, so
-  the model can ask or put it right (``also_fits``). An item already done, one named only beside the done ("Skip
+  the model can put it right (``also_fits``). An item already done, one named only beside the done ("Skip
   the bench"), a later item whose name is a word of this one's, and any, when the words also say a word of this
   item that none of them has, aren't named.
 - **Said again**: a done the user asked for earlier, refused for this same item, said again.
@@ -329,7 +329,7 @@ def done_asks(messages: Sequence[dict]) -> Dict[str, str]:
     """{item: what the user said} for each done the user asked for in their recent messages that was refused as
     not pointing to the item, and that hasn't been marked since or been called off with a no. Read from the
     conversation before this turn."""
-    from thirties_core.done_words import NO_RE, TURNS_BACK, _DONE_ASK_RE
+    from thirties_core.done_words import TURNS_BACK, _DONE_ASK_RE, says_no
     from thirties_core.started import FINISHED_RE, said_not_done
 
     def visible_user(m: dict) -> bool:
@@ -345,7 +345,7 @@ def done_asks(messages: Sequence[dict]) -> Dict[str, str]:
         if visible_user(m):
             said = str(m.get("content") or "")
             for title in list(asks):
-                if NO_RE.match(said) or said_not_done(said, title):
+                if says_no(said) or said_not_done(said, title):
                     asks.pop(title)
         elif m.get("role") == "tool" and m.get("name") == "log_outcome":
             content = str(m.get("content") or "")

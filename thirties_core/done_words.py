@@ -54,6 +54,18 @@ _NOT_NAMES = {"done", "finished", "finish", "complete", "completed", "already", 
 # a no: the reply turns the question down, or calls the done off
 NO_RE = re.compile(r"^\W*(?:no|nope|nah|not (?:that|it|yet|really)|wrong|neither|none|never ?mind|nvm|forget it|"
                    r"don'?t (?:mark|tick|bother)|cancel|the other)\b", re.IGNORECASE)
+
+
+def says_no(message: Optional[str]) -> bool:
+    """The reply is a no (``NO_RE``). A no that goes with a "not" about the talk isn't one ("no need to ask me twice",
+    "no, not saying it a second time": started.about_the_talk)."""
+    found = NO_RE.match(message or "")
+    if not found:
+        return False
+    from thirties_core.started import about_the_talk
+    return not (about_the_talk(message) or about_the_talk(message[found.end():]))
+
+
 # a message asking for a done: said in so many words, or a past tense ("fed", "walked")
 _DONE_ASK_RE = re.compile(r"\b(?:mark|tick|check|cross)\w*\b", re.IGNORECASE)
 # the refusal done_reference.check gives, as it reads in the conversation
@@ -164,7 +176,7 @@ def pending_dones(messages: Sequence[dict]) -> List[str]:
             said = str(m.get("content") or "")
             refused = {}
             for title in list(pending):
-                if NO_RE.match(said) or said_not_done(said, title):
+                if says_no(said) or said_not_done(said, title):
                     pending.pop(title)
         elif m.get("role") == "tool" and m.get("name") == "log_outcome":
             content = str(m.get("content") or "")
@@ -203,4 +215,4 @@ def earlier_request(pt: Any, args: Dict[str, Any]) -> bool:
 # --- end a question about one item, and a done already asked for ---
 
 
-__all__ = ["KIN_GROUPS", "NO_RE", "asked_about", "earlier_request", "kin", "named", "pending_dones"]
+__all__ = ["KIN_GROUPS", "NO_RE", "asked_about", "earlier_request", "kin", "named", "pending_dones", "says_no"]

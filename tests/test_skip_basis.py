@@ -52,7 +52,7 @@ class FibreMorning(unittest.TestCase):
     def assert_held(self, out, title):
         self.assertTrue(out.startswith(NOT_DONE), out)
         self.assertIn("isn't marked skipped", out)
-        self.assertIn("ask", out)
+        self.assertNotIn("ask", out)  # never asks them to say it again
         self.assertEqual(self.span(title).status, SpanStatus.PLANNED)
 
 

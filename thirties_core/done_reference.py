@@ -363,8 +363,8 @@ def _picked(pt: "PlanTools", message: str, title: str, shown: str, titles: List[
 
 def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides: Iterable[str] = ()) -> str:
     """The lines a done's result carries when the user's words may name something besides this item
-    (done_fit.also_said), or may be meant for another item (plain_done.also_fits), so the model can ask or put it
-    right; "" otherwise, or when nobody is talking. The names the words leave out of the done are never read as what
+    (done_fit.also_said), or may be meant for another item (plain_done.also_fits), so the model can put it right;
+    "" otherwise, or when nobody is talking. The names the words leave out of the done are never read as what
     it's about (done_exceptions.py)."""
     message = getattr(pt, "user_message", None)
     ids = [i for i in ids if i]
@@ -379,8 +379,8 @@ def also_said_note(pt: "PlanTools", title: str, ids: Iterable[str] = (), besides
     names = names_of(pt, title, ids)
     naming = without_counts(without_exceptions(message) or "")
     fits = also_fits(pt, naming, title, left_out)
-    meant = (f"(The user's message may also mean {', '.join(fits)}: if they meant another item, ask which, or "
-             "correct it.)") if fits else ""
+    meant = (f"(The user's message may also mean {', '.join(fits)}: if they meant another item, correct it.)"
+             if fits else "")
     return " ".join(n for n in (also_said(naming, names, others, _listed_items(pt, names)), meant) if n)
 
 
@@ -412,8 +412,8 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
     if title not in titles:  # a list item with no time today
         titles.append(title)
     others = [t for t in titles if t != title]
-    refusal = (f"The user's words don't point to {title}, so it isn't marked done. If they meant it, ask which "
-               "item they finished; if they named another item, mark that one by its id.")
+    refusal = (f"The user's words don't point to {title}, so it isn't marked done. If they named another item, "
+               "mark that one by its id.")
     if any(re.search(rf"\b{re.escape(i)}\b", message) for i in ids):
         return None, message
     # --- a count is never a name: "those two" counts items, it doesn't name Fire two test tiles (done_counts.py) ---
@@ -445,12 +445,12 @@ def check(pt: "PlanTools", title: str, ids: Iterable[str] = (),
             return None, message
         from thirties_core.clock import format_clock
         return (f"The user's words name the items planned at {format_clock(thirty[0])}, and {title} isn't planned "
-                "then, so it isn't marked done. If they meant it too, ask."), message
+                "then, so it isn't marked done."), message
     # --- end by their time ---
     if BULK_RE.search(message):
         return None, message
     copy_refusal =(f"{title} is on the plan more than once and the user's words don't say which time, so it "
-                    "isn't marked done. Mark the one whose time has come, or ask which one they did.")
+                    "isn't marked done. Mark the one whose time has come by its id, and say which one you marked.")
     if _named(naming, title, titles):
         return (None, message) if _the_copy_meant(pt, [message], ids) else (copy_refusal, message)
     # --- a time the user gives picks one of several items their words fit equally ("the 11am one") ---
@@ -581,8 +581,7 @@ def skip_check(pt: "PlanTools", title: str, start: Optional[Any] = None) -> Opti
     from thirties_core.said_for_it import told_skip
     if told_skip(message):
         return None
-    return (f"Nothing the user said is a skip, so {title} isn't marked skipped. If they meant to skip something, "
-            "ask which item.")
+    return f"Nothing the user said is a skip, so {title} isn't marked skipped."
 
 
 __all__ = ["also_said_note", "check", "done_reading", "pointed_back", "prior_exchange", "skip_check", "BULK_AT_RE",

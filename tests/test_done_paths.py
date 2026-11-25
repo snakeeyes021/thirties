@@ -85,11 +85,11 @@ class TestARecordAfterTheFact(DoneCase):
         self.assertEqual(self.ticks(), ["Sew the quilt binding"])
         self.assertIn("- [ ] Buy quilt batting", self.body("n_craft"))
 
-    def test_several_open_items_match_ask_which(self):
+    def test_several_open_items_match_the_likeliest_is_marked(self):
         out = self.call("watered the fern from 3 to 3:15", "add_event",
                         {"title": "Water the fern", "start": "3:00 PM", "end": "3:15 PM", "happened": True})
         self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("Ask which", out)
+        self.assertIn("Mark the likeliest by its task_id", out)
         self.assertEqual(self.ticks(), [])
         self.assertEqual(self.spans("Water the fern"), [])
 
@@ -154,7 +154,7 @@ class TestTheAnswerToWhichOne(DoneCase):
 
     def test_the_first_one(self):
         out = self.done("watered the fern, that's finished", "Water the fern")
-        self.assertIn("Ask which", out)
+        self.assertIn("Mark the likeliest by its task_id", out)
         asked = ("watered the fern, that's finished",
                  "Which fern did you water: Water the fern by the window, or Water the fern in the hall?")
         window = self.task("Water the fern by the window")

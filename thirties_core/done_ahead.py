@@ -76,7 +76,7 @@ def said_ahead(message: Optional[str], title: str, others: Iterable[str] = ()) -
 
 def _why(title: str) -> str:
     return (f"The user said {title} will be done, or is done once something happens: that's still to come, so it "
-            "isn't marked done. Leave it open; it's done when they say it is.")
+            "isn't marked done. Leave it open.")
 
 
 __all__ = ["said_ahead"]

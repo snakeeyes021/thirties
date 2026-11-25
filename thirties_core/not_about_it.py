@@ -53,7 +53,7 @@ def only_as_an_end(clauses: Iterable[str], title: str, others: Iterable[str]) ->
 
 def end_refusal(title: str) -> str:
     return (f"The user named {title} only as when something else stops, not as done, so it isn't marked done. "
-            "Leave it open; it's done when they say it is.")
+            "Leave it open.")
 
 
 __all__ = ["end_refusal", "head", "only_as_an_end", "without_display_now"]

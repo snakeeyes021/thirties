@@ -1455,7 +1455,7 @@ class AssistantTools(KindTools):
             said = not_finished(words, name, others)
             if said == "begun":
                 raise ToolError(f"The user said {name} has started, not that it's finished, so it isn't done yet. "
-                                "Record it with doing_now; mark it done when they say it's over.")
+                                "Record it with doing_now.")
             if said == "not":
                 raise ToolError(f"The user said {name} hasn't happened, so it isn't done. Leave it as it is.")
             # --- said plainly not done is no done; going or fine beside a done is a note (write_guard.py) ---
@@ -1485,7 +1485,7 @@ class AssistantTools(KindTools):
         if span is None and task is None and st == SpanStatus.DONE and not ITEM_ID.fullmatch(str(event).strip()):
             # --- a done that's an open item on the user's lists ticks that item, never a new one (done_on_lists.py) ---
             from thirties_core.done_on_lists import on_the_lists
-            task = on_the_lists(self, str(event))  # several: the model is told to ask which
+            task = on_the_lists(self, str(event))  # several: the model picks the likeliest and says so
             if task is not None:
                 span = next((s for s in self.pt.day_plan.spans if s.task_id == task.id
                              and s.status == SpanStatus.PLANNED), None)

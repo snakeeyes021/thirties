@@ -122,7 +122,6 @@ STATE_RE = re.compile(
     r"\b(?:running|going|firing|started|starting|underway|under way|in progress|on its way|heating|warming|"
     r"cooling|soaking|drying|loading|working|fine|ok|okay|alright|all right|good)\b|"
     r"\bon\s*$", re.IGNORECASE)  # "the kiln is on", said at the end; "worked on the railing" is something else
-_NOT_DONE_RE = re.compile(r"\b(?:not|never|haven'?t|hasn'?t|didn'?t|isn'?t|wasn'?t|yet to)\b|n't\b", re.IGNORECASE)
 _CLAUSE_RE = re.compile(r"[.;!?\n,]+|\b(?:and|but|so|then|while)\b", re.IGNORECASE)
 # past tenses that aren't the thing happening
 _NOT_PAST = {"started", "scheduled", "planned", "needed", "wanted", "supposed", "tired", "bored", "kicked", "turned",
@@ -232,8 +231,7 @@ def told_not_to_tick(message: Optional[str], title: str, others=()) -> str:
     stops the done. "" when nothing says so."""
     stop, _ = _told_not(message, title, others)
     if stop:
-        return (f"The user said not to tick {title}, so it isn't marked done. Leave it open; it's done when they "
-                "say it is.")
+        return f"The user said not to tick {title}, so it isn't marked done. Leave it open."
     return ""
 
 
@@ -249,7 +247,7 @@ def told_not_note(message: Optional[str], title: str, others=()) -> str:
     meant = [t for t in items if _about(message, t, [x for x in items if x != t])] or [title]
     said = ", ".join(f'"{c.strip()}"' for c in unnamed)
     return (f"(The user's message also asks not to tick something it doesn't name ({said}): it may mean "
-            f"{', '.join(meant)}. If it means {title}, correct it, or ask which.)")
+            f"{', '.join(meant)}. If it means {title}, correct it.)")
 
 
 def _told_not(message: Optional[str], title: str, others=()) -> tuple:
@@ -387,8 +385,8 @@ def going_note(message: Optional[str], title: str, others=()) -> str:
     stop, going = _state_reading(message, title, others)
     if stop or not going:
         return ""
-    return (f"(The user's message also says {title} is under way or fine: if it hasn't really finished, ask, or "
-            "correct it.)")
+    return (f"(The user's message also says {title} is under way or fine: if it hasn't really finished, correct "
+            "it.)")
 
 
 def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
@@ -418,7 +416,8 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
     if onward:
         return onward, False
     # --- end begun or next ---
-    from thirties_core.started import _SENTENCE_RE, _asks, _without_record_words, without_caused
+    from thirties_core.started import (_SENTENCE_RE, _asks, _without_record_words, denies_done, denies_named,
+                                       without_caused)
     others = [o for o in others if o and o != title]
     # a question, or the app's own status quoted ("why does it still say 'not marked'?"), says nothing about it; a
     # done the user is only getting done ("getting the fence fixed") is no done word
@@ -429,7 +428,7 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
         if _MISTAKEN_RE.search(s) and (_about(s, title, others) or not any(
                 _about(s, o, [x for x in others if x != o] + [title]) for o in others)):
             return (f"The user said they only thought {title} was finished, so it isn't marked done. Leave it "
-                    "open; it's done when they say it is."), False
+                    "open."), False
     # --- end taken back ---
     clauses = [c for c in _CLAUSE_RE.split(told) if c and c.strip() and not _ACK_RE.match(c)]
     # --- an item named only as when something else stops is no done; what a clause says is about its head
@@ -438,6 +437,7 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
     if only_as_an_end(clauses, title, others):
         return end_refusal(title), False
     about = [c for c in clauses if _about(head(c), title, others) or _fits_level(head(c), title, others)]
+    named = bool(about)
     # --- end when something else stops ---
     if not about:
         about = [c for c in clauses if not any(_about(c, o, [x for x in others if x != o] + [title]) for o in others)]
@@ -449,18 +449,20 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
     for c in about:
         if _UNREAL_RE.search(c):
             return (f"The user said {title} should or could have happened, not that it did, so it isn't marked "
-                    "done. Leave it open; it's done when they say it is."), False
+                    "done. Leave it open."), False
         if any(not _own_word(m.group(0), title) for m in _CALLED_OFF_RE.finditer(c)):
             return (f"The user said {title} was moved or called off, not that it happened, so it isn't marked "
-                    "done. Leave it open, or move it if they asked; it's done when they say it is."), False
+                    "done. Leave it open, or move it if they asked."), False
     # --- end didn't happen ---
     going = []
     for c in about:
         if _done_in(c, title):
             continue
-        if _NOT_DONE_RE.search(c):
-            return (f"The user said {title} isn't finished, so it isn't marked done. Leave it open; it's done when "
-                    "they say it is."), False
+        # a "not" in words naming the item says it isn't done, unless it's about the talk ("not explaining the kiln
+        # log twice"); one in words naming no item, only when it says so ("not yet", "didn't get to it"), never one
+        # about the talk ("I'm not repeating myself", "no clue why that's asked") (started.py)
+        if denies_named(c, title, others) if named else denies_done(c, title):
+            return (f"The user said {title} isn't finished, so it isn't marked done. Leave it open."), False
         if _state_in(c, title):
             going.append(c)
     if not going:
@@ -469,7 +471,7 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
     # are done": the dishes' done) ---
     if not any(_done_in(d, title) or _done_beside(d, told_sentences, title, others) for d in about):
         return (f"The user said {title} is going or all right, not that it's finished, so it isn't marked done. "
-                "Leave it open; it's done when they say it is."), False
+                "Leave it open."), False
     # --- merely all right, with a done in the same sentence or one said of the item anywhere: the done wins, with
     # nothing to note ("it went fine, all wrapped", "ok the list has it open. the shawl IS done") ---
     return "", any(_under_way_in(c, title) or not (_done_beside(c, told_sentences, title, others)
@@ -522,13 +524,12 @@ def _tick_refused(message: str, title: str, db: Any) -> str:
     from thirties_core.said_for_it import told_done
     from thirties_core.whole_routine import answers_the_question
     if not (told_done(message, title, yes=True) or answers_the_question(message)):
-        return (f"not written: nothing the user said is a done, so {title} isn't ticked. It's done when they say it "
-                "is.")
+        return f"not written: nothing the user said is a done, so {title} isn't ticked."
     from thirties_core.started import not_finished
     others = _other_items(db, title)
     if not_finished(message, title, others) in ("begun", "not") or state_not_done(message, title, others):
         return (f"not written: the user's words say {title} isn't finished, so it isn't ticked. Something running, "
-                "started or fine isn't done; it's done when they say it is.")
+                "started or fine isn't done.")
     return ""
 
 

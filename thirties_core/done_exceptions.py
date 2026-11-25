@@ -155,7 +155,8 @@ def _says(kind: str, text: str) -> bool:
         return bool(_removal_words().search(text))
     from thirties_core.plain_done import says_it_happened
     from thirties_core.write_guard import _CLAUSE_RE
-    return any(says_it_happened(c) and not _DENIED_RE.search(c) for c in _CLAUSE_RE.split(text) if c and c.strip())
+    from thirties_core.started import denies_done
+    return any(says_it_happened(c) and not denies_done(c) for c in _CLAUSE_RE.split(text) if c and c.strip())
 
 
 def _exception_spans(sentence: str, kind: str,
@@ -298,7 +299,7 @@ def _why(title: str, kind: str) -> str:
         return (f"The user's words leave {title} out of what they're skipping, so it isn't marked skipped. Leave it "
                 "as it is.")
     return (f"The user's words name {title} as not done (left out of what they said is done, or still open), so it "
-            "isn't marked done. Leave it open; it's done when they say it is.")
+            "isn't marked done. Leave it open.")
 
 
 __all__ = ["left_out", "without_exceptions"]

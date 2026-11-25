@@ -100,16 +100,110 @@ def _asks(sentence: str) -> bool:
 def said_not_done(message: Optional[str], title: str, others: Iterable[str] = ()) -> bool:
     """Whether the user says this item hasn't happened ("haven't walked the dog yet", "the walk didn't happen").
     A question isn't a denial ("why does the walk still say not marked yet? I did it at 8"), and neither is the
-    app's own status text, quoted or described ("it shows as not done", "isn't ticked")."""
+    app's own status text, quoted or described ("it shows as not done", "isn't ticked"), nor a "not" about the talk
+    ("I'm not repeating that": ``denies_named``)."""
     if not message:
         return False
     others = list(others)
     for sentence in _SENTENCE_RE.findall(_without_record_words(message)):
         if _asks(sentence):
             continue
-        if any(c.strip() and _names(c, title, others) and NOT_YET_RE.search(c) for c in _CLAUSE.split(sentence)):
+        if any(c.strip() and _names(c, title, others) and denies_named(c, title, others)
+               for c in _CLAUSE.split(sentence)):
             return True
     return False
+
+
+# --- a "not" that says it isn't done ---
+# a "n't" word, written with or without its apostrophe ("didn't", "didnt"; "sent" is no denial)
+_NT = (r"(?:(?:haven|hasn|hadn|didn|isn|aren|wasn|weren|won|wouldn|can|couldn|don|doesn|shouldn|mustn|needn|ain)"
+       r"['’]?t|\w+n['’]t|cannot)")
+# the words that deny: "not", "haven't", "didn't", "nothing", "yet to" and the like
+_NEGATION = rf"(?:not|never|no|nothing|none|neither|nor|yet to|{_NT})"
+# what may stand between the denial and what it denies ("isn't really done", "none of it is done", "not going to do")
+_BETWEEN = (r"(?:['’]s)?(?:\s+(?:yet|really|even|quite|actually|fully|totally|completely|properly|been|being|be|got|"
+            r"gotten|get|getting|is|are|was|were|going\s+to|gonna|of\s+(?:it|them|those|that|this|the\s+[\w']+)))*")
+# a done, the doing of something, or "yet": what a denial of the thing itself is about
+_DOING = (r"(?:done|finish\w*|complet\w*|start\w*|begun|began|do|does|did|doing|happen\w*|manag\w*|touch\w*|"
+          r"sorted|handled|wrapped|over|yet|ready|there\s+yet|through|close|near|able\s+to|fit\w*|"
+          r"(?:get|got|gotten|getting)\s+(?:to|round|around)|make\s+it|made\s+it|"
+          r"(?:have|had|get|got|find|found)\s+(?:the\s+|a\s+|any\s+|enough\s+)?(?:time|chance|moment))")
+# a denial ending its clause: "I didn't", "haven't yet", "not quite", "not that one" (a tag like "isn't it" asks)
+_BARE_RE = (r"\b(?:not|never|none|nothing|neither|nor)(?:\s+(?:yet|really|quite|either|at\s+all|so|it|that|this|"
+            rf"them|those|one))*\W*$|\b{_NT}(?:\s+(?:yet|really|quite|either|at\s+all|so))*\W*$")
+_DENIES_DONE_RE = re.compile(rf"\b{_NEGATION}{_BETWEEN}\s+{_DOING}\b|\b{_NEGATION}{_BETWEEN}\s+[\w']+\s+yet\b|"
+                             rf"\bnot\s+yet\b|\b(?:nowhere near|far from)\b|{_BARE_RE}", re.IGNORECASE)
+_DENIED_WORD_RE = re.compile(rf"\b{_NEGATION}{_BETWEEN}\s+([\w']+)", re.IGNORECASE)
+_NEGATION_RE = re.compile(rf"\b{_NEGATION}\b", re.IGNORECASE)
+# what a "not" about the talk, or about how it went, is about: asking, confirming, saying it again, why it's asked,
+# no need, how long it took ("I'm not explaining the kiln log twice", "no clue why that's asked", "no need to ask", "it
+# didn't take long")
+_TALK_RE = re.compile(
+    rf"{_NEGATION}{_BETWEEN}\s+(?:confirm\w*|ask\w*|repeat\w*|explain\w*|answer\w*|say\w*|said|tell\w*|told|spell\w*|"
+    r"clarif\w*|re-?word\w*|rephras\w*|why|need\w*|have\s+to|bother\w*|worr\w*|problem|doubt|rush|hurry|kidding|"
+    r"joking|again|mean\w*|matter\w*|take\w*|took|long|bad|hard|easy|big\s+deal|a\s+big\s+deal|sweat|wonder|"
+    r"question\w*|check\w*\s+(?:with|on)\s+me|make\s+me|"
+    r"(?:sure|certain|know\w*|idea|clue|see|understand\w*)\s+(?:why|what|how)\b)\b|"
+    rf"{_NT}\s+(?:it|i|you|they|we|that|there)\b\W*$", re.IGNORECASE)  # a tag: "it's in the log, isn't it"
+# not knowing whether it happened ("not sure if the kiln log is done", "no idea", "can't remember"); not knowing why
+# it's asked is talk ("no clue why that's asked")
+_UNSURE_RE = re.compile(
+    r"\b(?:not\s+(?:really\s+|quite\s+|too\s+|even\s+)?(?:sure|certain)|unsure|uncertain|no\s+(?:idea|clue)|"
+    rf"(?:{_NT}|do\s+not)\s+(?:really\s+)?(?:know|remember|recall))\b(?!\s+(?:why|what|how)\b)", re.IGNORECASE)
+_UNSURE_STRETCH_RE = re.compile(rf"(?:{_UNSURE_RE.pattern})[^,;.!?\n]*?(?=[,;.!?\n]|\bbut\b|$)", re.IGNORECASE)
+
+
+def unsure(text: Optional[str]) -> bool:
+    """Whether the words say the user doesn't know if something happened ("not sure if the kiln log is done", "no
+    idea", "can't remember"). Not knowing why it's asked is talk ("no clue why that's asked")."""
+    return bool(_UNSURE_RE.search(text or ""))
+
+
+def without_unsure(text: Optional[str]) -> str:
+    """The words without what they say the user doesn't know ("unsure about the kiln log; swept the bay" reads
+    "; swept the bay"): no done is told there."""
+    return _UNSURE_STRETCH_RE.sub(" ", text or "")
+
+
+def denies_done(clause: Optional[str], title: str = "") -> bool:
+    """Whether a "not" in the clause says something isn't done: it denies a done or the doing of it ("not done",
+    "haven't finished", "didn't get to it", "not yet", "nothing's done", "I didn't"), or the item's own verb or name
+    ("haven't wedged the stoneware" for Wedge the stoneware). A "not" about the talk denies nothing ("I'm not
+    repeating it", "no clue why that's asked", "won't say it again")."""
+    text = clause or ""
+    if _DENIES_DONE_RE.search(text):
+        return True
+    if not title:
+        return False
+    from thirties_core.done_words import _hits, _words
+    from thirties_core.write_guard import _past_of_title
+    return any(_hits(_words(m.group(1)), title) or _past_of_title(m.group(1), title)
+               for m in _DENIED_WORD_RE.finditer(text))
+
+
+_EXCEPTED_RE = re.compile(r"\b(?:except|apart from|aside from|other than|besides|save for)\b", re.IGNORECASE)
+
+
+def denies_named(clause: Optional[str], title: str = "", others: Iterable[str] = ()) -> bool:
+    """Whether a "not" in a clause that names the item says it isn't done: any "not" there ("the glaze isn't dry"),
+    except one about the talk or about how it went ("I'm not explaining the kiln log twice", "the kiln log didn't take
+    long"), or one the item is named as the exception to ("did none save for the kiln log": the kiln log is)."""
+    text = clause or ""
+    parts = _EXCEPTED_RE.split(text, maxsplit=1)
+    if title and len(parts) == 2 and _names(parts[1], title, list(others)) \
+            and not _names(parts[0], title, list(others)):
+        return False
+    return denies_done(text, title) or any(not _TALK_RE.match(text, m.start()) for m in _NEGATION_RE.finditer(text))
+
+
+def about_the_talk(text: Optional[str]) -> bool:
+    """Whether the words have a "not" and every one is about the talk or how it went, with nothing denied ("I'm not
+    repeating myself", "no need to ask")."""
+    text = text or ""
+    found = list(_NEGATION_RE.finditer(text))
+    return bool(found) and all(_TALK_RE.match(text, m.start()) for m in found) \
+        and not any(c.strip() and denies_done(c) for c in _CLAUSE.split(text))
+# --- end a "not" that says it isn't done ---
 
 
 def not_finished(message: Optional[str], title: str, others: Iterable[str] = ()) -> str:
@@ -175,5 +269,5 @@ def only_started(message: Optional[str], title: str, others: Iterable[str] = ())
     return not_finished(message, title, others) == "begun"
 
 
-__all__ = ["STARTED_RE", "FINISHED_RE", "NOT_YET_RE", "REST_RE", "is_rest", "not_finished", "only_started", "said_not_done",
-           "without_caused"]
+__all__ = ["STARTED_RE", "FINISHED_RE", "NOT_YET_RE", "REST_RE", "about_the_talk", "denies_done", "denies_named",
+           "is_rest", "not_finished", "only_started", "said_not_done", "unsure", "without_caused", "without_unsure"]

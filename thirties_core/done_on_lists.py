@@ -7,7 +7,8 @@ words name the item by its distinctive words (item_facts.referenced), and the na
 with it.
 
 - exactly one open item matches: that's the one;
-- several match: which one is the user's to say, so the model is told to ask;
+- several match: the model marks the one the user most likely means, by its task_id, and says which, so they can
+  say if they meant another;
 - none: it's something done that wasn't on any list (recorded as new, as before).
 
 Only while the user is talking: the app's own buttons and the background never come here.
@@ -34,7 +35,7 @@ def matches(assistant, event: str, message: Optional[str], skip: tuple = ()) -> 
     """The open list items this done can be: the name the model gave shares a word with the item, and the user's
     words and that name together have at least half of the item's own words ("finished the quilt binding" for
     Sew the quilt binding; "descaled the kettle" is not Buy a new kettle). When several can, the one the user's
-    words name by its distinctive words (item_facts.referenced), if exactly one; else all of them, to ask about. A
+    words name by its distinctive words (item_facts.referenced), if exactly one; else all of them, to pick from. A
     Today line and the home item it's a copy of count once, as the home item. Items whose ids are in skip aren't
     candidates."""
     if not message or not str(event or "").strip():
@@ -70,8 +71,8 @@ def on_the_lists(assistant, event: str) -> Optional[Any]:
         from thirties_core.assistant_tools import ToolError, describe_task
         raise ToolError("Nothing on today's plan is that, and the user's words match several open items on their "
                         "lists: " + "; ".join(describe_task(t) for t in found)
-                        + ". Ask which one they finished, then call again with its task_id. If it's none of them, "
-                          "record it once they say so.")
+                        + ". Mark the likeliest by its task_id, and name it in the reply so a wrong pick gets "
+                          "corrected.")
     return None
 
 

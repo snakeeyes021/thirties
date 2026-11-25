@@ -8,12 +8,15 @@ user told this turn is a done: a done word, a report, a yes to a done question, 
 only of an item the words name as not done: left out of the done ("except", "apart from", "but not", "though ...
 are still open", read with that part taken out of the rest), not yet, still going, told not to tick it, asked
 about only in a question, or answered no to the app's question about it. A done carries only the notes it always
-had.
+had. A "not" about the talk ("not repeating myself", "no clue why that's asked") names no item as not done. Nothing the
+model is told sends it back to the user to confirm a done or say it again: when it can't tell which item a done is
+for, it marks the likeliest and says so.
 
 Invented fixtures: a pottery studio's afternoon, with five short jobs planned from 2:40.
 """
 
 import json
+import re
 import unittest
 
 from tests.fixtures import at
@@ -294,6 +297,104 @@ class TestTheRestIsReadWithoutThatPart(unittest.TestCase):
         self.assertEqual(state_not_done(message, WEDGE, others), "")
         self.assertEqual(going_note(message, WEDGE, others), "")
         self.assertTrue(state_not_done(message, GLAZE, [WEDGE, LOG, SWEEP]))
+
+
+def asked(phrase):
+    """The app's reply after a done it didn't mark: a question whether the item is done."""
+    return f"That one isn't marked yet. Did you mean {phrase} is done?"
+
+
+class TestANotAboutTheTalkIsNoStop(StudioBase):
+    """A reply to the app's question that won't go over the done again, or wonders why it's asked, carries the done: its
+    "not" is about the talk and names no item as not done. A "not" that says the item isn't done still stops it."""
+
+    def test_a_reply_that_wont_repeat_it_ticks(self):
+        self.assert_went(LOG, self.say("Not repeating myself, you heard me.", LOG, asked("the kiln log")))
+        self.assert_held(GLAZE, self.say("Not yet.", GLAZE, asked("the glaze test")))
+
+    def test_wondering_why_it_is_asked_ticks(self):
+        self.assert_went(LOG, self.say("No idea why that's a question, you heard me.", LOG, asked("the kiln log")))
+        self.assert_went(WEDGE, self.say("No clue why that needs asking twice.", WEDGE,
+                                         asked("the stoneware")))
+        self.assert_held(SWEEP, self.say("I didn't. The clock beat me.", SWEEP, asked("the wheel bay")))
+        self.assert_held(GLAZE, self.say("Not sure, I'd have to look.", GLAZE, asked("the glaze test")))
+        self.assert_held(BATTS, self.say("Not sure if the batts order went in.", BATTS))
+
+    def test_a_no_to_the_asking_is_no_no_to_the_done(self):
+        self.assert_went(LOG, self.say("No need to ask me twice.", LOG, asked("the kiln log")))
+        self.assert_went(WEDGE, self.say("No, not spelling that out twice.", WEDGE, asked("the stoneware")))
+        self.assert_held(BATTS, self.say("No, haven't got to it.", BATTS, asked("the batts order")))
+
+    def test_a_not_about_the_talk_naming_the_item_ticks(self):
+        self.assert_went(LOG, self.say("Not explaining the kiln log twice, you heard me.", LOG,
+                                       asked("the kiln log")))
+        self.assert_held(GLAZE, self.say("The glaze test isn't dry.", GLAZE, asked("the glaze test")))
+
+    def test_the_joplin_tick_follows(self):
+        from thirties_core.write_guard import refused
+        db = _Kept(*(t for t, _, _ in BLOCK))
+        self.assertEqual(refused({"op": "complete", "title": LOG},
+                                 "[app] Not explaining the kiln log twice, it's filled in.", db), "")
+        self.assertTrue(refused({"op": "complete", "title": LOG},
+                                "[app] Wedged the stoneware, though the kiln log hasn't been touched.", db))
+
+
+class TestNothingSendsThemBackToSayItAgain(StudioBase):
+    """What a refused done tells the model never sends it back to the user to confirm the done or say it again, and
+    a note beside a done that went through puts it right without asking first."""
+
+    PUSH = re.compile(r"\bask\b|\bconfirm|say it is\b|say it'?s over|one short question", re.IGNORECASE)
+
+    def assert_no_push(self, text):
+        self.assertIsNone(self.PUSH.search(text), text)
+
+    def test_a_refused_done_says_why_and_nothing_more(self):
+        for title, message, shown in ((GLAZE, OPEN_THREE, ""),
+                                      (LOG, "Is the kiln log filled in?", ""),
+                                      (SWEEP, "The studio smells of wet clay today.", ""),
+                                      (BATTS, "no", "Did the batts order go in?"),
+                                      (WEDGE, "I'm partway through wedging the stoneware.", ""),
+                                      (WAX, "Don't tick the wax resist, it's still lumpy.", "")):
+            out = self.say(message, title, shown)
+            self.assert_held(title, out)
+            self.assert_no_push(out)
+
+    def test_a_note_beside_a_done_says_what_else_the_words_say(self):
+        out = self.say("glaze test done, the glaze is still drying", GLAZE)
+        self.assert_went(GLAZE, out)
+        self.assertIn("under way or fine", out)
+        self.assert_no_push(out)
+        out = self.say("the kiln batts got ordered", LOG)
+        self.assert_went(LOG, out)
+        self.assertIn(f"may also mean {BATTS}", out)
+        self.assert_no_push(out)
+
+    def test_several_list_items_matching_mark_the_likeliest(self):
+        for title, tid in (("Label the bisque shelf", "t_bisque"), ("Label the glaze shelf", "t_shelf")):
+            self.api.notes["n_errands"]["body"] += f"- [ ] {title}\n"
+            self.services.tasks.append(item(tid, title))
+            self.services.tasks[-1].list_role = "list"
+        self.t.user_message = "labelled the shelf, that's finished"
+        try:
+            out = self.t.execute("log_outcome", {"event": "Label the shelf", "status": "done"})
+        finally:
+            self.t.user_message = None
+        self.assertTrue(out.startswith(NOT_DONE), out)
+        self.assertIn("Mark the likeliest by its task_id", out)
+        self.assert_no_push(out)
+
+    def test_the_prompt_says_to_mark_the_best_guess(self):
+        from tests.fixtures import DAY, make_scheduler
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        prompt = ConversationManager(plan, [], pending, sched, inference_engine=MockInferenceEngine(),
+                                     active_notes=[]).brain.build_system_prompt()
+        rule = next(line for line in prompt.splitlines() if line.startswith("12. Track what actually happens."))
+        self.assertIn('"Marked X done; say if you meant another"', rule)
+        self.assertIn("Never make them confirm a done or repeat it.", rule)
+        self.assertNotIn("ask which", rule)
 
 
 if __name__ == "__main__":

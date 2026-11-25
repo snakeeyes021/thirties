@@ -88,7 +88,8 @@ class TestOneExtraWordIsTheModelsToRead(AlsoSaidBase):
         out = self.say("wrenhollow files sent!!", PATTERNS)
         self.assert_went(PATTERNS, out)
         self.assertIn('also says "wrenhollow files"', out)
-        self.assertIn("ask which, or correct it", out)
+        self.assertIn("if they meant another item, correct it", out)
+        self.assertNotIn("ask", out)
 
     def test_the_note_never_reaches_the_user(self):
         from thirties_core.done_fit import also_said

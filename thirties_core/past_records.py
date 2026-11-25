@@ -4,7 +4,7 @@
 (assistant_tools.log_outcome):
 
 - **Which list item**: its id, or its exact list wording, or (while the user is talking) the one open list item
-  their words name (done_on_lists.py); several match: the model is told to ask which.
+  their words name (done_on_lists.py); several match: the model picks the likeliest and says so.
 - **A done the user said** (said_for_it.done_refused): which list item it is for is the model's reading; it stops,
   and nothing is recorded, only when nothing the user said is a done or their words name the item as not done.
 - **Working on it isn't finishing it** (work_sessions.py): a session on something that isn't finished stays open
@@ -46,7 +46,7 @@ def resolve(pt: "PlanTools", title: str, task_id: Optional[str]) -> Tuple[Option
             task = same
         elif _talking(pt):
             from thirties_core.done_on_lists import on_the_lists
-            task = on_the_lists(a, title)  # several: the model is told to ask which
+            task = on_the_lists(a, title)  # several: the model picks the likeliest and says so
     if task is not None and _talking(pt):
         from thirties_core.said_for_it import done_refused
         held = done_refused(pt, task.title)
