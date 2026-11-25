@@ -219,6 +219,11 @@ def place_or_move(assistant: Any, title: str, task: Any = None,
         if spot is not None:
             return spot, doubled, said
         minutes = usual_minutes(assistant, task, title)
+        # --- a refused write is not a full day: with room left, nothing moves (it was refused for its own reason) ---
+        if if_time.first_slot(assistant.pt, minutes) is not None or if_time.doubled_slot(assistant.pt, minutes) is not None:
+            logger.warning("%r wasn't put on today's plan though there's room; nothing was moved for it", title)
+            return None, False, said
+        # --- end refused ---
         pick = lowest(assistant, title, task, minutes, protected)
         if pick is None:
             break
@@ -235,6 +240,73 @@ def place_or_move(assistant: Any, title: str, task: Any = None,
 
 
 # --- Joplin is the truth: a line on the Today note means the user wants it today ---
+
+def _names(assistant: Any, line: str, task: Any = None) -> Tuple[set, set]:
+    """The ways a Today line can be named on the plan (its wording, short or whole, and its home item's), and the
+    ids that stand for it (its home item, and its own line on the Today note)."""
+    from thirties_core.titles import title_of
+    names = {line.strip().lower(), title_of(line).strip().lower()}
+    ids = set()
+    if task is not None:
+        ids.add(task.id)
+        names |= {task.title.strip().lower(), title_of(task.title).strip().lower()}
+    try:
+        from thirties_core.today import TodayLinks
+        link = TodayLinks(assistant._db).home_of(line)
+    except Exception:
+        link = None
+    if link:
+        ids.add(link.get("home_id") or "")
+        names |= {str(link.get("home_title") or "").strip().lower(),
+                  title_of(str(link.get("home_title") or "")).strip().lower()}
+    note = None
+    try:
+        note = assistant._today_note()
+    except Exception:
+        pass
+    if note is not None:
+        ids |= {t.id for t in getattr(assistant.s, "tasks", []) or []
+                if t.parent_note_id == note.get("id") and t.title.strip().lower() == line.strip().lower()}
+    return {n for n in names if n}, {i for i in ids if i}
+
+
+def stands_for(assistant: Any, line: str, task: Any = None) -> Any:
+    """The item on today's plan that stands for this Today line, whatever its state: planned (past or not, unmarked
+    included: unknown, never re-placed), done, skipped. None when nothing on today's plan stands for it."""
+    from thirties_core.titles import title_of
+    names, ids = _names(assistant, line, task)
+    for s in assistant.pt.day_plan.spans:
+        if s.is_envelope:
+            continue
+        if (s.task_id and s.task_id in ids) or s.title.strip().lower() in names \
+                or title_of(s.title).strip().lower() in names:
+            return s
+    return None
+
+
+def had_item_today(assistant: Any, line: str, task: Any = None) -> bool:
+    """Its item was on today's plan earlier and left it (removed, cleared, moved off, skipped or dropped), by the
+    plan's history or Before today's records. Such a line is no hand add: it is never given a time."""
+    pt = assistant.pt
+    db = assistant._db
+    day = pt.today().isoformat()
+    names, _ = _names(assistant, line, task)
+    try:
+        from thirties_core.plan_log import changes_for
+        if any(changes_for(db, title=n, plan_date=day) for n in names):
+            return True
+    except Exception:
+        pass
+    try:
+        from thirties_core.carry import OpenPool
+        pool = OpenPool(db).all()
+        for n in names:
+            rec = pool.get(n) or {}
+            if day in (rec.get("set_aside"), rec.get("dropped_on")):
+                return True
+    except Exception:
+        pass
+    return False
 
 def loose_today(assistant: Any) -> List[str]:
     """Lines on today's list that no planned item stands for (day_lists.pencilled_in, which takes in any left
@@ -272,6 +344,9 @@ def _place_ahead_rows(assistant: Any) -> List[str]:
         task = _task_of(assistant, title, row.get("home_id") or None)
         rec = pool.get(title.strip().lower()) or {}
         theirs = bool(rec.get("named_day")) or not rec.get("set_aside")
+        if stands_for(assistant, title, task) is not None:  # already on today's plan, whatever its state
+            store.set_state(pt.today(), title, "listed")
+            continue
         if not theirs and streaks.held(pt.today(), title, getattr(task, "id", "") or "",
                                        due=getattr(task, "due", "") or "",
                                        urgent=stated_cant_wait(assistant._db, task, title)):
@@ -288,10 +363,14 @@ def _place_ahead_rows(assistant: Any) -> List[str]:
 
 
 def _place_lines(assistant: Any, told: List[str]) -> List[str]:
-    """Every line on the Today note with no plan item: the user wants it today, so it gets its time (one line
-    saying so, once), or the day being full, the lowest item moves on. Never taken off for want of a plan item. One
-    resting after missed days (backoff.py: Thirties doesn't put it on, from any list) waits for the leftovers
-    question instead."""
+    """Every line the user added to the Today note, one that never had a plan item today: the user wants it
+    today, so it gets its time (one line saying so, once), or the day being full, the lowest item moves on.
+
+    - A line something on today's plan stands for, in any state (an unmarked past one included: unknown), is
+      left alone: never re-placed, never moved.
+    - A line whose item left today's plan earlier today (removed, cleared, moved off, skipped, dropped) is no
+      hand add: it is taken off the Today note quietly (the user took the item off), logged, never told.
+    - One resting after missed days (backoff.py) waits for the leftovers question."""
     from thirties_core import if_time
     from thirties_core.backoff import MissStreaks, stated_cant_wait
     from thirties_core.clock import format_clock, thirty_of
@@ -299,6 +378,12 @@ def _place_lines(assistant: Any, told: List[str]) -> List[str]:
     lines: List[str] = []
     for title in loose_today(assistant):
         task = _task_of(assistant, title)
+        if stands_for(assistant, title, task) is not None:
+            continue
+        if had_item_today(assistant, title, task):
+            if take_line_off(assistant, title):
+                logger.info("Today note: %r left today's plan earlier today; its leftover line was taken off", title)
+            continue
         if streaks.held(assistant.pt.today(), title, getattr(task, "id", "") or "", due=getattr(task, "due", "") or "",
                         urgent=stated_cant_wait(assistant._db, task, title)):
             continue

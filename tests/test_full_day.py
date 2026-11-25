@@ -111,16 +111,62 @@ class JoplinIsTheTruth(Base):
         self.assertEqual(full_day.mirror_today(self.a), [])
         self.assertFalse(self.planned("Lube the chains"))
 
-    def test_a_line_is_never_taken_off_for_want_of_a_plan_item(self):
+    def test_a_line_whose_item_left_todays_plan_earlier_is_never_given_a_time_and_goes_quietly(self):
         self.on_today("spoke bins today", "Sort the spoke bins")
         span = self.planned("Sort the spoke bins")[0]
-        self.t.day_plan.spans.remove(span)  # off the plan by a path that left its line behind
+        self.t._drop(span)  # its time cleared earlier today, by a path that left its Today line behind
+        self.t._save_plan_after_change()
+        if "Sort the spoke bins" not in self.api.notes["n_today"]["body"]:
+            self.api.notes["n_today"]["body"] += "- [ ] Sort the spoke bins\n"  # the line lingers
         bench = self.api.notes["n_bench"]["body"]
         said = full_day.mirror_today(self.a)
-        self.assertIn("- [ ] Sort the spoke bins", self.api.notes["n_today"]["body"])  # Joplin is the truth
-        self.assertTrue(self.planned("Sort the spoke bins"))
-        line_with("\n".join(said), "Sort the spoke bins", "today's plan at")
+        self.assertEqual(said, [])  # a repair: never told
+        self.assertFalse(self.planned("Sort the spoke bins"))  # never given a time again
+        self.assertNotIn("Sort the spoke bins", self.api.notes["n_today"]["body"])  # the user took it off today
         self.assertEqual(self.api.notes["n_bench"]["body"], bench)  # a home list is never written to
+
+    def test_an_unmarked_past_item_is_unknown_never_re_placed_or_moved(self):
+        self.t.execute("add_event", {"title": "Rear wheel truing", "start": "9:40 AM", "duration": "40 min",
+                                     "task_id": "t_wheel", "category": "task"})
+        self.assertIn("True the rear wheel", self.api.notes["n_today"]["body"])  # its line, worded as its list item
+        set_debug_time(at("15:10"))  # its block went by and nothing was said
+        before = [(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope]
+        said = full_day.mirror_today(self.a)
+        self.assertEqual(said, [])
+        self.assertEqual([(s.title, s.start_dt) for s in self.t.day_plan.spans if not s.is_envelope], before)
+        for day in (DAY + timedelta(days=1), SATURDAY):  # never moved on to a later day either
+            self.assertFalse(any(s.task_id == "t_wheel" for s in self.t.plan_for(day).spans), day)
+
+    def test_a_refused_write_with_free_time_left_is_never_read_as_a_full_day(self):
+        self.on_today("spoke bins today", "Sort the spoke bins")
+        self.api.notes["n_today"]["body"] += "- [ ] Lube the chains\n"
+        with patch("thirties_core.if_time.place", return_value=(None, False)):  # the write refused, room left
+            said = full_day.mirror_today(self.a)
+        self.assertFalse(any("No room today" in line for line in said), said)
+        self.assertTrue(self.planned("Sort the spoke bins"))  # nothing moved for it
+        self.assertIn("- [ ] Lube the chains", self.api.notes["n_today"]["body"])
+
+    def test_one_message_a_sync_however_many_lines_and_none_for_repairs(self):
+        from types import SimpleNamespace
+        from thirties_core.background import BackgroundService
+        self.on_today("spoke bins today", "Sort the spoke bins")
+        span = self.planned("Sort the spoke bins")[0]
+        self.t._drop(span)
+        self.t._save_plan_after_change()
+        if "Sort the spoke bins" not in self.api.notes["n_today"]["body"]:
+            self.api.notes["n_today"]["body"] += "- [ ] Sort the spoke bins\n"
+        self.api.notes["n_today"]["body"] += "- [ ] Lube the chains\n- [ ] Patch the demo tubes\n- [ ] Oil the pedals\n"
+        sent = []
+        service = BackgroundService(self.sched.config, lambda title, text, kind: sent.append((kind, text)),
+                                    scheduler=self.sched, joplin_engine=self.services.joplin,
+                                    inference_engine=None, sync_engine=SimpleNamespace(sync=lambda: None))
+        service.manager = lambda: SimpleNamespace(tools=self.t, day_plan=self.t.day_plan)
+        service.send = lambda text, kind, **_: sent.append((kind, text))
+        service.today_sync(at("10:20"))
+        self.assertEqual(len(sent), 1, sent)
+        for title in ("Lube the chains", "Patch the demo tubes", "Oil the pedals"):
+            self.assertIn(title, sent[0][1])
+        self.assertNotIn("Sort the spoke bins", sent[0][1])
 
     def test_a_full_day_moves_the_lowest_item_on_and_the_users_line_takes_its_time(self):
         self.on_today("spoke bins today", "Sort the spoke bins")

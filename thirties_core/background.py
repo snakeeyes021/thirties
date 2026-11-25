@@ -1159,8 +1159,9 @@ class BackgroundService:
         assistant = self.manager().tools.assistant
         if assistant is not None and assistant.morning_pending() and now.hour < 12:
             assistant.start_the_day()  # Joplin was closed at wake-up; it may be open now
-        for message in assistant.sync_today() if assistant is not None else []:
-            self.send("📝 " + message, "today", now=now)
+        said = [m for m in (assistant.sync_today() if assistant is not None else []) if m]
+        if said:  # at most one message a sync, however many lines it has (repairs say nothing: full_day.py)
+            self.send("📝 " + "\n".join(said), "today", now=now)
         if assistant is not None:  # done items move to the month's Done note (done_log.py)
             from thirties_core.done_log import DoneLog
             filed = DoneLog(self.scheduler.state_db).sweep(assistant)
