@@ -2095,6 +2095,11 @@ class AssistantTools(KindTools):
             from thirties_core.item_path import named  # a nested list item with its parents
             lines.append(f"- {named(tasks, k['title'], k.get('task_id'), 200)} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
+        # --- the coming week's holidays, as facts: whether an item has to be done before one is the model's call ---
+        from thirties_core.holidays import ahead_text
+        holidays = ahead_text(self.pt, self._today())
+        ask = "\n".join(x for x in (holidays, ask) if x)
+        # --- end holidays ---
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; where each "
                 "one is now):\n" + "\n".join(lines) + "\nAS THE PLAN STANDS NOW "
                 + leftover_facts.for_model(now_facts, names=False) + ("\n" + ask if ask else ""))

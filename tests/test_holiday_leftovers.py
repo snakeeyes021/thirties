@@ -149,5 +149,16 @@ class HolidayToday(HolidayBase):
         self.assertEqual(self.pool("Replace the brake cables")["start"], DAY.isoformat())
 
 
+class TheMorningModelSeesTheHolidays(HolidayBase):
+    """2: the leftovers context names the coming week's holidays, by name and day; the judgement is the model's."""
+
+    def test_the_leftover_brief_names_the_coming_holidays(self):
+        self.missed_yesterday("Replace the brake cables", "t_cables")
+        self.t.execute("rollover_proposal", {})
+        brief = self.a.leftover_brief()
+        self.assertIn("Lantern Day", brief)
+        self.assertIn("Saturday", brief[brief.index("Lantern Day") - 60:brief.index("Lantern Day") + 60])
+
+
 if __name__ == "__main__":
     unittest.main()
