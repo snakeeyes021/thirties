@@ -1,6 +1,5 @@
 """A done goes through for an item the user plainly named, even when a word of its title is shared with another
-item; a done the model reads for an item the words don't point to goes on as its reading, with a note naming what
-they fit.
+item; a done the model reads for an item the words don't point to goes on as its reading.
 
 Seen in a simulated day: an item like "Pup into crate" beside "Order a crate divider", and a morning walk beside two
 other walks: saying the pup was settled in the crate, or the stroll and breakfast were over, was refused each time.
@@ -77,13 +76,11 @@ class TestDoneOnTheUsersWords(RoutineCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
 
     def test_an_item_the_words_dont_point_to_is_the_models_reading(self):
-        for title, said, fits in (("Order a crate divider", "crate is done", "Pup into crate"),
-                                  ("Midday stroll", "evening stroll done", "Evening stroll"),
-                                  ("Order a crate divider", "pup is settled in the crate now, finished",
-                                   "Pup into crate")):
+        for title, said in (("Order a crate divider", "crate is done"), ("Midday stroll", "stroll is done"),
+                            ("Midday stroll", "evening stroll done"), ("Pup's vet visit", "laundry done"),
+                            ("Order a crate divider", "pup is settled in the crate now, finished")):
             out = self.done(title, said)
             self.assertFalse(out.startswith(NOT_DONE), (title, said, out))
-            self.assertIn(fits, out[out.index("(The user's"):], (title, said))
             self.assertEqual(self.status(title), SpanStatus.DONE)
             next(s for s in self.t.day_plan.spans if s.title == title).status = SpanStatus.PLANNED
 

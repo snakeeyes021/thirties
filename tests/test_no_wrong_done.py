@@ -5,8 +5,8 @@
   the plan or in Joplin, however the model calls log_outcome.
 - **Said of something not on the plan.** "the glaze order is sent" while a Glaze recipe test is planned and Send
   the glaze order is listed: the planned item shares a word, but the user's words name the listed one. Which one
-  they meant is the model's to read: the done goes on, and its result names the list item that fits all the words,
-  with its id, so the model can mark that one and put this one right.
+  they meant is the model's to read: the done goes on, and its result says what else the words say, so the model
+  can ask or put it right.
 
 Through the real log_outcome path on the mock Joplin API, with the model calling it the careless way (by the
 planned item's id, its title, or a short form of it), and through a whole turn with a scripted model. Fixtures are
@@ -146,14 +146,13 @@ class SomethingNotPlannedTest(WrongDoneBase):
         self.assertIn("[x] Send the glaze order", self.body("n_errands") + "".join(
             n.get("body") or "" for n in self.api.notes.values() if (n.get("title") or "").startswith("Done ")))
 
-    def test_the_note_names_the_list_item_that_fits(self):
+    def test_the_note_says_what_else_the_words_say(self):
         self.api.notes["n_errands"]["body"] += "- [ ] Send the glaze order\n"
         self.services.tasks.append(item("t_order", "Send the glaze order"))
         self.services.tasks[-1].list_role = "list"
         out = self.say("the glaze order is sent", {"event": self.span("Glaze recipe test").id, "status": "done"})
         self.assertFalse(str(out).startswith(NOT_DONE), out)
-        self.assertIn("names Send the glaze order", out)
-        self.assertIn("t_order", out)
+        self.assertIn('also says "glaze order"', out)
         out = self.say("the glaze order is sent", {"event": "t_order", "status": "done"})
         self.assertFalse(str(out).startswith(NOT_DONE), out)
         self.assertIn("[x] Send the glaze order", self.body("n_errands") + "".join(

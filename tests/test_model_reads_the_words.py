@@ -222,7 +222,7 @@ class TestAWordForWhichKind(WordsCase):
         self.listed("Oil the ash paddle")
         out = self.tick("Varnish the paddle", "the ash paddle is varnished")
         self.assertWent(out)
-        self.assertIn("Oil the ash paddle", out)  # the list item that fits all the words is named
+        self.assertIn('also says "ash paddle"', out)
 
     def test_a_different_thing_said_goes_on_with_a_note(self):
         out = self.tick("Varnish the paddle", "the paddle rack is varnished")

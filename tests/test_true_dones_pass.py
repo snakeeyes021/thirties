@@ -94,12 +94,11 @@ class NowAboutTheDisplayTest(TrueDoneBase):
                 self.fresh()
                 self.assert_not_ticked("Kiln check", self.say(message, "Kiln check", prior=("", self.SHOWN)))
 
-    def test_an_item_the_words_dont_name_is_the_models_reading_with_a_note(self):
+    def test_an_item_the_words_dont_name_is_the_models_reading(self):
         for message in self.MESSAGES[3:]:
             with self.subTest(message=message):
                 self.fresh()
                 out = self.say(message, "Kiln check", prior=("", self.SHOWN))
-                self.assertIn("says nothing of Kiln check", out)
                 self.assert_ticked("Kiln check", out)
 
     def test_now_about_the_item_itself_still_holds(self):

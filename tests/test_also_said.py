@@ -4,8 +4,7 @@ A done whose words share a word with the item but also say a word it lacks ("wre
 Wrenhollow marionette patterns) was refused as naming something else, though the person meant the item. Whether
 such a word fits is the model's reading: the done goes on, and its result says what else the words say, so the
 model can ask or put it right. When those words name another planned or listed item (all that item's words, or
-its head noun), the done goes on too, and its result names that item (with the id of the list item that fits all
-the words, to mark instead); the Joplin tick follows the same reading.
+its head noun), the done goes on too, with the same note; the Joplin tick follows the same reading.
 Invented fixtures: a marionette maker who also keeps a falcon.
 """
 
@@ -114,8 +113,7 @@ class TestWordsNamingAnotherItemAreANote(AlsoSaidBase):
         self.listed(ORDER, "t_order")
         out = self.say("the gesso order is sent", SWATCH)
         self.assert_went(SWATCH, out)
-        self.assertIn(f"names {ORDER}", out)
-        self.assertIn("t_order", out)  # the list item that fits every word, to mark instead
+        self.assertIn('also says "gesso order"', out)
 
     def test_all_of_a_planned_items_words(self):
         self.planned(ORDER)
@@ -127,7 +125,7 @@ class TestWordsNamingAnotherItemAreANote(AlsoSaidBase):
         self.listed(PERCH, "t_perch")
         out = self.say("the marionette perch is carved", HANDS)
         self.assert_went(HANDS, out)
-        self.assertIn(f"names {PERCH}", out)
+        self.assertIn('also says "marionette perch"', out)
 
     def test_a_noun_of_its_own_still_goes_on_beside_another_listed_item(self):
         self.listed(PERCH, "t_perch")

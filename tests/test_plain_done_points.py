@@ -7,7 +7,7 @@ name the item as not done (said_for_it.py).
   it.
 - Said again: a done said again after the app asked which marks it.
 - Talk to the app beside a done ("quit checking on that one") never makes it read as under way.
-- What else the words fit is a note, never a stop: words that fit two items still to do as well, words that name
+- What else the words fit never stops a done: words that fit two items still to do as well, words that name
   another item or fit it better, a pointer back to a reply that named two items, a reply about another item.
 - Still refused: no done said, and a no.
 
@@ -81,12 +81,11 @@ class TestTheModelsReading(PlainCase):
     def test_fits_another_item_better(self):
         self.assertTrue(by_the_models_reading(self.t, "chickens watered", HENS))
         self.assertFalse(by_the_models_reading(self.t, "chickens watered", "Brush the goats"))
-        out = self.assertMarked("the chooks got watered", "Brush the goats")
-        self.assertIn(f"{HENS} and says nothing of Brush the goats", out)
+        self.assertMarked("the chooks got watered", "Brush the goats")
 
-    def test_another_item_named_goes_on_with_a_note(self):
+    def test_another_item_named_goes_on_with_the_note_it_had(self):
         self.assertIn(f"may also mean {HENS}", self.assertMarked("the hens got watered", "Water the sourdough starter"))
-        self.assertIn("fits Glaze the mugs", self.assertMarked("the mugs are glazed", HENS))
+        self.assertMarked("the mugs are glazed", HENS)
 
     def test_no_done_words_no_done(self):
         self.assertRefused("the chooks are getting watered", HENS)
@@ -99,15 +98,12 @@ class TestTheModelsReading(PlainCase):
 class TestTwoItemsFit(PlainCase):
     items = BOTH_ANIMALS
 
-    def test_words_that_say_nothing_beyond_the_tie_go_on_with_a_note(self):
-        out = self.assertMarked("the watering's all done", HENS)
-        self.assertIn(f"Water the goats as well as {HENS}", out)
-        out = self.assertMarked("all watered now", "Water the goats")
-        self.assertIn("as well as Water the goats", out)
+    def test_words_that_say_nothing_beyond_the_tie_are_the_models_reading(self):
+        self.assertMarked("the watering's all done", HENS)
+        self.assertMarked("all watered now", "Water the goats")
 
     def test_a_word_beyond_the_tie_is_the_models_to_read(self):
-        out = self.assertMarked("the chooks got watered", HENS)
-        self.assertNotIn("as well as", out)
+        self.assertMarked("the chooks got watered", HENS)
         self.assertEqual(self.span("Water the goats").status, SpanStatus.PLANNED)
 
     def test_the_other_animal_named_goes_on_with_a_note(self):
@@ -138,13 +134,11 @@ class TestAnsweringTheApp(PlainCase):
         self.assertMarked("as I wrote. tick it", HENS, shown)
 
     def test_another_item_than_the_one_asked_about(self):
-        out = self.assertMarked("go ahead and tick that", "Water the goats", self.asked())
-        self.assertIn(f"answers the question about {HENS}, and Water the goats wasn't in it", out)
+        self.assertMarked("go ahead and tick that", "Water the goats", self.asked())
 
     def test_a_reply_naming_two_open_items(self):
         shown = ("", "Water the hens and Water the goats are both still open.")
-        out = self.assertMarked("go ahead and tick that", HENS, shown)
-        self.assertIn("points back to a reply that named", out)
+        self.assertMarked("go ahead and tick that", HENS, shown)
 
     def test_a_no(self):
         self.assertRefused("no, not that one", HENS, self.asked())
@@ -159,12 +153,10 @@ class TestSaidAgain(PlainCase):
 
     def test_said_again_for_another_item(self):
         asks = {HENS: "the watering's all done"}
-        out = self.assertMarked("the watering's all done", "Water the goats", ("", "Which one did you finish?"), asks)
-        self.assertIn(f"{HENS} as well as Water the goats", out)
+        self.assertMarked("the watering's all done", "Water the goats", ("", "Which one did you finish?"), asks)
 
     def test_nothing_asked_before(self):
-        out = self.assertMarked("the watering's all DONE", HENS, ("", "Which one did you finish?"))
-        self.assertIn(f"as well as {HENS}", out)
+        self.assertMarked("the watering's all DONE", HENS, ("", "Which one did you finish?"))
 
     def test_a_reply_that_doesnt_say_which(self):
         self.assertIn(NOTHING_DONE, self.assertRefused("ok", HENS, ("", "Which one did you finish?")))
@@ -262,7 +254,6 @@ class TestWholeTurns(ConversationTestCase):
     def test_two_items_fit_and_nothing_was_asked(self):
         out = self.turn("the watering's all done", "Water the goats", "Marked the goats; was it the hens too?")
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn(f"{HENS} as well as Water the goats", out)
         self.assertEqual(self.status("Water the goats"), SpanStatus.DONE)
         self.assertEqual(self.status(HENS), SpanStatus.PLANNED)
         out = self.turn("ok", HENS, "Which one?")

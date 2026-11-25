@@ -4,10 +4,9 @@
   in Joplin, a session on something that goes on leaves it open, and it needs something the user said to be a done.
 - A done whose name only matches an item already settled earlier today (done, skipped, a session) still looks for
   the open list item the user's words name.
-- An answer to "which one?" picks the item it points to; a done the model read for another goes on with a note
-  naming the one picked, and a reply that doesn't say which ticks nothing.
-- With several items sharing a word, or copies of one item, the done goes on for the one the model read, with a
-  note naming the one whose time has come.
+- An answer to "which one?" picks the item it points to; a done the model read for another goes on as its
+  reading, and a reply that doesn't say which ticks nothing.
+- With several items sharing a word, or copies of one item, the done goes on for the one the model read.
 
 Invented lists, on a fake Joplin.
 """
@@ -170,11 +169,10 @@ class TestTheAnswerToWhichOne(DoneCase):
         asked = ("watered the fern", "Which one: Water the fern by the window, or Water the fern in the hall?")
         out = self.done("the first one", self.spans("Water the fern by the window")[0].id, asked)
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertNotIn("by its place", out)
         self.assertIn("- [x] Water the fern by the window", self.body("n_garden"))
         self.assertIn("- [ ] Water the fern in the hall", self.body("n_garden"))
 
-    def test_another_one_than_the_place_picks_goes_on_with_a_note(self):
+    def test_another_one_than_the_place_picks_is_the_models_reading(self):
         asked = ("watered the fern, that's finished",
                  "Which fern did you water: Water the fern by the window, or Water the fern in the hall?")
         out = self.done("yes", self.task("Water the fern in the hall").id, asked)
@@ -182,7 +180,6 @@ class TestTheAnswerToWhichOne(DoneCase):
         self.assertEqual(self.ticks(), [])
         out = self.done("the first one", self.task("Water the fern in the hall").id, asked)
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn("picks Water the fern by the window by its place", out)
         self.assertEqual(self.ticks(), ["Water the fern in the hall"])
 
 
@@ -200,8 +197,7 @@ class TestTheOneWhoseTimeCame(DoneCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertEqual(self.spans("Morning stroll")[0].status, SpanStatus.PLANNED)
         out = self.done("the stroll's done", self.spans("Evening stroll")[0].id)
-        self.assertFalse(out.startswith(NOT_DONE), out)  # the model's reading, with a note naming the others
-        self.assertIn("as well as Evening stroll", out)
+        self.assertFalse(out.startswith(NOT_DONE), out)  # the model's reading
 
     def test_copies_with_one_title_are_the_one_whose_time_came(self):
         for start in ("8:00 AM", "1:00 PM", "9:00 PM"):
@@ -210,7 +206,6 @@ class TestTheOneWhoseTimeCame(DoneCase):
         late = next(s for s in self.spans("Stroll") if s.start_dt == at("21:00"))
         out = self.done("stroll done", late.id)
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn(f"may mean the Stroll at 1:00 PM [id {now.id}]", out)
         out = self.done("stroll done", now.id)
         self.assertFalse(out.startswith(NOT_DONE), out)
 
@@ -228,7 +223,6 @@ class TestTheOneWhoseTimeCame(DoneCase):
         first, second = sorted(self.spans("Stroll"), key=lambda s: s.start_dt)
         out = self.done("stroll done early", second.id)
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn(f"may mean the Stroll at 8:00 AM [id {first.id}]", out)
 
 
 if __name__ == "__main__":

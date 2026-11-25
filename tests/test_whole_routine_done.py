@@ -131,10 +131,9 @@ class TestBothPartsAnswered(KilnCase):
         for title, out in self.all_done("both", shown).items():
             self.assertFalse(out.startswith(NOT_DONE), f"{title}: {out}")
 
-    def test_both_beyond_the_routine_carries_a_note(self):
+    def test_both_beyond_the_routine_is_the_models_reading(self):
         out = self.done("Both", "Renew the kiln permit", self.QUESTION)
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn("Renew the kiln permit wasn't in it", out)
 
     def test_both_without_a_question_about_it_is_unchanged(self):
         out = self.done("both", "Sweep the kiln shelf", "Next: Renew the kiln permit at 1:00 PM.")

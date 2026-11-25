@@ -401,37 +401,6 @@ def done_question(shown: Optional[str]) -> str:
     return last[-1] if last and _TICK_WORD_RE.search(last[-1]) else ""
 
 
-def unanswered_which(pt: Any, title: str) -> str:
-    """Why no tick goes ahead when the last reply asked which of several open items the user finished and their
-    words name none of them, point at none by place or count, and only say it's done ("done!", "that one's
-    sorted"): nothing says which. "" otherwise."""
-    message = getattr(pt, "user_message", None)
-    _, shown = getattr(pt, "prior_exchange", None) or ("", "")
-    if getattr(pt, "by_hand", False) or not message or "?" not in (shown or ""):
-        return ""
-    from thirties_core.done_counts import pointed_count
-    from thirties_core.done_reference import (BOTH_RE, BULK_RE, ORDINAL_RE, PLURAL_RE, _listed_alone,
-                                              _open_items_shown, _titles)
-    from thirties_core.done_words import _hits
-    from thirties_core.plain_done import _open_titles, _which_words, says_it_happened
-    if not says_it_happened(message) or ORDINAL_RE.search(message) or BOTH_RE.search(message) \
-            or PLURAL_RE.search(message) or BULK_RE.search(message) or _ALL_RE.search(message) \
-            or pointed_count(message):
-        return ""
-    titles = list(dict.fromkeys(_titles(pt) + [title]))
-    shown_open = _open_items_shown(pt, shown, titles)
-    listed = [t for t in dict.fromkeys(_open_titles(pt) + shown_open) if _listed_alone(shown, t)]
-    which = _which_words(message)
-    if len(listed) < 2 or any(_hits(which, t) for t in titles + shown_open):
-        return ""
-    from thirties_core.done_words import asked_about
-    asked = done_question(shown)
-    if asked and len(asked_about(asked, titles + shown_open, titles)) == 1:
-        return ""  # the question was about one item: the reply answers it, whatever else the reply listed
-    return (f"The user's words don't say which item they finished, and the last reply asked them, so {title} isn't "
-            "ticked. Ask again which one, in one short question.")
-
-
 # a question asking which item, not whether ("Which one?", "what did you finish?")
 _WHICH_ASKED_RE = re.compile(r"\b(?:which|what)\b", re.IGNORECASE)
 
@@ -543,9 +512,8 @@ def held_done(pt: Any, title: str, others: Iterable[str], words: Optional[str], 
               spanned: bool = False) -> str:
     """Why a done in this turn can't go ahead (log_outcome): the item is only asked about, the words point at its
     parts, a reply to the app's question leaves it out ("both, except the bailers"), the user said no to the app's
-    question about it, the app asked which and the words don't say (``unanswered_which``), or nothing said is a
-    done. A done the user asked for in an earlier message isn't held by a question (done_words.earlier_request). ""
-    when it can go ahead."""
+    question about it, or nothing said is a done. A done the user asked for in an earlier message isn't held by
+    a question (done_words.earlier_request). "" when it can go ahead."""
     message = getattr(pt, "user_message", None)
     if getattr(pt, "by_hand", False) or message is None:
         return ""
@@ -564,7 +532,7 @@ def held_done(pt: Any, title: str, others: Iterable[str], words: Optional[str], 
         left = left_out(message, title, others, answered=True)
         if left:
             return left
-    return said_no(pt, title) or unanswered_which(pt, title) or no_done_said(pt, title, others, words, spanned)
+    return said_no(pt, title) or no_done_said(pt, title, others, words, spanned)
 
 
 def done_refused(pt: Any, title: str, others: Optional[Iterable[str]] = None, event: Any = None) -> str:
@@ -608,4 +576,4 @@ def auto_done_asked(pt: Any) -> bool:
 
 __all__ = ["asked_only", "asks_for_a_tick", "asks_for_change", "auto_done_asked", "begun_or_next", "done_question",
            "done_refused", "held_done", "is_asking", "no_done_said", "only_questions", "parts_only", "parts_refusal",
-           "said_no", "told_done", "told_skip", "unanswered_which"]
+           "said_no", "told_done", "told_skip"]

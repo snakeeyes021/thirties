@@ -3,12 +3,12 @@
 Someone says a whole round of work is finished, and names the few things in it that aren't, said on their
 own. The model ticks the other items in that stretch: a correct reading. The done checks used to ask, for
 each item, whether the done in that sentence was about it; the item wasn't named and the names said were other
-items, so they refused it. Which items a done is for is the model's reading. Python keeps one gate (something the user
-told this turn is a done: a done word, a report, a yes to a done question, an ask for a tick) and stops a tick only
-of an item the words name as not done: left out of the done ("except", "apart from", "but not", "though ... are
-still open", read with that part taken out of the rest), not yet, still going, told not to tick it, asked about
-only in a question, or answered no to the app's question about it. What else the words say goes in the result as a
-note.
+items, so they refused it. Which items a done is for is the model's reading. Python keeps one gate (something the
+user told this turn is a done: a done word, a report, a yes to a done question, an ask for a tick) and stops a tick
+only of an item the words name as not done: left out of the done ("except", "apart from", "but not", "though ...
+are still open", read with that part taken out of the rest), not yet, still going, told not to tick it, asked
+about only in a question, or answered no to the app's question about it. A done carries only the notes it always
+had.
 
 Invented fixtures: a pottery studio's afternoon, with five short jobs planned from 2:40.
 """
@@ -188,15 +188,14 @@ class TestTheModelsReadingStands(StudioBase):
         self.assert_held(LOG, self.say(message, LOG, shown))
         self.assert_went(SWEEP, self.say(message, SWEEP, shown))
 
-    def test_words_naming_another_item_go_on_with_a_note_naming_it(self):
+    def test_words_naming_another_item_go_on_with_the_notes_a_done_had(self):
         samples = "Order glaze samples"
         self.api.notes["n_errands"]["body"] += f"- [ ] {samples}\n"
         self.services.tasks.append(item("t_samples", samples))
         self.services.tasks[-1].list_role = "list"
         out = self.say("the glaze samples are ordered", GLAZE)
         self.assert_went(GLAZE, out)
-        self.assertIn(f"names {samples}", out)
-        self.assertIn("t_samples", out)
+        self.assertIn('also says "glaze samples"', out)
         out = self.say("the kiln batts are ordered", LOG)
         self.assert_went(LOG, out)
         self.assertIn(BATTS, out)
@@ -235,12 +234,21 @@ class TestASkipIsReadTheSameWay(StudioBase):
 
 class TestABareDoneAnswersTheQuestionAsked(StudioBase):
     """A bare done answers the app's question: about one item, it's that item's, whatever else the reply listed;
-    asking which, it doesn't say which."""
+    asking which, it's the model's pick, and the reply names it."""
 
     def test_a_question_about_one_item_and_one_asking_which(self):
         shown = f"Not marked yet: {GLAZE}, {LOG}. Did you finish the glaze test?"
         self.assert_went(GLAZE, self.say("I did, finally!", GLAZE, shown))
-        self.assert_held(LOG, self.say("finished it!", LOG, f"Which did you finish: {LOG} or {BATTS}?"))
+        self.t.picked_dones = set()
+        self.assert_went(LOG, self.say("finished it!", LOG, f"Which did you finish: {LOG} or {BATTS}?"))
+        self.assertEqual(self.t.picked_dones, {LOG})
+
+
+class TestOnlyTheNotesADoneAlwaysHad(StudioBase):
+    def test_a_done_read_for_another_item_carries_no_new_note(self):
+        out = self.say("the wheel bay is swept", WEDGE)
+        self.assert_went(WEDGE, out)
+        self.assertNotIn("(The user's message", out)
 
 
 class TestADoneToldBesideTheAppsStatus(StudioBase):

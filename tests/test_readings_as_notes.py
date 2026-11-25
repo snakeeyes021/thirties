@@ -7,8 +7,8 @@ words say plainly the item isn't finished ("not yet"), or say it's under way wit
 
 Words that fit another item better ("the tallow got strained" for Dip the tallow tapers, beside Strain the tallow
 into the moulds) are the model's to read too: the done goes on, and its result names that item, also when the words
-name the other item outright (all its words), or say nothing of this one. Which clauses carry the done is read
-generously: every clause with a done word or a past in it ("got to finish the tallow").
+name the other item outright (all its words). Which clauses carry the done is read generously: every clause with a
+done word or a past in it ("got to finish the tallow").
 
 Asked not to tick "it" beside a done ("Tapers: dipped. No tick on that one till they harden."), which item "it" means
 is the model's reading too: the done goes on, and its result names the items it may mean. Asked not to tick an item

@@ -6,8 +6,8 @@ strictly the other way round: every naming word in the phrase has to be one of t
 forms, or an everyday word for it: done_words.kin). A phrase that shares a word with the item but carries a naming
 word the item doesn't have ("glaze order" beside Glaze recipe test) may name something else. Whether it does is
 the model's reading: the done goes through with a note saying what else the words say, so the model can ask or put
-it right. When those words name another planned or listed item, the note names that item (``named_note``); the
-asks that change the plan without a done read them as not pointing at this item (done_reference.check).
+it right, also when those words name another planned or listed item. The asks that change the plan without a done
+read such words as not pointing at this item (done_reference.check).
 
 - **The phrase**: a run of words next to each other in one clause that names something; small words, done words,
   times, words for how or when ("finally", "this morning") and the like end it.
@@ -17,8 +17,8 @@ asks that change the plan without a done read them as not pointing at this item 
   done goes through, and the result says the words also say that phrase (``also_said``).
 - **Names another item**: such a phrase is all another planned or listed item's words ("glaze order" beside Send
   the glaze order), or carries that item's head noun ("the teapot lid" beside Sand the lid) (``named_instead``).
-  Then the done's note names it; ``elsewhere`` finds the one open list item that fits all the words, if any, for
-  the model to mark instead.
+  The asks that change the plan without a done don't read that as this item; ``elsewhere`` finds the one open list
+  item that fits all the words, if any.
 - **A word for which kind**: "the ash paddle is varnished" for Varnish the paddle. Extra words placed ahead of the
   item's own, in a phrase whose last word is the item's, only tell its kind or material; they count against it
   only when another planned or listed item has them. A phrase whose last word the item lacks ("glaze order" beside
@@ -354,17 +354,5 @@ def refusal(pt: Any, title: str, phrases: List[str], items: List[str]) -> str:
     return why + "If they finished that one, mark it; if it isn't clear which, ask in one short question."
 
 
-def named_note(pt: Any, title: str, phrases: List[str], items: List[str]) -> str:
-    """One plain line for the model when a done goes on though the user's words name another item that shares a
-    word with this one (``named_instead``): the item they name, and the open list item that fits all their words if
-    there is one, so it can mark that one and put this one right."""
-    said = "; ".join(f'"{p}"' for p in phrases)
-    line = f"(The user's message names {', '.join(items)} ({said}), not {title}: if they meant that one, "
-    task = elsewhere(getattr(pt, "assistant", None), phrases)
-    if task is not None:
-        return line + f"mark {task.title}, with event {task.id}, and correct {title}; if it isn't clear, ask.)"
-    return line + f"mark it and correct {title}; if it isn't clear which, ask.)"
-
-
-__all__ = ["CONTAINER_NOUNS", "names_something_else", "named_instead", "named_note", "also_said", "names_of",
-           "reading", "fits_all", "fits_but_for_a_container", "only_said_which_kind", "elsewhere", "refusal"]
+__all__ = ["CONTAINER_NOUNS", "names_something_else", "named_instead", "also_said", "names_of", "reading",
+           "fits_all", "fits_but_for_a_container", "only_said_which_kind", "elsewhere", "refusal"]

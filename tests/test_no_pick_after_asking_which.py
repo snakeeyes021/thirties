@@ -1,8 +1,8 @@
-"""After the assistant asked which item, a bare done picks nothing.
+"""After the assistant asked which item, a bare done is the model's pick.
 
-- **A question listing them isn't a list to pick from.** "Which did you finish: A, B or C?", or any reply listing
-  several open items with a question in it: a bare "done!" or "that one's sorted" ticks none of them, and the note
-  tells the model to ask again which one, in one short question.
+- **A bare done after that question is the model's pick.** "Which did you finish: A, B or C?", or any reply
+  listing several open items with a question in it: a bare "done!" or "that one's sorted" ticks the one the model
+  picks, and the reply has to name it (reply_checks.picked_unnamed).
 - **A done that names the item still stands.** "the atlases are reshelved" after the same question ticks that item.
 
 Through the real tool path on the mock Joplin API (no real calls). Fixtures are invented: a library's day.
@@ -65,17 +65,20 @@ class LibraryDay(TodayTestCase):
 
 class TestAfterAskingWhich(LibraryDay):
 
-    def test_a_bare_done_picks_none_of_them(self):
+    def test_a_bare_done_is_the_models_pick_and_the_reply_names_it(self):
         for shown in QUESTIONS:
             for message in BARE:
                 for title in LISTED:
                     with self.subTest(shown=shown, message=message, item=title):
                         self.fresh()
+                        self.t.picked_dones = set()
                         out = self.say(message, title, shown)
-                        self.assertTrue(out.startswith(NOT_DONE), out)
-                        self.assertIn("Ask again which one, in one short question", out)
+                        self.assertFalse(out.startswith(NOT_DONE), out)
+                        self.assertEqual(self.span(title).status, SpanStatus.DONE, out)
+                        self.assertEqual(self.t.picked_dones, {title})
                         for each in LISTED:
-                            self.assertEqual(self.span(each).status, SpanStatus.PLANNED, out)
+                            if each != title:
+                                self.assertEqual(self.span(each).status, SpanStatus.PLANNED, out)
 
     def test_a_done_naming_the_item_still_stands(self):
         for shown in QUESTIONS:

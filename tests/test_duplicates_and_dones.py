@@ -99,11 +99,10 @@ class TestTheOneJustListed(SharedNameCase):
             out = self.done(message, title, ("", shown))
             self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_listed_with_the_other_it_carries_a_note(self):
+    def test_listed_with_the_other_it_is_the_models_reading(self):
         shown = f"Still open:\n{GLAZE}\n{GLAZE_CALL}"
         out = self.done("glaze run is done", GLAZE, ("", shown))
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn(f"{GLAZE_CALL} as well as {GLAZE}", out)
 
     def test_going_fine_is_still_refused_when_listed(self):
         shown = f"Still open:\n3:30 PM – {GLAZE}"

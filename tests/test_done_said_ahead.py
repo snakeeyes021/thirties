@@ -5,7 +5,7 @@
   however the model calls log_outcome.
 - **A count isn't a name.** "check those two off", "both of them are done": the number counts items named
   earlier. A done the model reads for an item whose title has the word in it (Fire two test tiles) goes on as its
-  reading, and its result names the items the count points back to.
+  reading.
 - **A named reopen goes through.** "nope, the paddles still need their wax: reopen them", "I never got to the
   paddles; please untick them": the user asks for a write, so the paddles go back to planned and their Joplin line
   is unticked, whether the model calls reopen_item or reports the item as open with log_outcome. Nothing the user
@@ -140,14 +140,13 @@ class CountNotNameTest(SaidRightBase):
     COUNTS = ("check those two off", "those two are done", "finished both", "the two of them are finished",
               "both of them, done", "mark the two done")
 
-    def test_a_count_read_for_the_title_with_the_number_in_it_carries_a_note(self):
+    def test_a_count_read_for_the_title_with_the_number_in_it_is_the_models_reading(self):
         for message in self.COUNTS:
             for how in ("id", "title"):
                 with self.subTest(message=message, way=how):
                     self.fresh()
                     out = self.say(message, self.way("Fire two test tiles", how), prior=("", self.SHOWN))
                     self.assertFalse(str(out).startswith(NOT_DONE), out)
-                    self.assertIn("Fire two test tiles wasn't among them", out)
 
     def test_a_count_with_nothing_named_before_is_the_models_reading(self):
         for message in ("check those two off", "finished both"):
@@ -275,7 +274,6 @@ class WholeTurnTest(SaidRightBase):
         m, results = self.turn("check those two off", [{"name": "log_outcome", "arguments": {
             "event": "Fire two test tiles", "status": "done"}}], prior_shown=CountNotNameTest.SHOWN)
         self.assertEqual(self.status(m, "Fire two test tiles"), SpanStatus.DONE, results)  # the model's reading
-        self.assertIn("Fire two test tiles wasn't among them", " ".join(results))
 
     def test_a_reopen_in_a_whole_turn(self):
         out = self.say("waxed the canoe paddles", {"event": self.span("Wax the canoe paddles").id, "status": "done"})

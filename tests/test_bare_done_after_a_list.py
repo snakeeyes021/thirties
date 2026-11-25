@@ -3,9 +3,8 @@
 - **The model's pick stands.** "that one's sorted", "done!", "finished it": no word of any item in it, so which of
   the open items just listed it is, is the model's to pick. Whichever listed item it ticks is ticked, on the plan
   and in Joplin.
-- **Outside what was listed, a note.** An item the reply didn't list, a count or "both" that doesn't fit the list,
-  or words that name another item go on as the model read them, with a note when there's something to name. No done
-  word at all is still refused, and so is any pick after a reply that asked which.
+- **Outside what was listed, the model's reading.** An item the reply didn't list, a count or "both" that doesn't
+  fit the list, or words that name another item go on as the model read them. No done word at all is refused.
 - **The reply says which.** A reply that doesn't name the ticked item is sent back once; if it still doesn't, it
   opens with what was ticked. A reply that names it goes as written.
 - **One word takes it back.** "no", "not that one", "undo" right after such a tick reopens it, on the plan and in
@@ -34,7 +33,7 @@ ITEMS = ((BINDERS, "9:20 AM", "t_binders"), (BADGES, "9:50 AM", "t_badges"), (RO
 LISTED = (BINDERS, BADGES, ROOM)
 SHOWN = f"Still open: {BINDERS}, {BADGES} and {ROOM}."
 BARE = ("that one's sorted", "done!", "finished it", "that's done now")
-POINTED_BACK = "points back to a reply that named"
+
 
 
 class OfficeDay(TodayTestCase):
@@ -99,19 +98,19 @@ class TestThePickStands(OfficeDay):
                         if other != title:
                             self.assertOpen(other, out)
 
-    def test_never_after_a_question_asking_which(self):
+    def test_after_a_question_asking_which_too(self):
+        self.t.picked_dones = set()
         out = self.say("done!", ROOM, shown=f"Which did you finish: {BINDERS}, {BADGES} or {ROOM}?")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("Ask again which one", out)
-        self.assertOpen(ROOM, out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertTicked(ROOM, out)
+        self.assertEqual(self.t.picked_dones, {ROOM})  # the model's pick: the reply names it
 
 
-class TestOutsideTheListIsANote(OfficeDay):
+class TestOutsideTheListIsTheModelsReading(OfficeDay):
     """A done the model read for an item outside what the reply listed goes on; its result says what else fits."""
 
     def test_an_item_the_reply_did_not_list(self):
         out = self.say("that one's sorted", TENDER)
-        self.assertIn(POINTED_BACK, out)
         self.assertTicked(TENDER, out)
 
     def test_nothing_listed_before(self):
@@ -129,7 +128,6 @@ class TestOutsideTheListIsANote(OfficeDay):
 
     def test_words_that_name_another_item(self):
         out = self.say("the binders are collated", BADGES)
-        self.assertIn(f"fits {BINDERS} and says nothing of {BADGES}", out)
         self.assertTicked(BADGES, out)
 
     def test_an_item_already_done_is_still_listed(self):
@@ -137,7 +135,6 @@ class TestOutsideTheListIsANote(OfficeDay):
         self.t.execute("log_outcome", {"event": self.span(BINDERS).id, "status": "done"})
         self.t.by_hand = False
         out = self.say("finished it", TENDER)
-        self.assertIn(POINTED_BACK, out)
         self.assertTicked(TENDER, out)
 
 

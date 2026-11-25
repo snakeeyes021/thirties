@@ -2,8 +2,7 @@
 
 - **A pointer beside the name.** "the saltmarsh shawl is done, tick it" after a reply listing several items: the
   "it" is the shawl the message just named, not one of the items listed. Which of the items its words fit is the
-  model's reading. A bare "tick it" after such a list, with no word of any item, goes on as the model picked it,
-  with a note naming the items the list named.
+  model's reading. A bare "tick it" after such a list, with no word of any item, goes on as the model picked it.
 - **All right somewhere else.** "ok the list still shows it open. the shawl IS done": an "ok" or "fine" in another
   sentence doesn't make the done read as merely all right. Said of the item with no done anywhere, it still does,
   and so does a word for under way.
@@ -96,9 +95,8 @@ class TestAPointerBesideTheName(StudioDay):
                 self.setUp()
                 self.assertTicked(SHAWL, self.say(message, SHAWL, SHOWN_ALL))
 
-    def test_a_bare_pointer_after_the_list_carries_a_note(self):
+    def test_a_bare_pointer_after_the_list_is_the_models_reading(self):
         out = self.say("tick it please", BOBBINS, SHOWN_ALL)
-        self.assertIn("points back to a reply that named", out)
         self.assertTicked(BOBBINS, out)
 
 

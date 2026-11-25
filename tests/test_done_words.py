@@ -5,8 +5,8 @@
 - Across turns: the app asking whether they meant one item, answered with anything but a no, marks that item; and
   a done asked for earlier and refused stays asked for, so a "yes", "yes, the class" or a complaint ending in "?"
   completes it.
-- Words that fit another item go on as the model read them, with a note naming that item; words that say no done
-  tick nothing, on the plan or in Joplin.
+- Words that fit another item go on as the model read them; words that say no done tick nothing, on the plan or
+  in Joplin.
 """
 
 import unittest
@@ -85,13 +85,11 @@ class TestDoneInEverydayWords(WordsCase):
             self.assertFalse(out.startswith(NOT_DONE), (message, out))
             self.assertEqual(self.span(item).status, SpanStatus.DONE, message)
 
-    def test_words_for_another_item_go_on_with_a_note_naming_it(self):
-        for message, item, fits in (("dog agility done", "Agility drills", PUP),
-                                    ("calibration done", "Rake the gravel", "Calibrate the kiln"),
-                                    ("varnishing done", "Surgeon visit", "Varnish")):
+    def test_words_for_another_item_are_the_models_reading(self):
+        for message, item in (("dog agility done", "Agility drills"), ("calibration done", "Rake the gravel"),
+                              ("varnishing done", "Surgeon visit")):
             out = self.done(message, item)
             self.assertFalse(out.startswith(NOT_DONE), (message, out))
-            self.assertIn(fits, out[out.index("(The user's"):], message)
             self.assertEqual(self.span(item).status, SpanStatus.DONE, message)
 
     def test_no_done_word_is_still_refused(self):
@@ -114,10 +112,9 @@ class TestAQuestionAboutOneItem(WordsCase):
             self.assertTrue(out.startswith(NOT_DONE), (message, item, out))
         self.assertEqual(self.span(PUP).status, SpanStatus.PLANNED)
 
-    def test_a_yes_for_another_item_goes_on_with_a_note(self):
+    def test_a_yes_for_another_item_is_the_models_reading(self):
         out = self.done("yes", "Agility drills", ("", f"Did you mean {PUP}?"))
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn(f"answers the question about {PUP}, and Agility drills wasn't in it", out)
 
     def test_an_offer_is_no_such_question(self):
         offered = ("", "Want me to move the kiln to 10:00?")
@@ -232,7 +229,7 @@ class TestTheWholeExchange(ConversationTestCase):
 
 class TestNoJoplinTickForWordsThatNeverPointed(ListsTestCase):
     """Data guard: words that say no done tick nothing in Joplin, even with an earlier request standing; a done the
-    model read for another item goes on with a note naming the item the words fit."""
+    model read for another item goes on as its reading."""
 
     def setUp(self):
         super().setUp()
@@ -260,10 +257,9 @@ class TestNoJoplinTickForWordsThatNeverPointed(ListsTestCase):
         self.assertFalse(out.startswith(NOT_DONE), out)
         self.assertIn("- [x] Call the bank", self.body("n_errands"))
 
-    def test_a_done_read_for_another_item_carries_a_note(self):
+    def test_a_done_read_for_another_item_goes_on(self):
         out = self.done("the banking call is finished", "Buy stamps")
         self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn("fits Call the bank and says nothing of Buy stamps", out)
 
 
 if __name__ == "__main__":
