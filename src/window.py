@@ -94,7 +94,6 @@ class ThirtiesWindow(Adw.ApplicationWindow):
                                                if self.conv_manager is not None
                                                and self.conv_manager.tools.assistant is not None else "")
         self.day_view.agenda.on_work_times = self._after_work_times
-        self.day_view.agenda.pencil_action = self._pencil_action
         self.day_view.agenda.title_for = self._title_for  # short titles, the user's notes, never a raw id (11-06)
         self.day_view.agenda.describe = self._describe
         self.content_toolbar.set_content(self.day_view)
@@ -291,31 +290,6 @@ class ThirtiesWindow(Adw.ApplicationWindow):
             threading.Thread(target=post, daemon=True).start()
             self.chat_toggle_btn.set_active(True)
         self._push_sync()
-
-    def _pencil_action(self, title: str, action: str) -> str:
-        """An action on a later day's pencilled-in item: day_actions.pencil_act on this day's tools, never
-        during an assistant turn; then the day is shown again."""
-        from thirties_core.astronomy import get_current_time
-        from thirties_core.day_actions import pencil_act
-        from thirties_core.timeline_layout import day_layout
-        manager = self.conv_manager
-        assistant = manager.tools.assistant if manager is not None else None
-        if assistant is None:
-            return ""
-        if not manager.turn_lock.acquire(blocking=False):
-            return "Try that again once the reply is in."
-        try:
-            plan = manager.day_plan
-            from thirties_core.plan_log import caused_by
-            with caused_by("Day page"):
-                out = pencil_act(assistant, plan.target_date, title, action,
-                                 day_layout(plan, get_current_time(plan.sunrise.tzinfo)))
-        finally:
-            manager.turn_lock.release()
-        self._local_changes += 1
-        self.day_view.refresh_plan(manager.day_plan, force=True)
-        self._push_sync()
-        return out
 
     def _before_today(self):
         assistant = self.conv_manager.tools.assistant if self.conv_manager else None

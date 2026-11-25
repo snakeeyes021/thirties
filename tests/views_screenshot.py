@@ -186,7 +186,7 @@ def scene_hand(out: Path, prefix: str) -> list:
     return shots
 
 
-def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), theirs=True):
+def _wired_view(sched, plan, tab, period="day", if_time=(), theirs=True):
     """A DayView with the window's providers stood in by invented data, and a real tool runner on the day."""
     from thirties_core.plan_tools import PlanTools
     view = day_view(sched, plan, tab, period)
@@ -197,13 +197,10 @@ def _wired_view(sched, plan, tab, period="day", if_time=(), pencilled=(), theirs
     def read(name, args):
         if name == "if_there_is_time_items" and if_time:
             return "If there's time:\n" + "\n".join(f"- {t}" for t in if_time)
-        if name == "pencilled_in" and pencilled:
-            return "On the list, no time yet:\n" + "\n".join(f"- {t}" for t in pencilled)
         if name == "not_yours_today":
             return "- cal-r"
         return ""
     agenda.read_tool = read
-    agenda.pencil_action = lambda title, action: ""
     shown = {"on": theirs}
     view.set_theirs_provider(lambda: shown["on"], lambda on: shown.update(on=on))
     view.refresh_plan(plan, force=True)
@@ -226,19 +223,13 @@ def scene_agenda(out: Path, prefix: str) -> list:
 
 
 def scene_timeline_untimed(out: Path, prefix: str) -> list:
-    """The Day tab with today's If there's time as chips over the day, and a Not reported card's live tick; then a
-    later day's pencilled-in list, on the Agenda and the Timeline."""
+    """The Day tab with today's If there's time as chips over the day, and a Not reported card's live tick."""
     shots = []
     set_debug_time(at("13:10"))
     sched, plan = day_sched()
     view = _wired_view(sched, plan, "timeline", "day", if_time=["Repot the fern", "Call the plumber back"])
     path = out / f"{prefix}timeline_day_if_time.png"
     shots.append((path, render(view, 683, 900, path)))
-    later, _ = sched.build_day_plan(DAY + timedelta(days=2))
-    for tab in ("day", "timeline"):
-        view = _wired_view(sched, later, tab, "day", pencilled=["Buy stamps", "Water the plants"])
-        path = out / f"{prefix}{'agenda' if tab == 'day' else 'timeline'}_later_day_pencilled.png"
-        shots.append((path, render(view, 683, 760 if tab == "day" else 700, path)))
     set_debug_time(at("15:40"))
     return shots
 

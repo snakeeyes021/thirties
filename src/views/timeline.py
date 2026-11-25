@@ -1518,8 +1518,8 @@ class TimelinePage(Gtk.Box):
         self._moment: Optional[tuple] = None  # (the layout, its moment_of) when the hand last moved alone
         self.night_open = False  # the night strip, opened by a click or a drag into it
         self.show_theirs: Callable[[], bool] = lambda: True  # other people's events shown (one switch)
-        # the day's things with no time: () -> (kind, titles), kind "if_time" (today's If there's time) or
-        # "pencilled" (a later day's list); and (kind, title, action) -> acts on one, as the Agenda does
+        # today's If there's time: () -> (kind, titles), kind "if_time"; and (kind, title, action) -> acts on
+        # one, as the Agenda does
         self.untimed: Optional[Callable[[], tuple]] = None
         # a later day's draft, pencilled in (week_draft.draft_for): day -> [{"title", "start", "minutes"}]
         self.drafts: Optional[Callable[[date], list]] = None
@@ -1629,9 +1629,9 @@ class TimelinePage(Gtk.Box):
         self._reload_tab()
 
     def _fill_untimed(self) -> None:
-        """Today's If there's time, or a later day's pencilled-in list, as chips over the day; each opens Done,
+        """Today's If there's time, as chips over the day; each opens Done,
         Schedule it and the ways to put it off, the same as the Agenda's rows."""
-        from thirties.views.agenda import IF_TIME_CHOICES, IF_TIME_TITLE, PENCIL_CHOICES, untimed_actions
+        from thirties.views.agenda import IF_TIME_CHOICES, IF_TIME_TITLE, untimed_actions
         _clear(self.untimed_box)
         self.untimed_chips = {}
         kind, titles = "", []
@@ -1643,7 +1643,7 @@ class TimelinePage(Gtk.Box):
         self.untimed_group.set_visible(bool(titles))
         if not titles:
             return
-        self.untimed_title.set_text(IF_TIME_TITLE if kind == "if_time" else "On the list, no time yet")
+        self.untimed_title.set_text(IF_TIME_TITLE)
         from thirties_core.titles import title_of
         for title in titles:
             chip = Gtk.MenuButton(label=title_of(title), tooltip_text=title)
@@ -1655,7 +1655,7 @@ class TimelinePage(Gtk.Box):
             def act(t, action, k=kind, p=pop):
                 p.popdown()
                 self.untimed_act(k, t, action)
-            choices = IF_TIME_CHOICES if kind == "if_time" else PENCIL_CHOICES
+            choices = IF_TIME_CHOICES
             done, schedule, _later, menu = untimed_actions(title, choices, act)
             done.set_child(Gtk.Label(label="Done", xalign=0))  # in a menu, words rather than a bare tick
             box.append(done)

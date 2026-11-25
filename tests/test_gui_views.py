@@ -404,23 +404,14 @@ class AgendaLaneTests(unittest.TestCase):
         chip.actions["week"].emit("clicked")
         self.assertEqual(self.calls[-1], ("if_there_is_time", {"item": "Repot the fern", "action": "week"}))
 
-    def test_a_later_days_pencilled_in_rows_and_chips_have_actions(self) -> None:
+    def test_a_later_day_shows_no_list_without_times(self) -> None:
         later, _ = self.sched.build_day_plan(DAY + timedelta(days=1))
-        acted = []
         agenda = self.view.agenda
-        agenda.read_tool = lambda name, args: "On the list, no time yet:\n- Buy stamps" if name == "pencilled_in" else ""
-        agenda.pencil_action = lambda title, action: acted.append((title, action)) or "ok"
+        agenda.read_tool = lambda name, args: "On the list, no time yet:\n- Buy stamps"
         self.view.refresh_plan(later)
-        done, schedule, later_btn, box = agenda.pencil_rows["Buy stamps"]
-        self.assertEqual(later_btn.get_label(), "Not that day")
-        done.emit("clicked")
-        schedule.emit("clicked")
-        self.assertEqual(acted, [("Buy stamps", "done"), ("Buy stamps", "schedule")])
-        chip = self.view.timeline.untimed_chips["Buy stamps"]
-        self.assertEqual(self.view.timeline.untimed_title.get_text(), "On the list, no time yet")
-        chip.actions["next_day"].emit("clicked")
-        chip.actions["drop"].emit("clicked")
-        self.assertEqual(acted[2:], [("Buy stamps", "next_day"), ("Buy stamps", "drop")])
+        self.assertNotIn("pencilled", agenda.groups)
+        self.assertFalse(self.view.timeline.untimed_group.get_visible())
+
 
 
 @unittest.skipUnless(GTK, "GTK 4 / libadwaita or a display is not available")

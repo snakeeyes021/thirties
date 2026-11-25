@@ -181,22 +181,18 @@ class DayView(Gtk.Box):
         self.timeline.drafts = draft_for
 
     def _untimed(self) -> tuple:
-        """The day's things with no time, for the Timeline: today's If there's time, or a later day's
-        pencilled-in list; read like the Agenda reads them."""
+        """Today's If there's time, for the Timeline, read like the Agenda reads it; nothing for another day."""
         read = self.agenda.read_tool
         if read is None or self.day_plan is None:
             return "", []
-        if self.live_now() is not None:
-            kind, out = "if_time", read("if_there_is_time_items", {}) or ""
-        else:
-            kind, out = "pencilled", read("pencilled_in", {"day": self.day_plan.target_date.isoformat()}) or ""
-        return kind, [line[2:] for line in out.splitlines() if line.startswith("- ")]
+        if self.live_now() is None:
+            return "", []
+        out = read("if_there_is_time_items", {}) or ""
+        return "if_time", [line[2:] for line in out.splitlines() if line.startswith("- ")]
 
     def _untimed_act(self, kind: str, title: str, action: str) -> None:
         if kind == "if_time":
             self.agenda._if_time(title, action)
-        else:
-            self.agenda._pencil(title, action)
 
     def _theirs_shown(self) -> bool:
         try:

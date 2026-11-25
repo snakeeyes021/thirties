@@ -34,9 +34,6 @@ IF_TIME_NOT_TODAY = "Not today"
 IF_TIME_TOMORROW = "Tomorrow"
 IF_TIME_WEEK = "Later this week"
 IF_TIME_DROP = "Drop"
-# Pencilled in on a later day's list (day_actions.py)
-PENCIL_NOT_THAT_DAY = "Not that day"
-PENCIL_DAY_AFTER = "The day after"
 # The days ahead, pencilled in (week_draft.py): a draft, not the plan
 DRAFT_TITLE = "Pencilled in"
 DRAFT_TEXT = "A draft for this day. It firms up that morning, and takes no time until then."
@@ -90,7 +87,6 @@ def _block_end(span: EventSpan) -> datetime:
 
 # What each untimed list offers: (Done, Schedule it, the "not now" menu's label and its choices)
 IF_TIME_CHOICES = (IF_TIME_NOT_TODAY, (("tomorrow", IF_TIME_TOMORROW), ("week", IF_TIME_WEEK), ("drop", IF_TIME_DROP)))
-PENCIL_CHOICES = (PENCIL_NOT_THAT_DAY, (("next_day", PENCIL_DAY_AFTER), ("drop", IF_TIME_DROP)))
 
 
 def untimed_actions(title: str, choices: tuple, act: Callable[[str, str], None]) -> tuple:
@@ -157,8 +153,6 @@ class AgendaPage(Gtk.ScrolledWindow):
         self.show_theirs: Callable[[], bool] = lambda: True
         # after a work button's log_day_times: the window's hook (the rest of the day is replanned from it)
         self.on_work_times: Callable[[str], None] = lambda result: None
-        # (title, action) -> what's said: an action on a later day's pencilled-in item (day_actions.pencil_act)
-        self.pencil_action: Optional[Callable[[str, str], str]] = None
         # plan -> the day's draft [{"title", "start", "minutes"}] for a later day (week draft); [] otherwise
         self.drafts: Optional[Callable[[DayPlan], List[Dict[str, Any]]]] = None
         self.set_show_theirs: Callable[[bool], None] = lambda on: None
@@ -224,7 +218,6 @@ class AgendaPage(Gtk.ScrolledWindow):
         if now is None:  # another day: the plan as it stands, and its record if it's past
             self._fill(self._group("plan", "The plan"), [s for s in spans if s.status == SpanStatus.PLANNED], now)
             self._fill_drafts(plan)
-            self._fill_pencilled(plan.target_date.isoformat())
             self._fill_routines(plan)
             if unreported:  # still to sort out, there too
                 self._fill(self._group("behind", BEHIND_TITLE, BEHIND_TEXT), unreported, now, behind=True)
@@ -432,36 +425,6 @@ class AgendaPage(Gtk.ScrolledWindow):
             for box in _children(group):
                 if hasattr(box, "when_text"):
                     box.add_css_class("pencilled")
-
-    def _fill_pencilled(self, day: Optional[str]) -> None:
-        """On the day's list with no time yet (pencilled in, O3): shown as such, to be given a time or not. Read
-        through ``read_tool``, which only reads: ``run_tool`` refreshes this page, so it would loop."""
-        if self.read_tool is None:
-            return
-        try:
-            out = self.read_tool("pencilled_in", {"day": day} if day else {}) or ""
-        except Exception:
-            return
-        items = [line[2:] for line in out.splitlines() if line.startswith("- ")]
-        if not items:
-            return
-        group = self._group("pencilled", "On the list, no time yet", "Pencilled in: give one a time, or leave it.")
-        self.pencil_rows = {}
-        for title in items:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(title))
-            if self.pencil_action is not None:
-                buttons = untimed_actions(title, PENCIL_CHOICES, self._pencil)
-                for w in buttons[:3]:  # Done, Schedule it, Not that day (the last is that menu's own box)
-                    row.add_suffix(w)
-                self.pencil_rows[title] = buttons
-            group.add(row)
-
-    def _pencil(self, title: str, action: str) -> None:
-        if self.pencil_action is None:
-            return
-        out = self.pencil_action(title, action)
-        if out and self.on_notice is not None:
-            self.on_notice(out)
 
     def _fill(self, group: Adw.PreferencesGroup, spans: List[EventSpan], now: Optional[datetime],
               current: bool = False, behind: bool = False, ahead: bool = False) -> None:
