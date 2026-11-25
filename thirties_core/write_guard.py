@@ -512,6 +512,8 @@ def refused(op: Dict[str, Any], turn: str, db: Any) -> str:
     if not turn or op.get("valid_until") or op.get("_twin") or op.get("_done_on_plan"):
         return ""  # outside a turn, this morning's housekeeping, the twin of a tick that went through, or a done
         # the plan accepted this turn
+    if op.get("_moved_on") and op.get("op") == "remove" and _is_today(db, str(op.get("note_id") or "")):
+        return ""  # a full day's move written to Joplin: the line went on to its new day (full_day.py)
     message = _said(turn)
     kind = op.get("op")
     title = str(op.get("title") or "")

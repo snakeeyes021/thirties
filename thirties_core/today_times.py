@@ -9,8 +9,10 @@ add_to_today already gives each thing its time. These cover the other ways somet
 - "add X to the list" said while the day is under way, naming no other list or day, is for today: "the list" is
   today's list;
 - an item held on today (due today or overdue: due_today.py) that loses its time, by a skip or a vague "not now",
-  gets a new block later today (``retime_held``), never an untimed line. Only when the day is full even doubled up
-  does it wait on today's list, and the answer says so.
+  gets a new block later today (``retime_held``), never an untimed line.
+
+When the day is full even doubled up, the lowest-priority item moves on to the next day with room, and the answer
+says so in one line (full_day.py).
 """
 
 from __future__ import annotations
@@ -66,12 +68,13 @@ def place_new_item(assistant: "AssistantTools", task: "TaskItem", day: Any = Non
     """For an item just added to a list: its time today when it was asked for today ('' otherwise)."""
     if not for_today(assistant, task.title, day, due_day):
         return ""
-    from thirties_core import if_time
     from thirties_core.clock import format_clock
-    spot, doubled = if_time.place(assistant, task.title, task)
+    from thirties_core.full_day import place_or_move
+    spot, doubled, moved = place_or_move(assistant, task.title, task, protected=True)
+    said = "".join(" " + line for line in moved)
     if spot is None:
-        return " Today is full, so it has no time yet: say where it should go."
-    return f" On today's plan at {format_clock(spot)}" + (" (alongside another item)." if doubled else ".")
+        return said
+    return f" On today's plan at {format_clock(spot)}" + (" (alongside another item)." if doubled else ".") + said
 
 
 def retime_held(assistant: "AssistantTools", line: str, task_id: Optional[str] = None,

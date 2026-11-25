@@ -116,19 +116,22 @@ class BeforeToday:
 
     def place_asked_today(self, rec: Dict[str, Any]) -> str:
         """A leftover placed at "today" (place_leftover, by the user's word or the model's): on today's plan in the
-        next free time that fits, as the morning places what can't wait. With no free time that fits, it goes on
-        today's list (the Today note) without a time. Where it is now, in a few words."""
+        next free time that fits, as the morning places what can't wait. With no free time even doubled up, the
+        day's lowest item moves on to the next day with room (full_day.py), and the answer says so. Where it is
+        now, in a few words."""
         from thirties_core.clock import format_clock
         self.place_today([rec], asked=True)
         span = self._on_plan(rec)
         if span is not None:
             return f"{rec['title']}: on today's plan at {format_clock(span.start_dt)}."
-        try:
-            self.a._add_to_today([rec["title"]], "none")
-        except Exception as e:  # no Today note, or Joplin can't take it: said plainly
-            logger.warning("Today note write failed for %s: %s", rec["title"], e)
-            return f"{rec['title']}: kept for today, but no free time today fits it and it isn't on today's list."
-        return f"{rec['title']}: on today's list without a time (no free time today fits it)."
+        from thirties_core.full_day import asked_now, place_or_move
+        task = next((t for t in self.a.s.tasks if rec.get("task_id") and t.id == rec["task_id"]), None)
+        spot, _, moved = place_or_move(self.a, rec["title"], task, protected=asked_now(self.a.pt, rec["title"], []))
+        said = "".join(" " + line for line in moved)
+        if spot is not None:
+            OpenPool(self.db).set(rec["title"], slot=spot.isoformat())
+            return f"{rec['title']}: on today's plan at {format_clock(spot)}.{said}"
+        return said.strip()
 
     def take_off_today(self, rec: Dict[str, Any]) -> None:
         """A leftover moved off today (or dropped, or done elsewhere): its slot on today's plan goes."""

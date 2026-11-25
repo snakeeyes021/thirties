@@ -177,13 +177,16 @@ class PlacedAtToday(HolidayBase):
         self.assertEqual(len(self.planned("Replace the brake cables")), 1)
         self.assertIn("on today's plan at", out)
 
-    def test_no_room_today_says_its_on_todays_list_without_a_time(self):
+    def test_no_room_today_even_doubled_up_it_goes_on_to_the_next_day_with_room_and_says_so(self):
         self.missed_yesterday("Replace the brake cables", "t_cables")
-        with patch.object(self.t, "open_windows", return_value=[]):
+        with patch.object(self.t, "open_windows", return_value=[]), \
+                patch("thirties_core.if_time.first_slot", return_value=None), \
+                patch("thirties_core.if_time.doubled_slot", return_value=None):
             out = self.say("cables: today", "place_leftover", {"item": "Replace the brake cables", "horizon": "today"})
         self.assertEqual(self.planned("Replace the brake cables"), [])
-        self.assertIn("on today's list without a time", out)
-        self.assertIn("- [ ] Replace the brake cables", self.api.notes["n_today"]["body"])
+        self.assertIn("No room today: Replace the brake cables goes to tomorrow.", out)
+        self.assertNotIn("without a time", out)
+        self.assertNotIn("Replace the brake cables", self.api.notes["n_today"]["body"])  # never in limbo on today
         self.assertEqual(self.api.notes["n_bench"]["body"], BENCH)  # its own list is never touched
 
 

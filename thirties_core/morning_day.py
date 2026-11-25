@@ -16,12 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def place_pinned(assistant: Any) -> List[str]:
-    """Items pinned to today that aren't on its plan yet: each placed now. Returns "Title at 3:00 PM" for each."""
+    """Items pinned to today that aren't on its plan yet: each placed now; a full day moves its lowest item on
+    (full_day.py), never the pinned one while anything else can go. Returns "Title at 3:00 PM" for each, and the
+    lines saying what moved."""
     pt = assistant.pt
     if pt.scheduler is None or not pt.is_current(pt.day_plan):
         return []
-    from thirties_core import if_time
     from thirties_core.clock import format_clock, thirty_of
+    from thirties_core.full_day import place_or_move
     from thirties_core.horizons import candidates_for_day
     try:
         pinned = [c for c in candidates_for_day(pt, pt.day_plan.target_date, limit=None) if c.source == "pinned"]
@@ -31,12 +33,13 @@ def place_pinned(assistant: Any) -> List[str]:
     out = []
     for c in pinned:
         try:
-            spot, _ = if_time.place(assistant, c.title, c.task)
+            spot, _, moved = place_or_move(assistant, c.title, c.task, protected=True)
         except Exception as e:
             logger.warning("Couldn't place %s: %s", c.title, e)
             continue
         if spot is not None:
             out.append(f"{c.title} at {format_clock(thirty_of(spot))}")  # Thirties picked it: its block
+        out += moved
     return out
 
 
