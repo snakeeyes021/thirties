@@ -296,9 +296,9 @@ def _due_today_note(assistant, title: str, task, action: str) -> str:
         return ""
     others = due_today.others_on(pt, title)
     by_hand = bool(getattr(pt, "by_hand", False))
-    if (action == "week" and not by_hand) or (action == "tomorrow" and not due_today.clear_move(pt, title, others)) \
-            or (action == "drop" and not due_today.clear_ask(pt, title, others)):
+    if (action == "week" and not by_hand) or (action == "tomorrow" and not due_today.clear_move(pt, title, others)):
         raise ToolError(due_today.stays_line(title, held, pt.today()))
+    # a drop: the model's call stands, and the answer says it was due (off_today.leave_list says it on today's list)
     if action == "tomorrow":
         return " " + due_today.moved_line(title, pt.today() + timedelta(days=1), pt.today(), held)
     return " " + due_today.moved_line(title, None, pt.today(), held)
@@ -311,7 +311,7 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
     note; one for tomorrow goes on tomorrow's Today list; one for later this week waits in Before today's pool."""
     from thirties_core.assistant_tools import ToolError
     from thirties_core.clock import format_clock
-    from thirties_core.leave_today import has_home, remove_copy, top_line
+    from thirties_core.leave_today import has_home, top_line
     from thirties_core.models import SpanStatus
     pt = assistant.pt
     task = assistant._exact_task(str(item)) or next((t for t in assistant.s.tasks if t.id == str(item)), None)
@@ -349,14 +349,16 @@ def _act_on_listed(assistant, item: str, action: str, time: Optional[str]) -> st
             return f"There's no time left today for {line}, even alongside something else; it stays on the list."
         return f"{line} is on the plan at {format_clock(spot)}" + (" (alongside another item)." if doubled else ".")
     homed = has_home(assistant, line)
-    if action == "drop" and not homed and drop_said(pt):
-        from thirties_core.off_today import take_off_list
-        if not take_off_list(pt, line):
-            raise ToolError(f"{line} couldn't be taken off today's list just now.")
-        said = f"Dropped {line}: it's filed in this month's Dropped note."
+    if action == "drop":  # off today's list, and it doesn't come back by itself; dropped for good only on the
+        # user's drop word (off_today.leave_list); its deadline, if any, is said, never a hold
+        from thirties_core.off_today import leave_list
+        said = leave_list(pt, line, task.id if task is not None else None, "drop", also=False).strip()
+        due = ""
     else:
-        if not remove_copy(assistant, line):
-            raise ToolError(f"{line} couldn't be taken off today's list just now.")
+        from thirties_core.leave_today import remove_copy_why
+        why = remove_copy_why(assistant, line)
+        if why:
+            raise ToolError(f"{line} is still on today's list: {why}.")
         # --- tomorrow only on the user's word: otherwise a later day this week, by fit (not_today.py) ---
         from thirties_core.not_today import tomorrow_unasked
         if action == "tomorrow" and tomorrow_unasked(pt, assistant._today() + timedelta(days=1)):

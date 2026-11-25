@@ -364,10 +364,11 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "if_there_is_time",
         "description": "Act on any item on today's list (the Today note): done; "
                        "schedule (the next free time that fits, or the time the user names); tomorrow; week (later "
-                       "this week); or drop (off today's list and today's plan; its own list is untouched). The way "
-                       "to take something off today's list that the user skips or puts off. Drop only on the user's "
-                       "drop words ('drop it', 'not doing it', 'forget it', 'for good'); 'take it off' is week or "
-                       "tomorrow, and it stays to do. If they say it happened (done, paid, sent), it's done.",
+                       "this week); or drop (off today's list and today's plan, and it doesn't come back by itself; "
+                       "its own list is untouched). The way to take something off today's list that the user skips, "
+                       "puts off or takes off today: week or tomorrow when they want it back another day, drop when "
+                       "they want it off today and gone (it's filed as dropped for good only on their drop words). "
+                       "If they say it happened (done, paid, sent), it's done.",
         "parameters": {"item": "The item, as worded on today's list.",
                        "action": "done, schedule, tomorrow, week or drop.",
                        "time": "For schedule: the time the user named, if any (e.g. '3:30 PM')."},
