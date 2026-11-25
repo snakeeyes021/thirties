@@ -395,6 +395,14 @@ def _state_reading(message: Optional[str], title: str, others=()) -> tuple:
     """(why the words say the item isn't finished, or "", whether they say it's under way or merely all right)."""
     if not message:
         return "", False
+    # --- named in an exception part of a done, or as still open: never what the done is about; the rest is read
+    # without those parts (done_exceptions.py) ---
+    from thirties_core.done_exceptions import left_out, without_exceptions
+    left = left_out(message, title, others)
+    if left:
+        return left, False
+    message = without_exceptions(message)
+    # --- end an exception part ---
     told_not = told_not_to_tick(message, title, others)
     if told_not:
         return told_not, False
