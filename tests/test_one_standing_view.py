@@ -112,6 +112,26 @@ class TestShowSchedule(StandingCase):
         self.assertOneView(out)
 
 
+class TestUntimed(StandingCase):
+
+    def test_if_theres_time_after_not_marked_yet_and_no_pencilled_section(self):
+        from unittest.mock import MagicMock, patch
+        self.manager.tools.assistant = self.manager.tools.assistant or MagicMock()
+        with patch("thirties_core.day_lists.pencilled_in", return_value=["Oil the chain tool"]), \
+                patch("thirties_core.if_time.items", return_value=["Sweep the bench"]):
+            out = self.turn("CALL show_schedule {}",
+                            "Here you go.\n\nOn today's list, no time yet:\nOil the chain tool", said="what's left?")
+        self.assertOneView(out)
+        self.assertNotIn("no time yet", out)
+        self.assertNotIn("Oil the chain tool", out)
+        self.assertEqual(self.section(out, "If there's time:"), ["Sweep the bench"], out)
+        self.assertLess(out.index("Not marked yet:"), out.index("If there's time:"))
+
+    def test_no_if_theres_time_part_when_its_empty(self):
+        out = self.turn("CALL show_schedule {}", "Here you go.", said="what's left?")
+        self.assertNotIn("If there's time", out)
+
+
 class TestHandTick(StandingCase):
 
     def test_a_past_item_ticked_in_the_app_keeps_its_planned_block(self):

@@ -5,9 +5,11 @@ Wherever the day is laid out for the user, it's this view, always in the same sh
   Now: what's in the block under way
   The rest of today: every row from the next block to the end of the day, with the Free stretches
   Not marked yet: one item per line, by its title, never a time
+  If there's time: what the user put under that heading on today's list, one title per line, never a time
 
-(and only when there's something for them: an item a change moved out of those rows, someone else's events in that
-stretch, and today's list items with no time). Nothing from before now, unless the user asked
+(each only when there's something in it; also an item a change moved out of those rows, and someone else's events
+in that stretch). Never a section of today's list lines with no time ("On today's list, no time yet"): the user
+doesn't want one. Nothing from before now, unless the user asked
 for earlier today (``standing``'s ``whole_day``). The model never writes it and is never asked to: it goes under the
 reply of a turn that changed something (an add, a done or skip, a move, a drop), and under the reply of a turn that
 called show_schedule, once (conversation.py, one_schedule.place). Whether the user asked to see the plan is never
@@ -38,12 +40,11 @@ DEFAULT_MODE = "rest"
 NEXT_ROWS = 3  # "few": the next few rows after the current block
 FREE_MIN = timedelta(hours=1)  # an open stretch this long or longer gets its own "Free" line
 HALF = timedelta(minutes=30)
-NO_TIME_HEADING = "On today's list, no time yet:"
 IF_TIME_HEADING = "If there's time:"
 EARLIER_HEADING = "Earlier today:"
 # What Python puts under a reply, said to the model as a fact (show_schedule's result, the turn's NOW section)
 PLACED = ("Python puts the standard view under your reply by itself, exactly once: Now, The rest of today, and "
-          "Not marked yet (titles only, never times). Never copy, rewrite or summarise it; write only your own "
+          "Not marked yet (titles only, never times), then If there's time when it isn't empty. Never copy, rewrite or summarise it; write only your own "
           "sentences.")
 
 Snapshot = Dict[str, Tuple[float, float, str]]
@@ -112,7 +113,7 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     stretch on a "Not yours" line. "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
     keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
     what the user asked not to be asked about); worked out from the plan when not given. ``untimed``: today's list
-    items with no time, as (heading, titles) sections (untimed_for). ``with_now``: False under a start notice, which
+    items under "If there's time", as (heading, titles) sections (untimed_for), after Not marked yet. ``with_now``: False under a start notice, which
     says what's on now itself. ``free``: a "Free" line for each open stretch of an hour or more among the rows.
 
     ``mode`` given: that, whole (asked for outright). Left out: as the person wants it (reply_extras.py, from
@@ -149,9 +150,9 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     theirs = [s for s in plan.spans_in_view() if s.shown_only and s.end_dt > block and s.start_dt < shown_until]
     behind = unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)  # today's only
     from thirties_core.messages import join_sections
-    return join_sections(  # Now, the rest of today, Also moved, no time yet, Not marked yet, Not yours
+    return join_sections(  # Now, the rest of today, Also moved, Not marked yet, If there's time, Not yours
         now_line if with_now else "", next_block, _moved_line(elsewhere, plan, said) if elsewhere else "",
-        *(untimed_lines(heading, titles) for heading, titles in untimed), "\n".join(behind),
+        "\n".join(behind), *(untimed_lines(heading, titles) for heading, titles in untimed),
         "Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
                                   for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())) if theirs else "")
 

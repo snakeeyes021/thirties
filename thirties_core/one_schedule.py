@@ -10,8 +10,9 @@ items Python's text shows too. Its intro line goes with it ("Here's how tonight 
 when it says more than that. A single row, rows about other days or about what's done, and prose that mentions times
 all stay.
 
-Sections appear once ("If there's time", "On today's list, no time yet", "Not marked yet"): Python's when its text
-has one, else the model's first.
+Sections appear once ("If there's time", "Not marked yet"): Python's when its text has one, else the model's first.
+A section of today's list lines with no time ("On today's list, no time yet") never appears: the user doesn't want
+one, and Python's view has none.
 """
 
 from __future__ import annotations
@@ -41,8 +42,9 @@ _STATUS_RE = re.compile(r"^\s*(?:[-•*]\s*)?you'?re in the \d{1,2}(?::\d{2})?\s
 _SENTENCE_END_RE = re.compile(r"[.!?](?:[\"'”’)]*)\s+")
 
 UNTIMED_HEADS = (re.compile(r"^\s*if there'?s time\b[^\n]*:\s*$", re.IGNORECASE),
-                 re.compile(r"^\s*on today'?s list,? (?:with )?no time\b[^\n]*:\s*$", re.IGNORECASE),
                  re.compile(r"^\s*not marked yet\b[^\n]*:\s*$", re.IGNORECASE))
+# a section the user never wants: today's list lines with no time
+NO_TIME_HEAD = re.compile(r"^\s*(?:on )?today'?s list,? (?:with )?no time\b[^\n]*:\s*$", re.IGNORECASE)
 
 
 def _titles(plan) -> List[str]:
@@ -146,10 +148,10 @@ def _listings(lines: List[str], protected: Set[int], titles: Sequence[str], show
 
 
 def _untimed(lines: List[str], protected: Set[int], shown_lines: Sequence[str]) -> Set[int]:
-    """Each section once: Python's when its text has one, else the model's first."""
+    """Each section once: Python's when its text has one, else the model's first; never a no-time-yet one."""
     drop: Set[int] = set()
-    for head in UNTIMED_HEADS:
-        pythons = any(head.match(line) for line in shown_lines)
+    for head in UNTIMED_HEADS + (NO_TIME_HEAD,):
+        pythons = head is NO_TIME_HEAD or any(head.match(line) for line in shown_lines)
         found = 0
         for i, line in enumerate(lines):
             if i in protected or not head.match(line):
