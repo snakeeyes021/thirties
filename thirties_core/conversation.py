@@ -562,6 +562,7 @@ class ConversationManager:
         # --- notes to the engineers: kept for review, never acted on (engineer_notes.py) ---
         from thirties_core import engineer_notes
         kept, rest = engineer_notes.take(self.scheduler.state_db if self.scheduler else None, merged, via)
+        engineer_notes.start_turn(self.tools, merged, via, kept)  # what the model's own call and the reply check see
         if kept is not None and engineer_notes.only_a_note(rest):
             return self._only_for_engineers(batch, via, before), True
         if kept is not None:
@@ -654,6 +655,9 @@ class ConversationManager:
                 final, self.scheduler.state_db, now_q,
                 mutes_on=CheckinMutes(self.scheduler.state_db).paused_until(now_q) is not None)
         # --- end promise of quiet ---
+        # --- a note said to be kept for the engineers only when one was (engineer_notes.py) ---
+        final = engineer_notes.without_false_kept(self.tools, final)
+        # --- end note said to be kept ---
         from thirties_core.messages import clean_message  # every reply: no done rows, names not ids, plain lines
         final = clean_message(final, self.tools, words)
         from thirties_core import repeat_lines  # an item's time said once a day, and never after "stop" (repeat_lines.py)

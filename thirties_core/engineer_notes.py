@@ -10,6 +10,12 @@ engineers?").
 A message that is only a note gets a short acknowledgement from Python and never reaches the model, so nothing in
 it can be acted on. For a note inside a longer message, the model is told (before the message) which part is the
 note, that it's kept, and to act only on the rest.
+
+Python's pattern is only the fast path for the plain shapes (an opener, or "engineers:" leading the message or a
+bracketed aside). Whether a message speaks to the people who build the app in any other wording is the model's
+judgement: it keeps the note itself with ``note_for_engineers`` (same store, same file, once per turn). A reply may
+say a note is kept only when one was this turn: the Frontier brain sends a reply that says so back once, and
+whatever such claim is still untrue goes from the final reply (``without_false_kept``).
 """
 
 from __future__ import annotations
@@ -46,6 +52,8 @@ _OPENERS = re.compile(
     + r"\s*(?:\)|\])?\s*[:\-–—,]?\s*",
     re.IGNORECASE)
 _LEADING_WHO = re.compile(r"^\s*(?:the\s+)?" + _WHO + r"\s*[:\-–—]\s*", re.IGNORECASE)
+# the same, as a bracketed aside anywhere: "(engineers: ...)", "[devs - ...]" (never "(dev-only build)")
+_BRACKETED_WHO = re.compile(r"[\(\[]\s*(?:the\s+)?" + _WHO + r"(?:\s*:|\s+[\-–—]|[\-–—]\s)\s*", re.IGNORECASE)
 
 
 @dataclass
@@ -62,11 +70,10 @@ def split(message: str) -> Tuple[str, str]:
     """(the note to the engineers, the rest of the message). The note runs from its opener ("note to the
     engineers:") to the end of that paragraph (or of a bracketed aside); ("", message) when there's none."""
     text = message or ""
-    m = _OPENERS.search(text)
-    if m is None:
-        m = _LEADING_WHO.match(text)
-        if m is None:
-            return "", text
+    found = [m for m in (_OPENERS.search(text), _LEADING_WHO.match(text), _BRACKETED_WHO.search(text)) if m]
+    if not found:
+        return "", text
+    m = min(found, key=lambda f: f.start())  # the first one in the message
     start, body_start = m.start(), m.end()
     bracket = text[start:start + 1] in "([" and text[m.end() - 1:m.end()] not in ")]"
     if bracket:  # "(note to devs: the bell rang twice) also, move lunch": the aside ends at its closing bracket
@@ -179,6 +186,37 @@ def take(db, message: str, via: str = "", at: Optional[datetime] = None) -> Tupl
     return EngineerNotes(db).add(note, message, via, at), rest
 
 
+@dataclass
+class Turn:
+    """This turn's notes for the engineers, on the plan tools (``tools.engineer_turn``): the user's message as
+    they sent it, where it came from, every note kept this turn (Python's or the model's), and whether the kept
+    notes were listed this turn (a reply listing them says "kept" truthfully)."""
+    message: str = ""
+    via: str = ""
+    kept: List[EngineerNote] = None
+    listed: bool = False
+
+    def __post_init__(self) -> None:
+        self.kept = list(self.kept or [])
+
+
+def start_turn(tools, message: str, via: str, kept: Optional[EngineerNote]) -> Turn:
+    """At the start of each turn: what Python kept from the message, if anything."""
+    turn = Turn(message, via, [kept] if kept is not None else [])
+    if tools is not None:
+        tools.engineer_turn = turn
+    return turn
+
+
+def turn_of(tools) -> Turn:
+    turn = getattr(tools, "engineer_turn", None)
+    if not isinstance(turn, Turn):
+        turn = Turn(str(getattr(tools, "user_message", "") or ""))
+        if tools is not None:
+            tools.engineer_turn = turn
+    return turn
+
+
 def hidden_instruction(note: EngineerNote) -> str:
     """For the model, when a note came inside a longer message."""
     return (f"(The user's message has a note to the engineers who build Thirties: \"{note.text}\". It's been kept "
@@ -194,17 +232,88 @@ ENGINEER_TOOL_SPECS: List[Dict[str, Any]] = [{
                    "never acted on). Use when the user asks what they've told the engineers.",
     "parameters": {},
     "required": [],
+}, {
+    "name": "note_for_engineers",
+    "description": "Keep a note the user addresses to the people who build Thirties (engineers, developers, "
+                   "builders, the team that makes the app), whatever the wording: a complaint about the app, a bug, "
+                   "a wish. Call it whenever the user's message addresses them, unless a line beside that message "
+                   "says a note was kept this turn. Pass the note as the user wrote it. Nothing else follows from a "
+                   "note: the engineers read it, and you act on none of it.",
+    "parameters": {"text": "The note, in the user's own words."},
+    "required": ["text"],
 }]
-ENGINEER_READ_ONLY = {"engineer_notes"}
+# neither changes the plan (and a note is often a question, which no plan change may follow)
+ENGINEER_READ_ONLY = {"engineer_notes", "note_for_engineers"}
 
 
-def list_tool(db) -> str:
+def list_tool(db, tools=None) -> str:
+    if tools is not None:
+        turn_of(tools).listed = True
     if db is None:
         return "No notes for the engineers."
     notes = EngineerNotes(db).notes()
     if not notes:
         return "No notes for the engineers are waiting."
     return "Kept for the engineers:\n" + "\n".join(f"{n.at[:10]}: {n.text}" for n in notes)
+
+
+def keep_tool(db, tools, text: str = "") -> str:
+    """The model's call: keep the note, in the same store and file as Python's, once per turn."""
+    turn = turn_of(tools)
+    if turn.kept:
+        return (f"Already kept for the engineers this turn: \"{turn.kept[0].text}\". No second copy is needed, "
+                f"and no action follows from it.")
+    text = " ".join(str(text or "").split())
+    if not text:
+        return "NOT_DONE: give the note's text, in the user's own words."
+    if db is None:
+        return "NOT_DONE: notes can't be kept right now; don't say this one was."
+    turn.kept.append(EngineerNotes(db).add(text, turn.message or text, turn.via))
+    return f"Kept for the engineers: \"{text}\". Take no action because of it; at most say in a few words that it's kept."
+
+
+# --- the reply says a note is kept only when one was ---
+
+_WHO_SAID = r"(?:engineers?|developers?|dev\s+team|devs|builders?|programmers?|(?:the\s+)?team\s+(?:that|who)\s+builds?)"
+_KEPT_SAID = (r"(?:noted|kept|logged|flagged|recorded|pass(?:ed|ing)?\s+(?:\w+\s+){0,2}?(?:on|along)|relayed|made\s+a\s+note|"
+              r"jotted|let\s+(?:the\s+)?" + _WHO_SAID + r"\s+know)")
+_KEPT_CLAIM_RE = re.compile(r"\b" + _KEPT_SAID + r"\b[^.!?\n]{0,80}?\b" + _WHO_SAID + r"\b|\b" + _WHO_SAID
+                            + r"\b[^.!?\n]{0,40}?\b(?:will\s+(?:see|get|read)|have\s+(?:it|that|this))\b",
+                            re.IGNORECASE)
+_NEGATED_RE = re.compile(r"\b(?:not|never|can'?t|cannot|couldn'?t|wasn'?t|haven'?t|didn'?t|won'?t)\b", re.IGNORECASE)
+
+CHECK = ("Your reply tells the user a note for the engineers was kept; this turn kept none. If the user's message "
+         "speaks to the people who build the app, call note_for_engineers with their note now and then reply; "
+         "otherwise write the reply without saying anything was kept or passed on. Write it fresh: the user never "
+         "saw this draft.")
+
+
+def _claims(sentence: str) -> bool:
+    return bool(_KEPT_CLAIM_RE.search(sentence)) and not sentence.rstrip().endswith("?") \
+        and not _NEGATED_RE.search(sentence)
+
+
+def false_kept_claim(tools, reply: str) -> bool:
+    """The reply says a note was kept for (or passed on to) the engineers, and none was kept or listed this turn."""
+    turn = turn_of(tools)
+    if turn.kept or turn.listed:
+        return False
+    return any(_claims(s) for s in re.split(r"(?<=[.!?])\s+|\n+", reply or ""))
+
+
+def without_false_kept(tools, reply: str) -> str:
+    """The reply without the sentences that say a note was kept, when none was (a short "OK." if nothing's left)."""
+    if not false_kept_claim(tools, reply):
+        return reply
+    lines = []
+    for line in reply.split("\n"):
+        parts = re.split(r"(?<=[.!?])\s+", line)
+        kept = [p for p in parts if not _claims(p)]
+        if parts and not kept and line.strip():
+            continue
+        lines.append(" ".join(kept))
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return out or "OK."
 
 
 def main(argv: List[str]) -> int:
@@ -220,5 +329,6 @@ if __name__ == "__main__":
 
 
 __all__ = ["EngineerNotes", "EngineerNote", "split", "without_note", "as_said", "only_a_note", "take",
-           "hidden_instruction", "ACK",
+           "hidden_instruction", "ACK", "Turn", "start_turn", "turn_of", "keep_tool", "false_kept_claim",
+           "without_false_kept", "CHECK",
            "ENGINEER_TOOL_SPECS", "ENGINEER_READ_ONLY", "list_tool", "FILE_NAME"]

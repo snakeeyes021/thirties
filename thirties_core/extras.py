@@ -26,7 +26,8 @@ EXTRA_READ_ONLY = (set(engineer_notes.ENGINEER_READ_ONLY) | media_picks.MEDIA_RE
 def extra_handlers(assistant) -> Dict[str, Callable[..., str]]:
     """The handlers, bound to the assistant's tools (``assistant._db`` is the app's database)."""
     return {
-        "engineer_notes": lambda **_: engineer_notes.list_tool(assistant._db),
+        "engineer_notes": lambda **_: engineer_notes.list_tool(assistant._db, assistant.pt),
+        "note_for_engineers": lambda text="", **_: engineer_notes.keep_tool(assistant._db, assistant.pt, text),
         "suggest_media": lambda kind="", alongside="", **_: media_picks.suggest(assistant, kind, alongside),
         "log_contact": lambda person="", how="", when=None, note="", **_: people.log_contact(
             assistant, person, how, when, note),
@@ -48,7 +49,8 @@ RULES = """MORE YOU CAN DO (with the tools listed below)
 - How a day or a week went: review_day or week_overview; include what was pushed back to the backlog, as they give it.
 - When the user mentions seeing, texting, calling or spending time with someone, log_contact; how often they want to be in touch is keep_in_touch.
 - Before drafting list items for the user (a breakdown, a new project's tasks), call task_style and write them like their own lines.
-- Rush tickets at the user's theatre: rush_tickets (a daily check, only when the user turns it on)."""
+- Rush tickets at the user's theatre: rush_tickets (a daily check, only when the user turns it on).
+- When the user speaks to the people who build Thirties (a note, complaint or question for the engineers, developers or builders, in any wording) and no line beside their message says it was already kept, call note_for_engineers with it, and do nothing else because of it. Say a note is kept only when one was."""
 
 
 def prompt_section(tools) -> str:

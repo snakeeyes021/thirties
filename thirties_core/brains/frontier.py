@@ -561,6 +561,7 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         reply = self._not_holding(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
+        reply = self._kept_for_engineers(reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._tidy(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before), changes_before)
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
@@ -844,6 +845,7 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
         reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
         reply = self._fed_text_out(reply, changes_before)  # and nothing a rewrite brought back (internal_text.py)
         reply = self._not_holding(turn_start, reply, self._one_more_round)  # holding_lines.py
+        reply = self._kept_for_engineers(reply, self._one_more_round)  # engineer_notes.py
         reply = self._tidy(turn_start, reply, self._one_more_round, changes_before)  # clean_prose.py
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
@@ -1364,6 +1366,21 @@ Skip means not today, never tomorrow: for a skip, log_outcome skipped is enough 
             if not holding_lines.only_holds(fresh):
                 return holding_lines.without(fresh) or fresh
         return holding_lines.COULDNT
+
+    # --- a note said to be kept for the engineers only when one was (engineer_notes.py) ---
+
+    def _kept_for_engineers(self, reply: str, retry) -> str:
+        """A reply that says a note for the engineers is kept, when none was, goes back once: the model keeps it
+        (note_for_engineers) or drops the claim. Whatever claim is still untrue after that goes, whole."""
+        from thirties_core import engineer_notes
+        if not engineer_notes.false_kept_claim(self.tools, reply):
+            return reply
+        logger.warning("[FrontierBrain] Reply says a note for the engineers is kept; none was: %r", reply[:200])
+        self._check(engineer_notes.CHECK)
+        fresh = (retry() or "").strip() or reply  # a call alone, with no new words: the draft may now be true
+        return engineer_notes.without_false_kept(self.tools, fresh)
+
+    # --- end note said to be kept ---
 
     def _written(self, turn_start: int) -> List[str]:
         """Everything the model wrote this turn, drafts included."""
