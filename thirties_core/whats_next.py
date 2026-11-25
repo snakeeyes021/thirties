@@ -109,12 +109,12 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     """The slice, its sections a blank line apart (messages.join_sections): "Now:" and what's in the current block
     (none when nothing is), every row from there to the end of today (or only the next few, with the mode "few")
     laid out by the schedule's own row formatter,
-    any moved item not among them, "Not marked yet:" (none when nothing is), and someone else's events in that
-    stretch on a "Not yours" line. "" outside the day, or with the mode "nothing". ``said``: the user's message, so a time they gave
-    keeps its minutes. ``unmarked``: what's past its time with nothing said (messages.missed_for, which leaves out
-    what the user asked not to be asked about); worked out from the plan when not given. ``untimed``: today's list
-    items under "If there's time", as (heading, titles) sections (untimed_for), after Not marked yet. ``with_now``: False under a start notice, which
-    says what's on now itself. ``free``: a "Free" line for each open stretch of an hour or more among the rows.
+    any moved item not among them, "Not marked yet:" (none when nothing is), someone else's events in that stretch
+    on a "Not yours" line, and last "If there's time:" (none when it's empty). "" outside the day, or with the
+    mode "nothing". ``said``: the user's message, so a time they gave keeps its minutes. ``unmarked``: what's past
+    its time with nothing said (messages.missed_for, which leaves out what the user asked not to be asked about);
+    worked out from the plan when not given. ``untimed``: the If there's time section, as (heading, titles)
+    (untimed_for). ``with_now``: False under a start notice, which says what's on now itself. ``free``: a "Free" line for each open stretch of an hour or more among the rows.
 
     ``mode`` given: that, whole (asked for outright). Left out: as the person wants it (reply_extras.py, from
     ``config`` and ``db``): nothing at all, or only the next few rows, when they said so. Its Not marked yet list
@@ -150,11 +150,12 @@ def render(plan: DayPlan, now: datetime, moved: Iterable[EventSpan] = (), mode: 
     theirs = [s for s in plan.spans_in_view() if s.shown_only and s.end_dt > block and s.start_dt < shown_until]
     behind = unmarked_lines(missed_items(plan, now) if unmarked is None else unmarked)  # today's only
     from thirties_core.messages import join_sections
-    return join_sections(  # Now, the rest of today, Also moved, Not marked yet, If there's time, Not yours
+    return join_sections(  # Now, the rest of today, Also moved, Not marked yet, Not yours, If there's time (last)
         now_line if with_now else "", next_block, _moved_line(elsewhere, plan, said) if elsewhere else "",
-        "\n".join(behind), *(untimed_lines(heading, titles) for heading, titles in untimed),
+        "\n".join(behind),
         "Not yours: " + "; ".join(f"{s.title}, {format_clock(s.start_dt)}"
-                                  for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())) if theirs else "")
+                                  for s in sorted(theirs, key=lambda s: s.start_dt.timestamp())) if theirs else "",
+        *(untimed_lines(heading, titles) for heading, titles in untimed))
 
 
 def unmarked_lines(spans: List[EventSpan]) -> List[str]:

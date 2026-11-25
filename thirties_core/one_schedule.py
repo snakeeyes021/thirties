@@ -183,7 +183,7 @@ def _joined(lines: List[str]) -> str:
 
 def tidy(reply: str, shown: str, plan) -> str:
     """The reply with the model's own listing of the day left out, when ``shown`` (Python's text, going under it)
-    lays it out; and each untimed section once."""
+    lays it out; and each section once."""
     if not reply:
         return reply
     lines = reply.splitlines()

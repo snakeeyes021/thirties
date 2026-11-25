@@ -62,6 +62,7 @@ MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
 
 MESSAGE_READ_ONLY = {"show_schedule", "item_history"}
 
+
 class MessageTools:
     def __init__(self, tools: "PlanTools") -> None:
         self.tools = tools
