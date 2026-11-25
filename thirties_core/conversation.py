@@ -617,12 +617,7 @@ class ConversationManager:
         self._stamp_arrivals(batch, before)
 
         self.last_raw_reply = reply  # before the AM/PM pass (for tests of the brains themselves)
-        final = reply
-        if self.tools.shown_schedule:
-            from thirties_core.messages import place_schedule
-            final = place_schedule(final, self.tools.shown_schedule)  # Python's layout, whatever the model made
-            from thirties_core import one_schedule  # and no listing of the model's own beside it
-            final = one_schedule.around(final, self.tools.shown_schedule, self.day_plan)
+        final = reply  # show_schedule's view goes under it at the end, once (_with_whats_next)
         said = [without_note(str(m.get("content") or "")) for m in self.messages if m.get("role") == "user"  # all day
                 and not m.get("hidden") and not str(m.get("content") or "").startswith("[System check")]  # not Python's
         keep = real_times(*said, words, spans=self.day_plan.spans)  # real item times and the user's
@@ -644,7 +639,7 @@ class ConversationManager:
             final = join_sections(final.rstrip(), "\n".join(notes))
         # --- the morning's reply lists the day itself: no what's-next slice under it (morning_reply.py) ---
         from thirties_core import morning_reply
-        final = morning_reply.without_slice(self, final) if morning_now else \
+        final = morning_reply.without_slice(self, final) if morning_now and not self.tools.shown_schedule else \
             self._with_whats_next(final, words, before)
         # --- end morning reply ---
         # --- a promise of quiet only when quiet is kept (quiet_asks.py) ---
@@ -741,18 +736,20 @@ class ConversationManager:
         return reply
 
     def _with_whats_next(self, reply: str, said: str, before: int) -> str:
-        """After a turn that changed something, tried to, or talked the plan over (whats_next.follows_turn), what's
-        next, from the plan as it now stands (whats_next.py), at the end of the reply, as the person wants it
-        (reply_extras.py). Never with a schedule already in the reply, when the user asked for it, or in a turn
-        about what replies show."""
-        from thirties_core import whats_next
+        """Where things stand, under the reply, once (whats_next.py, one_schedule.place): show_schedule's view when
+        the model called it this turn; else, after a turn that changed something, tried to, or talked the plan
+        over (whats_next.follows_turn), the standard view as the person wants it (reply_extras.py). None in a turn
+        about what replies show. Whether the user asked to see the plan is never read off their words: the model
+        decides that, by calling show_schedule."""
+        from thirties_core import one_schedule, whats_next
         from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
         now = get_current_time(self.day_plan.day_start.tzinfo)
         db = self._context()[1]
-        if self.tools.shown_schedule and self.tools.is_current(self.day_plan):
-            whats_next.SentSummaries(db).mark(self.day_plan, now, whole_day=True)  # the user has seen the day
-        if self.tools.shown_schedule or whats_next.SCHEDULE_ASKED_RE.search(said or "") \
-                or any(m.get("name") == "set_reply_extras" for m in self.brain.messages[before:]):
+        if self.tools.shown_schedule:
+            if self.tools.is_current(self.day_plan):
+                whats_next.SentSummaries(db).mark(self.day_plan, now, whole_day=True)  # the user has seen the day
+            return one_schedule.place(reply, self.tools.shown_schedule, self.day_plan)
+        if any(m.get("name") == "set_reply_extras" for m in self.brain.messages[before:]):
             return reply
         if not whats_next.follows_turn(self.brain.messages[before:], reply, said, self.day_plan, READ_ONLY_TOOLS,
                                        NOT_DONE):
@@ -761,8 +758,9 @@ class ConversationManager:
         moved = whats_next.moved_since(getattr(self, "_plan_before", {}), self.day_plan)
         # A status view: worked out fresh from the plan for every slice, so what's still unmarked shows again in the
         # next one. "Shown" only keeps the separate notices from listing them again; it never hides them here.
-        # never the list twice; muted or not (a mute quiets check-ins, never where things stand)
-        unmarked = [] if MISSED_HEADING in reply else missed_for(self.tools, now, muted_too=True)
+        # Muted or not (a mute quiets check-ins, never where things stand); a list the model wrote itself goes
+        # (one_schedule.place), so the list is Python's, once.
+        unmarked = missed_for(self.tools, now, muted_too=True)
         part = whats_next.summary(self.tools, now, None, moved, said, unmarked)  # as the person wants it
         if part and self.tools.is_current(self.day_plan):
             whats_next.SentSummaries(db).mark(self.day_plan, now)
@@ -770,11 +768,7 @@ class ConversationManager:
             MissedTracker(self.scheduler.state_db).mark(now, unmarked)  # every one of them is listed
             from thirties_core.away import LastSentList  # the list as last sent (away.py)
             LastSentList(self.scheduler.state_db).mark(now, unmarked)
-        from thirties_core.messages import join_sections
-        if part:  # one schedule per reply: Python's, never a listing of the model's own too (one_schedule.py)
-            from thirties_core import one_schedule
-            reply = one_schedule.tidy(reply, part, self.day_plan)
-        return join_sections(reply, part) if part else reply
+        return one_schedule.place(reply, part, self.day_plan) if part else reply
 
     def _lost(self, batch: List[Incoming], before: int, changes_before: int, error: BrainUnavailable, via: str,
               attempts: int) -> str:

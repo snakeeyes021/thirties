@@ -3,8 +3,9 @@
 They sit beside the schedule and assistant tools in ``PlanTools`` and share its dispatcher and contract
 (natural-language arguments in, short plain-English results out, ``NOT_DONE`` when nothing changed).
 
-- ``show_schedule``: the schedule for a reply, laid out by Python (messages.render_schedule). The model puts it in
-  its reply as is; the conversation layer swaps in this text if the model rewrote the rows (A5, C2).
+- ``show_schedule``: where things stand, the one standard view (whats_next.standing: Now, The rest of today, Not
+  marked yet), or another day's plan (messages.render_schedule). Python puts it under the reply itself, once
+  (one_schedule.place); the model only writes its own sentences.
 - ``check_on``: the user asks to be checked on for an item ("ask me if I've left for the vet"): contextual.py.
 - ``item_history``: what's actually recorded about an item, so the model answers "why is X skipped?" from facts
   instead of making up a story (A4: 10-28, an item skipped with no recorded
@@ -32,9 +33,12 @@ def _as_bool(value: Any) -> bool:
 MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "show_schedule",
-        "description": "The schedule laid out for the user: where they are now, what's not marked yet, then the "
-                       "rest of the day (or another day). Put the text in your reply as it is. Read-only.",
-        "parameters": {"whole_day": "true only if the user asks for the whole day (or for earlier today).",
+        "description": "The standard view of where things stand (Now, The rest of today, Not marked yet), or "
+                       "another day's plan; the default answer whenever the plan is asked for. "
+                       "Python puts it under your reply by itself, once; you write only your own "
+                       "sentences, never the rows. Read-only.",
+        "parameters": {"whole_day": "true only if the user asks for earlier today (or the whole day): what today "
+                                    "held before now goes above the standard view.",
                        "day": "Which day (default: the day being planned)."},
         "required": [],
     },
@@ -58,7 +62,6 @@ MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
 
 MESSAGE_READ_ONLY = {"show_schedule", "item_history"}
 
-
 class MessageTools:
     def __init__(self, tools: "PlanTools") -> None:
         self.tools = tools
@@ -69,27 +72,28 @@ class MessageTools:
     # --- show_schedule ---
 
     def show_schedule(self, whole_day: Any = False, **_: Any) -> str:
+        """The day being lived: the standard view (whats_next.standing), the same text a change puts under a reply.
+        Another day, or outside the day: that day's plan (messages.render_schedule). Either way the text goes under
+        the reply by Python (conversation.py), and the model is told so: it never lays the day out itself."""
         from thirties_core.messages import MissedTracker, missed_for, render_schedule
+        from thirties_core.whats_next import PLACED, standing
         tools = self.tools
         plan = tools.day_plan
         now = tools._now()
         live = tools.is_current(plan) and plan.day_start <= now < plan.day_end
+        text = standing(tools, now, whole_day=_as_bool(whole_day)) if live else ""
+        if not text:
+            from thirties_core.item_path import labelled_plan, tasks_of  # a nested item with its parents
+            text = render_schedule(labelled_plan(plan, tasks_of(tools)), None, whole_day=_as_bool(whole_day))
         missed = missed_for(tools, now, muted_too=True) if live else []  # asked for: muted or not
-        from thirties_core.item_path import labelled, labelled_plan, tasks_of  # a nested item with its parents
-        tasks = tasks_of(tools)
-        text = render_schedule(labelled_plan(plan, tasks), now if live else None, whole_day=_as_bool(whole_day),
-                               missed=labelled(missed, tasks),
-                               config=getattr(tools.scheduler, "config", None), db=tools._state_db,
-                               said=tools.user_message or "")  # the block line as the person wants it
-        if live and getattr(tools, "assistant", None) is not None:  # after the day's timed items (if_time.py)
-            from thirties_core.if_time import text_for
-            text += text_for(tools.assistant)
         if missed:
             MissedTracker(tools._state_db).mark(now, missed)  # shown: notices and replies needn't list them again
             from thirties_core.away import LastSentList  # the list as last sent (away.py)
             LastSentList(tools._state_db).mark(now, missed)
-        tools.shown_schedule = text  # the conversation layer makes sure the reply carries this, as it is
-        return text
+        tools.shown_schedule = text  # the conversation layer puts this under the reply, once
+        note = PLACED if live else ("Python puts this day's plan under your reply by itself, exactly once. Never "
+                                    "copy, rewrite or summarise it; write only your own sentences.")
+        return f"{note}\n\n{text}"
 
     # --- check_on ---
 

@@ -1,15 +1,16 @@
 """One schedule per reply: Python's.
 
-When Python's rest of today goes under a reply (whats_next.py), or show_schedule's layout is in it
-(messages.place_schedule), a schedule the model listed itself in the same reply is left out, so the day is never
-shown twice and the rows the user reads are Python's. What counts as the model's listing: a run of lines that are
+When Python's standard view goes under a reply (whats_next.py: after a change, or after show_schedule, ``place``),
+a schedule the model listed itself in the same reply is left out, so the day is never shown twice and the rows the
+user reads are Python's. The model's own "Now:" line and "You're in the … block" line go too: the view says what's on
+now, in one place. What counts as the model's listing: a run of lines that are
 schedule rows (a time, then one of today's items: "6:00 PM – Repot the cactus", "6:00 PM Repot the cactus"), with the
 lines among them that only name an item or an open stretch, or say "Now:", at least two of them rows, and mostly
 items Python's text shows too. Its intro line goes with it ("Here's how tonight runs:"), or ends on a full stop
 when it says more than that. A single row, rows about other days or about what's done, and prose that mentions times
 all stay.
 
-Sections of untimed things ("If there's time", "On today's list, no time yet") appear once: Python's when its text
+Sections appear once ("If there's time", "On today's list, no time yet", "Not marked yet"): Python's when its text
 has one, else the model's first.
 """
 
@@ -36,10 +37,12 @@ _BARE_HEADING_RE = re.compile(r"^\s*(?:the )?(?:rest of (?:today|the day|your da
                               r"next(?: up)?|up next|coming up|(?:the )?whole day|today|tonight|this evening|"
                               r"(?:your |the )?(?:updated |new )?(?:schedule|plan|day|evening)(?: for today)?)\s*:\s*$",
                               re.IGNORECASE)
-_SENTENCE_END_RE =re.compile(r"[.!?](?:[\"'”’)]*)\s+")
+_STATUS_RE = re.compile(r"^\s*(?:[-•*]\s*)?you'?re in the \d{1,2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.? block\b", re.IGNORECASE)
+_SENTENCE_END_RE = re.compile(r"[.!?](?:[\"'”’)]*)\s+")
 
 UNTIMED_HEADS = (re.compile(r"^\s*if there'?s time\b[^\n]*:\s*$", re.IGNORECASE),
-                 re.compile(r"^\s*on today'?s list,? (?:with )?no time\b[^\n]*:\s*$", re.IGNORECASE))
+                 re.compile(r"^\s*on today'?s list,? (?:with )?no time\b[^\n]*:\s*$", re.IGNORECASE),
+                 re.compile(r"^\s*not marked yet\b[^\n]*:\s*$", re.IGNORECASE))
 
 
 def _titles(plan) -> List[str]:
@@ -143,7 +146,7 @@ def _listings(lines: List[str], protected: Set[int], titles: Sequence[str], show
 
 
 def _untimed(lines: List[str], protected: Set[int], shown_lines: Sequence[str]) -> Set[int]:
-    """Each untimed section once: Python's when its text has one, else the model's first."""
+    """Each section once: Python's when its text has one, else the model's first."""
     drop: Set[int] = set()
     for head in UNTIMED_HEADS:
         pythons = any(head.match(line) for line in shown_lines)
@@ -165,6 +168,9 @@ def _tidy_lines(lines: List[str], protected: Set[int], shown: str, plan) -> List
     titles = _titles(plan)
     drop = _listings(lines, protected, titles, shown.lower())
     drop |= _untimed(lines, protected, shown.splitlines())
+    if shown.strip():  # what's on now is said once, in Python's view
+        drop |= {i for i, line in enumerate(lines) if i not in protected
+                 and (_NOW_RE.match(line) or _STATUS_RE.match(line))}
     return [line for i, line in enumerate(lines) if i not in drop]
 
 
@@ -201,4 +207,17 @@ def around(reply: str, schedule: Optional[str], plan) -> str:
     return reply if out == original else _joined(out)
 
 
-__all__ = ["around", "tidy"]
+def place(reply: str, view: str, plan) -> str:
+    """The reply with Python's view under it, exactly once: a copy of it the model made is taken out, and so is
+    any listing, "Now:" line, status line or section of the model's own that the view lays out (``tidy``). Only the
+    model's own sentences stay above the view."""
+    view = (view or "").strip()
+    if not view:
+        return reply
+    text = (reply or "").replace(view, "") if reply else ""
+    text = tidy(text, view, plan) if text.strip() else ""
+    from thirties_core.messages import join_sections
+    return join_sections(text.strip(), view)
+
+
+__all__ = ["around", "place", "tidy"]

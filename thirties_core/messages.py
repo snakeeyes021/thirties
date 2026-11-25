@@ -330,6 +330,8 @@ def now_section(tools) -> str:
                      + (" Not reported and gone by: " + ", ".join(span_label(s, tasks) for s in moot)
                         + ": never ask about those; the list still shows them, and the user can still mark them."
                         if moot else ""))
+    from thirties_core.whats_next import PLACED  # what goes under a reply, as a fact (whats_next.py)
+    lines.append("Under a reply that changes today's plan or calls show_schedule: " + PLACED)
     return "\n".join(lines) + "\n\n"
 
 

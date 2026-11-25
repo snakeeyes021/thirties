@@ -1,7 +1,8 @@
 """What Python adds to a reply, and the person's say over it.
 
-Three things are Python's, never the model's: what's next after a change (whats_next.py), its "Not marked yet"
-section, and the line saying which block the person is in ("You're in the 10:00 block: …", messages.status_line).
+Three things are Python's, never the model's: the standard view after a change (whats_next.py), the "Not marked
+yet" list under check-ins and start notices (the view after a change always has its own, whenever anything is
+unmarked), and the line saying which block the person is in ("You're in the 10:00 block: …", messages.status_line).
 Each is a shared preference that Preferences shows too, so the app and chat agree. Asked in chat to stop one, the
 assistant sets it with set_reply_extras: from now on, or only for today if the person says so. Asking for the
 schedule or what's next still shows it.
@@ -23,17 +24,18 @@ PARTS = {  # the part, and its shared setting
     "not_marked": "assistant.after_change_unmarked",
     "status_line": "assistant.status_line",
 }
-NAMES = {"whats_next": "what's next after a change", "not_marked": "the Not marked yet list after a change",
+NAMES = {"whats_next": "what's next after a change", "not_marked": "the Not marked yet list under check-ins",
          "status_line": "the line saying which block you're in"}
 TODAY_KEY = "reply_extras_today"  # this day's own choices: {"day": "<iso>", "values": {<part>: <value>}}
 
 REPLY_EXTRAS_TOOL_SPECS: List[Dict[str, Any]] = [{
     "name": "set_reply_extras",
-    "description": "Stop, trim or bring back what Python adds to replies, only when the user's message asks for that "
-                   "outright: 'what's next' after a change (its Now and Next lines), the 'Not marked yet' list in it, "
-                   "or the 'You're in the … block' line. For today unless they say it's for good ('from now on'). The "
-                   "one way to honour 'stop sending the list' or 'stop saying block'; never say it's stopped without "
-                   "this call, and never call it for a complaint about the schedule itself.",
+    "description": "Stop, trim or bring back what Python adds, only when the user's message asks for that outright: "
+                   "the standard view after a change (whats_next: off, or only the next few rows), the 'Not marked "
+                   "yet' list under check-ins and start notices (not_marked; the view after a change always keeps "
+                   "it), or the 'You're in the … block' line (status_line). For today unless they say it's for good "
+                   "('from now on'). Never say something stopped without this call, and never call it for a "
+                   "complaint about how a section looks (its format is Python's and stays).",
     "parameters": {"part": "'whats_next', 'not_marked', 'status_line', or 'all'.",
                    "show": "'off' or 'on'; for whats_next also 'few' (only the next few things, when they ask for "
                            "less) or 'rest' (the rest of today, every row: the usual).",
@@ -148,10 +150,14 @@ def set_extras(config, settings, db, today: date, part: str, show: str, for_toda
     if db is not None:
         db.set_sync_meta(TODAY_KEY, json.dumps({"day": today.isoformat(), "values": held}))
     after = effective(config, db, today)
-    shown = [NAMES[p] for p in parts if after[p] not in ("nothing", False)]
-    hidden = [NAMES[p] for p in parts if after[p] in ("nothing", False)]
+    shown = [NAMES[p] for p in parts if after[p] not in ("nothing", False) and p != "not_marked"]
+    hidden = [NAMES[p] for p in parts if after[p] in ("nothing", False) and p != "not_marked"]
     when = "for the rest of today" if only_today else "from now on, on every device (Preferences shows it too)"
     out = []
+    if "not_marked" in parts:  # the view after a change keeps its own list whatever this says
+        out.append(("Check-ins and start notices leave out the Not marked yet list " if not after["not_marked"] else
+                    "Check-ins and start notices show the Not marked yet list again ") + when
+                   + ". The view after a change still lists what's not marked yet, titles only.")
     if hidden:
         out.append("Replies leave out " + " and ".join(hidden) + f" {when}. A request for the schedule or what's next "
                    "still shows it.")
