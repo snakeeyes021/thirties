@@ -92,11 +92,11 @@ PLAIN_WHY = ("Explain a choice in plain words the user would use themselves (\"i
 MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (they come best first; not the whole "
-    "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
-    "on, one plain line each (time first, never '- ' bullets), and one line on why. " + PLAIN_WHY + " The week's "
-    "planned items may get a line too, by name. Ask nothing, unless the facts say something doesn't fit today: then "
-    "that is your one question (the day as it is, what doesn't fit, and the options: drop it, move it to a day, or "
-    "squeeze it in). If there's nothing to put on and "
+    "backlog) and call propose_day with them. " + POLICY + " Your message holds only words of your own; "
+    "the app places the day's list under it by itself, what you put on included, so never list rows; give one line "
+    "on why you chose them. " + PLAIN_WHY + " The week's planned items may get a line too, by name. Ask nothing, "
+    "unless the facts say something doesn't fit today: then that is your one question (the day as it is, what "
+    "doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
 
 
@@ -727,6 +727,7 @@ def _resting_out(dp: DayProposal, day: date, cands: List[Dict[str, Any]]) -> Lis
     return out
 
 
+DAY_LIST_PLACED = "The app places the day's list under your message"  # morning_day.place_day_list keys on it
 MORNING_FACTS = (
     "\nThis is the morning's only message, so it also says, briefly and in your words, what follows (true already). "
     "If it says what was done with what's left from before, say that as a notice in your words, not a question: "
@@ -739,8 +740,9 @@ MORNING_FACTS = (
     "took place at a set time (a show, an appointment, a planetarium show at 7:30) is an event even when its name reads "
     "like an action, and never goes in keep; only work the user can still do later is kept, with kind \"task\". "
     "When unsure, unknown: not marked yet, asked about once. Start with \"☀️ Good "
-    "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
-    "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
+    "morning!\". " + DAY_LIST_PLACED + " by itself (each routine part with its steps, the "
+    "meals and other anchors, and what you put on): never write those rows yourself, only your own sentences."
+    "\n---\n{facts}\n---")
 
 
 def morning_proposal(manager, facts: str = "", brief: str = "") -> Tuple[str, bool]:

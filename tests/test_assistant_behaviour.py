@@ -304,7 +304,11 @@ class TestTheMorningHasTheWholeDayAndWhatWasAskedFor(RoutineCase):
         mark_up(self.sched.state_db, at("07:45"))
         self.svc.rollover(at("08:00"))
         text = self.sent[0][1]
-        self.assertIn("leaves part of the day out", self.engine.call_history[-1][-1]["content"])
+        asked = [m["content"] for call in self.engine.call_history for m in call if m["role"] == "user"]
+        self.assertFalse(any("leaves part of the day out" in a for a in asked))  # never asked: Python places the list
+        from thirties_core.day_lists import planned_ahead_text
+        heading = planned_ahead_text(self.m.tools.assistant).splitlines()[0]  # Python's own list
+        self.assertEqual(text.count(heading), 1)
         self.assertIn("Feed the fish", text)
         self.assertIn("Lunch", text)
         self.assertNotIn("\n- ", text)

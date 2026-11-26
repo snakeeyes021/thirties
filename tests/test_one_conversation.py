@@ -47,6 +47,8 @@ class OneConversationCase(unittest.TestCase):
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()
+        from tests.fixtures import morning_sent
+        morning_sent(self.sched.state_db)  # ordinary turns: the morning went out already
         self.sched.config.assistant.message_level = "heavy"
         self.sched.config.telegram = TelegramConfig(enabled=True, bot_token="123:FAKE", allowed_chat_ids=[CHAT])
         joplin = MagicMock()

@@ -580,6 +580,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        from thirties_core.morning_day import strip_day_list  # the model's own day listing goes (morning_day.py)
+        reply = strip_day_list(self, turn_start, reply)
         reply = self._moves_made(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._own_up(turn_start, reply, changes_before, outcomes_before)
         reply = self._no_unseen_correction(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
@@ -587,6 +589,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
         reply = self._not_holding(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._kept_for_engineers(reply, lambda: self._rounds(2, changes_before, outcomes_before))
         reply = self._tidy(turn_start, reply, lambda: self._rounds(2, changes_before, outcomes_before), changes_before)
+        from thirties_core.morning_day import place_day_list  # the morning's day list is Python's (morning_day.py)
+        reply = place_day_list(self, turn_start, reply)
         self._show_only(turn_start, reply)
         for m in self.messages[turn_start:]:  # drafts and checks are spent: later turns see the final reply only
             if m.get("role") == "assistant" and m.get("hidden"):
@@ -864,6 +868,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
         if not reply.strip():
             reply = ("Done." if self.tools.successful_changes > changes_before else
                      "Sorry, I lost my train of thought there. Could you say that again?")
+        from thirties_core.morning_day import strip_day_list  # the model's own day listing goes (morning_day.py)
+        reply = strip_day_list(self, turn_start, reply)
         reply = self._moves_made(turn_start, reply, self._one_more_round)
         reply = self._own_up_baseline(turn_start, reply)
         reply = self._no_unseen_correction(turn_start, reply, self._one_more_round)
@@ -871,6 +877,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
         reply = self._not_holding(turn_start, reply, self._one_more_round)  # holding_lines.py
         reply = self._kept_for_engineers(reply, self._one_more_round)  # engineer_notes.py
         reply = self._tidy(turn_start, reply, self._one_more_round, changes_before)  # clean_prose.py
+        from thirties_core.morning_day import place_day_list  # the morning's day list is Python's (morning_day.py)
+        reply = place_day_list(self, turn_start, reply)
         self._show_only(turn_start, reply)
         logger.info("[FrontierBrain] Final reply: %r", reply)
         return reply

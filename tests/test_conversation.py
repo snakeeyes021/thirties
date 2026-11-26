@@ -3,7 +3,7 @@
 from tests.fixtures import temp_dir
 import unittest
 
-from tests.fixtures import DAY, TZ, at, event, line_with, make_scheduler, occupant
+from tests.fixtures import DAY, TZ, at, event, line_with, make_scheduler, morning_sent, occupant
 from thirties_core.astronomy import get_current_time, set_debug_time
 from thirties_core.conversation import ConversationManager
 from thirties_core.inference import MockInferenceEngine, parse_model_directives
@@ -26,6 +26,7 @@ class ConversationTestCase(unittest.TestCase):
 
     def make_manager(self, events=None, tasks=None, notes=None) -> ConversationManager:
         sched = make_scheduler(events)
+        morning_sent(sched.state_db)  # these turns are ordinary ones: the morning's own reply is tested on its own
         plan, pending = sched.build_day_plan(DAY)
         return ConversationManager(plan, tasks or [], pending, sched, inference_engine=self.engine, active_notes=notes or [])
 

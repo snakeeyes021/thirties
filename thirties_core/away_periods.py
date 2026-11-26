@@ -18,7 +18,7 @@ Python keeps the facts; the model decides what they mean for each item:
   morning proposal leaves paused items out (day_proposal.py), and no bell or check-in goes out for them
   (background.py).
 - **Said once**: the first morning inside a period says, in one plain line, that the user is away until when
-  (``morning_line``); a morning reply that leaves it out gets it added (reply_checks.morning_fill).
+  (``morning_line``); a morning reply that leaves it out gets it added (morning_day.place_day_list).
 
 Example (invented): away at "the glaze fair in Elmbrook" from Friday through Monday, back around 7:40 PM Monday,
 note "Ines opens the studio". The model pauses the "Kiln room" routine and "Studio supper"; "Sketch new mugs"

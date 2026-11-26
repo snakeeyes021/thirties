@@ -660,12 +660,14 @@ class TestTheMorningMessage(RoutineCase):
         self.engine.responses = [
             {"role": "assistant", "content": "", "tool_calls": [
                 {"name": "propose_day", "arguments": {"items": [{"item": "t_bank", "start": "4:00 PM"}]}}]},
-            {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one."}]
+            {"role": "assistant", "content": "For after work:\n- 4:00 PM – Call the bank\nIt's the pressing one."},
+            {"role": "assistant", "content": "For after work, the bank call: it's the pressing one."}]
         mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
         self.svc.rollover(at("08:00"))
         self.assertEqual([k for k, _ in self.sent], ["rollover"])  # one message (10-31: three at sunrise)
-        # the wrong time, said as planned in place: a list line still, under its lead-in
-        self.assertIn("\nCall the bank is at 4:30 PM\n", self.sent[0][1])
+        # the wrong time is sent back once; the day's list under the reply is Python's (morning_day.place_day_list)
+        self.assertIn("it's the pressing one.", self.sent[0][1])
+        self.assertIn("\n4:30 PM Call the bank", self.sent[0][1])
         self.assertNotRegex(self.sent[0][1], r"4:00( PM)? – Call the bank")
         self.assertTrue(any(s.title == "Lunch" for s in self.m.day_plan.spans))  # set up, and not listed
         self.assertNotIn("On today by themselves", self.sent[0][1])

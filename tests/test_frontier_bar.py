@@ -107,12 +107,14 @@ class TestFrontierBar(unittest.TestCase):
                        json.dumps({"rating": 6}), json.dumps({"rating": 5}))
         planner, judge = recorder(PLAN_REPLY), recorder(JUDGE_REPLY, JUDGE_REPLY)
         engine = MockInferenceEngine([{"role": "assistant", "content": "Laundry at 10, guitar at 4.", "tool_calls": []}])
+        scripted = engine.responses[0]["content"]
         results = run_script(SCRIPT, [], [], sim, judge, planner, engine)
         self.assertEqual([r["who"] for r in results], ["bar", "thirties"])
         self.assertTrue(all(r["opening"] == "plan my day pls" and not r["error"] for r in results))
         self.assertEqual(results[0]["requests_met"], 0.75)
         thirties_log = [x for _, w, x in results[1]["log"] if w == "assistant"]
-        self.assertEqual(thirties_log, ["Laundry at 10, guitar at 4."])
+        self.assertEqual(len(thirties_log), 1)  # the morning reply: the model's words, then Python's day list
+        self.assertTrue(thirties_log[0].startswith(scripted), thirties_log)
         self.assertIn("plan my day pls", json.dumps(engine.call_history[0]))
         with tempfile.TemporaryDirectory() as tmp:
             out = write_report(results, Path(tmp), "unit")

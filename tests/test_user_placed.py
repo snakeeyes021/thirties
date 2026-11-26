@@ -25,6 +25,9 @@ class PlacedCase(ConversationTestCase):
     def setUp(self):
         super().setUp()
         self.t = self.manager.tools
+        from tests.fixtures import DAY
+        from thirties_core import morning  # the day is still being built here, as these cases were written
+        self.t._state_db.set_sync_meta(morning.done_key(DAY), "")
         out = self.t.execute("update_event", {"event": "Work", "start": "11:00 AM", "end": "6:00 PM"})
         self.assertFalse(out.startswith(NOT_DONE), out)
         for title, start, length in (("Wax the canoe paddle", "6:30 PM", "30 min"),

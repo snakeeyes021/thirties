@@ -318,13 +318,7 @@ def problems(brain: Any, turn_start: int, reply: str, now: Optional[datetime] = 
         if any(DROP_OFFER_RE.search(s) and FIT_RE.search(s) for s in lines):
             out.append("it offers to drop something because today is full; the day's end is no reason to drop "
                        "anything: say where it goes instead (the next free time, or tomorrow)")
-    from thirties_core import morning_day
-    if morning_day.is_morning_turn(brain, turn_start):
-        missing = morning_day.left_out(brain, reply)
-        if missing:
-            out.append("it's the morning's message and leaves part of the day out (" + ", ".join(missing[:4])
-                       + "): list the whole day as Python lists it, each routine part with its steps and the meals, "
-                       "then what you put on")
+    # the morning's day list is Python's, placed under the reply (morning_day.place_day_list): never asked for
     # --- what it says about the leftovers from before: the plan's counts and places (leftover_facts.py) ---
     from thirties_core import leftover_facts
     out += leftover_facts.problems(brain, turn_start, reply)
@@ -365,25 +359,10 @@ def say_picked(brain: Any, reply: str) -> str:
 
 
 def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
-    """A morning reply that still omits routine steps or anchors gets Python's lines for the day under it. One that
-    still miscounts the leftovers gets Python's notice in place of those sentences (leftover_facts.py)."""
+    """A morning reply that still miscounts the leftovers gets Python's notice in place of those sentences
+    (leftover_facts.py). The day's list itself is Python's, placed at the end of the turn (morning_day.place_day_list)."""
     from thirties_core.leftover_facts import set_straight
-    reply = set_straight(brain, turn_start, reply)
-    from thirties_core import morning_day
-    # --- the first morning inside a time away says so, once (away_periods.py) ---
-    assistant = getattr(getattr(brain, "tools", None), "assistant", None)
-    if assistant is not None and morning_day.is_morning_turn(brain, turn_start):
-        from thirties_core.away_periods import say_once
-        try:
-            reply = say_once(assistant, assistant._today(), reply)
-        except Exception as e:  # never costs the user their reply
-            import logging
-            logging.getLogger(__name__).warning("Couldn't add the time away line: %s", e)
-    # --- end time away ---
-    if not morning_day.is_morning_turn(brain, turn_start) or not morning_day.left_out(brain, reply):
-        return reply
-    lines = morning_day.missing_line(brain.tools.assistant)
-    return (reply.rstrip() + "\n\n" + lines) if lines else reply
+    return set_straight(brain, turn_start, reply)
 
 
 def last_resort(reply: str) -> str:

@@ -36,6 +36,8 @@ class MessagesCase(unittest.TestCase):
         self.plan = self.sched.build_day_plan(DAY)[0]
 
     def manager(self, engine=None):
+        from tests.fixtures import morning_sent
+        morning_sent(self.sched.state_db)  # an ordinary turn: the morning went out already
         plan, pending = self.sched.build_day_plan(DAY)
         return ConversationManager(plan, [], pending, self.sched, inference_engine=engine or MockInferenceEngine(),
                                    active_notes=[])

@@ -154,6 +154,57 @@ class TestMorningsAway(AwayCase):
         self.assertEqual(away_periods.periods(self.sched.state_db), [])
 
 
+class TestTheMorningListIsPythons(AwayCase):
+    """The morning reply's day list is Python's, placed by Python: a listing the model copied from earlier mornings,
+    with a routine step paused for the time away, never reaches the user."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock
+        from thirties_core.background import BackgroundService
+        from thirties_core.conversation import ConversationManager
+        from thirties_core.inference import MockInferenceEngine
+        self.catalog.set_urgency("t_bank", "now")
+        self.services.tasks = self.catalog.apply(self.services.tasks)
+        self.engine = MockInferenceEngine()
+        plan, pending = self.sched.build_day_plan(DAY)
+        self.m = ConversationManager(plan, self.services.tasks, pending, self.sched,
+                                     joplin_engine=self.services.joplin, inference_engine=self.engine)
+        self.sent = []
+        self.svc = BackgroundService(self.sched.config, lambda t, b, k: self.sent.append((k, b)), scheduler=self.sched,
+                                     joplin_engine=self.services.joplin, inference_engine=self.engine,
+                                     sync_engine=MagicMock())
+        self.svc.today = lambda: DAY
+        self.svc._manager, self.svc._day = self.m, DAY
+        self.m.tools.execute("set_away", {"start": "today", "end": "Sunday", "place": "the glaze fair in Elmbrook"})
+        self.m.tools.execute("pause_while_away", {"names": ["Kiln room"]})
+
+    def test_a_copied_listing_with_a_paused_step_is_replaced_by_pythons_once(self):
+        from tests.fixtures import mark_up
+        self.engine.responses = [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"name": "propose_day", "arguments": {"items": [{"item": "t_bank", "start": "4:30 PM"}]}}]},
+            {"role": "assistant", "content": "☀️ Good morning! You're away at the glaze fair until Sunday.\n"
+                                             "9:00 AM Check the kiln, Wedge clay\n10:30 AM Tea break\n"
+                                             "4:30 PM Call the bank\nClay orders first, so the bank waits for the afternoon."}]
+        mark_up(self.sched.state_db, at("07:45"))  # the first message of the day
+        self.svc.rollover(at("08:00"))
+        self.assertEqual([k for k, _ in self.sent], ["rollover"])
+        text = self.sent[0][1]
+        self.assertTrue(text.startswith("☀️ Good morning! You're away at the glaze fair until Sunday."), text)
+        self.assertIn("Clay orders first, so the bank waits for the afternoon.", text)  # the model's own sentences stay
+        self.assertNotIn("Check the kiln", text)  # paused: not on today's plan, never listed
+        self.assertNotIn("Wedge clay", text)
+        from thirties_core.day_lists import planned_ahead_text
+        view = planned_ahead_text(self.m.tools.assistant)
+        self.assertEqual(text.count(view), 1)  # Python's list, exactly once, as Python lists it
+        self.assertNotIn("Check the kiln", view)
+        self.assertEqual(text.count("Tea break"), 1)
+        self.assertEqual(text.count("Call the bank"), 1)
+        self.assertRegex(view, r"\n1[01]:[03]0 AM Tea break")  # Python's row
+        self.assertEqual(text.count("You're away"), 1)  # the trip said once
+
+
 class TestNoBellWhileAway(BellDay):
 
     def test_a_paused_routine_step_never_rings_and_the_rest_does(self):

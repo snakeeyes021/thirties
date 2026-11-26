@@ -84,4 +84,85 @@ def missing_line(assistant: Any) -> str:
         return ""
 
 
-__all__ = ["place_pinned", "is_morning_turn", "left_out", "missing_line"]
+class _Names:
+    """A stand-in plan for one_schedule: the titles a morning listing can name (today's rows, every routine and its
+    steps, the anchors, what's paused while the user is away), so a row about something not on today's plan is
+    still known as a row."""
+
+    def __init__(self, titles: List[str]) -> None:
+        from types import SimpleNamespace
+        self.spans = [SimpleNamespace(title=t) for t in titles]
+
+
+def _known_names(assistant: Any) -> List[str]:
+    from thirties_core.today import note_items
+    out = [s.title for s in assistant.pt.day_plan.spans if not s.is_envelope]
+    try:
+        for note in assistant._routines():
+            out.append(note["title"])
+            out += [text.strip() for text, _ in note_items(note)]
+        out += [a.title for a in assistant.routines.book().anchors(include_removed=True)]
+    except Exception as e:
+        logger.warning("Couldn't read the routine names: %s", e)
+    try:
+        from thirties_core import away_periods
+        for p in away_periods.periods(assistant._db):
+            out += [x.get("name", "") for x in p.get("paused") or []]
+    except Exception as e:
+        logger.warning("Couldn't read what's paused: %s", e)
+    return [t for t in dict.fromkeys(t.strip() for t in out) if t]
+
+
+def lists_day(brain: Any, turn_start: int) -> bool:
+    """The turn's morning instruction told the model that the app places the day's list (day_proposal.MORNING_FACTS):
+    Python places it, then."""
+    from thirties_core.day_proposal import DAY_LIST_PLACED
+    return any(m.get("role") == "user" and DAY_LIST_PLACED in str(m.get("content") or "")
+               for m in brain.messages[max(0, turn_start - 3):])
+
+
+def _without_listing(assistant: Any, text: str, view: str) -> str:
+    """The text without a day listing the model wrote itself (one_schedule.tidy); every known name counts as shown,
+    so its copy of any of them goes."""
+    if not text.strip():
+        return ""
+    from thirties_core import one_schedule
+    names = _known_names(assistant)
+    return one_schedule.tidy(text, "\n".join([view] + names), _Names(names))
+
+
+def strip_day_list(brain: Any, turn_start: int, reply: str) -> str:
+    """Before the reply's claims are checked: a morning reply loses the day listing the model wrote itself, so its
+    copied rows are never checked against the plan or sent back for a rewrite (Python's list goes under it at the
+    end: place_day_list)."""
+    assistant = getattr(getattr(brain, "tools", None), "assistant", None)
+    if assistant is None or not reply or not lists_day(brain, turn_start):
+        return reply
+    try:
+        return _without_listing(assistant, reply, missing_line(assistant)) or reply
+    except Exception as e:  # never costs the user their morning
+        logger.warning("Couldn't take the model's day listing out: %s", e)
+        return reply
+
+
+def place_day_list(brain: Any, turn_start: int, reply: str) -> str:
+    """The morning reply with the day's list as Python lists it (day_lists.planned_ahead_text), placed by Python
+    under the model's own sentences, exactly once. A listing the model wrote itself goes (one_schedule.tidy), even
+    rows about something that isn't on today's plan (a routine step paused for the time away, an earlier day's row):
+    the rows the user reads are today's plan. The first morning inside a time away carries its line on top
+    (away_periods.say_once)."""
+    assistant = getattr(getattr(brain, "tools", None), "assistant", None)
+    if assistant is None or not lists_day(brain, turn_start):
+        return reply
+    from thirties_core.messages import join_sections
+    view = missing_line(assistant).strip()
+    text = _without_listing(assistant, (reply or "").replace(view, "") if view else (reply or ""), view)
+    try:
+        from thirties_core.away_periods import say_once
+        text = say_once(assistant, assistant._today(), text)
+    except Exception as e:  # never costs the user their morning
+        logger.warning("Couldn't add the time away line: %s", e)
+    return join_sections(text.strip(), view) if view else text.strip()
+
+
+__all__ = ["place_pinned", "is_morning_turn", "left_out", "missing_line", "strip_day_list", "place_day_list"]
