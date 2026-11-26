@@ -548,9 +548,10 @@ class TestMorning(TodayTestCase):
         self.yesterday("Watch the comet", "9:00 PM")
         self.t.assistant.start_the_day()
         self.t.execute("rollover_proposal", {})
+        self.t.assistant.ask_json = lambda system, user: {"answer": "STILL_NEEDED", "reason": "scripted"}
         out = self.t.execute("propose_leftovers", {
             "keep": [{"item": "Call the bank", "when": "tomorrow", "why": "the branch is closed today"},
-                     {"item": "rinse the tank filter", "when": "this weekend"}],
+                     {"item": "rinse the tank filter", "when": "this weekend", "kind": "task"}],
             "drop": [{"item": "Watch the comet", "why": "it was last night"}]})
         # the model's own "tomorrow", with no day in the user's words: a later day this week instead (not_today.py)
         self.assertIn("Keep:\nCall the bank – Saturday\nRinse the tank filter – this weekend\nDrop:\nWatch the comet", out)  # golden: exact text the user reads

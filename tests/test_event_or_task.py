@@ -145,7 +145,8 @@ class TheModelSaysWhichItIs(StudioCase):
         data = self.record()
         for k in data["leftovers"]["keep"]:
             if k["title"] == TOUR_LINE:
-                k["facts"] = {**(k.get("facts") or {}), "time_by_user": False, "dates": [], "planned_day": ""}
+                k["facts"] = {**(k.get("facts") or {}), "time_by_user": False, "dates": [], "planned_day": "",
+                              "today_line": False}
         self.db.set_sync_meta(self.a._rollover_key(), json.dumps(data))
         keep = [{"item": k["title"]} for k in data["leftovers"]["keep"] if k["title"] != TOUR_LINE]
         self.t.execute("propose_leftovers", {"keep": keep, "end": [{"item": TOUR_LINE, "kind": "event"}]})
@@ -160,7 +161,8 @@ class TheModelSaysWhichItIs(StudioCase):
             self.assertFalse(ends(past, DAY, kind))
         self.assertFalse(ends({**past, "kind": "ongoing"}, DAY, "event"))
         self.assertFalse(ends({**past, "kind": "daily"}, DAY, "event"))
-        self.assertFalse(ends({**past, "time_by_user": False}, DAY, "event"))
+        self.assertTrue(ends({**past, "time_by_user": False}, DAY, "event"))  # a time Thirties chose: over too
+        self.assertFalse(ends({**past, "planned_day": ""}, DAY, "event"))  # never planned on a day now over
 
     def test_the_rule_and_the_tool_say_kind(self):
         from thirties_core.assistant_tools import ASSISTANT_TOOL_SPECS
@@ -234,7 +236,9 @@ class KeptOnlyAsATask(StudioCase):
         for kind in ("event", "unsure", "", None):
             self.assertFalse(keeps(past, DAY, kind))
         self.assertTrue(keeps({**past, "kind": "ongoing"}, DAY, None))
-        self.assertTrue(keeps({**past, "time_by_user": False}, DAY, None))  # nothing over: kept as before
+        self.assertFalse(keeps({**past, "time_by_user": False}, DAY, None))  # a time Thirties chose: over too
+        self.assertTrue(keeps({**past, "planned_day": ""}, DAY, None))  # a plain list item: kept as before
+        self.assertFalse(keeps({"today_line": True, "kind": "once"}, DAY, None))  # on an earlier day's list
 
 
 class BothMustAgree(StudioCase):
@@ -319,8 +323,7 @@ class TheHelpersPrompt(StudioCase):
         text = fill(self.a, item, DAY)
         self.assertTrue(text.startswith("Today is Thursday, October 15, 2026.\n"), text)
         self.assertIn(f'The item: "{TOUR_LINE}"', text)
-        self.assertIn("Planned for: Wednesday, October 14 at 2:40 ", text)
-        self.assertIn(" (the user's own time).\n", text)
+        self.assertIn("Planned for: Wednesday, October 14 at 2:40 PM (the user's own time).\n", text)
         self.assertIn("Where it lives: only on that day's list.", text)
         self.assertIn("Dates in its name: none.", text)
         self.assertIn('word for word: "glaze group kiln tour, 2:40 sharp".', text)
@@ -391,6 +394,102 @@ class TheCallPath(StudioCase):
             def json_call(self, *a, **k):
                 raise RuntimeError("no model")
         self.assertIsNone(SlmBrain(self.t, runtime=Broken()).ask_json("sys", "usr"))
+
+
+class AtATimeThirtiesChose(StudioCase):
+    """Planned yesterday at a time Thirties chose: still a past one-off, so it needs kind and the helper too."""
+
+    EVENING = "Open studio evening"
+
+    def setUp(self):
+        super().setUp()
+        self.t.execute("add_event", {"title": self.EVENING, "start": "4:10 PM", "duration": "30 min",
+                                     "day": YESTERDAY.isoformat()})
+
+    def keep(self, kind=None):
+        self.t.execute("rollover_proposal", {})
+        titles = [k["title"] for k in self.record()["leftovers"]["keep"]]
+        self.assertIn(self.EVENING, titles)
+        keep = [{"item": t, "when": "saturday", **({"kind": kind} if kind else {})} for t in titles]
+        self.t.execute("propose_leftovers", {"keep": keep})
+        return self.pool(self.EVENING)
+
+    def test_its_facts_say_a_time_thirties_chose(self):
+        self.t.execute("rollover_proposal", {})
+        item = next(k for k in self.record()["leftovers"]["keep"] if k["title"] == self.EVENING)
+        self.assertFalse(item["facts"]["time_by_user"])
+        self.assertEqual(item["facts"]["planned_day"], YESTERDAY.isoformat())
+
+    def test_keep_without_agreement_goes_to_the_question_never_a_day(self):
+        rec = self.keep("task")  # the helper says its occasion has passed: they disagree
+        self.assertEqual(len(self.asked_about(self.EVENING)), 1)
+        self.assertTrue(rec.get("unknown"))
+        self.assertFalse(rec.get("start"))
+        self.assertNotEqual(rec.get("when"), "saturday")
+        self.assertIn(self.EVENING, self.a.leftover_notice())
+
+    def test_keep_with_no_kind_goes_to_the_question_without_a_call(self):
+        rec = self.keep()
+        self.assertEqual(self.asked_about(self.EVENING), [])
+        self.assertTrue(rec.get("unknown"))
+        self.assertFalse(rec.get("start"))
+
+    def test_no_helper_answer_goes_to_the_question(self):
+        self.answers = {"Open studio": None}
+        rec = self.keep("task")
+        self.assertTrue(rec.get("unknown"))
+        self.assertFalse(rec.get("start"))
+
+    def test_kept_when_both_agree(self):
+        self.answers = {"Open studio": "STILL_NEEDED"}
+        rec = self.keep("task")
+        self.assertFalse(rec.get("unknown"))
+        self.assertTrue(rec.get("start"))
+
+    def test_the_users_own_word_places_it_with_no_second_opinion(self):
+        self.t.execute("rollover_proposal", {})
+        self.t.user_message = "open studio evening again on saturday"
+        try:
+            self.t.execute("propose_leftovers", {"keep": [{"item": k["title"], "when": "saturday"} for k in
+                                                          self.record()["leftovers"]["keep"]]})
+        finally:
+            self.t.user_message = None
+        self.assertEqual(self.asked_about(self.EVENING), [])
+        self.assertTrue(self.pool(self.EVENING).get("start"))
+
+    def test_both_agree_to_end_it(self):
+        self.t.execute("rollover_proposal", {})
+        keep = [{"item": k["title"], "kind": "task"} for k in self.record()["leftovers"]["keep"]
+                if k["title"] != self.EVENING]
+        self.t.execute("propose_leftovers", {"keep": keep, "end": [{"item": self.EVENING, "kind": "event"}]})
+        self.assertTrue(self.pool(self.EVENING).get("ended"))
+
+
+class ThePlannedTime(StudioCase):
+
+    def test_a_typed_time_with_no_am_or_pm_reads_as_the_waking_day(self):
+        self.assertEqual(gather(self.a, TOUR_LINE, "td_tour", DAY)["planned_at"], "2:40 PM")
+        self.assertEqual(gather(self.a, TRIM_LINE, "td_trim", DAY)["planned_at"], "9:10 AM")
+
+    def test_a_stated_time_counts_only_while_the_row_is_still_there(self):
+        from datetime import time
+        self.t.user_message = "the glaze demo is at 4:40"
+        try:
+            self.t.execute("add_event", {"title": "Glaze demo", "start": "4:40 PM", "duration": "30 min",
+                                         "day": YESTERDAY.isoformat()})
+        finally:
+            self.t.user_message = None
+        plan = self.t.plan_for(YESTERDAY.isoformat())
+        span = next(s for s in plan.spans if s.title == "Glaze demo")
+        self.assertIsNotNone(span.given_start)
+        f = gather(self.a, "Glaze demo", "", DAY)
+        self.assertEqual((f["planned_at"], f["time_by_user"]), ("4:40 PM", True))
+        span.given_start = datetime.combine(YESTERDAY, time(13, 0), TZ)  # a time from before it moved
+        self.t._persist(span)
+        f = gather(self.a, "Glaze demo", "", DAY)
+        self.assertFalse(f["time_by_user"])
+        self.assertNotEqual(f["planned_at"], "1:00 PM")
+        self.assertEqual(f["planned_at"], "4:30 PM")  # where its row is, by the half hour
 
 
 class NeverVanish(StudioCase):

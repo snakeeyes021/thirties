@@ -148,7 +148,9 @@ class TestPuttingOnToday(StudioCase):
         self.task("t_permit").due = DAY.isoformat()
         self.t.user_message = "morning"
         try:
-            self.t.execute("propose_leftovers", {"keep": [{"item": "Order a bag of porcelain", "when": "today"},
+            self.t.assistant.ask_json = lambda system, user: {"answer": "STILL_NEEDED", "reason": "scripted"}
+            self.t.execute("propose_leftovers", {"keep": [{"item": "Order a bag of porcelain", "when": "today",
+                                                           "kind": "task"},
                                                           {"item": "Renew the kiln permit", "when": "today"}]})
         finally:
             self.t.user_message = None

@@ -20,8 +20,9 @@ What follows from them:
   missing or unsure kind, stays not marked yet. An event ends silently (``end_now``): never offered, rolled over
   or asked about; its record is stored as unknown (not dropped, not skipped, never ticked done), its line comes off
   the Today note through the guarded remove, and a home list is never touched.
-- Kept only as a task: a one-time thing whose own time or date is over stays in ``keep`` only when the model says
-  ``kind: "task"`` (``keeps``); with no kind, or any other, it stays not marked yet with no day, so an event that
+- Kept only as a task: a one-time thing planned for a day now over (at the user's time, at one Thirties chose, or
+  on that day's list) or whose own date is over stays in ``keep`` only when the model says ``kind: "task"``
+  (``keeps``); with no kind, or any other, it stays not marked yet with no day, so an event that
   already took place never rolls into another day.
 - Never vanish: an item asked about and left unanswered keeps its pool record (and window) or its home list; it is
   never dropped, filed or ended by not being answered.
@@ -159,6 +160,8 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
     if hit is not None:
         span, d = hit
         given = getattr(span, "given_start", None)
+        if given is not None and given.timestamp() != span.start_dt.timestamp():
+            given = None  # a stated time counts only while the row is still there (given_times.py)
         out["planned_day"] = d.isoformat()
         if given is not None:
             out["planned_at"], out["time_by_user"] = format_clock(given), True
@@ -167,16 +170,19 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
         out["category"] = span.category.value
         out.update(_span_facts(assistant, span))
     for text in (line, title):
-        _, said, _ = split_leading_time(text or "")
+        _, said, certain = split_leading_time(text or "")
         if said is not None:  # a time typed at the start of its line: the user's
             out["time_by_user"] = True
             if not out["planned_day"]:
                 out["planned_day"] = (day - timedelta(days=1)).isoformat()
-            if not out["planned_at"] or hit is None or getattr(hit[0], "given_start", None) is None:
-                out["planned_at"] = format_clock(datetime.combine(day, said))
+            said = said if certain else _half_of_day(said, hit[0] if hit is not None else None)
+            out["planned_at"] = format_clock(datetime.combine(day, said))
             break
     tasks = {t.id: t for t in getattr(assistant.s, "tasks", [])}
-    home = tasks.get(task_id or "")
+    home = tasks.get(task_id or "") or next(
+        (t for t in tasks.values() if t.list_role == "today" and t.title.strip().lower() == title.strip().lower()), None)
+    if home is not None and home.list_role == "today":
+        out["today_line"] = True  # a line on the Today note: it was on an earlier day's list
     if home is not None and home.list_role != "today":
         out["home"] = home.parent_note_title or "a list"
     if home is not None and home.list_role in TASK_ROLES:
@@ -218,25 +224,61 @@ def _fixed_by_name(assistant, title: str) -> bool:
         return False
 
 
+def _half_of_day(said, span):
+    """A typed time with no am/pm ("2:40"): the one that matches its plan row, else the waking-day reading (1 to 6
+    in the afternoon, 7 to 11 in the morning, 12 at noon)."""
+    from datetime import time as _time
+    if said.hour >= 12:
+        return said
+    later = _time(said.hour + 12, said.minute)
+    if span is not None:
+        at = span.start_dt.time()
+        if (at.hour, at.minute) == (later.hour, later.minute):
+            return later
+        if (at.hour, at.minute) == (said.hour, said.minute):
+            return said
+    return later if 1 <= said.hour <= 6 else said
+
+
+def named_by_user(assistant, item: Dict[str, Any]) -> bool:
+    """The user's message this turn names the item: their word places it, with no second opinion."""
+    said = getattr(getattr(assistant, "pt", None), "user_message", None)
+    if not said:
+        return False
+    from thirties_core.done_reference import _named
+    task = next((t for t in getattr(assistant.s, "tasks", []) if item.get("task_id") and t.id == item["task_id"]),
+                None)
+    return bool(_named(said, item["title"], []) or (task is not None and _named(said, task.title, [])))
+
+
+def planned_over(facts: Dict[str, Any], day: date) -> bool:
+    """Planned for a day now over: on its plan (at the user's time or one Thirties chose) or on its list."""
+    if not facts:
+        return False
+    if facts.get("planned_day") and facts["planned_day"] < day.isoformat():
+        return True
+    return bool(facts.get("today_line"))
+
+
 def ends(facts: Dict[str, Any], day: date, kind: Any) -> bool:
     """Whether a leftover the model put in end really ends: the model said it's an event, its own time or date is
     over, and it is a one-time thing. Structure only; the title is never read (due today is checked by the caller)."""
     from thirties_core import kinds
-    return (str(kind or "").strip().lower() == "event" and past_time(facts, day)
-            and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY))
+    return str(kind or "").strip().lower() == "event" and past_one_off(facts, day)
 
 
 def past_one_off(facts: Dict[str, Any], day: date) -> bool:
-    """A one-time thing whose own time or date is over (not ongoing, not daily)."""
+    """A one-time thing (not ongoing, not daily) planned for a day now over, whoever chose its time, or one whose
+    own time or date is over. The kind checks and the helper cover every such leftover."""
     from thirties_core import kinds
-    return past_time(facts or {}, day) and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY)
+    return (past_time(facts or {}, day) or planned_over(facts or {}, day)) \
+        and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY)
 
 
 def keeps(facts: Dict[str, Any], day: date, kind: Any) -> bool:
     """Whether a keep stands: a one-time thing whose own time or date is over is kept only when the model says
     it's a task; anything else stays not marked yet. Structure only; the title is never read."""
-    from thirties_core import kinds
-    if not past_time(facts or {}, day) or (facts or {}).get("kind") in (kinds.ONGOING, kinds.DAILY):
+    if not past_one_off(facts, day):
         return True
     return str(kind or "").strip().lower() == "task"
 
@@ -341,4 +383,4 @@ def question(names: List[str]) -> str:
 
 
 __all__ = ["gather", "past_time", "ends", "keeps", "past_one_off", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
-           "offered_before", "named_dates", "UNKNOWN_WHEN", "ENDED_WHY", "RULE"]
+           "offered_before", "named_dates", "planned_over", "UNKNOWN_WHEN", "ENDED_WHY", "RULE"]

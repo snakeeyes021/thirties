@@ -108,7 +108,9 @@ class HolidayIsTheDayItWouldGo(HolidayBase):
     def test_the_models_own_pick_of_a_holiday_for_a_leftover_moves_to_the_next_day_with_room(self):
         self.missed_yesterday("Replace the brake cables", "t_cables")
         self.t.execute("rollover_proposal", {})
-        self.t.execute("propose_leftovers", {"keep": [{"item": "Replace the brake cables", "when": "saturday"}]})
+        self.t.assistant.ask_json = lambda system, user: {"answer": "STILL_NEEDED", "reason": "scripted"}
+        self.t.execute("propose_leftovers", {"keep": [{"item": "Replace the brake cables", "when": "saturday",
+                                                          "kind": "task"}]})
         self.assertEqual(self.pool("Replace the brake cables")["start"], SUNDAY.isoformat())
 
 

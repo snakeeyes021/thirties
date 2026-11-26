@@ -224,8 +224,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "planetarium show at 7:30) is an event even when its name reads like an action: it never goes in "
                        "keep. Only work the user can still do later goes in keep, with kind \"task\". When unsure, "
                        "unknown (no day, asked about once).",
-        "parameters": {"keep": "A list of {item, when, kind, why}; kind \"task\" is required for one whose "
-                               "slot or date has passed (without it, it stays not marked yet).", "drop": "A list of {item, why}.",
+        "parameters": {"keep": "A list of {item, when, kind, why}; kind \"task\" is required for a one-time "
+                               "item planned for a day now over, whoever chose its time (without it, it stays "
+                               "not marked yet).", "drop": "A list of {item, why}.",
                        "end": "A list of {item, kind, why}; kind is required: \"event\" (it could only happen at "
                               "that time; it ends), \"task\" or \"unsure\" (both stay not marked yet).",
                        "unknown": "A list of {item}: not marked yet, asked about."},
@@ -2176,7 +2177,9 @@ class AssistantTools(KindTools):
             from thirties_core.past_one_offs import keeps, past_one_off
             from thirties_core.occasion_helper import STILL_NEEDED, agrees
             facts = item.get("facts") or {}
-            if not _due(self.pt, item["title"], item.get("task_id") or None, item.get("due")) and (
+            from thirties_core.past_one_offs import named_by_user
+            if not _due(self.pt, item["title"], item.get("task_id") or None, item.get("due")) \
+                    and not named_by_user(self, item) and (
                     not keeps(facts, day, k.get("kind"))
                     or (past_one_off(facts, day) and not agrees(self, item, day, STILL_NEEDED))):  # both agree
                 held_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,

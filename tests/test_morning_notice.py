@@ -88,11 +88,12 @@ class TestProposeLeftoversAnswersFromThePlan(MorningCase):
         self.task("t_permit").due = DAY.isoformat()
         self.unmarked_yesterday("Renew the kiln permit", "Order a bag of porcelain")
         self.t.execute("rollover_proposal", {})
+        self.t.assistant.ask_json = lambda system, user: {"answer": "STILL_NEEDED", "reason": "scripted"}
         self.t.user_message = "up, the canoe club meets at 7:15 tonight"
         try:
             out = self.t.execute("propose_leftovers", {
-                "keep": [{"item": "Renew the kiln permit", "when": "today"},
-                         {"item": "Order a bag of porcelain", "when": "today"}]})
+                "keep": [{"item": "Renew the kiln permit", "when": "today", "kind": "task"},
+                         {"item": "Order a bag of porcelain", "when": "today", "kind": "task"}]})
         finally:
             self.t.user_message = None
         # the porcelain is unknown and the user didn't name it: it isn't put on today, so it isn't counted there
