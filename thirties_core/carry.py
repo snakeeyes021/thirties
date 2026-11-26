@@ -23,9 +23,11 @@ The rules, applied once a day when the day is built (after the user's first repl
    gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
    The model reads what each leftover carries (past_one_offs.py): whether it was planned at a time on a past
    day and whether the user gave that time, whether it has a home list or lives only on Today, its kind, how
-   many mornings it was offered, the dates it names. A one-time thing whose day and time are over never gets
-   "tomorrow" by itself: the model leaves it unknown, and it is asked about once. A time the user gave a task is
-   only its plan: tasks stay open after their planned slot goes by. One the user put
+   many mornings it was offered, the dates it names, and what tells an event from a task (from a calendar, other
+   people on it, a fixed time, on a list the user keeps tasks in). A one-time EVENT just ends; a TASK stays
+   open: the model says which (propose_leftovers end, kind "event"), and Python only checks that its own time is
+   over, it isn't ongoing or daily and it isn't due today. A time the user gave a task is only its plan, never a
+   deadline; a task, or one the model is unsure of, stays unknown and is asked about once. One the user put
    at a stated time on a day now over gets no day from Python's guess: it is "not marked yet", in the one
    question ("did it happen?"), until the user or the model says otherwise.
    Then each kept one-off gets a concrete day (replan.py), applied at once and said in the morning ("Keep: <item>,

@@ -215,12 +215,15 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
         "description": "Your version of this morning's proposal for what's left from before (it starts as Python's "
                        "first guess). Every leftover goes in keep (with a natural 'when': today, tomorrow, this "
                        "week, this weekend, before <day>, by <day>, next week, next month, someday; Python works "
-                       "out the days) or in drop (it has gone moot or can't happen any more, e.g. a one-time event "
-                       "whose day is gone). Drops wait for the user's yes. A one-time thing whose day and time are "
-                       "over never gets tomorrow by itself: put it in unknown (no day, asked about once). Tasks "
-                       "stay open after their planned slot goes by.",
+                       "out the days), drop (it has gone moot; drops wait for the user's yes), end or unknown. An "
+                       "event, something that could only happen at its own time (a concert, a match with friends), "
+                       "simply ends once that time has passed: put it in end with kind \"event\" (no carrying "
+                       "forward, no tick). Work to finish stays open after its planned slot goes by: the clock "
+                       "time on it was a plan, not a deadline, so keep it or leave it in unknown. Neither gets "
+                       "tomorrow by itself. When unsure, unknown (no day, asked about once).",
         "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}.",
-                       "end": "A list of {item, why}: treated as unknown (asked about once).",
+                       "end": "A list of {item, kind, why}; kind is required: \"event\" (it could only happen at "
+                              "that time; it ends), \"task\" or \"unsure\" (both stay not marked yet).",
                        "unknown": "A list of {item}: not marked yet, asked about."},
         "required": ["keep"],
     },
@@ -2196,11 +2199,16 @@ class AssistantTools(KindTools):
             held = held_due(self.pt, item["title"], item.get("task_id") or None, item.get("due"))
             if held is not None:
                 raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not ended.")
-            # --- held: nothing ends by itself in the morning; an "end" is asked about once, as unknown ---
-            new_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
-                                "pending_drop": False})
+            # --- only an event whose own time is over ends; a task, or no or an unsure kind, stays unknown ---
+            from thirties_core.past_one_offs import ends
+            if ends(item.get("facts") or {}, day, e.get("kind")):
+                new_end.append({**item, "why": str(e.get("why") or "its day is over"), "pending_drop": False,
+                                "ended_as": "event"})
+            else:
+                new_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
+                                    "pending_drop": False})
             seen.add(item["title"].lower())
-            # --- end held ---
+            # --- end only an event ends ---
         for u in (unknown if isinstance(unknown, list) else []):
             u = u if isinstance(u, dict) else {"item": u}
             item = find(u.get("item") or u.get("title"))

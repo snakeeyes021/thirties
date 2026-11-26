@@ -94,7 +94,7 @@ class AtATimeTheUserGave(CoopCase):
         self.assertIn("its slot has passed", brief)
         self.assertIn("lives only on the Today note", brief)
         self.assertIn("never offered before", brief)
-        self.assertIn("Tasks stay open after their planned slot goes by", brief)
+        self.assertIn("once that slot has passed it stays open", brief)
 
     def test_an_end_is_asked_about_once_never_dropped_or_done(self):
         self.t.execute("rollover_proposal", {})

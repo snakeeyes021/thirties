@@ -13,15 +13,22 @@ What follows from them:
 
 - A one-off the user put at a stated time on a day that is now over gets no day from Python's first guess: it is
   "not marked yet" (``unknown``), in the morning's one question ("did it happen?"), never "tomorrow" by itself.
-- The model may end it (propose_leftovers ``end``): a one-time thing that lived only for its day and time is moot
-  unless the user said it moved. Ending means "not carried", never ticked done: its record is archived as ended, a
-  Today copy of a listed item comes off Today (its home item is untouched), and a line that lives only on Today is
-  filed in the month's Dropped note (``end_now``), so nothing is lost and undrop puts it back.
+- A one-time EVENT just ends; a TASK stays open. Python never tells the two apart from the wording: it gathers
+  the facts that do (from a calendar, other people on it, a fixed time, on a list the user keeps tasks in),
+  and the model says which it is (propose_leftovers ``end`` with ``kind``). Only ``kind: "event"`` on an item
+  whose own time or date is over, that isn't ongoing or daily and isn't due today, ends (``ends``); a task, or a
+  missing or unsure kind, stays not marked yet. Ending means "not carried", never ticked done: its record is
+  archived as ended, a Today copy of a listed item comes off Today (its home item is untouched), and a line that
+  lives only on Today is filed in the month's Dropped note (``end_now``), so nothing is lost and undrop puts it
+  back.
+- Never vanish: an item asked about and left unanswered keeps its pool record (and window) or its home list; it is
+  never dropped, filed or ended by not being answered.
 - An item offered in one morning's proposal is never offered or placed again by itself (``offered_before``).
 
 Invented example: a bike co-op volunteer had "Pick up the donated frames" at 2:40 and "Run the tyre swap stall" at
 3:10, times they gave, on yesterday's plan and never marked either. This morning neither is put on tomorrow: both
-are asked about once ("not marked yet"), unless the morning model ends them as over.
+are asked about once ("not marked yet"), unless the morning model says the stall was an event, which then ends;
+picking up the frames is a task and stays open.
 """
 
 from __future__ import annotations
@@ -39,10 +46,17 @@ LOOK_BACK_DAYS = 7
 UNKNOWN_WHEN = "not marked yet"
 ENDED_WHY = "its day is over"
 # for the morning model, beside the leftover list (never for the user)
-RULE = ("Leftovers whose slot has passed get no new day from you: list them under unknown in propose_leftovers, "
-        "where they wait without a day for the one question about whether they happened. Tasks stay open after "
-        "their planned slot goes by. "
-        "An item offered on an earlier morning is never offered again.")
+RULE = ("Each leftover is an event or a task. An event could only happen at its own time: a concert, a "
+        "dental check-up, a match with friends. Past that time an event simply ends; list it under end, kind "
+        "\"event\" (no carrying forward, no tick, and a home list keeps its line). Other leftovers are work "
+        "to finish: a clock time on such work records its plan, never a deadline, so once that slot has passed "
+        "it stays open: keep it or leave it in unknown, never end it. The facts listed with each leftover help "
+        "(from a calendar, other people on it, a fixed time, on a list the user keeps tasks in), and so does its "
+        "name. When unsure, unknown: it stays not marked yet, with no day, and the one question asks whether it "
+        "happened. Nothing is dropped without the user's yes. An item offered on an earlier morning is never "
+        "offered again.")
+KINDS = ("event", "task", "unsure")  # what propose_leftovers end takes; only "event" ends
+
 
 _MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 _DATE_RE = re.compile(rf"\b(\d{{4}}-\d{{1,2}}-\d{{1,2}}|{_MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?|"
@@ -132,7 +146,8 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
     from thirties_core.clock import format_clock, thirty_of
     from thirties_core.step_times import split_leading_time
     out: Dict[str, Any] = {"planned_day": "", "planned_at": "", "time_by_user": False, "home": "", "kind": "",
-                           "offered": 0, "dates": []}
+                           "offered": 0, "dates": [], "calendar": False, "others": "", "fixed": False,
+                           "task_list": False}
     hit = _last_planned(assistant, title, task_id, day)
     if hit is not None:
         span, d = hit
@@ -143,6 +158,7 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
         else:
             out["planned_at"] = format_clock(thirty_of(span.start_dt))
         out["category"] = span.category.value
+        out.update(_span_facts(assistant, span))
     for text in (line, title):
         _, said, _ = split_leading_time(text or "")
         if said is not None:  # a time typed at the start of its line: the user's
@@ -156,6 +172,10 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
     home = tasks.get(task_id or "")
     if home is not None and home.list_role != "today":
         out["home"] = home.parent_note_title or "a list"
+    if home is not None and home.list_role in TASK_ROLES:
+        out["task_list"] = True
+    if not out["fixed"]:
+        out["fixed"] = _fixed_by_name(assistant, title)
     try:
         out["kind"] = assistant.kind_of(title)
     except Exception:
@@ -163,6 +183,40 @@ def gather(assistant, title: str, task_id: str, day: date, line: str = "") -> Di
     out["offered"] = times_offered(getattr(assistant, "_db", None), title, day)
     out["dates"] = named_dates(title, day)
     return out
+
+
+TASK_ROLES = ("list", "backlog", "project")  # lists the user keeps tasks in (lists.ROLES)
+
+
+def _span_facts(assistant, span) -> Dict[str, Any]:
+    """What the plan row itself says: from a calendar, someone else on it, a fixed time (the item's own flag)."""
+    from thirties_core.models import SpanCategory
+    out: Dict[str, Any] = {"calendar": span.source == "calendar" or span.category == SpanCategory.CALENDAR}
+    whose = str(getattr(span, "whose", "") or "")
+    out["others"] = (f"shared with {whose}" if getattr(span, "shared", False) else f"on {whose}'s calendar") \
+        if whose else ("shared with someone else" if getattr(span, "shared", False) else "")
+    try:
+        pt = getattr(assistant, "pt", None)
+        out["fixed"] = bool(pt is not None and pt._is_fixed(span))
+    except Exception:
+        out["fixed"] = bool(getattr(span, "is_firm", False))
+    return out
+
+
+def _fixed_by_name(assistant, title: str) -> bool:
+    """The item is set to a fixed time of its own (item_facts), even with no plan row."""
+    try:
+        return bool(assistant.pt._lasting().for_item(title).fixed_at)
+    except Exception:
+        return False
+
+
+def ends(facts: Dict[str, Any], day: date, kind: Any) -> bool:
+    """Whether a leftover the model put in end really ends: the model said it's an event, its own time or date is
+    over, and it is a one-time thing. Structure only; the title is never read (due today is checked by the caller)."""
+    from thirties_core import kinds
+    return (str(kind or "").strip().lower() == "event" and past_time(facts, day)
+            and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY))
 
 
 def past_time(facts: Dict[str, Any], day: date) -> bool:
@@ -190,6 +244,14 @@ def line(facts: Dict[str, Any], day: date) -> List[str]:
         if past_time(facts, day):
             out.append("its slot has passed")
     out.append(f"home list {facts['home']}" if facts.get("home") else "lives only on the Today note")
+    if facts.get("task_list"):
+        out.append("on a list the user keeps tasks in")
+    if facts.get("calendar"):
+        out.append("from a calendar")
+    if facts.get("others"):
+        out.append(str(facts["others"]))
+    if facts.get("fixed"):
+        out.append("a fixed time")
     if facts.get("kind"):
         out.append(f"kind {facts['kind']}")
     n = int(facts.get("offered") or 0)
@@ -254,5 +316,5 @@ def question(names: List[str]) -> str:
     return "Not marked yet: " + ", ".join(names[:-1]) + f" and {names[-1]}. Did they happen?"
 
 
-__all__ = ["gather", "past_time", "line", "end_now", "question", "record_offered", "times_offered",
+__all__ = ["gather", "past_time", "ends", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
            "offered_before", "named_dates", "UNKNOWN_WHEN", "ENDED_WHY", "RULE"]
