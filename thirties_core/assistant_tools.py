@@ -217,10 +217,10 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "week, this weekend, before <day>, by <day>, next week, next month, someday; Python works "
                        "out the days) or in drop (it has gone moot or can't happen any more, e.g. a one-time event "
                        "whose day is gone). Drops wait for the user's yes. A one-time thing whose day and time are "
-                       "over goes in end (not carried, never marked done; applied now), unless the user said it "
-                       "moved, and it never gets tomorrow. Put any you're unsure of in unknown: it gets no day and one question.",
+                       "over never gets tomorrow by itself: put it in unknown (no day, asked about once). Tasks "
+                       "stay open after their planned slot goes by.",
         "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}.",
-                       "end": "A list of {item, why}: its day is over.",
+                       "end": "A list of {item, why}: treated as unknown (asked about once).",
                        "unknown": "A list of {item}: not marked yet, asked about."},
         "required": ["keep"],
     },
@@ -2196,16 +2196,11 @@ class AssistantTools(KindTools):
             held = held_due(self.pt, item["title"], item.get("task_id") or None, item.get("due"))
             if held is not None:
                 raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not ended.")
-            # --- only a one-time thing whose own time or date is over can end; anything still doable is unknown ---
-            from thirties_core import kinds
-            from thirties_core.past_one_offs import past_time
-            facts = item.get("facts") or {}
-            if not past_time(facts, day) or facts.get("kind") in (kinds.ONGOING, kinds.DAILY):
-                raise ToolError(f"{item['title']} has no time or date of its own that is over, so it can't end "
-                                "here: put it in unknown, and the user is asked about it.")
-            # --- end only a one-time thing ---
-            new_end.append({**item, "why": str(e.get("why") or "its day is over"), "pending_drop": False})
+            # --- held: nothing ends by itself in the morning; an "end" is asked about once, as unknown ---
+            new_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
+                                "pending_drop": False})
             seen.add(item["title"].lower())
+            # --- end held ---
         for u in (unknown if isinstance(unknown, list) else []):
             u = u if isinstance(u, dict) else {"item": u}
             item = find(u.get("item") or u.get("title"))

@@ -94,22 +94,20 @@ class AtATimeTheUserGave(CoopCase):
         self.assertIn("its slot has passed", brief)
         self.assertIn("lives only on the Today note", brief)
         self.assertIn("never offered before", brief)
-        self.assertIn("is moot unless the user said it moved", brief)
+        self.assertIn("Tasks stay open after their planned slot goes by", brief)
 
-    def test_the_model_ends_them_not_done_and_not_carried(self):
+    def test_an_end_is_asked_about_once_never_dropped_or_done(self):
         self.t.execute("rollover_proposal", {})
         out = self.t.execute("propose_leftovers", {"keep": [], "end": [{"item": FRAMES}, {"item": STALL}]})
-        self.assertIn("Ended (its day is over; not carried, not done):", out)
+        self.assertIn("Not marked yet (no day; the one question asks whether it happened):", out)
         self.assertIn("What each one carries:", out)
         for title in (FRAMES, STALL):
             rec = self.pool(title)
-            self.assertEqual(rec["horizon"], DROPPED)
-            self.assertTrue(rec.get("ended"))
-        done = self.db.completed_since(YESTERDAY)
-        self.assertEqual(done, set())
-        self.assertNotIn(FRAMES.lower(), {k for k in OpenPool(self.db).all(DAY)})  # never offered again
-        self.assertNotIn(FRAMES, sort_leftovers(self.a, TOMORROW)["ask"])
-        self.assertIn("Ended, their day is over:", self.a.leftover_notice())
+            self.assertNotEqual(rec.get("horizon"), DROPPED)
+            self.assertFalse(rec.get("ended"))
+            self.assertFalse(rec.get("start"))  # no day of its own
+        self.assertEqual(self.db.completed_since(YESTERDAY), set())
+        self.assertIn("Did they happen?", self.a.leftover_notice())
 
     def test_one_the_model_cant_tell_about_stays_unknown(self):
         self.t.execute("rollover_proposal", {})
@@ -141,7 +139,7 @@ class AtATimeTheUserGave(CoopCase):
         self.db.set_sync_meta(self.a._rollover_key(), json.dumps(data))
         writes = len(self.api.updates) if hasattr(self, "api") else None
         out = self.t.execute("propose_leftovers", {"keep": [{"item": STALL}], "end": [{"item": FRAMES}]})
-        self.assertIn("can't end here: put it in unknown", out)
+        self.assertIn("Not marked yet (no day", out)
         self.assertNotEqual(self.pool(FRAMES).get("horizon"), DROPPED)
         self.assertFalse(self.pool(FRAMES).get("filed_key"))
         if writes is not None:
@@ -183,14 +181,12 @@ class TodayOnlyLines(CoopCase):
         settle(self.a, DAY)
         self.assertFalse(self.pool(f"3:10 {STALL}").get("start"))
 
-    def test_ended_it_is_filed_in_dropped_never_ticked_and_the_home_list_is_untouched(self):
+    def test_an_end_files_nothing_and_leaves_every_list_as_it_was(self):
         self.t.execute("rollover_proposal", {})
         keep = [{"item": k["title"], "when": "this week"} for k in self.record()["leftovers"]["keep"]
                 if k["title"] != f"3:10 {STALL}"]
         self.t.execute("propose_leftovers", {"keep": keep, "end": [{"item": f"3:10 {STALL}"}]})
-        self.assertNotIn(STALL, self.body("n_today"))
-        self.assertIn(STALL, self.dropped_note()["body"])
-        self.assertNotIn(f"- [x] 3:10 {STALL}", self.body("n_today"))
+        self.assertIn(f"- [ ] 3:10 {STALL}", self.body("n_today"))  # asked about once, never filed or ticked
         self.assertEqual(self.body("n_coop"), COOP)
 
 

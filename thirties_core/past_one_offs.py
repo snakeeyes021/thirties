@@ -39,10 +39,9 @@ LOOK_BACK_DAYS = 7
 UNKNOWN_WHEN = "not marked yet"
 ENDED_WHY = "its day is over"
 # for the morning model, beside the leftover list (never for the user)
-RULE = ("A one-time thing whose day and time are over (it lived only for that day: a trip, an errand at a time, "
-        "an event-like activity) is moot unless the user said it moved: end it with propose_leftovers (end: not "
-        "carried, never marked done) and never give it tomorrow or another day by itself. When you can't tell, "
-        "leave it in unknown: it stays not marked yet, with no day, and the one question asks whether it happened. "
+RULE = ("Leftovers whose slot has passed get no new day from you: list them under unknown in propose_leftovers, "
+        "where they wait without a day for the one question about whether they happened. Tasks stay open after "
+        "their planned slot goes by. "
         "An item offered on an earlier morning is never offered again.")
 
 _MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"

@@ -713,8 +713,8 @@ MORNING_FACTS = (
     "on-the-plan and dropped items. You may change Python's first guess with propose_leftovers (drop what has gone "
     "moot or can't happen any more, such as a one-time event whose day is gone; move what fits better elsewhere); it "
     "takes effect at once, and a drop is applied after today unless the user says otherwise. A one-time thing whose "
-    "day and time are over (the leftover list says so) is ended unless the user said it moved, never kept for "
-    "tomorrow; one you can't tell about stays not marked yet, asked about once. Start with \"☀️ Good "
+    "day and time are over (the leftover list says so) is never kept for tomorrow by itself: it stays not marked "
+    "yet, asked about once. Tasks stay open after their planned slot goes by. Start with \"☀️ Good "
     "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
     "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 
