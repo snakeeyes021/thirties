@@ -10,7 +10,7 @@ Invented: a potter on the late shift at a studio, with a canoe on days off."""
 import re
 import unittest
 from datetime import timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from tests.fixtures import DAY, at, make_scheduler
 from tests.test_conversation import reply
@@ -22,6 +22,16 @@ from thirties_core.astronomy import set_debug_time
 def on_plan_count(text):
     m = re.search(r"\((\d+) on today's plan\)", text)
     return int(m.group(1)) if m else None
+
+
+# Python's first guess places only leftovers never planned on a day now over (carry.replan_leftovers); these
+# items are planned yesterday just to make them leftovers, so they count as plain list items here.
+class AsPlainListItems:
+    def setUp(self):
+        p = patch("thirties_core.past_one_offs.planned_over", new=lambda facts, day: False)
+        p.start()
+        self.addCleanup(p.stop)
+        super().setUp()
 
 
 class MorningCase(StudioCase):
@@ -40,7 +50,7 @@ class MorningCase(StudioCase):
         return [s for s in self.t.day_plan.spans if s.title == title and s.start_dt.date() == DAY]
 
 
-class TestTheNoticeCountsThePlan(MorningCase):
+class TestTheNoticeCountsThePlan(AsPlainListItems, MorningCase):
 
     def test_kept_for_the_week_but_already_on_today(self):
         self.unmarked_yesterday("Sand the spare paddle", "Order a bag of porcelain")
@@ -104,10 +114,11 @@ class TestProposeLeftoversAnswersFromThePlan(MorningCase):
         self.assertEqual(on_plan_count(self.a.leftover_notice()), 1)
 
 
-class TestTheModelsMorningIsChecked(unittest.TestCase):
+class TestTheModelsMorningIsChecked(AsPlainListItems, unittest.TestCase):
     """A whole morning through the app's service with a mock model: the first message of the day builds it."""
 
     def setUp(self):
+        super().setUp()  # as plain list items (the morning may be sorted while the service starts)
         set_debug_time(at("09:45"))
         self.addCleanup(set_debug_time, None)
         from thirties_core.background import BackgroundService
@@ -181,7 +192,7 @@ class TestTheModelsMorningIsChecked(unittest.TestCase):
         self.assertIn("1 on today's plan", out)
 
 
-class TestTheClaimChecker(MorningCase):
+class TestTheClaimChecker(AsPlainListItems, MorningCase):
     """The checker's reading of counts and places, on its own."""
 
     def setUp(self):

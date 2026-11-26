@@ -148,12 +148,12 @@ class AtATimeTheUserGave(CoopCase):
 
 
 class TimeThirtiesPicked(CoopCase):
-    def test_a_time_nobody_gave_keeps_the_usual_first_guess(self):
+    def test_a_time_thirties_chose_gets_no_day_by_itself_either(self):
         self.booked_yesterday(WHEEL, "2:40 PM", task_id="t_wheel")
         settle(self.a, DAY)
         rec = self.pool(WHEEL)
-        self.assertTrue(rec.get("start"))
-        self.assertFalse(rec.get("unknown"))
+        self.assertFalse(rec.get("start"))  # planned for a day now over: asked about, whoever chose the time
+        self.assertTrue(rec.get("unknown"))
         f = gather(self.a, WHEEL, "t_wheel", DAY)
         self.assertFalse(f["time_by_user"])
         self.assertIn("on yesterday's plan at 3:00 PM (a slot Thirties chose)", "; ".join(line(f, DAY)))

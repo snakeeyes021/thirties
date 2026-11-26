@@ -11,11 +11,13 @@ from thirties_core.background import BackgroundService
 from thirties_core.inference import MockInferenceEngine
 from thirties_core.models import EventSpan, SpanCategory, TaskItem
 from thirties_core import morning
+from tests.plain_list_items import as_plain_list_items
 
 
 class TestOneMorning(unittest.TestCase):
 
     def setUp(self):
+        as_plain_list_items(self)  # tests of where the first guess places a leftover
         set_debug_time(at("09:25"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()

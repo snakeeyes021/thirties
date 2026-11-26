@@ -26,6 +26,11 @@ def as_earlier_lines():
     return patch("thirties_core.if_time.on_plan_today", return_value=object())
 
 
+# Python's first guess places only leftovers never planned on a day now over (carry.replan_leftovers); these
+# items are planned yesterday just to make them leftovers, so they count as plain list items here.
+AS_PLAIN_LIST_ITEMS = patch("thirties_core.past_one_offs.planned_over", new=lambda facts, day: False)
+
+
 class TodayTestCase(unittest.TestCase):
 
     def setUp(self):
@@ -459,6 +464,7 @@ class TestMorning(TodayTestCase):
         self.assertEqual(self.body("n_routine"), "- [ ] Shower\n- [ ] Journal\n")
         self.assertFalse(self.t.assistant.morning_pending())
 
+    @AS_PLAIN_LIST_ITEMS
     def test_unmarked_items_are_asked_about_once_in_one_question(self):
         from tests.fixtures import DAY
         self.yesterday("Buy stamps", "7:00 PM")  # planned, on a list, no outcome
@@ -516,6 +522,7 @@ class TestMorning(TodayTestCase):
         self.assertEqual(choose_horizon(a, task("Clean the garage"), "Clean the garage", DAY), "week")  # unsure
         self.assertEqual(choose_horizon(a, None, "Garden podcast", DAY), "week")
 
+    @AS_PLAIN_LIST_ITEMS
     def test_the_day_draws_from_the_pool_by_horizon(self):
         from thirties_core.carry import OpenPool
         from tests.fixtures import DAY

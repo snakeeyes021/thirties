@@ -20,6 +20,7 @@ from thirties_core.astronomy import set_debug_time
 from thirties_core.inference import MockInferenceEngine
 from thirties_core.internal_text import has_internal, strip_internal
 from thirties_core.messages import clean_message
+from tests.plain_list_items import as_plain_list_items
 
 TALLY_RE = re.compile(r"of them on today's plan|not on today's plan|proposed for dropping|kept \d+ from before;",
                       re.IGNORECASE)
@@ -84,6 +85,10 @@ class TestTheCopiedTallyIsSaidPlainly(MorningService):
 
     engine_class = CopyingEngine
 
+    def setUp(self):
+        as_plain_list_items(self)  # tests of where the first guess places a leftover
+        super().setUp()
+
     def test_the_copied_line_reaches_the_user_as_one_plain_sentence(self):
         out = self.m.send_user_message("awake, kiln is cooling")
         self.assertIn("kept 2 from before; 1 of them on today's plan; 1 not on today's plan", self.engine.copied)
@@ -94,6 +99,10 @@ class TestTheCopiedTallyIsSaidPlainly(MorningService):
 
 
 class TestTheModelIsToldTheTallyIsItsOwn(MorningService):
+
+    def setUp(self):
+        as_plain_list_items(self)  # tests of where the first guess places a leftover
+        super().setUp()
 
     def test_the_morning_brief_marks_the_tally_and_offers_the_plain_sentence(self):
         self.engine.set_next_response(reply("☀️ Good morning! The canoe can go out after the late shift."))

@@ -10,6 +10,7 @@ from thirties_core.background import BackgroundService, day_stretches
 from thirties_core.inference import MockInferenceEngine
 from thirties_core.memory import CheckinMutes, ReminderStore
 from thirties_core.models import EventSpan, SpanCategory
+from tests.plain_list_items import as_plain_list_items
 
 
 class TestBackground(unittest.TestCase):
@@ -528,6 +529,7 @@ class TestRollover(unittest.TestCase):
     question; nothing is moved into today; things on no list simply end."""
 
     def setUp(self):
+        as_plain_list_items(self)  # tests of where the first guess places a leftover
         set_debug_time(at("09:00"))
         self.addCleanup(set_debug_time, None)
         self.sched = make_scheduler()

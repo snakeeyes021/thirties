@@ -27,9 +27,10 @@ The rules, applied once a day when the day is built (after the user's first repl
    people on it, a fixed time, on a list the user keeps tasks in). A one-time EVENT just ends; a TASK stays
    open: the model says which (propose_leftovers end, kind "event"), and Python only checks that its own time is
    over, it isn't ongoing or daily and it isn't due today. A time the user gave a task is only its plan, never a
-   deadline; a task, or one the model is unsure of, stays unknown and is asked about once. One the user put
-   at a stated time on a day now over gets no day from Python's guess: it is "not marked yet", in the one
-   question ("did it happen?"), until the user or the model says otherwise.
+   deadline; a task, or one the model is unsure of, stays unknown and is asked about once. A one-time thing
+   planned for a day now over (at the user's time, at one Thirties chose, or on that day's list), not due today,
+   gets no day from Python's guess: it is "not marked yet", in the one question ("did it happen?"), until the
+   model and the helper agree or the user says otherwise.
    Then each kept one-off gets a concrete day (replan.py), applied at once and said in the morning ("Keep: <item>,
    <day>") so the user can correct it: what can't wait (urgency "now", or "as soon as possible" in its wording)
    goes on today if it fits, else the first day with room; everything else the first day from tomorrow with room,
@@ -527,7 +528,8 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     pt = assistant.pt
     week_start = getattr(pt.scheduler.config.general, "week_start", "mon") if pt.scheduler else "mon"
     week_end = max(_week_bounds(day, week_start)[1], day + timedelta(days=1))  # by default within this week
-    from thirties_core.past_one_offs import UNKNOWN_WHEN, past_time
+    from thirties_core.due_today import must_stay
+    from thirties_core.past_one_offs import UNKNOWN_WHEN, past_one_off
     offered = {str(t).lower() for t in out.get("offered_before", [])}
     for item in out.get("pool_items", []):
         if item.get("horizon") == SOMEDAY:
@@ -535,9 +537,12 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
         # --- offered in an earlier morning's proposal: never placed again by itself (rule 3: "and never again") ---
         if item["title"].lower() in offered:
             continue
-        # --- put at a time the user gave on a day now over: no day by itself, it's asked about (past_one_offs.py) ---
-        if past_time(item.get("facts") or {}, day):
-            item.update({"unknown": True, "when": UNKNOWN_WHEN, "why": "no outcome yet, and its slot has passed"})
+        # --- a one-time thing planned for a day now over (whoever chose its time, or on that day's list), or whose
+        # own date is over: no day by itself, it's asked about until the model and the helper agree or the user
+        # says (past_one_offs.py) ---
+        if past_one_off(item.get("facts") or {}, day) and not must_stay(
+                pt, item["title"], item.get("task_id") or None, item.get("due")):
+            item.update({"unknown": True, "when": UNKNOWN_WHEN, "why": "no outcome yet, and its day is over"})
             continue
         # --- end no day by itself ---
         task = tasks.get(item.get("task_id") or "")

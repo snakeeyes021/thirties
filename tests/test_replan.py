@@ -76,10 +76,15 @@ if __name__ == "__main__":
 
 
 from tests.test_today import TodayTestCase  # noqa: E402
+from tests.plain_list_items import as_plain_list_items  # noqa: E402
 
 
 class SettleTest(TodayTestCase):
     """The morning's sorting of yesterday gives each missed item its next day."""
+
+    def setUp(self):
+        as_plain_list_items(self)  # tests of where the first guess places a leftover
+        super().setUp()
 
     def miss(self, title, start="2:00 PM", minutes=30, **extra):
         y = (DAY - timedelta(days=1)).isoformat()

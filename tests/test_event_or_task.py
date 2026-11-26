@@ -26,6 +26,7 @@ YESTERDAY = DAY - timedelta(days=1)
 TOUR, TRIM, GLAZE = "Kiln tour for the visiting glaze group", "Trim the stoneware bowls", "Mix a celadon test batch"
 TOUR_LINE, TRIM_LINE = f"2:40 {TOUR}", f"9:10 {TRIM}"
 STUDIO = f"- [ ] {GLAZE}\n- [ ] Wedge the reclaim clay\n"
+EARLIER = "2026-01-01T12:00:00+00:00"  # when a line went on Today, long before this morning
 
 
 class StudioCase(TodayTestCase):
@@ -413,6 +414,30 @@ class AtATimeThirtiesChose(StudioCase):
         keep = [{"item": t, "when": "saturday", **({"kind": kind} if kind else {})} for t in titles]
         self.t.execute("propose_leftovers", {"keep": keep})
         return self.pool(self.EVENING)
+
+    def test_the_model_never_proposing_leaves_python_s_guess_with_no_day(self):
+        from tests.test_today import as_earlier_lines
+        with as_earlier_lines():  # a plain list item put on Today on an earlier day, never planned at a time
+            self.t.execute("add_to_today", {"items": [GLAZE]})
+        with self.db._get_connection() as conn:
+            conn.execute("UPDATE today_links SET updated_at = ?", (EARLIER,))
+        self.db.set_sync_meta(f"today_added:{DAY.isoformat()}", "[]")
+        self.a.start_the_day()
+        out = self.t.execute("rollover_proposal", {})  # and no propose_leftovers after it
+        for title in (self.EVENING, TOUR_LINE, TRIM_LINE):
+            rec = self.pool(title)
+            self.assertTrue(rec.get("unknown"), title)
+            self.assertFalse(rec.get("start"), title)
+            self.assertNotEqual(rec.get("when"), "tomorrow")
+        self.assertIn("Not marked yet:", out)
+        self.assertIn(self.EVENING, out.split("Not marked yet:", 1)[1])
+        self.assertNotIn(f"{self.EVENING}, tomorrow", out)
+        self.assertIn(f"{self.EVENING} (NOT MARKED YET", self.a.leftover_brief())
+        glaze = self.pool(GLAZE)
+        self.assertIsNotNone(glaze)
+        self.assertFalse(glaze.get("unknown"))  # the plain list item keeps the usual first guess
+        self.assertTrue(glaze.get("start"))
+        self.assertEqual(self.helper_calls, [])  # no second opinion without a proposal
 
     def test_its_facts_say_a_time_thirties_chose(self):
         self.t.execute("rollover_proposal", {})
