@@ -2196,6 +2196,14 @@ class AssistantTools(KindTools):
             held = held_due(self.pt, item["title"], item.get("task_id") or None, item.get("due"))
             if held is not None:
                 raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not ended.")
+            # --- only a one-time thing whose own time or date is over can end; anything still doable is unknown ---
+            from thirties_core import kinds
+            from thirties_core.past_one_offs import past_time
+            facts = item.get("facts") or {}
+            if not past_time(facts, day) or facts.get("kind") in (kinds.ONGOING, kinds.DAILY):
+                raise ToolError(f"{item['title']} has no time or date of its own that is over, so it can't end "
+                                "here: put it in unknown, and the user is asked about it.")
+            # --- end only a one-time thing ---
             new_end.append({**item, "why": str(e.get("why") or "its day is over"), "pending_drop": False})
             seen.add(item["title"].lower())
         for u in (unknown if isinstance(unknown, list) else []):

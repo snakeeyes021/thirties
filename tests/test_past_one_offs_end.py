@@ -132,6 +132,21 @@ class AtATimeTheUserGave(CoopCase):
         self.assertIn("due today: keep it today, not ended", out)
         self.assertNotEqual(self.pool(FRAMES).get("horizon"), DROPPED)
 
+    def test_a_task_still_doable_can_not_end_and_stays_unfiled(self):
+        self.t.execute("rollover_proposal", {})
+        data = self.record()
+        for k in data["leftovers"]["keep"]:
+            if k["title"] == FRAMES:  # no time the user gave, no date in its name: a plain task, still doable
+                k["facts"] = {**(k.get("facts") or {}), "time_by_user": False, "dates": [], "planned_day": ""}
+        self.db.set_sync_meta(self.a._rollover_key(), json.dumps(data))
+        writes = len(self.api.updates) if hasattr(self, "api") else None
+        out = self.t.execute("propose_leftovers", {"keep": [{"item": STALL}], "end": [{"item": FRAMES}]})
+        self.assertIn("can't end here: put it in unknown", out)
+        self.assertNotEqual(self.pool(FRAMES).get("horizon"), DROPPED)
+        self.assertFalse(self.pool(FRAMES).get("filed_key"))
+        if writes is not None:
+            self.assertEqual(len(self.api.updates), writes)  # nothing filed in Dropped, nothing taken off Today
+
 
 class TimeThirtiesPicked(CoopCase):
     def test_a_time_nobody_gave_keeps_the_usual_first_guess(self):
