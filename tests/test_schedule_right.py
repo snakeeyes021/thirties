@@ -227,7 +227,9 @@ class TestTheMorningRoutineStaysInTheMorning(RoutineCase):
 
 
 class TestNothingDroppedUnasked(RoutineCase):
-    """An item vanished from the plan in a turn about something else."""
+    """An item vanished from the plan in a turn about something else. On a later day the user's words must name it
+    (test_unasked_moves.py); on today which items their words take off is the model's reading, and a done said for
+    something else never turns the removal into a done for this one."""
 
     def setUp(self):
         super().setUp()
@@ -237,10 +239,11 @@ class TestNothingDroppedUnasked(RoutineCase):
         self.t.user_message = message
         return self.t.execute("remove_event", {"event": "Renew the parking permit"})
 
-    def test_a_turn_about_something_else_never_takes_it_off(self):
+    def test_a_done_for_something_else_never_ticks_it(self):
         out = self.remove("lunch done")
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("Renew the parking permit", [s.title for s in self.t.day_plan.spans])
+        self.assertTrue(out.startswith("Removed Renew the parking permit"), out)  # today: the model's reading
+        self.assertNotIn("Renew the parking permit", [s.title for s in self.t.day_plan.spans])
+        self.assertNotIn("Marked Renew the parking permit done", out)  # no done said for it: never ticked
 
     def test_naming_it_or_asking_for_it_takes_it_off(self):
         self.assertFalse(self.remove("no need to renew the parking permit today").startswith(NOT_DONE))
