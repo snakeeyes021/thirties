@@ -30,12 +30,12 @@ TODAY_KEY = "reply_extras_today"  # this day's own choices: {"day": "<iso>", "va
 
 REPLY_EXTRAS_TOOL_SPECS: List[Dict[str, Any]] = [{
     "name": "set_reply_extras",
-    "description": "Stop, trim or bring back what Python adds, only when the user's message asks for that outright: "
+    "description": "Stop, trim or bring back what the app adds, only when the user's message asks for that outright: "
                    "the standard view after a change (whats_next: off, or only the next few rows), the 'Not marked "
                    "yet' list under check-ins and start notices (not_marked; the view after a change always keeps "
                    "it), or the 'You're in the … block' line (status_line). For today unless they say it's for good "
                    "('from now on'). Never say something stopped without this call, and never call it for a "
-                   "complaint about how a section looks (its format is Python's and stays).",
+                   "complaint about how a section looks (the app sets its format, and keeps it).",
     "parameters": {"part": "'whats_next', 'not_marked', 'status_line', or 'all'.",
                    "show": "'off' or 'on'; for whats_next also 'few' (only the next few things, when they ask for "
                            "less) or 'rest' (the rest of today, every row: the usual).",

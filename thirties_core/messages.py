@@ -331,7 +331,7 @@ def now_section(tools) -> str:
                         + ": never ask about those; the list still shows them, and the user can still mark them."
                         if moot else ""))
     from thirties_core.whats_next import PLACED  # what goes under a reply, as a fact (whats_next.py)
-    lines.append("Under a reply that changes today's plan or calls show_schedule: " + PLACED)
+    lines.append("Under a reply that changes today's plan or shows the schedule: " + PLACED)
     return "\n".join(lines) + "\n\n"
 
 

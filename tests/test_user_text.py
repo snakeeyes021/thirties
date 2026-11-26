@@ -206,5 +206,34 @@ class TestWhatTheUserSeesAtRunTime(unittest.TestCase):
                 self.assertFalse(re.search(rf"\b(?:{DISCUSSION})\b", node.text, re.IGNORECASE), node.text)
 
 
+class TestWhatTheModelMayRepeat(unittest.TestCase):
+    """What the model is told about the standard view, and may repeat to the user, names no internals: the view's
+    notes, show_schedule's result and description, set_reply_extras' description, the prompt's rules 27 and 31,
+    and the NOW section say "the app", never "Python"."""
+
+    def test_no_python_in_them(self):
+        from tests.fixtures import DAY, at, make_scheduler
+        from thirties_core.astronomy import set_debug_time
+        from thirties_core.message_tools import MESSAGE_TOOL_SPECS
+        from thirties_core.messages import now_section
+        from thirties_core.plan_tools import PlanTools
+        from thirties_core.reply_extras import REPLY_EXTRAS_TOOL_SPECS
+        from thirties_core.whats_next import PLACED, PLACED_OTHER_DAY
+        set_debug_time(at("14:40"))
+        self.addCleanup(set_debug_time, None)
+        sched = make_scheduler()
+        plan, pending = sched.build_day_plan(DAY)
+        tools = PlanTools(plan, pending, sched)
+        texts = [PLACED, PLACED_OTHER_DAY, now_section(tools), tools.execute("show_schedule", {})]
+        texts += [s["description"] for s in MESSAGE_TOOL_SPECS + REPLY_EXTRAS_TOOL_SPECS
+                  if s["name"] in ("show_schedule", "set_reply_extras")]
+        rules = [line for line in (ROOT / "thirties_core/brains/frontier.py").read_text(encoding="utf-8").splitlines()
+                 if line.startswith(("27. ", "31. "))]
+        self.assertEqual(len(rules), 2)
+        for text in texts + rules:
+            self.assertTrue(text.strip())
+            self.assertNotRegex(text, r"\bPython\b", text[:200])
+
+
 if __name__ == "__main__":
     unittest.main()

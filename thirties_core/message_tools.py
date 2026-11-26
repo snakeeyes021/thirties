@@ -35,7 +35,7 @@ MESSAGE_TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "show_schedule",
         "description": "The standard view of where things stand (Now, The rest of today, Not marked yet), or "
                        "another day's plan; the default answer whenever the plan is asked for. "
-                       "Python puts it under your reply by itself, once; you write only your own "
+                       "The app puts it under your reply by itself, once; you write only your own "
                        "sentences, never the rows. Read-only.",
         "parameters": {"whole_day": "true only if the user asks for earlier today (or the whole day): what today "
                                     "held before now goes above the standard view.",
@@ -77,7 +77,7 @@ class MessageTools:
         Another day, or outside the day: that day's plan (messages.render_schedule). Either way the text goes under
         the reply by Python (conversation.py), and the model is told so: it never lays the day out itself."""
         from thirties_core.messages import MissedTracker, missed_for, render_schedule
-        from thirties_core.whats_next import PLACED, standing
+        from thirties_core.whats_next import PLACED, PLACED_OTHER_DAY, standing
         tools = self.tools
         plan = tools.day_plan
         now = tools._now()
@@ -92,8 +92,7 @@ class MessageTools:
             from thirties_core.away import LastSentList  # the list as last sent (away.py)
             LastSentList(tools._state_db).mark(now, missed)
         tools.shown_schedule = text  # the conversation layer puts this under the reply, once
-        note = PLACED if live else ("Python puts this day's plan under your reply by itself, exactly once. Never "
-                                    "copy, rewrite or summarise it; write only your own sentences.")
+        note = PLACED if live else PLACED_OTHER_DAY
         return f"{note}\n\n{text}"
 
     # --- check_on ---

@@ -43,9 +43,11 @@ HALF = timedelta(minutes=30)
 IF_TIME_HEADING = "If there's time:"
 EARLIER_HEADING = "Earlier today:"
 # What Python puts under a reply, said to the model as a fact (show_schedule's result, the turn's NOW section)
-PLACED = ("Python puts the standard view under your reply by itself, exactly once: Now, The rest of today, and "
+PLACED = ("The app puts the standard view under your reply by itself, exactly once: Now, The rest of today, and "
           "Not marked yet (titles only, never times), then If there's time when it isn't empty. Never copy, rewrite or summarise it; write only your own "
           "sentences.")
+PLACED_OTHER_DAY = ("The app puts this day's plan under your reply by itself, exactly once. Never copy, rewrite or "
+                    "summarise it; write only your own sentences.")
 
 Snapshot = Dict[str, Tuple[float, float, str]]
 
@@ -424,6 +426,6 @@ def follows_turn(tool_messages: Sequence[dict], reply: str, said: str, plan: Day
     return bool(_APOLOGY_RE.search(text)) or (bool(_DISPUTE_RE.search(said or "")) and _names_an_item(text, plan))
 
 
-__all__ = ["MODES", "DEFAULT_MODE", "PLACED", "standing", "earlier_lines", "mode_of", "asked_mode", "SentSummaries", "snapshot",
+__all__ = ["MODES", "DEFAULT_MODE", "PLACED", "PLACED_OTHER_DAY", "standing", "earlier_lines", "mode_of", "asked_mode", "SentSummaries", "snapshot",
            "moved_since", "render", "summary", "unmarked_lines", "untimed_for", "untimed_lines", "free_stretches", "free_line",
            "follows_turn", "plan_signature", "covered_until"]
