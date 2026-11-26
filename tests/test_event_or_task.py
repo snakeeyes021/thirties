@@ -2,8 +2,9 @@
 
 Python gathers the facts that tell an event from a task (from a calendar, other people on it, a fixed time, on
 a list the user keeps tasks in) and never reads the title; the morning model says which it is with propose_leftovers
-``end`` and its ``kind``. Only kind "event" on a one-time item whose own time is over ends. A task, or a missing or
-unsure kind, stays not marked yet. An item asked about and never answered is never dropped, filed or ended.
+``end`` and its ``kind``. Only kind "event" on a one-time item whose own time is over ends, silently: stored as
+unknown, off Today, never in the question, nothing filed in Dropped. A task, or a missing or unsure kind, stays not
+marked yet and is asked about. An item asked about and never answered is never dropped, filed or ended.
 
 Invented fixtures: a pottery studio (a kiln tour with visitors at 2:40, trimming stoneware bowls at 9:10).
 """
@@ -65,21 +66,43 @@ class StudioCase(TodayTestCase):
 
 class TheModelSaysWhichItIs(StudioCase):
 
-    def test_a_past_event_ends_not_carried_and_never_done(self):
+    def test_a_past_event_ends_silently_stored_as_unknown(self):
         out = self.propose([{"item": TOUR_LINE, "kind": "event", "why": "the visitors came and went"}])
-        self.assertIn("Ended (its day is over; not carried, not done):", out)
+        self.assertIn("Ended silently (", out)
         rec = self.pool(TOUR_LINE)
-        self.assertEqual(rec["horizon"], DROPPED)
+        self.assertNotEqual(rec["horizon"], DROPPED)
+        self.assertEqual(rec.get("outcome"), "unknown")
         self.assertTrue(rec.get("ended"))
-        self.assertNotIn(TOUR, self.body("n_today"))  # filed, never ticked
-        self.assertNotIn(f"- [x] {TOUR_LINE}", self.body("n_today"))
-        self.assertIn(TOUR, self.dropped_note()["body"])
+        self.assertNotIn(TOUR_LINE.lower(), OpenPool(self.db).all(DAY))  # never offered again
+        self.assertNotIn(TOUR, self.body("n_today"))  # off Today by the guarded remove, never ticked
+        self.assertIsNone(self.dropped_note())  # nothing filed in Dropped
         self.assertEqual(self.db.completed_since(YESTERDAY), set())
         self.assertEqual(self.body("n_studio"), STUDIO)  # the home list is untouched
+        notice = self.a.leftover_notice()
+        self.assertNotIn(TOUR, notice)  # never in the notice or the one question
+        self.assertNotIn("Ended", notice)
+        self.assertIn(TRIM_LINE, notice)  # the task kept with no kind is asked about instead
+        before = [r["title"] for rows in self.a.before.rows().values() if isinstance(rows, list) for r in rows
+                  if isinstance(r, dict) and "title" in r]
+        self.assertNotIn(TOUR_LINE, before)
+
+    def test_an_event_on_an_earlier_plan_is_stored_as_unknown_there(self):
+        from thirties_core.models import SpanStatus
+        self.t.user_message = "the open studio hour starts 4:10"
+        try:
+            self.t.execute("add_event", {"title": "Open studio hour", "start": "4:10 PM", "duration": "30 min",
+                                         "day": YESTERDAY.isoformat()})
+        finally:
+            self.t.user_message = None
+        self.propose([{"item": "Open studio hour", "kind": "event"}])
+        span = next(s for s in self.t.plan_for(YESTERDAY.isoformat()).spans if s.title == "Open studio hour")
+        self.assertEqual(span.status, SpanStatus.UNKNOWN)  # not skipped
+        self.assertTrue(self.pool("Open studio hour").get("ended"))
+        self.assertNotIn("Open studio hour", self.a.leftover_notice())
 
     def test_a_past_timed_task_stays_open(self):
         out = self.propose([{"item": TRIM_LINE, "kind": "task"}])
-        self.assertNotIn("Ended (", out)
+        self.assertNotIn("Ended silently (", out)
         rec = self.pool(TRIM_LINE)
         self.assertNotEqual(rec.get("horizon"), DROPPED)
         self.assertFalse(rec.get("ended"))

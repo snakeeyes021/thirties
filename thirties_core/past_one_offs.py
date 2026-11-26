@@ -17,10 +17,9 @@ What follows from them:
   the facts that do (from a calendar, other people on it, a fixed time, on a list the user keeps tasks in),
   and the model says which it is (propose_leftovers ``end`` with ``kind``). Only ``kind: "event"`` on an item
   whose own time or date is over, that isn't ongoing or daily and isn't due today, ends (``ends``); a task, or a
-  missing or unsure kind, stays not marked yet. Ending means "not carried", never ticked done: its record is
-  archived as ended, a Today copy of a listed item comes off Today (its home item is untouched), and a line that
-  lives only on Today is filed in the month's Dropped note (``end_now``), so nothing is lost and undrop puts it
-  back.
+  missing or unsure kind, stays not marked yet. An event ends silently (``end_now``): never offered, rolled over
+  or asked about; its record is stored as unknown (not dropped, not skipped, never ticked done), its line comes off
+  the Today note through the guarded remove, and a home list is never touched.
 - Kept only as a task: a one-time thing whose own time or date is over stays in ``keep`` only when the model says
   ``kind: "task"`` (``keeps``); with no kind, or any other, it stays not marked yet with no day, so an event that
   already took place never rolls into another day.
@@ -48,10 +47,12 @@ OFFERED_KEY = "leftovers_offered"  # {title lower: [days it was in a morning pro
 LOOK_BACK_DAYS = 7
 UNKNOWN_WHEN = "not marked yet"
 ENDED_WHY = "its day is over"
+GONE = "gone"  # the pool's archive horizon for what simply ended (never offered, not dropped)
 # for the morning model, beside the leftover list (never for the user)
 RULE = ("Each leftover is an event or a task. An event could only happen at its own time: a concert, a "
         "dental check-up, a match with friends. Past that time an event simply ends; list it under end, kind "
-        "\"event\" (no carrying forward, no tick, and a home list keeps its line). Other leftovers are work "
+        "\"event\". It ends without a word to the user: never asked about, never mentioned, its home list "
+        "untouched. Other leftovers are work "
         "to finish: a clock time on such work records its plan, never a deadline, so once that slot has passed "
         "it stays open: keep it (kind \"task\") or leave it in unknown, never end it. Something that took "
         "place at a set time (a show, an appointment, a planetarium show at 7:30) is an event even when its name "
@@ -279,22 +280,31 @@ def line(facts: Dict[str, Any], day: date) -> List[str]:
 # --- ended: not carried, never done ---
 
 def end_now(assistant, items: List[Dict[str, Any]], day: date) -> List[str]:
-    """End leftovers whose day is over: their pool records are archived as ended (never offered again), a Today
-    copy of an item with a home list comes off Today (the home item is untouched), and a line that lives only on
-    Today is filed in the month's Dropped note, so undrop puts it back. Nothing is ticked done."""
-    from thirties_core.carry import DROPPED, OpenPool
-    from thirties_core.done_log import FILED_ROLES, file_dropped_op
+    """End past events silently ("Things go moot": never offered, rolled over or asked about, stored as unknown).
+    Each pool record is archived as ended with its outcome unknown (horizon "gone": not dropped, not skipped,
+    never offered again); its row on an earlier plan, if still only planned, is stored as unknown; its line on
+    the Today note comes off through the guarded remove (a Today-only line too: the plan keeps it as unknown).
+    A home list is never touched, nothing is filed in Dropped and nothing is ticked done."""
+    from thirties_core.carry import OpenPool
+    from thirties_core.models import SpanStatus
     from thirties_core.today import TodayLinks, note_items
     db = getattr(assistant, "_db", None)
     if db is None or not items:
         return []
     pool = OpenPool(db)
     for i in items:
-        if pool.set(i["title"], horizon=DROPPED, pending_drop=False, dropped_on=day.isoformat(), dropped_by="app",
-                    ended=True, why=i.get("why") or ENDED_WHY) is None:
-            pool.add([{**i, "horizon": DROPPED}], day - timedelta(days=1))
-            pool.set(i["title"], dropped_on=day.isoformat(), dropped_by="app", ended=True,
-                     why=i.get("why") or ENDED_WHY)
+        fields = dict(horizon=GONE, pending_drop=False, unknown=False, ended=True, outcome="unknown",
+                      ended_on=day.isoformat(), when="", start="", end="", why=i.get("why") or ENDED_WHY)
+        if pool.set(i["title"], **fields) is None:
+            pool.add([{**i, "horizon": GONE}], day - timedelta(days=1))
+            pool.set(i["title"], **fields)
+        try:  # its plan row: unknown, never skipped
+            hit = _last_planned(assistant, i["title"], i.get("task_id") or "", day)
+            if hit is not None and hit[0].status == SpanStatus.PLANNED:
+                hit[0].status = SpanStatus.UNKNOWN
+                assistant.pt._persist(hit[0])
+        except Exception as e:
+            logger.warning("Couldn't store %s as unknown on its plan: %s", i["title"], e)
     note, writer = assistant._today_note(), assistant._writer()
     if note is None or writer is None or not getattr(writer, "allowed", True):
         return [i["title"] for i in items]
@@ -306,17 +316,10 @@ def end_now(assistant, items: List[Dict[str, Any]], day: date) -> List[str]:
         line_text = next((x for x in open_today if x.strip().lower() == t.strip().lower()), None)
         if line_text is None:
             continue
-        has_home = links.home_of(line_text) is not None or any(
-            x.title.strip().lower() == t.strip().lower() and x.list_role in FILED_ROLES for x in assistant.s.tasks)
-        if has_home:
-            writer.submit({**until, "op": "remove", "note_id": note["id"], "title": line_text})  # its Today copy
-            links.unlink(line_text)
-        else:
-            op = file_dropped_op(note["id"], line_text, note.get("title", ""), day, 0, i.get("why") or ENDED_WHY)
-            status, _ = writer.submit({**until, **op})
-            if status not in ("done", "queued"):
-                continue  # not filed: its line stays where it is
-            pool.set(t, filed_key=op["key"])
+        status, _ = writer.submit({**until, "op": "remove", "note_id": note["id"], "title": line_text})
+        if status not in ("done", "queued"):
+            continue  # not removed: its line stays where it is
+        links.unlink(line_text)
         assistant.s.tasks = [x for x in assistant.s.tasks
                              if not (x.parent_note_id == note["id"] and x.title == line_text)]
     return [i["title"] for i in items]

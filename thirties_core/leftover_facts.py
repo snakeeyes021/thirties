@@ -138,7 +138,7 @@ def summary(f: Optional[Dict[str, Any]], names: bool = True) -> str:
 def _unknown_ended(f: Dict[str, Any], names: bool = True) -> str:
     """Not marked yet (asked about, no day) and ended (its day is over), for the model's counts."""
     out = ""
-    for key, said in (("unknown", "not marked yet, asked about, no day"), ("ended", "ended, their day is over")):
+    for key, said in (("unknown", "not marked yet, asked about, no day"), ("ended", "events ended silently, never mention them")):
         if f.get(key):
             out += f"; {len(f[key])} {said}" + (f" ({', '.join(f[key])})" if names else "")
     return out
@@ -185,7 +185,7 @@ def tool_result(assistant: Any) -> str:
         lines.append("Not marked yet (no day; the one question asks whether it happened):")
         lines += f["unknown"]
     if f.get("ended"):
-        lines.append("Ended (its day is over; not carried, not done):")
+        lines.append("Ended silently (an event whose time is over; stored as unknown; never mention it):")
         lines += f["ended"]
     carried = _carried(assistant)
     if carried:

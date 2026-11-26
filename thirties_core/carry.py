@@ -137,8 +137,8 @@ class OpenPool:
         for item in items:
             key = item["title"].strip().lower()
             old = data.get(key)
-            if old and old.get("horizon") == DROPPED and not item.get("undrop"):
-                continue  # dropped stays dropped (the archive) unless the user brings it back
+            if old and (old.get("horizon") == DROPPED or old.get("ended")) and not item.get("undrop"):
+                continue  # dropped or ended stays so (the archive) unless the user brings it back
             rec = {**(old or {}), "title": item["title"].strip(), "task_id": item.get("task_id") or "",
                    "since": (old or {}).get("since") or since.isoformat(),
                    "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
@@ -806,14 +806,13 @@ def notice_text(kept: int, on_today: int, drops: int, overflow: List[str],
                 ended: Optional[List[str]] = None) -> str:
     """The morning's word on the leftovers when no model writes it (copy-madlibs T3-023 to T3-025): what was
     done, not a question; the one question is only for what doesn't fit today, and whether what isn't marked yet
-    (``unknown``: its day and time are over, so it has no day) happened. ``ended``: over with its day."""
+    (``unknown``: its day and time are over, so it has no day) happened. ``ended``: events whose time is over,
+    never said to the user."""
     if not kept and not drops and not overflow and not unknown and not ended:
         return ""
     # --- ended and not marked yet (past_one_offs.py) ---
     from thirties_core.past_one_offs import question
-    tail = ("Ended, their day is over: " + ", ".join(ended) + "." if ended else "")
-    ask = question(list(unknown or []))
-    tail = "\n".join(x for x in (tail, ask) if x)
+    tail = question(list(unknown or []))  # an ended event goes without a word ("Things go moot")
     if not kept and not drops and not overflow:
         return tail
     # --- end ended and not marked yet ---

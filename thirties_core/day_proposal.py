@@ -713,7 +713,7 @@ MORNING_FACTS = (
     "on-the-plan and dropped items. You may change Python's first guess with propose_leftovers (drop what has gone "
     "moot; move what fits better elsewhere); it takes effect at once, and a drop is applied after today unless the "
     "user says otherwise. An event (it could only happen at its own time, like a concert or a match with friends) "
-    "simply ends once its time has passed: end, kind \"event\". Work to finish stays open after its planned slot "
+    "simply ends once its time has passed: end, kind \"event\", silently (say nothing about it). Work to finish stays open after its planned slot "
     "goes by: a time on it was a plan, not a deadline. Neither is kept for tomorrow by itself. Something that "
     "took place at a set time (a show, an appointment, a planetarium show at 7:30) is an event even when its name reads "
     "like an action, and never goes in keep; only work the user can still do later is kept, with kind \"task\". "
