@@ -46,6 +46,22 @@ class StudioCase(TodayTestCase):
                      parent_note_title="Today To-Do", parent_note_id="n_today", list_role="today")])
         self.a = self.t.assistant
         self.db = self.sched.state_db
+        self.helper_calls, self.answers = [], {}
+        self.a.ask_json = self.helper  # the scripted helper: the same model's second opinion
+
+    def helper(self, system, user):
+        """Scripted: OCCASION_PASSED for the kiln tour and the open studio hour, STILL_NEEDED for the rest, unless
+        ``answers`` (by a word of the title) says otherwise; an answer of None is no answer."""
+        self.helper_calls.append(user)
+        title = user.split('The item: "', 1)[1].split('"', 1)[0]
+        for word, answer in self.answers.items():
+            if word in title:
+                return None if answer is None else {"answer": answer, "reason": "scripted"}
+        passed = "Kiln tour" in title or "Open studio" in title
+        return {"answer": "OCCASION_PASSED" if passed else "STILL_NEEDED", "reason": "scripted"}
+
+    def asked_about(self, title):
+        return [u for u in self.helper_calls if f'The item: "{title}"' in u]
 
     def pool(self, title):
         return OpenPool(self.db).all().get(title.lower())
@@ -204,6 +220,7 @@ class KeptOnlyAsATask(StudioCase):
                 self.assertIn(f"- [ ] {TOUR_LINE}", self.body("n_today"))
 
     def test_with_kind_task_it_is_kept(self):
+        self.answers = {"Kiln tour": "STILL_NEEDED"}  # the helper agrees
         self.keep_all("task")
         rec = self.pool(TOUR_LINE)
         self.assertFalse(rec.get("unknown"))
@@ -218,6 +235,162 @@ class KeptOnlyAsATask(StudioCase):
             self.assertFalse(keeps(past, DAY, kind))
         self.assertTrue(keeps({**past, "kind": "ongoing"}, DAY, None))
         self.assertTrue(keeps({**past, "time_by_user": False}, DAY, None))  # nothing over: kept as before
+
+
+class BothMustAgree(StudioCase):
+    """The morning model and the helper (the same model, asked one thing) must agree to end or to keep."""
+
+    def test_end_and_occasion_passed_ends_silently(self):
+        self.propose([{"item": TOUR_LINE, "kind": "event"}])
+        self.assertEqual(len(self.asked_about(TOUR_LINE)), 1)
+        self.assertTrue(self.pool(TOUR_LINE).get("ended"))
+        self.assertNotIn(TOUR, self.a.leftover_notice())
+
+    def test_keep_and_still_needed_is_kept(self):
+        self.t.execute("rollover_proposal", {})
+        self.t.execute("propose_leftovers", {"keep": [{"item": TRIM_LINE, "when": "friday", "kind": "task"}],
+                                             "unknown": [{"item": TOUR_LINE}]})
+        self.assertEqual(len(self.asked_about(TRIM_LINE)), 1)
+        self.assertTrue(self.pool(TRIM_LINE).get("start"))
+        self.assertFalse(self.pool(TRIM_LINE).get("unknown"))
+
+    def test_disagreement_goes_to_the_question(self):
+        self.answers = {"Kiln tour": "STILL_NEEDED", "Trim": "OCCASION_PASSED"}
+        self.t.execute("rollover_proposal", {})
+        self.t.execute("propose_leftovers", {"keep": [{"item": TRIM_LINE, "when": "friday", "kind": "task"}],
+                                             "end": [{"item": TOUR_LINE, "kind": "event"}]})
+        for title in (TOUR_LINE, TRIM_LINE):
+            rec = self.pool(title)
+            self.assertTrue(rec.get("unknown"), title)
+            self.assertFalse(rec.get("start"), title)
+            self.assertFalse(rec.get("ended"), title)
+            self.assertIn(f"- [ ] {title}", self.body("n_today"))
+        self.assertIn("Did they happen?", self.a.leftover_notice())
+
+    def test_cant_tell_or_no_answer_goes_to_the_question(self):
+        for answer in ("CANT_TELL", None, "MAYBE"):
+            with self.subTest(answer=answer):
+                self.setUp()
+                self.answers = {"Kiln tour": answer, "Trim": answer}
+                self.t.execute("rollover_proposal", {})
+                self.t.execute("propose_leftovers", {"keep": [{"item": TRIM_LINE, "when": "friday", "kind": "task"}],
+                                                     "end": [{"item": TOUR_LINE, "kind": "event"}]})
+                for title in (TOUR_LINE, TRIM_LINE):
+                    self.assertTrue(self.pool(title).get("unknown"), title)
+                    self.assertFalse(self.pool(title).get("ended"), title)
+                self.assertIn("Did they happen?", self.a.leftover_notice())
+
+    def test_no_helper_at_all_goes_to_the_question(self):
+        del self.a.ask_json
+        self.propose([{"item": TOUR_LINE, "kind": "event"}])
+        self.assertFalse(self.pool(TOUR_LINE).get("ended"))
+        self.assertTrue(self.pool(TOUR_LINE).get("unknown"))
+
+    def test_a_helper_that_fails_goes_to_the_question(self):
+        def broken(system, user):
+            raise TimeoutError("engine timeout")
+        self.a.ask_json = broken
+        self.propose([{"item": TOUR_LINE, "kind": "event"}])
+        self.assertFalse(self.pool(TOUR_LINE).get("ended"))
+
+    def test_no_call_for_items_left_unknown_or_not_past(self):
+        self.t.execute("rollover_proposal", {})
+        self.t.execute("propose_leftovers", {"keep": [], "unknown": [{"item": TOUR_LINE}, {"item": TRIM_LINE}]})
+        self.assertEqual(self.helper_calls, [])
+        self.assertEqual(self.asked_about(GLAZE), [])
+
+    def test_a_retried_proposal_asks_once(self):
+        self.t.execute("rollover_proposal", {})
+        args = {"keep": [{"item": TRIM_LINE, "when": "friday", "kind": "task"}],
+                "end": [{"item": TOUR_LINE, "kind": "event"}]}
+        self.t.execute("propose_leftovers", args)
+        self.t.execute("propose_leftovers", args)
+        self.assertEqual(len(self.asked_about(TRIM_LINE)), 1)
+
+
+class TheHelpersPrompt(StudioCase):
+
+    def test_it_is_filled_from_stored_facts(self):
+        from thirties_core.occasion_helper import SYSTEM, fill
+        self.services.conversations.append(YESTERDAY, {"role": "user", "content": "glaze group kiln tour, 2:40 sharp"})
+        self.services.conversations.append(YESTERDAY, {"role": "user", "content": "wedging clay all morning"})
+        self.t.execute("rollover_proposal", {})
+        item = next(k for k in self.record()["leftovers"]["keep"] if k["title"] == TOUR_LINE)
+        text = fill(self.a, item, DAY)
+        self.assertTrue(text.startswith("Today is Thursday, October 15, 2026.\n"), text)
+        self.assertIn(f'The item: "{TOUR_LINE}"', text)
+        self.assertIn("Planned for: Wednesday, October 14 at 2:40 ", text)
+        self.assertIn(" (the user's own time).\n", text)
+        self.assertIn("Where it lives: only on that day's list.", text)
+        self.assertIn("Dates in its name: none.", text)
+        self.assertIn('word for word: "glaze group kiln tour, 2:40 sharp".', text)
+        self.assertNotIn("wedging", text)
+        self.assertIn("dates: if the occasion", text)  # one prompt, whole (split only in the source)
+        self.assertIn('Reply only with: {"answer": "OCCASION_PASSED" | "STILL_NEEDED" | "CANT_TELL"', text)
+        for brace in ("{title}", "{weekday}", "{same_day_items}", "{user_words_or_none}", "{holiday_note}", "#"):
+            self.assertNotIn(brace, text)
+        self.assertTrue(SYSTEM.startswith("You help a personal planning app decide"))
+        self.assertTrue(SYSTEM.endswith("Answer with a single JSON object and nothing else."))
+
+    def test_the_other_items_of_that_day(self):
+        from thirties_core.occasion_helper import same_day_items
+        self.t.execute("add_event", {"title": "Load the bisque kiln", "start": "9:40 AM", "duration": "30 min",
+                                     "day": YESTERDAY.isoformat()})
+        self.t.execute("add_event", {"title": "Sweep the wheel room", "start": "4:20 PM", "duration": "30 min",
+                                     "day": YESTERDAY.isoformat()})
+        self.t.execute("log_outcome", {"event": "Load the bisque kiln", "day": YESTERDAY.isoformat(), "status": "done"})
+        said = same_day_items(self.a, TOUR_LINE, YESTERDAY)
+        self.assertIn("Load the bisque kiln (done)", said)
+        self.assertIn("Sweep the wheel room (not marked)", said)
+        self.assertLess(said.index("bisque"), said.index("wheel room"))
+        self.assertEqual(same_day_items(self.a, TOUR_LINE, YESTERDAY - timedelta(days=5)), "none")
+
+    def test_the_first_json_object_of_a_reply(self):
+        from thirties_core.occasion_helper import first_json
+        self.assertEqual(first_json('Sure. {"answer": "CANT_TELL", "reason": "x"} and {"b": 1}'),
+                         {"answer": "CANT_TELL", "reason": "x"})
+        self.assertEqual(first_json('{oops} {"answer": "STILL_NEEDED"}'), {"answer": "STILL_NEEDED"})
+        for bad in ("", None, "no json here", "[1, 2]"):
+            self.assertIsNone(first_json(bad))
+
+
+class TheCallPath(StudioCase):
+
+    def test_the_frontier_brain_asks_its_own_engine(self):
+        from thirties_core.brains.frontier import FrontierBrain
+
+        class Engine:
+            def __init__(self):
+                self.seen = []
+
+            def chat(self, messages, tools=None):
+                self.seen.append((messages, tools))
+                return {"role": "assistant", "content": 'Here: {"answer": "OCCASION_PASSED", "reason": "over"}'}
+        engine = Engine()
+        brain = FrontierBrain(self.t, engine)
+        self.assertEqual(self.a.ask_json, brain.ask_json)  # the active brain's helper
+        self.assertEqual(brain.ask_json("sys", "usr"), {"answer": "OCCASION_PASSED", "reason": "over"})
+        self.assertEqual(engine.seen[-1][0], [{"role": "system", "content": "sys"}, {"role": "user", "content": "usr"}])
+
+        class Down:
+            def chat(self, messages, tools=None):
+                raise ConnectionError("unavailable")
+        brain.inference_engine = Down()
+        self.assertIsNone(brain.ask_json("sys", "usr"))
+
+    def test_the_device_brain_uses_json_call(self):
+        from thirties_core.brains.slm.brain import SlmBrain
+
+        class Runtime:
+            def json_call(self, system, user, schema, max_output_tokens=256):
+                return {"answer": "STILL_NEEDED", "reason": "still owed"}
+        brain = SlmBrain(self.t, runtime=Runtime())
+        self.assertEqual(brain.ask_json("sys", "usr")["answer"], "STILL_NEEDED")
+
+        class Broken:
+            def json_call(self, *a, **k):
+                raise RuntimeError("no model")
+        self.assertIsNone(SlmBrain(self.t, runtime=Broken()).ask_json("sys", "usr"))
 
 
 class NeverVanish(StudioCase):

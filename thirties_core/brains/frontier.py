@@ -76,6 +76,25 @@ class FrontierBrain:
         self.active_notes = list(active_notes or [])
         self.messages: List[Dict[str, Any]] = []
         self.reset()
+        # --- a small helper call to the same engine and model (occasion_helper.py) ---
+        from thirties_core.occasion_helper import offer
+        offer(tools, self.ask_json)
+        # --- end helper call ---
+
+    def ask_json(self, system: str, user: str) -> Optional[Dict[str, Any]]:
+        """One small call to the same engine and model as the main turn: the first JSON object of the reply, or
+        None on any failure (an error, a timeout, the engine unavailable). It goes through the same engine, so it
+        counts like any other call (the usage-limit fallback applies)."""
+        from thirties_core.occasion_helper import first_json
+        try:
+            reply = self.inference_engine.chat(messages=[{"role": "system", "content": system},
+                                                         {"role": "user", "content": user}])
+        except Exception as e:
+            logger.info("The helper call failed: %s", e)
+            return None
+        if not isinstance(reply, dict) or reply.get("error"):
+            return None
+        return first_json(reply.get("content"))
 
     def reset(self) -> None:
         """Start a fresh transcript with an up-to-date system prompt."""

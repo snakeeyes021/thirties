@@ -2173,9 +2173,12 @@ class AssistantTools(KindTools):
             item = find(k.get("item") or k.get("title"))
             # --- a one-off whose own time is over is kept only as a task; otherwise unknown, no day ---
             from thirties_core.due_today import must_stay as _due
-            from thirties_core.past_one_offs import keeps
-            if not keeps(item.get("facts") or {}, day, k.get("kind")) \
-                    and not _due(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+            from thirties_core.past_one_offs import keeps, past_one_off
+            from thirties_core.occasion_helper import STILL_NEEDED, agrees
+            facts = item.get("facts") or {}
+            if not _due(self.pt, item["title"], item.get("task_id") or None, item.get("due")) and (
+                    not keeps(facts, day, k.get("kind"))
+                    or (past_one_off(facts, day) and not agrees(self, item, day, STILL_NEEDED))):  # both agree
                 held_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
                                      "pending_drop": False})
                 seen.add(item["title"].lower())
@@ -2216,7 +2219,8 @@ class AssistantTools(KindTools):
                 raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not ended.")
             # --- only an event whose own time is over ends; a task, or no or an unsure kind, stays unknown ---
             from thirties_core.past_one_offs import ends
-            if ends(item.get("facts") or {}, day, e.get("kind")):
+            from thirties_core.occasion_helper import OCCASION_PASSED, agrees
+            if ends(item.get("facts") or {}, day, e.get("kind")) and agrees(self, item, day, OCCASION_PASSED):
                 new_end.append({**item, "why": str(e.get("why") or "its day is over"), "pending_drop": False,
                                 "ended_as": "event"})
             else:

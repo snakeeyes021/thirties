@@ -147,6 +147,17 @@ class SlmBrain(ParityActions, TiredDay, HorizonTalk):
         self.messages: List[Dict[str, Any]] = []
         self.state = DialogState()
         self.reset()
+        from thirties_core.occasion_helper import offer  # the helper call (occasion_helper.py)
+        offer(tools, self.ask_json)
+
+    def ask_json(self, system: str, user: str) -> Optional[Dict[str, Any]]:
+        """A small helper call via runtime.json_call; returns the parsed object, else None."""
+        from thirties_core.occasion_helper import SCHEMA, first_json
+        try:
+            return first_json(self.runtime.json_call(system, user, SCHEMA))
+        except Exception as e:
+            logger.info("The helper call failed: %s", e)
+            return None
 
     # --- Brain protocol ---
 

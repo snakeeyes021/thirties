@@ -226,6 +226,12 @@ def ends(facts: Dict[str, Any], day: date, kind: Any) -> bool:
             and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY))
 
 
+def past_one_off(facts: Dict[str, Any], day: date) -> bool:
+    """A one-time thing whose own time or date is over (not ongoing, not daily)."""
+    from thirties_core import kinds
+    return past_time(facts or {}, day) and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY)
+
+
 def keeps(facts: Dict[str, Any], day: date, kind: Any) -> bool:
     """Whether a keep stands: a one-time thing whose own time or date is over is kept only when the model says
     it's a task; anything else stays not marked yet. Structure only; the title is never read."""
@@ -334,5 +340,5 @@ def question(names: List[str]) -> str:
     return "Not marked yet: " + ", ".join(names[:-1]) + f" and {names[-1]}. Did they happen?"
 
 
-__all__ = ["gather", "past_time", "ends", "keeps", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
+__all__ = ["gather", "past_time", "ends", "keeps", "past_one_off", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
            "offered_before", "named_dates", "UNKNOWN_WHEN", "ENDED_WHY", "RULE"]

@@ -37,6 +37,7 @@ class CoopCase(TodayTestCase):
                                             parent_note_id="n_coop", list_role="list"))
         self.a = self.t.assistant
         self.db = self.sched.state_db
+        self.a.ask_json = lambda system, user: {"answer": "STILL_NEEDED", "reason": "scripted"}  # the helper
 
     def booked_yesterday(self, title, start, said=None, task_id=""):
         """Put on yesterday's plan at ``start``; with ``said``, the user gave that time."""
