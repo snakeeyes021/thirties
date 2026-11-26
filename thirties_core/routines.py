@@ -937,6 +937,9 @@ class RoutineTools:
         from thirties_core.assistant_tools import ToolError
         if not is_due(r, plan.target_date, self.gen, self.last_done(note, r)):
             return
+        from thirties_core.away_periods import paused_on  # paused while the user is away (away_periods.py)
+        if paused_on(self.db, note["title"], plan.target_date):
+            return
         parts, _ = self.parts_for(note, r, plan.target_date)
         if not parts:
             state["unplaced"].append(f"{note['title']}: no usual time yet")
@@ -978,6 +981,9 @@ class RoutineTools:
         planned = {s.title.strip().lower() for s in plan.spans if s.status != SpanStatus.SKIPPED}
         for anchor in self.book().anchors() if anchors is None else anchors:
             if not anchor.on(plan.target_date) or anchor.key in planned:
+                continue
+            from thirties_core.away_periods import paused_on  # paused while the user is away (away_periods.py)
+            if paused_on(self.db, anchor.title, plan.target_date):
                 continue
             start = _at(anchor.at, plan.day_start)
             if start + timedelta(minutes=anchor.minutes) <= now or any(
@@ -1045,7 +1051,10 @@ class RoutineTools:
                 line += ". No usual time yet: when the user places it, that becomes its placement"
             if r.snoozed_until and plan.target_date < _day_of(r.snoozed_until):
                 line += f". Skipped until {_day_of(r.snoozed_until).strftime('%a %b %-d')}"
-            if due:
+            from thirties_core.away_periods import paused_on  # paused while the user is away (away_periods.py)
+            if due and paused_on(self.db, note["title"], plan.target_date):
+                line += ". Today: paused while the user is away (not on the plan)"
+            elif due:
                 there = [p for p in parts if any(i.lower() in on_plan for i in p["items"])]
                 line += ". Today: " + ("on the plan" if there and len(there) == len(parts) else
                                        "partly on the plan" if there else "due, not on the plan")
@@ -1105,6 +1114,8 @@ class RoutineTools:
             steps = [s for s in plan.spans if not s.is_envelope and step_key(s.title) in names]
             planned = [s for s in steps if s.status == SpanStatus.PLANNED]
             due = is_due(r, day, self.gen, self.last_done(note, r))
+            from thirties_core.away_periods import paused_on  # paused while the user is away (away_periods.py)
+            due = due and not paused_on(self.db, note["title"], day)
             if not planned and (steps or not due):
                 continue  # all marked (done or skipped), or not today's
             # its time goes in the Agenda's time column like every row (11-05): when it's on the plan, else when it

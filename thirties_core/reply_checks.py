@@ -370,6 +370,16 @@ def morning_fill(brain: Any, turn_start: int, reply: str) -> str:
     from thirties_core.leftover_facts import set_straight
     reply = set_straight(brain, turn_start, reply)
     from thirties_core import morning_day
+    # --- the first morning inside a time away says so, once (away_periods.py) ---
+    assistant = getattr(getattr(brain, "tools", None), "assistant", None)
+    if assistant is not None and morning_day.is_morning_turn(brain, turn_start):
+        from thirties_core.away_periods import say_once
+        try:
+            reply = say_once(assistant, assistant._today(), reply)
+        except Exception as e:  # never costs the user their reply
+            import logging
+            logging.getLogger(__name__).warning("Couldn't add the time away line: %s", e)
+    # --- end time away ---
     if not morning_day.is_morning_turn(brain, turn_start) or not morning_day.left_out(brain, reply):
         return reply
     lines = morning_day.missing_line(brain.tools.assistant)

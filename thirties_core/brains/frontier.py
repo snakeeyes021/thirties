@@ -182,6 +182,10 @@ class FrontierBrain:
         if assistant:  # what the user chose to break down (break_down.py)
             from thirties_core.break_down import prompt_section as break_down_section
             day_setup += break_down_section(assistant)
+            # --- time away from home: the facts and what's paused (away_periods.py) ---
+            from thirties_core.away_periods import prompt_section as away_section
+            day_setup += away_section(assistant)
+            # --- end time away ---
         from thirties_core.not_yours import invite_lines  # names whose calendar someone else's invite is on
         invites = "\n".join(f"- {line}" for line in invite_lines(plan, self.tools.ambiguous_events)) or "None"
         from thirties_core.morning import POLICY as policy  # the one written rule for proposing (A1)

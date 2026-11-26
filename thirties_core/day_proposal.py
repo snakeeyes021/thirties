@@ -693,6 +693,8 @@ def _proposal_candidates(dp: DayProposal, plan: "DayPlan") -> List[Dict[str, Any
             for c in out:
                 if c["title"].strip().lower() in pencilled and "pencilled in" not in c["why"]:
                     c["why"] = f"pencilled in for {format_clock(pencilled[c['title'].strip().lower()])}; {c['why']}"
+    from thirties_core.away_periods import not_paused  # what's paused while the user is away (away_periods.py)
+    out = not_paused(dp.db, plan.target_date, out)
     from thirties_core.project_pieces import with_steady_pieces  # a piece of each project, every day
     return with_steady_pieces(dp.a, plan, out, MAX_CANDIDATES)
 

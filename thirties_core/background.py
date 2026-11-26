@@ -655,6 +655,8 @@ class BackgroundService:
                if self._plannable(s) and s.status == SpanStatus.PLANNED and s.id not in asked
                and thirty_end(s) + grace <= now and on_time(s) and not mutes.is_muted(s.id, now)
                and not self._built_late(s, plan)]
+        from thirties_core.away_periods import paused_span  # paused while the user is away (away_periods.py)
+        due = [s for s in due if not paused_span(db, s)]
         if not due or self._held(now, "checkin"):  # a quiet the user asked for: not asked
             return
         if self._turn_running():  # the assistant is answering: the check-in waits for it
@@ -795,6 +797,8 @@ class BackgroundService:
                     if thirty_of(s.start_dt) == block and not told_already(s) and not s.tentative
                     and s.status == SpanStatus.PLANNED and self._bell_kind(s)
                     and (not quiet or s.category == SpanCategory.SLEEP)]
+        from thirties_core.away_periods import paused_span  # paused while the user is away (away_periods.py)
+        starting = [s for s in starting if not paused_span(db, s)]
         if not starting:
             return
         try:  # the morning message just said what's on: no block notice on top of it (11-02 replay)

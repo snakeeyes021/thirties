@@ -56,6 +56,17 @@ def prepare(manager, level: str = "medium") -> Tuple[str, str]:
             place_pinned(assistant)  # what the user asked for today is on it (morning_day.py)
         name = db.get_sync_meta(f"holiday:{day.isoformat()}") if db is not None else None
         holiday = f"It's {name}, so I've left Work off today; say if you're working." if name else ""
+        # --- time away from home: the facts, and the one line the first morning inside it says (away_periods.py) ---
+        from thirties_core import away_periods
+        try:
+            away = away_periods.morning_facts(assistant, day)
+            if away_periods.morning_line(db, day):
+                away_periods.mark_said(db, day)
+        except Exception as e:  # the morning never fails for want of it
+            logger.warning("Couldn't say the time away: %s", e)
+            away = ""
+        holiday = "\n\n".join(t for t in (holiday, away) if t)
+        # --- end time away ---
     text = manager.execute_tool("rollover_proposal", {})
     if text.startswith("Nothing from yesterday") or text.startswith("NOT_DONE"):
         text = ""
