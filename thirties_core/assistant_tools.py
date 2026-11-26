@@ -216,8 +216,12 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "first guess). Every leftover goes in keep (with a natural 'when': today, tomorrow, this "
                        "week, this weekend, before <day>, by <day>, next week, next month, someday; Python works "
                        "out the days) or in drop (it has gone moot or can't happen any more, e.g. a one-time event "
-                       "whose day is gone). Drops wait for the user's yes.",
-        "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}."},
+                       "whose day is gone). Drops wait for the user's yes. A one-time thing whose day and time are "
+                       "over goes in end (not carried, never marked done; applied now), unless the user said it "
+                       "moved, and it never gets tomorrow. Put any you're unsure of in unknown: it gets no day and one question.",
+        "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}.",
+                       "end": "A list of {item, why}: its day is over.",
+                       "unknown": "A list of {item}: not marked yet, asked about."},
         "required": ["keep"],
     },
     {
@@ -2067,7 +2071,13 @@ class AssistantTools(KindTools):
             when = default_when(item.get("horizon", "week"), item.get("due", ""), day, week_start)
             if item.get("start"):  # the day replanning found for it (replan.py) wins over the horizon's window
                 when = {"when": item.get("when") or when.get("when", ""), "start": item["start"], "end": item["end"]}
+            # --- its day and time are over: no day by itself, it's asked about (past_one_offs.py) ---
+            if item.get("unknown"):
+                when = {"when": item.get("when") or "not marked yet", "start": "", "end": ""}
+            # --- end no day by itself ---
             keep.append({**item, **when, "why": item.get("why", ""), "proposed_on": day.isoformat()})
+        from thirties_core.past_one_offs import record_offered  # offered once, never again
+        record_offered(self._db, ask, day)
         OpenPool(self._db).add(keep, day - timedelta(days=1))
         placed, overflow = self.before.place_today(keep)  # today's Keeps are on the schedule now
         overflow += list_overflow
@@ -2109,19 +2119,27 @@ class AssistantTools(KindTools):
                 [f"list {t.parent_note_title}"] if t is not None and t.parent_note_title else ["no list"]) + (
                 ["DOESN'T FIT TODAY"] if k["title"] in data.get("overflow", [])
                 and leftover_facts.span_of(self.pt.day_plan, k) is None else [])
+            # --- what it carries: planned at a time on a past day, whose time, home, kind, offers, dates ---
+            from thirties_core.past_one_offs import line as carried
+            facts = (["NOT MARKED YET: no day given; in the one question"] if k.get("unknown") else facts[:1]) \
+                + facts[1:] + carried(k.get("facts") or {}, self._today())
+            # --- end what it carries ---
             from thirties_core.item_path import named  # a nested list item with its parents
             lines.append(f"- {named(tasks, k['title'], k.get('task_id'), 200)} ({'; '.join(facts)})")
         lines += [f"- {d['title']} (proposed drop: {d.get('why') or 'no reason given'})" for d in lo.get("drop", [])]
+        lines += [f"- {e['title']} (ended: {e.get('why') or 'its day is over'})" for e in lo.get("end", [])]
+        from thirties_core.past_one_offs import RULE as past_rule  # a one-time thing whose day is over
         # --- the coming week's holidays, as facts: whether an item has to be done before one is the model's call ---
         from thirties_core.holidays import ahead_text
         holidays = ahead_text(self.pt, self._today())
         ask = "\n".join(x for x in (holidays, ask) if x)
         # --- end holidays ---
         return ("LEFTOVERS FROM BEFORE (unmarked: status unknown; Python's first guess, already in effect; where each "
-                "one is now):\n" + "\n".join(lines) + "\nAS THE PLAN STANDS NOW "
+                "one is now):\n" + "\n".join(lines) + "\n" + past_rule + "\nAS THE PLAN STANDS NOW "
                 + leftover_facts.for_model(now_facts, names=False) + ("\n" + ask if ask else ""))
 
-    def propose_leftovers(self, keep: Any = None, drop: Any = None, **_: Any) -> str:
+    def propose_leftovers(self, keep: Any = None, drop: Any = None, end: Any = None, unknown: Any = None,
+                          **_: Any) -> str:
         """The model's version of the morning's leftover proposal: each item kept at a natural horizon (Python
         works out the days) or dropped. Kept items wait there at once; drops wait for the user's yes."""
         import json
@@ -2166,8 +2184,27 @@ class AssistantTools(KindTools):
             from thirties_core.holidays import off_holiday
             window = off_holiday(self.pt, window, item["title"])
             # --- end holiday ---
-            new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False})
+            new_keep.append({**item, **window, "why": str(k.get("why") or ""), "pending_drop": False,
+                             "unknown": False})
             seen.add(item["title"].lower())
+        # --- ended (its day is over: not carried, never done) or left unknown (asked about, no day) ---
+        new_end, new_unknown = [], []
+        for e in (end if isinstance(end, list) else []):
+            e = e if isinstance(e, dict) else {"item": e}
+            item = find(e.get("item") or e.get("title"))
+            from thirties_core.due_today import deadline_words, held_due
+            held = held_due(self.pt, item["title"], item.get("task_id") or None, item.get("due"))
+            if held is not None:
+                raise ToolError(f"{item['title']} is {deadline_words(held, day)}: keep it today, not ended.")
+            new_end.append({**item, "why": str(e.get("why") or "its day is over"), "pending_drop": False})
+            seen.add(item["title"].lower())
+        for u in (unknown if isinstance(unknown, list) else []):
+            u = u if isinstance(u, dict) else {"item": u}
+            item = find(u.get("item") or u.get("title"))
+            new_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
+                                "pending_drop": False})
+            seen.add(item["title"].lower())
+        # --- end ended or unknown ---
         for d in (drop if isinstance(drop, list) else []):
             d = d if isinstance(d, dict) else {"item": d}
             item = find(d.get("item") or d.get("title"))
@@ -2185,16 +2222,24 @@ class AssistantTools(KindTools):
         pool = OpenPool(self._db)
         for d in new_drop:
             d["proposed_on"] = day.isoformat()
-        pool.add(new_keep + new_drop, day - timedelta(days=1))
+        pool.add(new_keep + new_drop + new_unknown, day - timedelta(days=1))
         recs = pool.all()
-        for r in new_drop + [k for k in new_keep if k["end"] > day.isoformat() or k["start"] > day.isoformat()]:
+        for r in new_drop + new_unknown + new_end + [k for k in new_keep if k["end"] > day.isoformat()
+                                                     or k["start"] > day.isoformat()]:
             rec = recs.get(r["title"].lower())
             if rec is not None and rec.get("slot"):
                 self.before.take_off_today(rec)  # not today's any more: its slot goes
         placed, overflow = self.before.place_today([recs.get(k["title"].lower(), k) for k in new_keep])
         for k in new_keep:
             self._someday_in_joplin(recs.get(k["title"].lower(), k), k.get("when") == "someday")
-        data["leftovers"] = {"keep": new_keep, "drop": new_drop}
+        # --- ended now: archived, off Today by the guarded path, never ticked (past_one_offs.end_now) ---
+        if new_end:
+            from thirties_core.past_one_offs import end_now
+            end_now(self, new_end, day)
+        ended = [e for e in (data.get("leftovers") or {}).get("end", [])
+                 if e["title"].lower() not in seen] + new_end
+        # --- end ended now ---
+        data["leftovers"] = {"keep": new_keep + new_unknown, "drop": new_drop, "end": ended}
         data["overflow"] = [o["title"] for o in overflow]
         self._db.set_sync_meta(self._rollover_key(), json.dumps(data))
         # --- what's in effect, read from the plan after these placements (leftover_facts.py) ---

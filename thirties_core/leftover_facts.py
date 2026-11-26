@@ -63,20 +63,27 @@ def facts(assistant: Any) -> Optional[Dict[str, Any]]:
     data = _record(assistant)
     lo = data.get("leftovers") or {}
     keep, drop = list(lo.get("keep") or []), list(lo.get("drop") or [])
-    if not keep and not drop and not data.get("overflow"):
+    ended = list(lo.get("end") or [])
+    if not keep and not drop and not ended and not data.get("overflow"):
         return None
     from thirties_core.item_path import named
     from thirties_core.messages import carried_where
     plan = getattr(assistant.pt, "day_plan", None)
     tasks = list(getattr(assistant.s, "tasks", []) or [])
     rows = []
+    # --- not marked yet (no day, asked about) and ended (its day is over) are neither kept nor dropped ---
+    unknown = [named(tasks, k["title"], k.get("task_id")) for k in keep
+               if k.get("unknown") and span_of(plan, k) is None]
+    keep = [k for k in keep if not (k.get("unknown") and span_of(plan, k) is None)]
+    # --- end not marked yet ---
     for k in keep:
         span = span_of(plan, k)
         rows.append({"title": k["title"], "name": named(tasks, k["title"], k.get("task_id")), "span": span,
                      "where": carried_where(plan, k), "when": str(k.get("when") or "")})
     overflow = [named(tasks, t) for t in data.get("overflow") or [] if span_of(plan, {"title": t}) is None]
     return {"keep": rows, "on_plan": [r for r in rows if r["span"] is not None],
-            "drop": [named(tasks, d["title"], d.get("task_id")) for d in drop], "overflow": overflow}
+            "drop": [named(tasks, d["title"], d.get("task_id")) for d in drop], "overflow": overflow,
+            "unknown": unknown, "ended": [named(tasks, e["title"], e.get("task_id")) for e in ended]}
 
 
 def notice(assistant: Any) -> str:
@@ -86,7 +93,8 @@ def notice(assistant: Any) -> str:
     if f is None:
         return ""
     out = notice_text(len(f["keep"]), len(f["on_plan"]), len(f["drop"]), f["overflow"],
-                      [(r["name"], r["where"]) for r in f["keep"] if r["when"] or r["span"] is not None])
+                      [(r["name"], r["where"]) for r in f["keep"] if r["when"] or r["span"] is not None],
+                      unknown=f.get("unknown") or [], ended=f.get("ended") or [])
     assistant.leftover_notice_said = out  # so the morning's facts can say it again once the day is built
     return out
 
@@ -116,13 +124,24 @@ def summary(f: Optional[Dict[str, Any]], names: bool = True) -> str:
     if not names:
         out = (f"kept {len(f['keep'])} from before; {len(on)} of them on today's plan; {len(off)} not on today's "
                f"plan; {len(f['drop'])} proposed for dropping")
-        return out + (f"; {len(f['overflow'])} that doesn't fit today" if f["overflow"] else "") + "."
+        return out + (f"; {len(f['overflow'])} that doesn't fit today" if f["overflow"] else "") \
+            + _unknown_ended(f, names) + "."
     out = f"kept {len(f['keep'])} from before; {len(on)} of them on today's plan" + (f" ({', '.join(on)})" if on else "")
     out += f"; {len(off)} not on today's plan" + (f" ({', '.join(off)})" if off else "")
     out += f"; {len(f['drop'])} proposed for dropping" + (f" ({', '.join(f['drop'])})" if f["drop"] else "")
     if f["overflow"]:
         out += "; doesn't fit today: " + ", ".join(f["overflow"])
+    out += _unknown_ended(f, names)
     return out + "."
+
+
+def _unknown_ended(f: Dict[str, Any], names: bool = True) -> str:
+    """Not marked yet (asked about, no day) and ended (its day is over), for the model's counts."""
+    out = ""
+    for key, said in (("unknown", "not marked yet, asked about, no day"), ("ended", "ended, their day is over")):
+        if f.get(key):
+            out += f"; {len(f[key])} {said}" + (f" ({', '.join(f[key])})" if names else "")
+    return out
 
 
 def plain(f: Optional[Dict[str, Any]]) -> str:
@@ -152,7 +171,7 @@ def where_now(f: Optional[Dict[str, Any]]) -> Dict[str, str]:
 
 def tool_result(assistant: Any) -> str:
     """What propose_leftovers answers: what's in effect, read from the plan after its placements."""
-    f = facts(assistant) or {"keep": [], "on_plan": [], "drop": [], "overflow": []}
+    f = facts(assistant) or {"keep": [], "on_plan": [], "drop": [], "overflow": [], "unknown": [], "ended": []}
     lines = []
     if f["keep"]:
         lines.append("Keep:")
@@ -161,10 +180,37 @@ def tool_result(assistant: Any) -> str:
     if f["drop"]:
         lines.append("Drop:")
         lines += f["drop"]
+    # --- not marked yet and ended, with what each leftover carries (past_one_offs.py) ---
+    if f.get("unknown"):
+        lines.append("Not marked yet (no day; the one question asks whether it happened):")
+        lines += f["unknown"]
+    if f.get("ended"):
+        lines.append("Ended (its day is over; not carried, not done):")
+        lines += f["ended"]
+    carried = _carried(assistant)
+    if carried:
+        lines += ["What each one carries:"] + carried
+    # --- end not marked yet and ended ---
     return ("In effect now, no approval needed. As the plan stands now " + for_model(f, names=False) + " What isn't on "
             "today's plan waits at its horizon; drops are applied by themselves after today unless the user says "
             "otherwise. Say it as a short notice, not a question, and never as a tally of kept, on-the-plan and "
             "dropped items. Where each one is now:\n" + "\n".join(lines))
+
+
+def _carried(assistant: Any) -> List[str]:
+    """Each leftover with what it carries, as the morning's list gave it (past_one_offs.line)."""
+    from thirties_core.past_one_offs import line
+    lo = _record(assistant).get("leftovers") or {}
+    try:
+        day = assistant._today()
+    except Exception:
+        return []
+    out = []
+    for k in (lo.get("keep") or []) + (lo.get("drop") or []) + (lo.get("end") or []):
+        said = line(k.get("facts") or {}, day)
+        if said:
+            out.append(f"{k['title']}: " + "; ".join(said))
+    return out
 
 
 # --- the model's words, checked against the facts ---

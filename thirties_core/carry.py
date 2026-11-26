@@ -21,6 +21,13 @@ The rules, applied once a day when the day is built (after the user's first repl
    - this week: everything else; when unsure, this week, never today.
    The morning model revises it (propose_leftovers): drops what has gone moot (a one-time event whose day is
    gone), moves what fits better elsewhere. Python works out the days of each horizon (resolve_when).
+   The model reads what each leftover carries (past_one_offs.py): whether it was planned at a time on a past
+   day and whether the user gave that time, whether it has a home list or lives only on Today, its kind, how
+   many mornings it was offered, the dates it names. A one-time thing whose day and time are over (it lived
+   only for that day: a trip, an errand at a time, an event-like activity) is moot unless the user said it
+   moved: the model ends it (not carried, never ticked done) and never gives it "tomorrow". One the user put
+   at a stated time on a day now over gets no day from Python's guess: it is "not marked yet", in the one
+   question ("did it happen?"), until the user or the model says otherwise.
    Then each kept one-off gets a concrete day (replan.py), applied at once and said in the morning ("Keep: <item>,
    <day>") so the user can correct it: what can't wait (urgency "now", or "as soon as possible" in its wording)
    goes on today if it fits, else the first day with room; everything else the first day from tomorrow with room,
@@ -133,8 +140,8 @@ class OpenPool:
             rec = {**(old or {}), "title": item["title"].strip(), "task_id": item.get("task_id") or "",
                    "since": (old or {}).get("since") or since.isoformat(),
                    "horizon": item.get("horizon") or WEEK, "due": item.get("due") or ""}
-            rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop", "proposed_on", "slot")
-                        if k in item})
+            rec.update({k: item[k] for k in ("when", "start", "end", "why", "pending_drop", "proposed_on", "slot",
+                                             "unknown") if k in item})
             if old and old.get("placed_by") == "user":
                 rec.update({k: old[k] for k in ("horizon", "when", "start", "end", "placed_by") if k in old})
             data[key] = rec
@@ -433,8 +440,19 @@ def sort_leftovers(assistant, day: date) -> Dict[str, Any]:
         pooled_ids.add(item["task_id"])
         if item["title"].lower() not in asked_before:
             ask.append(item["title"])
+        item["line"] = title
         pool_items.append(item)
-    return {"ask": ask, "off_today": off_today, "ended": ended,
+    # --- what each leftover carries, for the morning model (past_one_offs.py) ---
+    from thirties_core.past_one_offs import gather, offered_before
+    for item in pool_items:
+        try:
+            item["facts"] = gather(assistant, item["title"], item.get("task_id") or "", day, item.pop("line", ""))
+        except Exception as e:
+            logger.warning("Couldn't gather what %s carries: %s", item.get("title"), e)
+            item.pop("line", None)
+    offered = [i["title"] for i in pool_items if offered_before(db, i["title"], day)]
+    # --- end what it carries ---
+    return {"ask": ask, "off_today": off_today, "ended": ended, "offered_before": offered,
             "pooled": [i["title"] for i in pool_items], "pool_items": pool_items, "ongoing_missed": ongoing_missed,
             "missed": missed, "done": done_items}
 
@@ -507,9 +525,19 @@ def replan_leftovers(assistant, day: date, out: Dict[str, Any]) -> None:
     pt = assistant.pt
     week_start = getattr(pt.scheduler.config.general, "week_start", "mon") if pt.scheduler else "mon"
     week_end = max(_week_bounds(day, week_start)[1], day + timedelta(days=1))  # by default within this week
+    from thirties_core.past_one_offs import UNKNOWN_WHEN, past_time
+    offered = {str(t).lower() for t in out.get("offered_before", [])}
     for item in out.get("pool_items", []):
         if item.get("horizon") == SOMEDAY:
             continue
+        # --- offered in an earlier morning's proposal: never placed again by itself (rule 3: "and never again") ---
+        if item["title"].lower() in offered:
+            continue
+        # --- put at a time the user gave on a day now over: no day by itself, it's asked about (past_one_offs.py) ---
+        if past_time(item.get("facts") or {}, day):
+            item.update({"unknown": True, "when": UNKNOWN_WHEN, "why": "no outcome yet, and its slot has passed"})
+            continue
+        # --- end no day by itself ---
         task = tasks.get(item.get("task_id") or "")
         rest = streaks.held_until(day, item["title"], item.get("task_id") or "", signature(task), item.get("due", ""),
                                   urgent=stated_cant_wait(assistant._db, task, item["title"]))
@@ -772,11 +800,21 @@ def proposal_lines(keep: List[Dict[str, str]], drop: List[Dict[str, str]], short
 
 
 def notice_text(kept: int, on_today: int, drops: int, overflow: List[str],
-                placed: Optional[List[tuple]] = None) -> str:
+                placed: Optional[List[tuple]] = None, unknown: Optional[List[str]] = None,
+                ended: Optional[List[str]] = None) -> str:
     """The morning's word on the leftovers when no model writes it (copy-madlibs T3-023 to T3-025): what was
-    done, not a question; the one question is only for what doesn't fit today."""
-    if not kept and not drops and not overflow:
+    done, not a question; the one question is only for what doesn't fit today, and whether what isn't marked yet
+    (``unknown``: its day and time are over, so it has no day) happened. ``ended``: over with its day."""
+    if not kept and not drops and not overflow and not unknown and not ended:
         return ""
+    # --- ended and not marked yet (past_one_offs.py) ---
+    from thirties_core.past_one_offs import question
+    tail = ("Ended, their day is over: " + ", ".join(ended) + "." if ended else "")
+    ask = question(list(unknown or []))
+    tail = "\n".join(x for x in (tail, ask) if x)
+    if not kept and not drops and not overflow:
+        return tail
+    # --- end ended and not marked yet ---
     out = ""
     if kept or drops:
         out = f"Kept {kept} from before ({on_today} on today's plan)"
@@ -787,4 +825,4 @@ def notice_text(kept: int, on_today: int, drops: int, overflow: List[str],
     if overflow:
         out += (("\n" if out else "") + "Doesn't fit today: " + ", ".join(overflow)
                 + ". Drop, move to another day, or squeeze in?")
-    return out
+    return out + ("\n" + tail if tail else "")
