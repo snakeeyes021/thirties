@@ -79,7 +79,7 @@ DUE_WITHIN = 2  # days: due this soon, it comes first whatever the energy
 def is_due(candidate: Dict[str, Any], day=None) -> bool:
     """Due soon, or said can't wait: it keeps its place whatever the energy."""
     why = str(candidate.get("why") or "").lower()
-    if "can't wait" in why or why.startswith("now") or "overdue" in why:
+    if "can't wait" in why or "as soon as possible" in why or "overdue" in why:
         return True
     task = candidate.get("task")
     due = getattr(task, "due", "") if task is not None else ""

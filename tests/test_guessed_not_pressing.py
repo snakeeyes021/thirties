@@ -192,8 +192,8 @@ class TestAMockMorning(unittest.TestCase):
         self.assertLess(options.index("Could go this week, if"), options.index(lids))
         listed = [line for line in prompt.splitlines() if "'Glaze the teapot lids'" in line]
         self.assertTrue(listed)
-        self.assertTrue(all("[soon]" not in line for line in listed))
-        self.assertTrue(any("[soon]" in line for line in prompt.splitlines() if "'Patch the canoe keel'" in line))
+        self.assertTrue(all("[wanted in the next few days]" not in line for line in listed))
+        self.assertTrue(any("[wanted in the next few days]" in line for line in prompt.splitlines() if "'Patch the canoe keel'" in line))
         proposal = [p["title"] for p in self.m.tools.assistant.proposals.default_items(self.m.day_plan)]
         self.assertNotIn("Glaze the teapot lids", proposal)
         self.assertIn("Patch the canoe keel", proposal)

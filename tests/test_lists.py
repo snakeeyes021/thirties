@@ -130,7 +130,7 @@ class TestBrainsUseThem(unittest.TestCase):
         notes = [{"id": "n_errands", "source_notebook": "Tasks", "title": "Errands", "body": ""},
                  {"id": "n_wish", "source_notebook": "Tasks", "title": "Wishlist", "body": ""}]
         text = FrontierBrain(self.tools, None, tasks=self.tasks, active_notes=notes).build_backlog_summary()
-        self.assertIn("'Call the bank' [soon]", text)
+        self.assertIn("'Call the bank' [wanted in the next few days]", text)  # plain words, not the value
         self.assertIn("'Buy stamps'\n", text + "\n")  # no hurry: no tag
         self.assertIn('"Wishlist" [Reference / wishlist: never suggest unless asked]', text)
         ListCatalog(self.sched.state_db).set_role("n_wish", "backlog", "Wishlist")

@@ -70,13 +70,33 @@ def is_light(candidate: Dict[str, Any]) -> bool:
 from thirties_core.morning import POLICY  # one written rule for proposing (A1)
 from thirties_core.horizons import GUESSED_WHY  # how an option only a guess brought reads
 
+# --- plain reasons: why an option is here, in words a person uses (never the urgency value itself: the model
+# repeats "now" or "soon" as if the user had said it, "X is for now") ---
+ASAP_WHY = "the user wants it done as soon as possible"
+SOON_WHY = "the user wants it done in the next few days"
+
+
+def due_why(task: TaskItem, due_in: int) -> str:
+    """When it's due, in plain words: "due today", "due tomorrow", "due Thu Nov 5", "overdue (it was due Mon Nov 2)"."""
+    when = date.fromisoformat(task.due[:10]).strftime("%a %b %-d")
+    if due_in < 0:
+        return f"overdue (it was due {when})"
+    return "due today" if due_in == 0 else "due tomorrow" if due_in == 1 else f"due {when}"
+# --- end plain reasons ---
+
+# How the morning explains a choice (the options' reasons and the week's line are facts to put in the user's words)
+PLAIN_WHY = ("Explain a choice in plain words the user would use themselves (\"it's due tomorrow\", \"you wanted it "
+             "done soon\"); never repeat an internal label (\"for now\", \"urgency\", \"horizon\", \"pool\", "
+             "\"on track\", \"behind\") or a bare count (\"2 of 7\"): name the items instead of counting them.")
+
 MORNING_INSTRUCTION = (
     "[Morning, not from the user] The user is up, and the day is being built: its routines and anchors are on the "
     "plan. Plan the free time: pick a few concrete things from DAY OPTIONS (they come best first; not the whole "
     "backlog) and call propose_day with them. " + POLICY + " Then write one short message: a notice of what you put "
-    "on, one plain line each (time first, never '- ' bullets), and one line on why. Ask nothing, unless the facts say something doesn't fit today: then that is your one question (the day "
-    "as it is, what doesn't fit, and the options: drop it, move it to a day, or squeeze it in). If the week's plan "
-    "says how it's going (on track or behind), you may mention it in one line. If there's nothing to put on and "
+    "on, one plain line each (time first, never '- ' bullets), and one line on why. " + PLAIN_WHY + " The week's "
+    "planned items may get a line too, by name. Ask nothing, unless the facts say something doesn't fit today: then "
+    "that is your one question (the day as it is, what doesn't fit, and the options: drop it, move it to a day, or "
+    "squeeze it in). If there's nothing to put on and "
     "nothing to say, reply with only: NOTHING")
 
 
@@ -110,7 +130,7 @@ PROPOSAL_TOOL_SPECS: List[Dict[str, Any]] = [
         "parameters": {"items": "A list of {item, start, duration}: item is a task_id or title, start a clock time "
                                 "in the free time, duration optional (default: how long it usually takes). A new "
                                 "thing not on the lists also takes because: the user's exact words it comes from.",
-                       "why": "One short line on why these (optional)."},
+                       "why": "One short line on why these, in plain words the user would use (optional)."},
         "required": ["items"],
     },
     {
@@ -220,7 +240,6 @@ class DayProposal:
         """Due within a week, 'now', on the Today note, 'soon'; then a free-time pick or two and time on a project.
         Never routines, anchors, someday or reference items, anything done, or what's already on the plan."""
         from thirties_core.backlog import DONE_HIDES_DAYS
-        from thirties_core.lists import urgency_label
         from thirties_core.list_reading import do_now
         day = plan.target_date
         daily = self.a.routines.daily_titles()
@@ -285,11 +304,11 @@ class DayProposal:
                 continue  # left open, and placed where daily plans don't reach (carry.py)
             since = f"left open since {weekday(date.fromisoformat(left['since']))}" if left else ""
             if due_in is not None and due_in <= 7:
-                rank, why = (0, due_in), urgency_label(t) + (f"; {since}" if since else "")
+                rank, why = (0, due_in), due_why(t, due_in) + (f"; {since}" if since else "")
             elif t.urgency in ("now", "soon") and guessed(t):
                 rank, why = (4, 0), GUESSED_WHY + (f"; {since}" if since else "")
             elif t.urgency == "now":
-                rank, why = (1, 0), "now" + (f"; {since}" if since else "")
+                rank, why = (1, 0), ASAP_WHY + (f"; {since}" if since else "")
             elif h == "today":  # left open, and it can't wait / is quick / is due very soon / its window ends
                 rank, why = (1, 5), f"{since}; meant for {left.get('when') or 'today'}"
             elif h == "deadline":
@@ -299,7 +318,7 @@ class DayProposal:
             elif t.list_role == "today":
                 rank, why = (2, 0), "on today's list"
             elif t.urgency == "soon":
-                rank, why = (3, 0), "soon"
+                rank, why = (3, 0), SOON_WHY
             elif t.list_role == "menu":
                 rank, why = (5, 0), "a free-time pick"
             else:

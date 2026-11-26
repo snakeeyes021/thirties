@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 POLICY = ("What you put on the plan goes on at once: the schedule just IS the schedule, with no approval step. "
           "Tell the user what you put on, as a short notice, not a question. Call an item pressing, urgent or due "
-          "only when its urgency (now, soon, a date) or its due date says so; otherwise give the real reason you "
-          "chose it, or none.")
+          "only when its urgency (the user wants it soon, or by a date) or its due date says so; otherwise give the "
+          "real reason you chose it, or none.")
 
 
 def done_key(day) -> str:

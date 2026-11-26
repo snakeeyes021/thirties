@@ -245,4 +245,20 @@ def urgency_label(task: TaskItem) -> str:
     return task.urgency or ""
 
 
-__all__ = ["ListCatalog", "ROLES", "URGENCIES", "SORTED_ROLES", "ROLE_URGENCY", "sort_lists", "urgency_label"]
+# How pressing an item is, in the words a person uses, for what the model reads: never the urgency value itself
+# ("now", "soon"), which the model repeats as if the user had said it ("X is for now").
+PRESSING_WORDS = {"now": "wanted as soon as possible", "soon": "wanted in the next few days"}
+
+
+def pressing_words(task: TaskItem) -> str:
+    """'due Oct 30', 'wanted as soon as possible', 'wanted in the next few days', or ''."""
+    if task.due:
+        try:
+            return f"due {date.fromisoformat(task.due).strftime('%b %-d')}"
+        except ValueError:
+            pass
+    return PRESSING_WORDS.get(task.urgency or "", "")
+
+
+__all__ = ["ListCatalog", "ROLES", "URGENCIES", "SORTED_ROLES", "ROLE_URGENCY", "sort_lists", "urgency_label",
+           "pressing_words"]

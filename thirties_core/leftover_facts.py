@@ -192,8 +192,8 @@ def tool_result(assistant: Any) -> str:
         lines += ["What each one carries:"] + carried
     # --- end not marked yet and ended ---
     return ("In effect now, no approval needed. As the plan stands now " + for_model(f, names=False) + " What isn't on "
-            "today's plan waits at its horizon; drops are applied by themselves after today unless the user says "
-            "otherwise. Say it as a short notice, not a question, and never as a tally of kept, on-the-plan and "
+            "today's plan waits in Before today for a later day; drops are applied by themselves after today unless "
+            "the user says otherwise. Say it as a short notice, not a question, and never as a tally of kept, on-the-plan and "
             "dropped items. Where each one is now:\n" + "\n".join(lines))
 
 
