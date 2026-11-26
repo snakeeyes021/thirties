@@ -157,6 +157,46 @@ class TheFactsThatTellThemApart(StudioCase):
         self.assertEqual((f["calendar"], f["others"], f["fixed"]), (False, "", False))
 
 
+class KeptOnlyAsATask(StudioCase):
+    """Keep holds a one-off with a past slot only under kind "task"."""
+
+    def keep_all(self, tour_kind=None):
+        self.t.execute("rollover_proposal", {})
+        keep = [{"item": k["title"], "when": "tomorrow", "kind": "task"} for k in self.record()["leftovers"]["keep"]
+                if k["title"] != TOUR_LINE]
+        keep.append({"item": TOUR_LINE, "when": "tomorrow", **({"kind": tour_kind} if tour_kind else {})})
+        return self.t.execute("propose_leftovers", {"keep": keep})
+
+    def test_a_past_timed_one_off_kept_with_no_kind_stays_unknown_with_no_day(self):
+        for kind in (None, "event", "unsure"):
+            with self.subTest(kind=kind):
+                self.setUp()
+                out = self.keep_all(kind)
+                self.assertIn("Not marked yet (no day", out)
+                rec = self.pool(TOUR_LINE)
+                self.assertTrue(rec.get("unknown"))
+                self.assertFalse(rec.get("start"))
+                self.assertNotEqual(rec.get("when"), "tomorrow")
+                self.assertNotEqual(rec.get("horizon"), DROPPED)
+                self.assertIn(f"- [ ] {TOUR_LINE}", self.body("n_today"))
+
+    def test_with_kind_task_it_is_kept(self):
+        self.keep_all("task")
+        rec = self.pool(TOUR_LINE)
+        self.assertFalse(rec.get("unknown"))
+        self.assertTrue(rec.get("start"))
+        self.assertTrue(self.pool(TRIM_LINE).get("start"))  # the other one, kept as a task
+
+    def test_the_check_is_structure_only(self):
+        from thirties_core.past_one_offs import keeps
+        past = {"time_by_user": True, "planned_day": YESTERDAY.isoformat(), "kind": "once"}
+        self.assertTrue(keeps(past, DAY, "task"))
+        for kind in ("event", "unsure", "", None):
+            self.assertFalse(keeps(past, DAY, kind))
+        self.assertTrue(keeps({**past, "kind": "ongoing"}, DAY, None))
+        self.assertTrue(keeps({**past, "time_by_user": False}, DAY, None))  # nothing over: kept as before
+
+
 class NeverVanish(StudioCase):
     """Asked about, never answered: two more mornings go by and the item is still there."""
 

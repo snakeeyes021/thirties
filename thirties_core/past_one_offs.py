@@ -21,6 +21,9 @@ What follows from them:
   archived as ended, a Today copy of a listed item comes off Today (its home item is untouched), and a line that
   lives only on Today is filed in the month's Dropped note (``end_now``), so nothing is lost and undrop puts it
   back.
+- Kept only as a task: a one-time thing whose own time or date is over stays in ``keep`` only when the model says
+  ``kind: "task"`` (``keeps``); with no kind, or any other, it stays not marked yet with no day, so an event that
+  already took place never rolls into another day.
 - Never vanish: an item asked about and left unanswered keeps its pool record (and window) or its home list; it is
   never dropped, filed or ended by not being answered.
 - An item offered in one morning's proposal is never offered or placed again by itself (``offered_before``).
@@ -50,7 +53,10 @@ RULE = ("Each leftover is an event or a task. An event could only happen at its 
         "dental check-up, a match with friends. Past that time an event simply ends; list it under end, kind "
         "\"event\" (no carrying forward, no tick, and a home list keeps its line). Other leftovers are work "
         "to finish: a clock time on such work records its plan, never a deadline, so once that slot has passed "
-        "it stays open: keep it or leave it in unknown, never end it. The facts listed with each leftover help "
+        "it stays open: keep it (kind \"task\") or leave it in unknown, never end it. Something that took "
+        "place at a set time (a show, an appointment, a planetarium show at 7:30) is an event even when its name "
+        "reads like an action: never keep it; end it, or if unsure leave it in unknown. Only work the user can "
+        "still do later goes in keep, with kind \"task\". The facts listed with each leftover help "
         "(from a calendar, other people on it, a fixed time, on a list the user keeps tasks in), and so does its "
         "name. When unsure, unknown: it stays not marked yet, with no day, and the one question asks whether it "
         "happened. Nothing is dropped without the user's yes. An item offered on an earlier morning is never "
@@ -219,6 +225,15 @@ def ends(facts: Dict[str, Any], day: date, kind: Any) -> bool:
             and (facts or {}).get("kind") not in (kinds.ONGOING, kinds.DAILY))
 
 
+def keeps(facts: Dict[str, Any], day: date, kind: Any) -> bool:
+    """Whether a keep stands: a one-time thing whose own time or date is over is kept only when the model says
+    it's a task; anything else stays not marked yet. Structure only; the title is never read."""
+    from thirties_core import kinds
+    if not past_time(facts or {}, day) or (facts or {}).get("kind") in (kinds.ONGOING, kinds.DAILY):
+        return True
+    return str(kind or "").strip().lower() == "task"
+
+
 def past_time(facts: Dict[str, Any], day: date) -> bool:
     """A user-stated time on a day that has ended, or a named date already gone: Python picks no day for it."""
     if not facts:
@@ -316,5 +331,5 @@ def question(names: List[str]) -> str:
     return "Not marked yet: " + ", ".join(names[:-1]) + f" and {names[-1]}. Did they happen?"
 
 
-__all__ = ["gather", "past_time", "ends", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
+__all__ = ["gather", "past_time", "ends", "keeps", "KINDS", "TASK_ROLES", "line", "end_now", "question", "record_offered", "times_offered",
            "offered_before", "named_dates", "UNKNOWN_WHEN", "ENDED_WHY", "RULE"]

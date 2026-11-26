@@ -111,7 +111,7 @@ class AtATimeTheUserGave(CoopCase):
 
     def test_one_the_model_cant_tell_about_stays_unknown(self):
         self.t.execute("rollover_proposal", {})
-        self.t.execute("propose_leftovers", {"keep": [{"item": STALL, "when": "saturday"}],
+        self.t.execute("propose_leftovers", {"keep": [{"item": STALL, "when": "saturday", "kind": "task"}],
                                              "unknown": [{"item": FRAMES}]})
         self.assertFalse(self.pool(FRAMES).get("start"))
         self.assertIn("Did it happen?", self.a.leftover_notice())

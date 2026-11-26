@@ -714,8 +714,10 @@ MORNING_FACTS = (
     "moot; move what fits better elsewhere); it takes effect at once, and a drop is applied after today unless the "
     "user says otherwise. An event (it could only happen at its own time, like a concert or a match with friends) "
     "simply ends once its time has passed: end, kind \"event\". Work to finish stays open after its planned slot "
-    "goes by: a time on it was a plan, not a deadline. Neither is kept for tomorrow by itself. When unsure, "
-    "unknown: not marked yet, asked about once. Start with \"☀️ Good "
+    "goes by: a time on it was a plan, not a deadline. Neither is kept for tomorrow by itself. Something that "
+    "took place at a set time (a show, an appointment, a planetarium show at 7:30) is an event even when its name reads "
+    "like an action, and never goes in keep; only work the user can still do later is kept, with kind \"task\". "
+    "When unsure, unknown: not marked yet, asked about once. Start with \"☀️ Good "
     "morning!\". Then list the whole day as Python lists it, one plain line each, time first, never '- ' bullets: "
     "each routine part with its steps, the meals and other anchors, then what you put on.\n---\n{facts}\n---")
 

@@ -220,8 +220,12 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "simply ends once that time has passed: put it in end with kind \"event\" (no carrying "
                        "forward, no tick). Work to finish stays open after its planned slot goes by: the clock "
                        "time on it was a plan, not a deadline, so keep it or leave it in unknown. Neither gets "
-                       "tomorrow by itself. When unsure, unknown (no day, asked about once).",
-        "parameters": {"keep": "A list of {item, when, why}.", "drop": "A list of {item, why}.",
+                       "tomorrow by itself. Something that took place at a set time (a show, an appointment, a "
+                       "planetarium show at 7:30) is an event even when its name reads like an action: it never goes in "
+                       "keep. Only work the user can still do later goes in keep, with kind \"task\". When unsure, "
+                       "unknown (no day, asked about once).",
+        "parameters": {"keep": "A list of {item, when, kind, why}; kind \"task\" is required for one whose "
+                               "slot or date has passed (without it, it stays not marked yet).", "drop": "A list of {item, why}.",
                        "end": "A list of {item, kind, why}; kind is required: \"event\" (it could only happen at "
                               "that time; it ends), \"task\" or \"unsure\" (both stay not marked yet).",
                        "unknown": "A list of {item}: not marked yet, asked about."},
@@ -2163,9 +2167,20 @@ class AssistantTools(KindTools):
             return hit
         week_start = getattr(self.pt.scheduler.config.general, "week_start", "mon") if self.pt.scheduler else "mon"
         day, new_keep, new_drop, seen = self._today(), [], [], set()
+        held_unknown = []
         for k in (keep if isinstance(keep, list) else []):
             k = k if isinstance(k, dict) else {"item": k, "when": "this week"}
             item = find(k.get("item") or k.get("title"))
+            # --- a one-off whose own time is over is kept only as a task; otherwise unknown, no day ---
+            from thirties_core.due_today import must_stay as _due
+            from thirties_core.past_one_offs import keeps
+            if not keeps(item.get("facts") or {}, day, k.get("kind")) \
+                    and not _due(self.pt, item["title"], item.get("task_id") or None, item.get("due")):
+                held_unknown.append({**item, "when": "not marked yet", "start": "", "end": "", "unknown": True,
+                                     "pending_drop": False})
+                seen.add(item["title"].lower())
+                continue
+            # --- end kept only as a task ---
             try:
                 window = resolve_when(k.get("when") or "this week", day, week_start)
             except ValueError as e:
@@ -2191,7 +2206,7 @@ class AssistantTools(KindTools):
                              "unknown": False})
             seen.add(item["title"].lower())
         # --- ended (its day is over: not carried, never done) or left unknown (asked about, no day) ---
-        new_end, new_unknown = [], []
+        new_end, new_unknown = [], held_unknown
         for e in (end if isinstance(end, list) else []):
             e = e if isinstance(e, dict) else {"item": e}
             item = find(e.get("item") or e.get("title"))
