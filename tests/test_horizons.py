@@ -504,6 +504,9 @@ class TestReviewCost(PlannerCase):
         self.assertEqual(hp.months_of(next(t for t in self.tasks if t.id == "door")), set())
 
 
+LEFT, AHEAD = "4 days left", 4  # DAY is a Thursday: four days of the week to go, four to the next one
+
+
 class TestOnTrack(PlannerCase):
     """C2: "how on track are we" at each level, counted by Python."""
 
@@ -511,7 +514,8 @@ class TestOnTrack(PlannerCase):
         from thirties_core.on_track import Track, summary
         slipped = [f"Garden task {n}" for n in range(6)]
         text = summary(Track(planned=8, done=1, slipped=slipped, days_left=3))
-        self.assertIn("slipped: " + ", ".join(slipped) + ";", text)
+        self.assertIn("not done by the day they were meant for: " + ", ".join(slipped[:-1]) + " and Garden task 5;",
+                      text)
         self.assertNotIn("more", text)
 
     def test_the_week_says_whats_done_what_slipped_and_whats_left(self):
@@ -523,28 +527,29 @@ class TestOnTrack(PlannerCase):
         self.hp.pin(self.tasks[5], week)                            # paint: done
         self.sched.state_db.record_task_completed("paint", DAY)
         self.assertEqual(track_line(self.hp, week, "this week"),
-                         "This week: behind, 1 of 3 done; slipped: Fix the door; 4 days left.")
+                         "Planned for this week: Paint the hall, Fix the door and Call the garage; done: Paint the "
+                         f"hall; not done by the day it was meant for: Fix the door; {LEFT}.")
         out = self.t.execute("show_period", {"when": "this week"})
-        self.assertTrue(out.startswith("This week (Oct 12 – 18):\nBehind, 1 of 3 done; slipped: Fix the door; "
-                                       "4 days left.\n"), out)
+        self.assertTrue(out.startswith("This week (Oct 12 – 18):\nDone: Paint the hall; not done by the day it was "
+                                       f"meant for: Fix the door; {LEFT}.\n"), out)
         self.hp.unpin("door")
-        self.assertEqual(track_line(self.hp, week), "On track, 1 of 2 done, 4 days left.")
+        self.assertEqual(track_line(self.hp, week), f"Done: Paint the hall; {LEFT}.")
 
     def test_each_week_of_the_month_and_the_year_in_natural_units(self):
         from thirties_core.on_track import track_line
         self.hp.pin(self.tasks[0], parse_period("next week", DAY))
         self.hp.pin(self.tasks[2], parse_period("this year", DAY))
         out = self.t.execute("show_period", {"when": "this month"})
-        self.assertIn("Next week: 1 planned, starts in 4 days", out)
-        self.assertEqual(track_line(self.hp, parse_period("this year", DAY)),
-                         "On track, 0 of 1 done, about 3 months left.")
-        self.assertEqual(track_line(self.hp, parse_period("next week", DAY)), "1 planned, starts in 4 days.")
+        line_with(out, "Next week", "Fix the door planned", f"starts in {AHEAD} days")
+        self.assertEqual(track_line(self.hp, parse_period("this year", DAY)), "None done yet; about 3 months left.")
+        self.assertEqual(track_line(self.hp, parse_period("next week", DAY)), f"Starts in {AHEAD} days.")
 
     def test_the_morning_mentions_the_week(self):
         from thirties_core.day_proposal import week_line
         self.assertEqual(week_line(self.t), "")
         self.hp.pin(self.tasks[0], parse_period("Monday", MON))
-        self.assertEqual(week_line(self.t), "This week: behind, 0 of 1 done; slipped: Fix the door; 4 days left.")
+        self.assertEqual(week_line(self.t), "Planned for this week: Fix the door; none done yet; not done by the day "
+                                            f"it was meant for: Fix the door; {LEFT}.")
 
 
 class TestTools(PlannerCase):
@@ -610,7 +615,7 @@ class TestTools(PlannerCase):
         self.hp.pin(self.tasks[2], parse_period("November", DAY))
         text = FrontierBrain(self.t, None, tasks=self.tasks, active_notes=[]).build_backlog_summary()
         self.assertIn("PLANS FOR THE WEEK, MONTH AND YEAR", text)
-        line_with(text, "This week", "on track", "0 of 1 done", "4 days left")
+        line_with(text, "This week", "none done yet", LEFT)
         line_with(text, "Fix the door", "Saturday", "id=door")
         self.assertNotIn("Clean the gutters", text.split("PLANS FOR")[1].split("\n\n")[0])  # November isn't now
 
@@ -635,7 +640,8 @@ class TestSessions(PlannerCase):
         HorizonPlans(self.sched.state_db).put("paint", "Paint the hall", "n_home", "Home", period_of("week", MON))
         self.sched.state_db.record_task_completed("paint", MON + timedelta(days=2))
         text = self.hp.offer_session()
-        self.assertTrue(text.startswith("Last week: 1 of 2 done; slipped: Fix the door. This week: "), text)
+        self.assertTrue(text.startswith("Planned for last week: Paint the hall and Fix the door; done: Paint the "
+                                        "hall; not done: Fix the door. This week: "), text)
 
     def test_a_proposal_asked_for_can_be_declined(self):
         self.hp.propose(period_of("week", self.when.date()))

@@ -1477,7 +1477,7 @@ def _score(c: Candidate, today: date) -> float:
 
 def _brief(planner: "HorizonPlanner", p: Period) -> str:
     from thirties_core.on_track import summary, track
-    return summary(track(planner, p))
+    return summary(track(planner, p), plan=True)  # its lines name nothing else
 
 
 def _span_text(p: Period) -> str:

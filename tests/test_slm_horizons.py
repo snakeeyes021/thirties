@@ -62,7 +62,7 @@ class TestGemmaHorizons(SlmTestCase):
         rows = HorizonPlans(self.sched.state_db).rows()
         self.assertEqual([(r["item_id"], r["slot"]) for r in rows], [("t1", "2026-10-17")])
         out = self.tell("what's on this week?")
-        self.assertTrue(out.startswith("This week (Oct 12 – 18):\nOn track, 0 of 1 done, 4 days left.\n"
+        self.assertTrue(out.startswith("This week (Oct 12 – 18):\nNone done yet; " + "4 days" + " left.\n"
                                        "- Saturday: Hardware store help desk"), out)
 
     def test_that_is_the_item_just_planned(self):

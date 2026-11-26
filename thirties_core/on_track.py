@@ -1,8 +1,10 @@
 """How on track a period is: "how on track are we" at each horizon (ROADMAP C2).
 
 For a week, a month or a year that has a plan (items dropped into it, horizons.py), Python counts what's planned,
-what's done, what slipped and how much of the period is left, and says it in a line ("Behind, 1 of 4 done; slipped:
-File the taxes; 3 days left."). show_period carries it for the period and for each week of a month or month of a
+what's done, what slipped and how much of the period is left, and says it in a line of plain words that names the
+items ("Planned for this week: Bisque the bowls, Wedge the stoneware and Label the glazes; done: Label the glazes;
+not done by the day it was meant for: Bisque the bowls; two days to go"). It never gives a bare tally ("1 of 3 done") or a label
+("behind", "on track"): the model repeats such words, and the user can't tell what they count. show_period carries it for the period and for each week of a month or month of a
 year; the week, month and year planning offers open with how the last one went; the morning proposal mentions the
 week. The model reads the line; it never counts (AGENTS.md §3, anti-pattern 2).
 
@@ -31,6 +33,8 @@ class Track:
     planned: int
     done: int
     slipped: List[str] = field(default_factory=list)
+    planned_titles: List[str] = field(default_factory=list)  # everything planned (not gone), in plan order
+    done_titles: List[str] = field(default_factory=list)
     days_left: int = 0      # today included; 0 once the period is over
     starts_in: int = 0      # days until a future period starts
 
@@ -65,17 +69,19 @@ def slipped_items(items: List[Dict], p: "Period", today: date, week_start: int =
 def track(planner: "HorizonPlanner", p: "Period") -> Track:
     today = planner.today()
     items = planner.plan_items(p)
-    done = sum(1 for r in items if r["status"] == "done")
+    kept = [r for r in items if r["status"] != "gone"]
+    done = [r["title"] for r in kept if r["status"] == "done"]
     slipped = [r["title"] for r in slipped_items(items, p, today, planner.week_start)]
     left = (p.end - today).days + 1 if p.start <= today <= p.end else 0
-    return Track(planned=sum(1 for r in items if r["status"] != "gone"), done=done, slipped=slipped,
-                 days_left=left, starts_in=(p.start - today).days if p.start > today else 0)
+    return Track(planned=len(kept), done=len(done), slipped=slipped, days_left=left,
+                 starts_in=(p.start - today).days if p.start > today else 0,
+                 planned_titles=[r["title"] for r in kept], done_titles=done)
 
 
 def _left(days: int) -> str:
     """Days left in natural units: days up to two weeks, then weeks, then months."""
     if days == 1:
-        return "last day"
+        return "today is the last day"
     if days <= 13:
         return f"{days} days left"
     if days <= 62:
@@ -84,35 +90,47 @@ def _left(days: int) -> str:
 
 
 def _names(titles: List[str]) -> str:
-    """Every slipped item by name, however many (a count in place of names leaves the user to find them)."""
-    return ", ".join(titles)
+    """Every item by name, however many (a count in place of names leaves the user to find them): "A, B and C"."""
+    titles = [t for t in titles if t]
+    return titles[0] if len(titles) == 1 else ", ".join(titles[:-1]) + f" and {titles[-1]}" if titles else ""
 
 
-def summary(t: Track) -> str:
-    """The facts in a few words, no capital or full stop. Empty when nothing
-    is planned. ("on track, 2 of 5 done, 4 days left")"""
+def summary(t: Track, plan: bool = False) -> str:
+    """The facts in plain words, naming the items, no capital or full stop; ``plan``: start with what's planned.
+    Empty when nothing is planned. (e.g. "none done yet", then the days to go; or "done: Label the glazes", then
+    the days to go)"""
     if t.planned == 0:
         return ""
+    parts = [f"{_names(t.planned_titles)} planned"] if plan and t.planned_titles else []
     if t.starts_in:
-        return f"{t.planned} planned, starts in {t.starts_in} day{'s' if t.starts_in != 1 else ''}"
-    counts = f"{t.done} of {t.planned} done"
-    if t.done == t.planned:
-        return f"all {t.planned} done" + ("" if t.over else f", {_left(t.days_left)}")
-    if t.over:
-        return counts + (f"; slipped: {_names(t.slipped)}" if t.slipped else "")
-    if t.slipped:
-        return f"behind, {counts}; slipped: {_names(t.slipped)}; {_left(t.days_left)}"
-    return f"on track, {counts}, {_left(t.days_left)}"
+        return "; ".join(parts + [f"starts in {t.starts_in} day{'s' if t.starts_in != 1 else ''}"])
+    if t.done >= t.planned:
+        parts.append("all done")
+    else:
+        parts.append(f"done: {_names(t.done_titles)}" if t.done and t.done_titles else
+                     "some done" if t.done else "none done yet")
+        if t.over:
+            open_ = [x for x in t.planned_titles if x not in t.done_titles]
+            if open_:
+                parts.append(f"not done: {_names(open_)}")
+        elif t.slipped:
+            parts.append(f"not done by the day {'it was' if len(t.slipped) == 1 else 'they were'} meant for: "
+                         f"{_names(t.slipped)}")
+    if not t.over:
+        parts.append(_left(t.days_left))
+    return "; ".join(parts)
 
 
 def track_line(planner: "HorizonPlanner", p: "Period", label: str = "") -> str:
-    """One line for a period: "This week: behind, 1 of 4 done; slipped: File the taxes; 3 days left." With no
-    label, the summary alone, as a sentence. Empty when nothing is planned for it."""
-    text = summary(track(planner, p))
+    """One line for a period: "Planned for this week: Wedge the stoneware and Label the glazes; done: Label the
+    glazes", then what's not done by its day and the days to go. With no label (the items are listed beside it), the
+    summary alone, as a sentence. Empty when nothing is planned for it."""
+    t = track(planner, p)
+    text = summary(t)
     if not text:
         return ""
     if label:
-        return f"{label[:1].upper()}{label[1:]}: {text}."
+        return f"Planned for {label}: {_names(t.planned_titles)}; {text}."
     return text[:1].upper() + text[1:] + "."
 
 
