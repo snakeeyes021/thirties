@@ -489,12 +489,43 @@ def keep(assistant, names, because=None) -> str:
 
 def open_items(assistant) -> List[str]:
     """The section's clean list, for every view that shows it: the open lines under the Today note's "If there's
-    time" heading, minus any that have a time on today's plan by now. Nothing else, ever."""
+    time" heading, and the ones Thirties has put there and are still waiting to reach Joplin (``queued``), minus any
+    that have a time on today's plan by now. Nothing else, ever."""
     try:
-        listed = items(assistant._today_note())
+        note = assistant._today_note()
+        listed = items(note)
     except Exception:
         return []
+    seen = {t.lower() for t in listed}
+    for title in queued(assistant, note):
+        if title.lower() not in seen:
+            seen.add(title.lower())
+            listed.append(title)
     return [t for t in listed if on_plan_today(assistant.pt, t) is None]
+
+
+def queued(assistant, note: Optional[Dict[str, Any]]) -> List[str]:
+    """Lines Thirties has written under the Today note's heading that wait in the outbox for Joplin (closed, or
+    not caught up yet): they're in the section as far as the user is concerned, so every view shows them."""
+    import json
+    db = getattr(assistant, "_db", None)
+    if db is None or not note:
+        return []
+    try:
+        rows = db.outbox_pending()
+    except Exception:
+        return []
+    out = []
+    for row in rows:
+        try:
+            op = json.loads(row.get("op") or "{}")
+        except ValueError:
+            continue
+        target = op.get("to_note_id") if op.get("op") == "move" else op.get("note_id")
+        if op.get("op") in ("add_task", "move") and target == note.get("id") and op.get("section") == HEADING \
+                and str(op.get("title") or "").strip():
+            out.append(str(op["title"]).strip())
+    return out
 
 
 def text_for(assistant) -> str:
