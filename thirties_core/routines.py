@@ -853,6 +853,11 @@ class RoutineTools:
         finally:
             self.pt.day_plan, self.placing = saved, False
             self.db.set_sync_meta(key, json.dumps(state))
+        try:  # anything still planned that's paused for the time away comes off (away_periods.py)
+            from thirties_core.away_periods import settle
+            settle(self.db, plan, self.pt._persist)
+        except Exception as e:
+            logger.warning("Couldn't settle the time away: %s", e)
         if state["placed"]:
             logger.info("Set up %s: %s", plan.target_date, "; ".join(state["placed"]))
         holiday = self.db.get_sync_meta(f"holiday:{plan.target_date.isoformat()}")
@@ -943,6 +948,11 @@ class RoutineTools:
         parts, _ = self.parts_for(note, r, plan.target_date)
         if not parts:
             state["unplaced"].append(f"{note['title']}: no usual time yet")
+            return
+        from thirties_core.away_periods import kept_steps  # steps paused while away stay off (away_periods.py)
+        parts = [{**p, "items": kept_steps(self.db, plan.target_date, p["items"])} for p in parts]
+        parts = [p for p in parts if p["items"]]  # every step of a part paused: the part goes
+        if not parts:
             return
         times = []
         prev: Optional[datetime] = None

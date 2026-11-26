@@ -205,6 +205,50 @@ class TestTheMorningListIsPythons(AwayCase):
         self.assertEqual(text.count("You're away"), 1)  # the trip said once
 
 
+class TestAPausedStep(AwayCase):
+    """One step of a routine part paused for the time away: the part goes on and is listed without it everywhere,
+    and the first day back it's whole again."""
+
+    def setUp(self):
+        super().setUp()
+        self.go_away()
+        out = self.t.execute("pause_while_away", {"names": ["Wedge clay"]})
+        self.assertIn("Paused through Mon Oct 19: Wedge clay", out)
+
+    def test_the_part_goes_on_without_it_and_every_list_leaves_it_out(self):
+        from thirties_core.day_lists import planned_ahead_text
+        from thirties_core.messages import whole_day_lines
+        t, out = self.morning(FRI)
+        self.assertIn("Kiln room at 9:00 AM", out)
+        self.assertIn("Check the kiln", self.titles(t))
+        self.assertNotIn("Wedge clay", self.titles(t))
+        listed = planned_ahead_text(t.assistant)  # the morning's list and its facts
+        self.assertIn("Check the kiln", listed)
+        self.assertNotIn("Wedge clay", listed)
+        view = "\n".join(whole_day_lines(t.day_plan))  # the standing view's rows
+        self.assertIn("Check the kiln", view)
+        self.assertNotIn("Wedge clay", view)
+        self.assertIn("Kiln room", {d["title"] for d in t.assistant.routines.day_routines()})  # the Agenda: still on
+
+    def test_a_step_already_on_the_plan_comes_off_as_the_day_is_built(self):
+        from tests.fixtures import at as at_day
+        self.sched.state_db.upsert_span(EventSpan("seeded", "Wedge clay", at_day("09:20", 1), at_day("09:25", 1),
+                                                  SpanCategory.TASK))  # put on before the pause took hold
+        t, _ = self.morning(FRI)
+        self.assertEqual({s.status for s in t.day_plan.spans if s.title == "Wedge clay"}, {SpanStatus.SKIPPED})
+
+    def test_every_step_paused_the_part_goes(self):
+        self.t.execute("pause_while_away", {"names": ["Check the kiln"]})
+        t, out = self.morning(FRI)
+        self.assertNotIn("Kiln room", out)
+        self.assertFalse({"Check the kiln", "Wedge clay"} & self.titles(t))
+
+    def test_the_first_day_back_the_part_is_whole(self):
+        t, out = self.morning(TUE)
+        self.assertIn("Kiln room at 9:00 AM", out)
+        self.assertTrue({"Check the kiln", "Wedge clay"} <= self.titles(t))
+
+
 class TestNoBellWhileAway(BellDay):
 
     def test_a_paused_routine_step_never_rings_and_the_rest_does(self):
@@ -218,6 +262,17 @@ class TestNoBellWhileAway(BellDay):
         self.ask("17:30", "18:35")
         self.assertEqual(self.bells(), ["🔔 6:00 PM: Sketch new mugs"])  # never the paused routine's step
         self.assertFalse(away_periods.paused_on(db, "Check the kiln", date(2026, 10, 18)))  # the period is over
+
+
+    def test_a_paused_step_is_left_out_of_its_parts_bell(self):
+        db = self.sched.state_db
+        self.add(EventSpan("kc", "Check the kiln", at("17:40"), at("17:45"), SpanCategory.ACTIVITY, source="routine"))
+        self.add(EventSpan("wc", "Wedge clay", at("17:45"), at("17:50"), SpanCategory.ACTIVITY, source="routine"))
+        away_periods._save(db, [{"id": "p2", "start": DAY.isoformat(), "end": DAY.isoformat(), "back_at": "",
+                                 "place": "the fair", "note": "",
+                                 "paused": [{"kind": "step", "name": "Wedge clay", "keys": ["wedge clay"]}]}])
+        self.ask("17:30", "17:35")
+        self.assertEqual(self.bells(), ["🔔 5:30 PM: Check the kiln"])
 
 
 if __name__ == "__main__":

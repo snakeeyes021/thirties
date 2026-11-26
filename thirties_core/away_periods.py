@@ -134,11 +134,39 @@ def paused_span(db, span) -> bool:
         return False
 
 
+def kept_steps(db, day: date, names: Iterable[str]) -> List[str]:
+    """The names (a routine part's steps, a day's rows) that aren't paused on ``day``: the one test every
+    renderer and the morning set-up use, so a paused step is never planned or listed while the time away lasts."""
+    names = list(names)
+    if db is None or on(db, day) is None:
+        return names
+    return [n for n in names if not paused_on(db, str(n), day)]
+
+
+def settle(db, plan, persist=None) -> int:
+    """Planned items paused for their own day (inside a time away) become skipped, so no list, view, bell or
+    check-in shows them. Called by the day builder (scheduler.py), by the set-up, and by pause_while_away. Returns
+    the count."""
+    from thirties_core.models import SpanStatus
+    if db is None or on(db, plan.target_date) is None:
+        return 0
+    count = 0
+    for s in getattr(plan, "spans", []):
+        if s.is_envelope or s.status != SpanStatus.PLANNED or s.source == "calendar":
+            continue
+        if not kept_steps(db, s.start_dt.date(), [s.title]):
+            s.status = SpanStatus.SKIPPED
+            (persist or db.upsert_span)(s)
+            count += 1
+    return count
+
+
 def not_paused(db, day: date, cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The day's proposal candidates without the paused ones."""
     if on(db, day) is None:
         return cands
-    return [c for c in cands if not paused_on(db, c.get("title", ""), day)]
+    keep = {str(t).lower() for t in kept_steps(db, day, [c.get("title", "") for c in cands])}
+    return [c for c in cands if str(c.get("title", "")).lower() in keep]
 
 
 # --- the words ---
@@ -387,6 +415,10 @@ def _resolve(pt, name: str) -> Dict[str, Any]:
             keys = {step_key(s) for s in assistant.routines.steps(note)} | {
                 step_key(i) for part in rec.parts for i in part.get("items", [])}
             return {"kind": "routine", "name": note["title"], "keys": sorted(k for k in keys if k)}
+    for note in assistant._routines():  # one step of a routine
+        for step in assistant.routines.steps(note):
+            if step_key(step) == step_key(name):
+                return {"kind": "step", "name": step, "keys": [step_key(step)]}
     for a in assistant.routines.book().anchors():
         if a.key == name.strip().lower():
             return {"kind": "anchor", "name": a.title, "keys": [step_key(a.title)]}
@@ -441,28 +473,18 @@ def pause_while_away(pt, names: Any = None, keep: Any = None, **_: Any) -> str:
 
 
 def _off_the_plan(pt, entries: Iterable[Dict[str, Any]]) -> str:
-    """What's already planned on a paused day for these entries is marked skipped (they don't happen; no bell, no
-    check-in). Only the plans already made: later days are set up without them."""
-    from thirties_core.models import SpanStatus
-    from thirties_core.step_times import key as step_key
-    keys = {k for e in entries for k in e.get("keys") or []}
+    """What's already planned on a paused day for what was just paused is marked skipped (settle): the plans in
+    memory now; later days as they're built."""
     db = pt.scheduler.state_db
-    count = 0
-    plans = [pt.day_plan] + list(getattr(pt, "_other_days", {}).values())
-    seen = set()
+    plans, seen, count = [pt.day_plan] + list(getattr(pt, "_other_days", {}).values()), set(), 0
     for plan in plans:
-        for s in getattr(plan, "spans", []):
-            if s.id in seen or s.is_envelope or s.status != SpanStatus.PLANNED or step_key(s.title) not in keys:
-                continue
-            seen.add(s.id)
-            if on(db, s.start_dt.date()) is None:
-                continue
-            s.status = SpanStatus.SKIPPED
-            pt._persist(s)
-            count += 1
+        if id(plan) not in seen:
+            seen.add(id(plan))
+            count += settle(db, plan, pt._persist)
     return f"{count} planned item{'s' if count != 1 else ''} taken off the plan." if count else ""
 
 
-__all__ = ["AWAY_TOOL_SPECS", "periods", "on", "current_or_next", "paused_on", "paused_span", "not_paused",
+__all__ = ["AWAY_TOOL_SPECS", "periods", "on", "current_or_next", "paused_on", "paused_span", "kept_steps", "settle",
+           "not_paused",
            "describe", "morning_line", "mark_said", "facts", "prompt_section", "morning_facts", "say_once",
            "set_away", "end_away", "pause_while_away"]

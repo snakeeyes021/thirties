@@ -686,6 +686,8 @@ class DeterministicScheduler:
         self._holiday_off(plan, events)
         from thirties_core.days_off import apply as days_off  # no Work on a day the user is off
         days_off(self, plan)
+        from thirties_core.away_periods import settle as away_settle  # paused while away (away_periods.py)
+        away_settle(self.state_db, plan)
         from thirties_core.calendar_outcomes import CalendarOutcomes
         CalendarOutcomes(self.state_db).apply(calendar_spans)  # what happened, kept apart from the calendar
         from thirties_core.calendar_times import CalendarOwnTimes
