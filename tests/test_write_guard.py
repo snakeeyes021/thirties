@@ -176,8 +176,8 @@ class RefusedTickWritesNothingElseTest(GuardBase):
 
 
 class PaidAndTakeOffIsDoneTest(GuardBase):
-    """Said to have happened and to come off: a done, ticked on both notes, never filed as dropped, and never taken
-    off before the tick."""
+    """Taking something off never ticks it: a done goes through log_outcome only (the model records it), and a
+    removal is a removal, never filed as dropped."""
 
     def setUp(self):
         super().setUp()
@@ -186,15 +186,21 @@ class PaidAndTakeOffIsDoneTest(GuardBase):
                                      "task_id": "t_paddles"})
         set_debug_time(at("11:30"))
 
-    def test_paid_and_take_off_ticks_done(self):
+    def test_a_removal_never_ticks(self):
         span = next(s for s in self.t.day_plan.spans if s.task_id == "t_rent")
-        out = self.say("the studio rent is paid, take it off", "remove_event", {"event": span.id})
-        self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn("- [x] Pay the studio rent", self.body("n_errands") + "".join(
+        self.say("the studio rent is paid, take it off", "remove_event", {"event": span.id})
+        self.assertNotIn("- [x] Pay the studio rent", self.body("n_errands") + "".join(
             n.get("body") or "" for n in self.done_notes()))
         self.assertIsNone(self.dropped_note())
-        self.assertNotIn("- [ ] Pay the studio rent", self.body("n_errands"))
+        self.assertFalse(any(s.task_id == "t_rent" and s.status.value == "done" for s in self.t.day_plan.spans))
         self.assertIn("- [ ] Return the canoe paddles", self.body("n_errands"))  # the other item is untouched
+
+    def test_happened_said_of_another_item_never_ticks_the_one_taken_off(self):
+        span = next(s for s in self.t.day_plan.spans if s.task_id == "t_paddles")
+        self.say("the kiln run happened, and take the paddles off", "remove_event", {"event": span.id})
+        self.assertNotIn("- [x] Return the canoe paddles", self.body("n_errands") + "".join(
+            n.get("body") or "" for n in self.done_notes()))
+        self.assertFalse(any(s.task_id == "t_paddles" and s.status.value == "done" for s in self.t.day_plan.spans))
 
     def test_clear_words_with_paid_let_the_done_through(self):
         out = self.say("rent's paid, take that off", "log_outcome", {"event": "Pay the studio rent", "status": "done"})
@@ -219,11 +225,10 @@ class PaidAndTakeOffIsDoneTest(GuardBase):
         self.assertIsNone(self.dropped_note())
         self.assertNotIn("Removed", out)
 
-    def test_untimed_line_said_done_and_taken_off_is_ticked(self):
+    def test_untimed_line_taken_off_is_never_ticked(self):
         self.untimed("Sweep the wheel room")
-        out = self.say("swept the wheel room, take it off", "remove_event", {"event": "Sweep the wheel room"})
-        self.assertFalse(out.startswith(NOT_DONE), out)
-        self.assertIn("- [x] Sweep the wheel room", self.body("n_today"))
+        self.say("swept the wheel room, take it off", "remove_event", {"event": "Sweep the wheel room"})
+        self.assertNotIn("- [x] Sweep the wheel room", self.body("n_today"))
         self.assertIsNone(self.dropped_note())
 
     def test_a_failed_tick_on_an_untimed_line_says_so(self):

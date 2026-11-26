@@ -1606,13 +1606,6 @@ class PlanTools:
                             f"resolve_calendar_event (attend=false); to delete it, they remove it from their calendar.")
         from thirties_core.item_facts import mentions
         from thirties_core.plan_log import outer_tool
-        # --- said it happened and asked to take it off: a done, never a drop (off_today.py) ---
-        if outer_tool() == "remove_event":
-            from thirties_core.off_today import done_instead
-            instead = done_instead(self, span)
-            if instead is not None:
-                return instead
-        # --- end said it happened ---
         # --- the plan's own duplicate of an item comes off: covered by its copy, or said to be there twice ---
         from thirties_core.duplicates import extra_copy
         if not span.is_envelope and outer_tool() == "remove_event" and extra_copy(self, span):

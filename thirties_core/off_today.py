@@ -21,8 +21,8 @@ clear an item from the list was also read as the item being finished. Now:
 
 A clear ask (``asks_to_clear``) is the user asking for an item to go: to take it off, drop, remove, clear, cancel or
 get rid of it, or saying it isn't happening. It is no done, so a done for it is refused (clearing isn't
-finishing). And when the user says it happened as well ("the rent's paid, take it off"), taking it off is the done:
-it is ticked done, never filed as dropped, and its line is never taken away before the tick (done_instead).
+finishing). Taking something off never ticks it: when the user also says it happened, the model records that done
+itself with log_outcome, which reads the user's words for that item.
 """
 
 from __future__ import annotations
@@ -110,30 +110,6 @@ def _other_titles(pt: "PlanTools", title: str) -> List[str]:
             pass
     low = title.strip().lower()
     return list(dict.fromkeys(t for t in titles if t and t.strip().lower() != low))
-
-
-def said_done_too(pt: "PlanTools", title: str) -> bool:
-    """The user asks to take the item off and says it happened ("the rent's paid, take it off"), with no drop word,
-    in words that point to it (done_reference.check: "lunch done" says nothing of the rent): the take-off is a
-    done."""
-    message = getattr(pt, "user_message", None)
-    if getattr(pt, "by_hand", False) or message is None:
-        return False
-    from thirties_core.said_for_it import told_done  # a yes to taking it off says nothing happened
-    from thirties_core.write_guard import asks_to_drop, says_done
-    return not asks_to_drop(message) and says_done(message, title, _other_titles(pt, title), strict=True) \
-        and told_done(message, title) and _words_point_to(pt, title)
-
-
-def done_instead(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
-    """remove_event for an item the user says happened: it is marked done instead (ticked in Joplin, filed as done,
-    never dropped); nothing is taken off before the tick. A refused or failed done raises, so nothing else is
-    written about the item. None when the user didn't say it happened."""
-    a = _assistant(pt)
-    if a is None or span.source == "calendar" or span.is_envelope or not said_done_too(pt, pt._title(span)):
-        return None
-    out = a.log_outcome(event=span.id, status="done")
-    return f"Marked {pt._title(span)} done instead of taking it off (the user said it happened): {out}"
 
 
 def today_line(pt: "PlanTools", title: str, task_id: Optional[str] = None) -> Optional[str]:
@@ -399,9 +375,6 @@ def remove_listed(pt: "PlanTools", event: Any, today_list: Any = None) -> Option
     line = today_line(pt, task.title if task is not None else name, task.id if task is not None else None)
     if line is None:
         return None
-    if said_done_too(pt, line):  # it happened: ticked done on the list, never dropped
-        from thirties_core.if_time import act
-        return act(a, line, "done")
     # asked for: which line is the model's reading; never one the user asked to keep (change_asks.py)
     from thirties_core.change_asks import kept
     keep = kept(pt, line, [task.id] if task is not None else [])
