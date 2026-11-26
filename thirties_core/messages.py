@@ -351,7 +351,7 @@ def carried_where(plan: DayPlan, item: dict) -> str:
         return f"today at {format_clock(thirty_of(on[0].start_dt))}"
     when = str(item.get("when") or "").strip()
     if not when or when == "today":
-        return "today, no time yet"
+        return "today"
     if when.startswith("this "):
         return f"not today, later {when}"
     return when

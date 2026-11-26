@@ -350,7 +350,7 @@ class TestPieces(WhatsNextCase):
         self.assertEqual(carried_where(plan, {"title": "Mend the kite", "when": "this week"}),
                          "not today, later this week")  # 11-12: "kept for this week" read as today's
         self.assertEqual(carried_where(plan, {"title": "Mend the kite", "when": "tomorrow"}), "tomorrow")
-        self.assertEqual(carried_where(plan, {"title": "Mend the kite", "when": "today"}), "today, no time yet")
+        self.assertEqual(carried_where(plan, {"title": "Mend the kite", "when": "today"}), "today")
 
 
 if __name__ == "__main__":
