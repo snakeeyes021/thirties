@@ -1,7 +1,7 @@
-"""An item that hasn't been started, whose planned block has begun, takes a new length from the current block.
+"""An item that hasn't been started, whose planned block has begun, takes a new length from the following half hour.
 
 The model is asked to stretch such an item. Its old start is in the past and nothing says it began, so a stretch from
-that start ran it over the next item and left its start behind. Now the length counts from the current block, what
+that start ran it over the next item and left its start behind. Now the length starts at the following half hour (now, when on one), what
 follows is pushed back, and the result says plainly what moved. An item under way keeps the start it began at, a
 start the model passes wins, and something that can't move is reported and left alone.
 
@@ -29,7 +29,7 @@ class ResizeCase(TodayTestCase):
                                      (GEARS, "12:00 PM", "30 min")):
             out = self.t.execute("add_event", {"title": title, "start": start, "duration": length})
             self.assertFalse(out.startswith(NOT_DONE), out)
-        set_debug_time(at("11:24"))  # the wheel's block is long past; nothing says it was started
+        set_debug_time(at("10:37"))  # the wheel's block began 7 minutes ago; nothing says it was started
 
     def say(self, message, tool, args):
         """The model's own call of ``tool`` for the user's ``message``."""
@@ -48,7 +48,7 @@ class ResizeCase(TodayTestCase):
 
 class TestNotStartedResizesFromNow(ResizeCase):
 
-    def test_the_length_counts_from_the_current_block_and_what_follows_moves(self):
+    def test_seven_minutes_in_the_item_starts_at_the_following_half_hour_and_what_follows_moves(self):
         out = self.say(f"{WHEEL} needs four blocks", "update_event", {"event": WHEEL, "duration": "120 min"})
         self.assertFalse(out.startswith(NOT_DONE), out)
         wheel = self.span(WHEEL)
@@ -56,9 +56,23 @@ class TestNotStartedResizesFromNow(ResizeCase):
         self.assertGreaterEqual(self.span(TUBES).start_dt, wheel.end_dt)
         self.assertGreaterEqual(self.span(GEARS).start_dt, self.span(TUBES).end_dt)
         self.assertIn("hadn't been started", out)
-        self.assertIn("11:00 AM – 1:00 PM", out)
+        self.assertIn("runs from 11:00 AM (the following half hour) until 1:00 PM", out)
         self.assertIn(f"{TUBES} moved to 1:00 PM", out)
         self.assertIn(f"{GEARS} moved to 1:30 PM", out)
+
+    def test_exactly_on_a_block_boundary_it_starts_in_that_block(self):
+        set_debug_time(at("11:00"))
+        out = self.say(f"{WHEEL} needs four blocks", "update_event", {"event": WHEEL, "duration": "120 min"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        wheel = self.span(WHEEL)
+        self.assertEqual((wheel.start_dt, wheel.end_dt), (at("11:00"), at("13:00")))
+        self.assertIn(f"{TUBES} moved to 1:00 PM", out)
+
+    def test_the_start_is_not_the_old_one(self):
+        out = self.say(f"{WHEEL} needs two blocks", "update_event", {"event": WHEEL, "duration": "60 min"})
+        wheel = self.span(WHEEL)
+        self.assertEqual((wheel.start_dt, wheel.end_dt), (at("11:00"), at("12:00")))
+        self.assertIn("it was planned from 10:30 AM.", out)
 
     def test_nothing_overlaps_afterwards(self):
         self.say(f"{WHEEL} needs four blocks", "update_event", {"event": WHEEL, "duration": "120 min"})
@@ -132,7 +146,8 @@ class TestTheFactIsGiven(ResizeCase):
     def test_the_schedule_says_the_block_has_begun_and_nothing_says_it_started(self):
         text = self.t.schedule_text()
         line = next(x for x in text.splitlines() if WHEEL in x)
-        self.assertIn("planned from 10:30 AM, which has begun; nothing says it started", line)
+        self.assertIn("planned from 10:30 AM, which has begun; nothing says it started; it would start at "
+                      "11:00 AM", line)
         self.assertIn(f"next: {TUBES} from 11:30 AM", line)
 
     def test_an_item_under_way_is_not_flagged(self):

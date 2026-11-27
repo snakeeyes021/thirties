@@ -3,21 +3,21 @@
 Seen in simulated days: the user asked for an item planned at a block that had begun, but that they hadn't started,
 to take four blocks. The item was stretched from its old start, ran over the next item, and kept its start in the
 past. A thing that hasn't been started can't have been running since its planned block, and two things don't run at
-once, so the new length counts from the current block and what follows is pushed back.
+once, so the new length starts at the following half hour and what follows is pushed back.
 
 What Python supplies (AGENTS.md §3: Python states the facts and does the arithmetic; the model reads what the user
 meant):
 
 - **The fact.** Wherever the model reads the item (the schedule, the update_event result): "planned from 10:30 AM,
-  which has begun; nothing says it started", and what comes next (``fact``). "Under way" is the plan's own status
+  which has begun; nothing says it started; it would start at 11:00 AM", and what comes next (``fact``). "Under way" is the plan's own status
   (under_way.real_start, or still going: in_progress.py), never this fact's guess.
 - **The rule.** When the model gives an item that is planned, not under way and not done a new length (and no start
-  or end of its own), and its planned start has passed, the length counts from the current block (``new_start``).
+  or end of its own), and its planned start has passed, the length starts at the following half hour, or now when it falls exactly on one (``new_start``).
   A start the model passes wins; an item under way keeps the start it began at (user_placed.start_refused).
 - **What follows.** Anything that would now overlap is pushed back the way a push is (PlanTools._push_following):
   items that can't move (a fixed item, a calendar event, an anchor) are never moved; the resize that would run into
   one is refused and says which, and nothing changes. Never two flexible items at once unless the user said so.
-- **The result says what moved** (``moved_line``): "True the rear hub now 2:00 PM – 4:00 PM; Sort the cable bins moved to 4:00 PM".
+- **The result says what moved** (``moved_line``): "True the rear hub now runs from 2:00 PM (the following half hour) until 4:00 PM; Sort the cable bins moved to 4:00 PM".
 
 Only the model's own call for the user's message is held to this: the app's own controls and the background keep the
 times they give.
@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from thirties_core.clock import format_clock, thirty_of
+from thirties_core.clock import format_clock, thirty_ceil, thirty_of
 
 if TYPE_CHECKING:
     from thirties_core.models import EventSpan
@@ -62,11 +62,13 @@ def following(pt: "PlanTools", span: "EventSpan") -> Optional["EventSpan"]:
 
 
 def fact(pt: "PlanTools", span: "EventSpan") -> str:
-    """"planned from 10:30 AM, which has begun; nothing says it started; next: Count the spares from 11:00 AM", or ""
+    """"planned from 10:30 AM, which has begun; nothing says it started; it would start at 11:00 AM; next: Count the
+    spares from 11:30 AM", or ""
     when it doesn't apply (it isn't the day's, or something says it started). Blocks only."""
     if not begun(pt, span):
         return ""
-    text = f"planned from {format_clock(thirty_of(span.start_dt))}, which has begun; nothing says it started"
+    text = (f"planned from {format_clock(thirty_of(span.start_dt))}, which has begun; nothing says it started; "
+            f"it would start at {format_clock(thirty_ceil(pt._now()))}")
     nxt = following(pt, span)
     if nxt is not None:
         text += f"; next: {pt._title(nxt)} from {format_clock(thirty_of(nxt.start_dt))}"
@@ -75,15 +77,15 @@ def fact(pt: "PlanTools", span: "EventSpan") -> str:
 
 def new_start(pt: "PlanTools", span: "EventSpan", start: Any, end: Any, shift: Any, duration: Any,
               title: Any) -> Optional[datetime]:
-    """Where an item given only a new length starts: the current block, when nothing says it started and its planned
-    start has passed. None when this doesn't apply (the model gave a start, an end or a shift; or the item is under
+    """Where an item given only a new length starts: the next block boundary (now, when it's exactly on one), when
+    nothing says it started and its planned start has passed. None when this doesn't apply (the model gave a start, an end or a shift; or the item is under
     way, over, fixed or not today's; or it isn't the model's call)."""
     if duration in (None, "") or any(v not in (None, "") for v in (start, end, shift)) or title:
         return None
     from thirties_core.move_scope import _talking
     if _talking(pt) is None or not begun(pt, span):
         return None
-    return max(thirty_of(pt._now()), span.start_dt)
+    return max(thirty_ceil(pt._now()), span.start_dt)
 
 
 def together(pt: "PlanTools") -> bool:
@@ -102,15 +104,15 @@ def refuse_fixed(pt: "PlanTools", span: "EventSpan", start: datetime, end: datet
     if not hard:
         return None
     first = min(hard, key=lambda s: s.start_dt)
-    return (f"{pt._title(span)} hasn't been started, so its new length counts from {format_clock(start)}, which would "
+    return (f"{pt._title(span)} hasn't been started, so its new length starts at {format_clock(start)}, which would "
             f"run it into {pt._title(first)} ({format_clock(first.start_dt)}), which can't move. Nothing was "
             f"changed: tell the user it doesn't fit before {pt._title(first)}, and ask what they'd like.")
 
 
 def moved_line(pt: "PlanTools", span: "EventSpan", old_start: datetime, pushed: List[str], sharing: List[str]) -> str:
     """The line the model reads: where the item now runs, and what moved."""
-    new = f"{pt._title(span)} hadn't been started, so it now runs {format_clock(span.start_dt)} – " \
-          f"{format_clock(span.end_dt)} (it was planned from {format_clock(thirty_of(old_start))})."
+    new = f"{pt._title(span)} hadn't been started, so it now runs from {format_clock(span.start_dt)} (the following " \
+          f"half hour) until {format_clock(span.end_dt)}; it was planned from {format_clock(thirty_of(old_start))}."
     if pushed:
         new += " " + "; ".join(pushed) + "."
     if sharing:
