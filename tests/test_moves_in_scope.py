@@ -1,8 +1,10 @@
-"""A move the user asked for changes only the items their words cover (move_scope.py).
+"""A move the model makes on today stands, and the result says which items the user's words didn't cover.
 
-Which item a move request means is the model's reading, and that stands; but a careless model also moved a second
-item nobody named so the first would fit. Now that second move is refused unless the user's words cover it:
-named or pointed to, words for a group or a cleared stretch of the day, or a tie the user set before.
+Which item a move request means is the model's reading, and that stands; a careless model also moved a second
+item nobody named so the first would fit. That second move is not refused (a move can be undone): it goes ahead,
+and its result tells the model it also moved an item the user didn't name, so the model owns up to it in the
+reply. Items the words do cover (named or pointed to, words for a group or a cleared stretch of the day, or a tie
+the user set before) carry no such note.
 Invented fixtures: a potter with a day off from the studio who also restores a canoe.
 """
 
@@ -15,7 +17,6 @@ from thirties_core import move_scope
 from thirties_core.models import EventSpan, SpanCategory, SpanStatus
 from thirties_core.plan_log import model_call
 from thirties_core.plan_tools import NOT_DONE
-from thirties_core.unasked import LEAVE_OUT
 
 TRIM = "Trim the bowl feet"
 SEAT = "Re-cane the canoe seat"
@@ -64,30 +65,30 @@ class ScopeBase(Base):
     def start(self, title):
         return _start(self.t.day_plan.spans, title)
 
+    def assert_unnamed(self, call):
+        title, out, was = call
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn(f"{title}, which the user didn't name", out)
+        self.assertNotEqual(self.start(title), was, title)
+
     def assert_moved(self, call):
         title, out, was = call
         self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertNotIn("which the user didn't name", out)
         self.assertNotEqual(self.start(title), was, title)
-
-    def assert_kept(self, call):
-        title, out, was = call
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn(LEAVE_OUT, out)
-        self.assertIn("one short question", out)
-        self.assertEqual(self.start(title), was, title)
 
 
 class TestAnUnnamedNeighbour(ScopeBase):
-    def test_named_item_moves_and_the_neighbour_stays(self):
+    def test_named_item_moves_and_the_neighbour_is_said_to_be_unnamed(self):
         trim, seat = self.turn("Push Trim the bowl feet to 2:40, the wheel is out of action",
                                [(TRIM, {"start": "2:30 PM"}), (SEAT, {"start": "3:30 PM"})])
         self.assert_moved(trim)
-        self.assert_kept(seat)
+        self.assert_unnamed(seat)
 
-    def test_neighbour_moved_first_is_still_refused(self):
+    def test_neighbour_moved_first_is_said_to_be_unnamed_too(self):
         seat, trim = self.turn("Push Trim the bowl feet to 2:40, the wheel is out of action",
                                [(SEAT, {"start": "3:30 PM"}), (TRIM, {"start": "2:30 PM"})])
-        self.assert_kept(seat)
+        self.assert_unnamed(seat)
         self.assert_moved(trim)
 
     def test_a_pointer_is_the_item_and_nothing_else(self):
@@ -96,22 +97,22 @@ class TestAnUnnamedNeighbour(ScopeBase):
                                                                  (SEAT, {"start": "3:30 PM"})],
                                before=["what's first after lunch? Trim the bowl feet?"])
         self.assert_moved(trim)
-        self.assert_kept(seat)
+        self.assert_unnamed(seat)
 
     def test_sharing_time_with_a_calendar_event_is_no_reason(self):
-        """The moved item lands on a fixed calendar event's time; the unnamed item there stays too."""
+        """The moved item lands on a fixed calendar event's time; the unnamed item there is moved and said."""
         self.hull_inspection()
         glaze, portage = self.turn("glaze batch later on, nearer 4:40", [(GLAZE, {"start": "4:30 PM"}),
                                                                        (PORTAGE, {"start": "5:30 PM"})])
         self.assert_moved(glaze)
-        self.assert_kept(portage)
+        self.assert_unnamed(portage)
 
     def test_a_calendar_event_running_over_moves_nothing_else(self):
         self.hull_inspection()
         hull, portage = self.turn("hull inspection is running over, it ends 4:50 now",
                                   [("Hull inspection", {"end": "4:50 PM"}), (PORTAGE, {"start": "5:30 PM"})])
         self.assertFalse(hull[1].startswith(NOT_DONE), hull[1])
-        self.assert_kept(portage)
+        self.assert_unnamed(portage)
 
 
 class TestTheModelsOwnReading(ScopeBase):
@@ -119,11 +120,11 @@ class TestTheModelsOwnReading(ScopeBase):
         trim, = self.turn("the first clay job can slide an hour later", [(TRIM, {"start": "2:30 PM"})])
         self.assert_moved(trim)
 
-    def test_a_second_by_its_reading_is_refused(self):
+    def test_a_second_by_its_reading_is_said_to_be_unnamed(self):
         trim, glaze = self.turn("the first clay job can slide an hour later",
                                 [(TRIM, {"start": "2:30 PM"}), (GLAZE, {"start": "4:30 PM"})])
         self.assert_moved(trim)
-        self.assert_kept(glaze)
+        self.assert_unnamed(glaze)
 
     def test_plural_words_cover_as_many_as_they_say(self):
         trim, glaze, seat = self.turn("the two clay jobs: slide them past 4:40",
@@ -131,14 +132,14 @@ class TestTheModelsOwnReading(ScopeBase):
                                        (SEAT, {"start": "7:30 PM"})])
         self.assert_moved(trim)
         self.assert_moved(glaze)
-        self.assert_kept(seat)
+        self.assert_unnamed(seat)
 
     def test_a_request_from_just_before_still_counts_once(self):
         trim, seat = self.turn("hm, still showing the old time", [(TRIM, {"start": "2:30 PM"}),
                                                                  (SEAT, {"start": "3:30 PM"})],
                                before=["can the first clay job slide an hour later?"])
         self.assert_moved(trim)
-        self.assert_kept(seat)
+        self.assert_unnamed(seat)
 
 
 class TestGroupWords(ScopeBase):
@@ -154,7 +155,7 @@ class TestGroupWords(ScopeBase):
                                        (GLAZE, {"start": "5:30 PM"})])
         self.assert_moved(trim)
         self.assert_moved(seat)
-        self.assert_kept(glaze)
+        self.assert_unnamed(glaze)
 
     def test_the_group_words_it_knows(self):
         for said in ("make space", "nudge the others", "all of them", "rest of the evening", "anything past the kiln",
@@ -193,7 +194,7 @@ class TestATieFollows(ScopeBase):
                                                 (GLAZE, {"start": "5:30 PM"})])
         self.assert_moved(seat)
         self.assert_moved(trim)
-        self.assert_kept(glaze)
+        self.assert_unnamed(glaze)
 
 
 class TestInAConversation(ConversationTestCase):
@@ -208,7 +209,7 @@ class TestInAConversation(ConversationTestCase):
     def start(self, title):
         return _start(self.manager.day_plan.spans, title)
 
-    def test_the_neighbour_stays_and_the_reply_leaves_it_out(self):
+    def test_the_neighbour_moves_on_the_models_call_and_the_reply_stands(self):
         trim, seat = self.start(TRIM), self.start(SEAT)
         said = "Trim the bowl feet is at 7:00 PM now."
         self.engine.responses = [
@@ -217,8 +218,8 @@ class TestInAConversation(ConversationTestCase):
             reply(said)]
         out = self.manager.send_user_message("can trim the bowl feet slip half an hour later")
         self.assertNotEqual(self.start(TRIM), trim)
-        self.assertEqual(self.start(SEAT), seat)
-        self.assertEqual(out, said)
+        self.assertNotEqual(self.start(SEAT), seat)
+        self.assertIn(said, out)
 
     def test_group_words_let_both_move(self):
         trim, seat = self.start(TRIM), self.start(SEAT)

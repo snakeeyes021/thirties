@@ -350,8 +350,8 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                        "start": "Instead of parts: when it starts; Python splits it into its natural parts (a "
                                 "thirty each, one after another), or one thirty if it fits.",
                        "day": "The day, if not today.",
-                       "alone": "true only when the user asked to move just the steps named, leaving the rest of "
-                                "their part where it is. Otherwise naming any step of a part moves the whole part."},
+                       "alone": "set it only if the user wants just the named steps moved while the others of "
+                                "the same part stay put; left out, a part named whole moves as one."},
         "required": ["routine"],
     },
     {

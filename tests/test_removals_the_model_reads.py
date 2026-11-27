@@ -107,14 +107,13 @@ class TestAMoveTheUserAskedFor(PlannedBase):
                         before=["glaze bit and kiln thing: slide both past supper"])
         self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_nobody_asked_for_a_move_it_stays(self):
-        from thirties_core.unasked import LEAVE_OUT
+    def test_a_move_the_words_dont_cover_goes_ahead_and_says_so(self):
         was = self.planned("Paddle the north channel")[0].start_dt
         out = self.said("the celadon came out a lovely green", "update_event",
                         {"event": "Paddle the north channel", "start": "9:30 PM"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn(LEAVE_OUT, out)
-        self.assertEqual(self.planned("Paddle the north channel")[0].start_dt, was)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("which the user didn't name", out)
+        self.assertNotEqual(self.planned("Paddle the north channel")[0].start_dt, was)
 
 
 class TestInAConversation(ConversationTestCase):

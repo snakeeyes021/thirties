@@ -133,17 +133,18 @@ class TestAPartSaidToBeInTheWrongPlace(PlacedCase):
         for out in outs:
             self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_what_the_words_dont_cover_stays(self):
+    def test_what_the_words_dont_cover_is_moved_on_the_models_call_and_said(self):
         out = self.said("Why are the glue pots at 11:20? Wrong spot entirely.", "update_event",
                         {"event": "Oil the gate hinge", "start": "1:00 PM"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertEqual(self.start("Oil the gate hinge"), at("12:30"))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("which the user didn't name", out)
+        self.assertEqual(self.start("Oil the gate hinge"), at("13:00"))
 
-    def test_a_step_named_only_as_where_it_goes_doesnt_open_its_part(self):
+    def test_a_step_named_only_as_where_it_goes_is_moved_and_said_so(self):
         out = self.said("Glue pots go straight after Sweep the bench.", "update_event",
                         {"event": "Sharpen the chisels", "start": "9:50 PM"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.in_part(["Sharpen the chisels"], "20:10")
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("which the user didn't name", out)
 
     def test_with_no_words_about_the_plan_nothing_moves(self):
         out = self.said("frosty again, the yard is white", "update_event",

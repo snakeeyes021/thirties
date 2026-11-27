@@ -368,6 +368,20 @@ def refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
             f"one short question whether {title} should move." + refusal_note(title))
 
 
+def note_unnamed(pt: "PlanTools", span: "EventSpan") -> None:
+    """This move goes ahead though the user's words don't cover the item: kept to be said in the result."""
+    pt._unnamed_move = (getattr(pt, "user_message", None), span.id)
+
+
+def unnamed_fact(pt: "PlanTools", span: "EventSpan") -> str:
+    """The fact for the model, once the move is made: it moved an item the user didn't name (never a refusal)."""
+    kept = getattr(pt, "_unnamed_move", None)
+    if not kept or kept[1] != span.id or kept[0] is not getattr(pt, "user_message", None):
+        return ""
+    pt._unnamed_move = None
+    return f"also moved {pt._title(span)}, which the user didn't name"
+
+
 # --- sliding what follows later ---
 
 def push_said(pt: "PlanTools") -> bool:

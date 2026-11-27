@@ -51,11 +51,11 @@ class UnaskedCase(ConversationTestCase):
 
 class TestMovingWhatTheUserDidntName(UnaskedCase):
 
-    def test_an_item_the_user_didnt_name_stays(self):
+    def test_an_item_the_user_didnt_name_moves_on_the_models_call_and_the_result_says_so(self):
         out = self.say("van at 6 then", "update_event", {"event": "Sand the bench", "start": "11:00 AM"})
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn("Sand the bench", out)
-        self.assertEqual(self.span("Sand the bench").start_dt, at("10:00"))
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("Sand the bench, which the user didn't name", out)
+        self.assertEqual(self.span("Sand the bench").start_dt, at("11:00"))
 
     def test_the_item_the_user_named_moves(self):
         out = self.say("move the van to 6", "update_event", {"event": "Wash the van", "start": "6:00 PM"})
@@ -93,7 +93,7 @@ class TestMovingWhatTheUserDidntName(UnaskedCase):
 class TestInATurn(UnaskedCase):
     """Through a turn with the model: its calls are held to the user's words; its true reply goes out."""
 
-    def test_the_model_moving_an_unnamed_item_is_refused(self):
+    def test_the_model_moving_an_unnamed_item_is_told_so_in_the_result(self):
         from tests.test_conversation import reply
         said = "Wash the van is at 6:00 PM now."
         self.engine.responses = [
@@ -102,9 +102,9 @@ class TestInATurn(UnaskedCase):
             reply(said)]
         out = self.manager.send_user_message("van at 6 then")
         self.assertEqual(self.span("Wash the van").start_dt, at("18:00"))
-        self.assertEqual(self.span("Sand the bench").start_dt, at("10:00"))
+        self.assertEqual(self.span("Sand the bench").start_dt, at("11:00"))
         results = [str(m.get("content")) for m in self.manager.brain.messages if m.get("role") == "tool"]
-        self.assertTrue(any(r.startswith(NOT_DONE) and "Sand the bench" in r for r in results), results)
+        self.assertTrue(any("Sand the bench, which the user didn't name" in r for r in results), results)
         self.assertIn(said, out)
 
 

@@ -27,9 +27,8 @@ class TestAMoveNobodyAskedFor(ConversationTestCase):
     def hull(self):
         return next(s for s in self.manager.day_plan.spans if s.title == "Wax the canoe hull")
 
-    def test_the_guard_tells_the_model_to_leave_it_out(self):
+    def test_a_move_the_words_dont_cover_goes_ahead_and_the_result_says_so(self):
         from thirties_core.plan_log import model_call
-        from thirties_core.unasked import LEAVE_OUT
         t = self.manager.tools
         t.user_message = "test tiles at 6:30 then"
         try:
@@ -37,17 +36,17 @@ class TestAMoveNobodyAskedFor(ConversationTestCase):
                 out = t.execute("update_event", {"event": "Wax the canoe hull", "start": "7:00 PM"})
         finally:
             t.user_message = None
-        self.assertTrue(out.startswith(NOT_DONE), out)
-        self.assertIn(LEAVE_OUT, out)
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertIn("which the user didn't name", out)
 
-    def test_a_reply_claiming_it_loses_the_claim_and_gets_no_couldnt_line(self):
+    def test_a_reply_about_a_move_that_went_ahead_stands_with_no_couldnt_line(self):
         self.engine.responses = [
             reply('CALL update_event {"event": "Wax the canoe hull", "start": "7:00 PM"}'),
             reply('CALL update_event {"event": "Glaze the test tiles", "start": "6:30 PM", "alongside": true}'),
             reply("Moved Glaze the test tiles to 6:30 PM and moved Wax the canoe hull to 7:00 PM."),
             reply("Moved Glaze the test tiles to 6:30 PM and moved Wax the canoe hull to 7:00 PM.")]
         out = self.manager.send_user_message("test tiles at 6:30 then")
-        self.assertEqual(self.hull().start_dt, at("18:30"))
+        self.assertEqual(self.hull().start_dt, at("19:00"))
         self.assertNotIn("couldn't", out.lower())
         self.assertNotIn("Wax the canoe hull is still", out)
         self.assertIn("Glaze the test tiles", out)

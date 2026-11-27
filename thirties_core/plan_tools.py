@@ -103,8 +103,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "alongside": "true if it happens during something fixed (reading on the train, a long session across a "
                          "short fixed one).",
             "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
-            "alone": "true only when the user asked to move just this one step of a routine's part, leaving the "
-                     "rest of its part where it is. Otherwise moving any step of a part moves the whole part.",
+            "alone": "set it only if the user wants this one routine step moved while the other steps of its "
+                     "part stay put; left out, the part goes with it.",
             "day": "The day the item is on (default: the day being planned).",
         },
         "required": ["event"],
@@ -1437,6 +1437,8 @@ class PlanTools:
         notes = list(notes or []) + [n for n in [keep_tie(self, span)] if n] + follow(self, span, was[1])
         if not title and span.start_dt != was[0]:
             notes += routine_parts.after_move(self, span, together, was[0])
+        from thirties_core.move_scope import unnamed_fact  # a move the words didn't cover is said, not refused
+        notes += [n for n in [unnamed_fact(self, span)] if n]
         # --- end ties ---
         # --- stretched over its own copy, it's one item (duplicates.py) ---
         from thirties_core.duplicates import merge_covered

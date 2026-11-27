@@ -105,9 +105,17 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     if message is None or span.is_envelope or span.source == "calendar":
         return None  # work and sleep, and calendar events, have their own rules
     # --- which items the request means is the model's reading, within what the words cover (move_scope.py) ---
+    from thirties_core.models import SpanStatus
     from thirties_core.move_scope import asked_to_clear, refused, words_about_plan
     if move_asked(pt) or asked_to_clear(pt) or words_about_plan(pt, message):
-        return refused(pt, span)
+        why = refused(pt, span)
+        if why and pt.is_current(pt.day_plan) and span.status == SpanStatus.PLANNED:
+            # a move on today is the model's call and can be undone: it goes ahead, and the result says it was a
+            # step the user's words didn't name (move_scope.unnamed_fact)
+            from thirties_core.move_scope import note_unnamed
+            note_unnamed(pt, span)
+            return None
+        return why
     # --- end within what the words cover ---
     title = pt._title(span)
     if _referred_to(pt, message, title, (span.id, span.task_id)):

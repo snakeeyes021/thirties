@@ -65,7 +65,7 @@ def record(db: Any, day: date, note_id: str, parts: List[Dict[str, Any]]) -> Non
 
 
 def detach(db: Any, day: date, note_id: str, name: str) -> None:
-    """A step moved on its own is a part of its own from then on."""
+    """Once a step has been placed apart from its part, it counts as a part by itself for that day."""
     data = _load(db, day)
     mine = step_key(name)
     parts = data.get(note_id)
@@ -90,7 +90,7 @@ def members(assistant: Any, note: Dict[str, Any], day: Optional[date] = None) ->
     try:
         keys |= set(tools.known_extras(note))
     except Exception as e:
-        logger.debug("No usual extras for %s: %s", note.get("title"), e)
+        logger.debug("stored placement unreadable (%s): %s", note.get("title"), e)
     if day is not None:
         keys |= placed_with(tools.db, day, note["id"])
     return keys
@@ -151,14 +151,17 @@ def mates(pt: Any, span: EventSpan, plan: Any = None) -> List[EventSpan]:
 # --- moves ---
 
 def widen(pt: Any, note: Dict[str, Any], plan: Any, parts: Any, alone: bool = False) -> Any:
-    """put_routine moving a part that's on the plan: the part's other steps still to do go with the ones named,
-    unless the user wants those on their own (``alone``). Steps not on the plan yet change nothing."""
+    """put_routine moving a part that's on the plan: the steps of that part the note has no line for (stored as
+    plain activities, so the ones the model doesn't see in the note) go with the steps named when the part is named
+    whole, in their place in the part, unless the user wants the named steps on their own (``alone``). A subset of
+    the note's own lines is placed as named, as put_routine always did."""
     if alone or getattr(pt.assistant.routines, "placing", False) or not isinstance(parts, list):
         return parts
     named = {step_key(str(i)) for p in parts if isinstance(p, dict) for i in (p.get("items") or [])}
     if not named:
         return parts
     keys = members(pt.assistant, note, plan.target_date)
+    lines = {step_key(s) for s in pt.assistant.routines.steps(note)}
     on_plan = _on_plan(pt, plan, keys)
     out = []
     for part in parts:
@@ -166,15 +169,25 @@ def widen(pt: Any, note: Dict[str, Any], plan: Any, parts: Any, alone: bool = Fa
         if not items:
             out.append(part)
             continue
-        added: List[str] = []
+        group: List[EventSpan] = []
         for text in items:
             span = next((s for s in on_plan if step_key(pt._title(s)) == step_key(str(text))), None)
-            for mate in mates(pt, span, plan) if span is not None else []:
-                k = step_key(pt._title(mate))
-                if k not in named:
-                    named.add(k)
-                    added.append(clean_title(mate.title))
-        out.append({**part, "items": list(items) + added} if added else part)
+            for s in ([span] + mates(pt, span, plan)) if span is not None else []:
+                if all(g.id != s.id for g in group):
+                    group.append(s)
+        # the note's lines of the part all named: the part is named whole, and the rest of it goes with it
+        whole = all(step_key(pt._title(g)) in named for g in group if step_key(pt._title(g)) in lines)
+        added = [g for g in group if whole and step_key(pt._title(g)) not in named
+                 and step_key(pt._title(g)) not in lines]
+        named |= {step_key(pt._title(g)) for g in added}
+        if not added:
+            out.append(part)
+            continue
+        where = {step_key(pt._title(s)): s.start_dt for s in on_plan}
+        every = list(items) + [clean_title(m.title) for m in added]
+        if all(step_key(str(i)) in where for i in every):  # each in its place in the part, as it sits on the plan
+            every.sort(key=lambda i: where[step_key(str(i))])
+        out.append({**part, "items": every})
     return out
 
 
@@ -249,10 +262,10 @@ def after_move(pt: Any, span: EventSpan, together: List[EventSpan], was_start: A
 # --- repair ---
 
 def regroup(assistant: Any, plan: Any) -> int:
-    """Steps of a part that sit in different thirties on the day (split apart) go back to where most of the part is.
-    A part is the steps put together on the day; for a day with no record of that, the routine's usual parts, but
-    then only a step the note has no line for is brought back (the stored kind that got left behind). Returns how
-    many steps moved."""
+    """A step of a part that sits in another thirty than the rest of it (split apart) goes back to where most of the
+    part is: the steps the note has no line for, which are the ones that got left behind. A part is the steps put
+    together on the day, or for a day with no record of that, the routine's usual parts. A part with a step at a
+    time the user gave spans thirties on purpose and is left as it is. Returns how many steps moved."""
     pt = assistant.pt
     db = assistant.routines.db
     if db is None:
@@ -266,7 +279,7 @@ def regroup(assistant: Any, plan: Any) -> int:
         lines = {step_key(s) for s in assistant.routines.steps(note)}
         recorded = _load(db, plan.target_date).get(note["id"])
         if recorded:
-            groups = [(set(p), set(p)) for p in recorded]
+            groups = [(set(p), set(p) - lines) for p in recorded]
         else:
             usual = assistant.routines.book().get(note["id"], note["title"]).parts
             groups = [({step_key(i) for i in p.get("items", [])}, {step_key(i) for i in p.get("items", [])} - lines)
@@ -276,12 +289,12 @@ def regroup(assistant: Any, plan: Any) -> int:
             blocks: Dict[Any, int] = {}
             for s in here:
                 blocks[thirty_of(s.start_dt)] = blocks.get(thirty_of(s.start_dt), 0) + 1
-            if len(blocks) < 2:
+            if len(blocks) < 2 or any(s.given_start is not None for s in here):
                 continue
             anchor = min(blocks, key=lambda b: (-blocks[b], b))
             cursor = max(s.end_dt for s in here if thirty_of(s.start_dt) == anchor)
             for s in sorted(here, key=lambda s: s.start_dt):
-                if thirty_of(s.start_dt) == anchor or step_key(pt._title(s)) not in free or s.given_start is not None:
+                if thirty_of(s.start_dt) == anchor or step_key(pt._title(s)) not in free:
                     continue
                 length = s.end_dt - s.start_dt
                 start = max(anchor, min(cursor, anchor + HALF - length))
