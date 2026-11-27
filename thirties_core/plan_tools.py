@@ -806,7 +806,7 @@ class PlanTools:
     def _movable(self, span: EventSpan) -> bool:
         return not span.is_envelope and span.source != "calendar" and not span.tentative
 
-    def _push_following(self, anchor: EventSpan) -> List[str]:
+    def _push_following(self, anchor: EventSpan, said: bool = False) -> List[str]:
         """Slide planned activities that collide with ``anchor`` (and each other) later, keeping order."""
         cursor = anchor.end_dt
         moved: List[Tuple[EventSpan, timedelta]] = []
@@ -826,7 +826,7 @@ class PlanTools:
             cursor = span.end_dt + delta
         # --- what slides along is only what the user's words cover (move_scope.py) ---
         from thirties_core.move_scope import push_refused
-        why = push_refused(self, anchor, [s for s, _ in moved])
+        why = None if said else push_refused(self, anchor, [s for s, _ in moved])  # said: Python's own push (resize_now.py)
         if why:
             raise ToolError(why)
         # --- end what the words cover ---
@@ -1320,6 +1320,12 @@ class PlanTools:
                 new_end = new_start + timedelta(minutes=parse_duration_minutes(duration))
             elif start not in (None, "") and not span.is_envelope:
                 new_end = new_start + (span.end_dt - span.start_dt)  # "move X to 5" moves it, keeping its length
+        # --- not started, its planned block already begun: a new length counts from now (resize_now.py) ---
+        from thirties_core import resize_now
+        began_from = resize_now.new_start(self, span, start, end, shift, duration, title)
+        if began_from is not None:
+            new_start, new_end = began_from, began_from + timedelta(minutes=parse_duration_minutes(duration))
+        # --- end not started ---
         if new_end <= new_start:
             raise ToolError(f"That would make {span.title} end ({format_clock(new_end)}) before it starts ({format_clock(new_start)}).")
         # --- an early-morning time never lands on tomorrow unsaid, and nothing leaves the day (day_edges.py) ---
@@ -1377,19 +1383,30 @@ class PlanTools:
             new_start, new_end = self._stack_short(new_start, new_end, ignore=span.id)
         moved = EventSpan(span.id, (title or span.title).strip(), new_start, new_end, span.category,
                           source=span.source, task_id=span.task_id, status=span.status, notes=span.notes)
-        if not span.is_envelope and self._push_wanted(moved, push_later, alongside):
-            self._push_asked()
+        # --- from now: what follows is pushed back by Python unless the user said they share time (resize_now.py) ---
+        from_now = began_from is not None and not _as_bool(alongside) and not resize_now.together(self)
+        starts_before = {s.id: s.start_dt for s in self.day_plan.spans}
+        if from_now:
+            why = resize_now.refuse_fixed(self, span, new_start, new_end)
+            if why:
+                raise ToolError(why)
+        # --- end from now ---
+        if not span.is_envelope and (from_now or self._push_wanted(moved, push_later, alongside)):
+            if not from_now:
+                self._push_asked()
             notes = []
             span_backup = (span.start_dt, span.end_dt)
             span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
             try:
-                notes = self._push_following(span)
+                notes = self._push_following(span, said=from_now)
             except ToolError:
                 span.start_dt, span.end_dt = span_backup
                 raise
         else:
             notes = self._place(moved, _as_bool(replace_overlaps), alongside=_as_bool(alongside))
         span.title, span.start_dt, span.end_dt = moved.title, moved.start_dt, moved.end_dt
+        if began_from is not None and span.start_dt != was[0]:
+            span.given_start = None  # a start the user stated was for the old block
         if span.source == "routine":
             span.source = "user"
         self.day_plan.spans.sort(key=lambda s: s.start_dt)
@@ -1430,6 +1447,16 @@ class PlanTools:
         moved_out += after_work_edit(self, span)
         # --- end one day's work hours ---
         from thirties_core.day_edges import day_note
+        # --- from now: said plainly what moved; else the fact when its block has begun (resize_now.py) ---
+        if began_from is not None:
+            pushed = [f"{self._title(s)} moved to {format_clock(s.start_dt)}" for s in self.day_plan.spans
+                      if s.id != span.id and s.id in starts_before and s.start_dt != starts_before[s.id]]
+            sharing = [self._title(s) for s in self._sharing(span)]
+            extra += " " + resize_now.moved_line(self, span, was[0], pushed, sharing)
+        else:
+            known = resize_now.fact(self, span)
+            extra += f" ({self._title(span)} is {known}.)" if known else ""
+        # --- end from now ---
         return (f"Changed {before} → {self.describe(span)}{day_note(self, span)}.{extra}"
                 f"{getattr(self, '_kept_note', '')}{moved_out}")
 
@@ -2018,8 +2045,7 @@ class PlanTools:
     def list_schedule(self, exact: Any = False, **_: Any) -> str:
         return self.schedule_text(exact=_as_bool(exact))
 
-    @staticmethod
-    def _flags(s: EventSpan, upcoming_from: Optional[datetime]) -> List[str]:
+    def _flags(self, s: EventSpan, upcoming_from: Optional[datetime]) -> List[str]:
         flags = [s.category.value]
         if s.tentative:
             flags.append("UNCONFIRMED invite")
@@ -2036,6 +2062,12 @@ class PlanTools:
             flags.append(f"under way, {recorded(s)}")
         if upcoming_from and s.end_dt <= upcoming_from:
             flags.append("already over")
+        # --- planned from a block that has begun, and nothing says it started (resize_now.py) ---
+        from thirties_core.resize_now import fact as not_started_fact
+        known = not_started_fact(self, s)
+        if known:
+            flags.append(known)
+        # --- end planned from a block that has begun ---
         return flags
 
     def schedule_text(self, upcoming_from: Optional[datetime] = None, exact: bool = False) -> str:
