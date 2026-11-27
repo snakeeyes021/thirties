@@ -827,8 +827,12 @@ class PlanTools:
             moved.append((span, delta))
             cursor = span.end_dt + delta
         # --- what slides along is only what the user's words cover (move_scope.py) ---
-        from thirties_core.move_scope import push_refused
-        why = None if said else push_refused(self, anchor, [s for s, _ in moved])  # said: Python's own push (resize_now.py)
+        from thirties_core.move_scope import push_refused, push_unnamed
+        unnamed: List[str] = []
+        if not said and self.is_current(self.day_plan):  # today: a slide can be undone, so it goes ahead and is said
+            unnamed = push_unnamed(self, anchor, [s for s, _ in moved])
+        why = None if said or unnamed or self.is_current(self.day_plan) else push_refused(
+            self, anchor, [s for s, _ in moved])  # said: Python's own push (resize_now.py)
         if why:
             raise ToolError(why)
         # --- end what the words cover ---
@@ -848,6 +852,8 @@ class PlanTools:
             span.start_dt, span.end_dt = span.start_dt + delta, span.end_dt + delta
             self._persist(span)
             notes.append(f"{self.describe(span).replace(', ', ' now ', 1)}")
+        if unnamed:
+            notes.append(f"also moved {', '.join(unnamed)} later, which the user didn't name")
         return notes
 
     def _make_room(self, span: EventSpan) -> List[str]:

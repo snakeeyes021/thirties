@@ -391,11 +391,12 @@ def push_said(pt: "PlanTools") -> bool:
     return message is None or group_said(pt, message)
 
 
-def push_refused(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["EventSpan"]) -> Optional[str]:
-    """Why sliding ``followers`` later, out of ``anchor``'s way, isn't covered by the user's words, or None."""
+def push_unnamed(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["EventSpan"]) -> List[str]:
+    """The titles of ``followers`` that sliding later, out of ``anchor``'s way, would move though the user's words
+    don't cover them. On today the slide goes ahead and the result says so (plan_tools._push_following)."""
     message = _talking(pt)
     if message is None or not followers or group_said(pt, message):
-        return None
+        return []
     stretches = windows(pt, message)
     from thirties_core.change_scope import _referred_to
     ids = list(_record(pt)) + [anchor.id]
@@ -406,6 +407,13 @@ def push_refused(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["Even
                 or _referred_to(pt, message, title, (s.id, s.task_id)):
             continue
         left.append(title)
+    return left
+
+
+def push_refused(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["EventSpan"]) -> Optional[str]:
+    """Why sliding ``followers`` later, out of ``anchor``'s way, isn't covered by the user's words, or None (for a
+    day other than today: today's slide goes ahead, push_unnamed)."""
+    left = push_unnamed(pt, anchor, followers)
     if not left:
         return None
     names = ", ".join(left)
@@ -414,5 +422,5 @@ def push_refused(pt: "PlanTools", anchor: "EventSpan", followers: Sequence["Even
             f"(it can sit alongside, alongside=true); if room is really needed, ask the user in one short question.")
 
 
-__all__ = ["GROUP_RE", "about", "asked_to_clear", "group_said", "moved", "push_refused", "push_said", "refused",
+__all__ = ["GROUP_RE", "about", "asked_to_clear", "group_said", "moved", "push_refused", "push_said", "push_unnamed", "refused",
            "routine_said", "windows", "words_about_plan"]

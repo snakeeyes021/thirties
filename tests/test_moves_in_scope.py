@@ -165,15 +165,20 @@ class TestGroupWords(ScopeBase):
                      "the paddle is after the kiln"):
             self.assertFalse(move_scope.GROUP_RE.search(said), said)
 
-    def test_sliding_along_needs_group_words(self):
+    def test_sliding_along_on_today_goes_ahead_and_says_what_else_slid(self):
+        seat_was = self.start(SEAT)
         trim, = self.turn("Trim the bowl feet later, nearer 2:10", [(TRIM, {"start": "2:00 PM", "push_later": True})])
-        self.assertTrue(trim[1].startswith(NOT_DONE), trim[1])
-        self.assertIn(SEAT, trim[1])
-        self.assertEqual(self.start(TRIM), trim[2])
+        self.assertFalse(trim[1].startswith(NOT_DONE), trim[1])
+        self.assertNotEqual(self.start(TRIM), trim[2])
+        self.assertIn(f"also moved {SEAT} later, which the user didn't name", trim[1])
+        self.assertNotEqual(self.start(SEAT), seat_was)
+
+    def test_sliding_along_with_group_words_says_nothing_unnamed(self):
         seat_was = self.start(SEAT)
         trim, = self.turn("Trim the bowl feet later, nearer 2:10, and make room after it",
                           [(TRIM, {"start": "2:00 PM", "push_later": True})])
         self.assert_moved(trim)
+        self.assertNotIn("which the user didn't name", trim[1])
         self.assertNotEqual(self.start(SEAT), seat_was)
 
 
