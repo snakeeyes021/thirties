@@ -490,13 +490,64 @@ Taking things off today: when the user takes things off today (remove_event, cle
     # "it isn't actually marked done", "hasn't been logged as finished": saying it's NOT recorded is no claim
     _NEGATED_RE = re.compile(r"(?:n't|\bnot|\bnever|\bnothing|\bno)\b(?:\s+\w+){0,3}\s*$", re.IGNORECASE)
 
-    def _claims_outcome(self, text: str) -> bool:
+    def _claims_outcome(self, text: str, turn_start: Optional[int] = None) -> bool:
+        """The reply says this turn marked something done (or skipped). A sentence that asks, offers or says it isn't,
+        and one about an item already marked on the plan, or ticked in an earlier turn, says nothing of this turn."""
         text = text or ""
         if self._ADMITS_RE.search(text):
             return False
-        return any(not self._NEGATED_RE.search(text[max(0, m.start() - 40):m.start()])
-                   and not re.search(r"\bnot\b|n't", m.group(0), re.IGNORECASE)
-                   for m in self._OUTCOME_CLAIM_RE.finditer(text))
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+            if sentence.rstrip().endswith("?") or re.match(r"\s*(?:neither|none|nothing|no one|nobody)\b", sentence,
+                                                           re.IGNORECASE):
+                continue
+            for m in self._OUTCOME_CLAIM_RE.finditer(sentence):
+                lead = sentence[:m.start()]
+                if (self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead)
+                        or re.search(r"\bnot\b|n't", m.group(0), re.IGNORECASE)):
+                    continue
+                before = re.split(r"[,;]|\band\b|\bthen\b|\bbut\b", lead)[-1]  # the clause the claim is in
+                after = re.split(r"[,;]|\band\b|\bthen\b|\bbut\b", sentence[m.end():])[0]
+                if self._marked_before(before + m.group(0) + after, turn_start):
+                    continue
+                return True
+        return False
+
+    def _marked_before(self, sentence: str, turn_start: Optional[int]) -> bool:
+        """The sentence is about an item already marked on the plan, or one a tick in an earlier turn recorded: what it
+        says was done before this turn."""
+        from thirties_core.models import SpanStatus
+        plan = getattr(self.tools, "day_plan", None)
+        named = [s for s in self._named(sentence, whole=True) if not s.is_envelope] if plan is not None else []
+        if named and all(s.status != SpanStatus.PLANNED for s in named):
+            return True
+        earlier = self._recorded_names(turn_start)
+        return any(re.search(rf"(?<![\w'’]){re.escape(name)}(?![\w'’])", sentence, re.IGNORECASE) for name in earlier)
+
+    def _recorded_names(self, turn_start: Optional[int]) -> List[str]:
+        """What the calls that record an outcome in turns before this one were about (an item's title, a goal): the
+        lower-case names, longest first."""
+        from thirties_core.plan_tools import RECORDING_TOOLS
+        names: List[str] = []
+        for m in self.messages[:turn_start if turn_start is not None else 0]:
+            if m.get("role") != "assistant":
+                continue
+            for call in m.get("tool_calls") or []:
+                args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+                if call.get("name") not in RECORDING_TOOLS:
+                    continue
+                for key in ("event", "title", "item", "task", "goal", "target"):
+                    ref = args.get(key)
+                    for one in (ref if isinstance(ref, list) else [ref]):
+                        if not one:
+                            continue
+                        try:
+                            span = self.tools.day_plan.get_span(str(one))
+                        except Exception:
+                            span = None
+                        name = str(span.title if span is not None else one).strip().lower()
+                        if len(name) > 2 and name not in names:
+                            names.append(name)
+        return sorted(names, key=len, reverse=True)
 
     def _claims_change(self, text: str) -> bool:
         """A sentence saying the plan changed; a question ("should I put it at 5?") claims nothing. "All fixed" and
@@ -560,6 +611,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
+        self._turn_start = turn_start  # where this turn's messages begin (the outcome claim check)
 
         self._reflected = False
         reply = self._rounds(MAX_ROUNDS, changes_before, outcomes_before)
@@ -681,8 +733,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
                                       "content": output, "arguments": args})
             changed = self.tools.successful_changes - changes_before
             if not calls:
-                if (self._claims_outcome(content) and self.tools.outcomes_logged == outcomes_before
-                        and not self._reflected):  # 10-30 sim: the model said a session was logged as done, with nothing logged
+                if (self._claims_outcome(content, getattr(self, "_turn_start", None))
+                        and self.tools.outcomes_logged == outcomes_before and not self._reflected):  # 10-30 sim: the model said a session was logged as done, with nothing logged
                     self._reflected = True
                     logger.warning("[FrontierBrain] Model claimed an outcome without log_outcome; asking it to correct.")
                     self._check("Your reply says something was marked done (or skipped), but no log_outcome went "
@@ -789,6 +841,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
         logger.info("[FrontierBrain] User message: %r", user_text)
         self.messages.append({"role": "user", "content": user_text})
         turn_start = len(self.messages)
+        self._turn_start = turn_start  # where this turn's messages begin (the outcome claim check)
 
         reply = ""
         last_results: List[str] = []
@@ -814,7 +867,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
 
             changed = self.tools.successful_changes - changes_before
             if not calls:
-                if (self._claims_outcome(content) and self.tools.outcomes_logged == outcomes_before
+                if (self._claims_outcome(content, turn_start) and self.tools.outcomes_logged == outcomes_before
                         and not reflected):  # 10-30 sim: the model said a session was logged as done, with nothing logged
                     reflected = True
                     logger.warning("[FrontierBrain] Model claimed an outcome without log_outcome; asking it to correct.")
@@ -1023,6 +1076,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
                        and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
         # --- an item where a call this turn asked for it is moved, never "still at" (landed_moves.py) ---
         from thirties_core.landed_moves import landed_ids
+        from thirties_core.true_claims import movable
         landed = landed_ids(self.tools, self.messages, turn_start)
         anything = anything or bool(landed)
         # --- end where a call asked ---
@@ -1035,9 +1089,10 @@ Taking things off today: when the user takes things off today (remove_event, cle
             if self._NEGATED_RE.search(lead[-40:]) or self._NOT_YET_RE.search(lead):
                 continue
             named = self._named(sentence)
-            # --- an item skipped or ticked this turn was handled, never one that failed to move ---
+            # --- an item that was skipped, ticked or left unknown (this turn or before) was handled, never one that
+            # failed to move (true_claims.py) ---
             settled = getattr(self, "_status_before", None) or {}
-            unsettled = [s for s in named if settled.get(s.id, s.status) == s.status]
+            unsettled = [s for s in named if movable(s) and settled.get(s.id, s.status) == s.status]
             if named and not unsettled:
                 continue
             named = unsettled
@@ -1046,27 +1101,22 @@ Taking things off today: when the user takes things off today (remove_event, cle
                 if not anything:
                     out.append("nothing")
                 continue
-            still = [s for s in named if s.id in before and before[s.id] == (s.start_dt, s.end_dt)
-                     and s.id not in landed]
-            if len(still) == len(named):  # none of what it names moved
-                out += [f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}" for s in still[:3]]
-            # --- a claim about several items, checked part by part (claim_parts.py) ---
-            elif still:
-                for s in self._claimed_unchanged(sentence, self._MOVED_RE,
-                                                 lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)
-                                                 and settled.get(s.id, s.status) == s.status
-                                                 and s.id not in landed):
-                    out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
+            # --- only the parts of the sentence that say the move are checked, item by item (claim_parts.py) ---
+            for s in self._claimed_unchanged(sentence, self._MOVED_RE,
+                                             lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)
+                                             and settled.get(s.id, s.status) == s.status and s.id not in landed,
+                                             only=movable):
+                out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
             # --- end part by part ---
         return list(dict.fromkeys(out))
 
-    def _claimed_unchanged(self, sentence: str, claim_re, unchanged) -> List[Any]:
+    def _claimed_unchanged(self, sentence: str, claim_re, unchanged, only=lambda s: True) -> List[Any]:
         """The items in the parts of a sentence its claim covers, where every item a part names is unchanged
         (claim_parts.py): "I moved the bench to 11 and the van to 6" with only the van moved gives the bench."""
         from thirties_core.claim_parts import claimed_parts
         out: List[Any] = []
         for part in claimed_parts(sentence, claim_re, lambda p: [self.tools._title(s) for s in self._named(p)]):
-            named = [s for s in self._named(part) if not s.is_envelope]
+            named = [s for s in self._named(part) if not s.is_envelope and only(s)]
             if named and all(unchanged(s) for s in named):
                 out += [s for s in named if s not in out]
         return out[:3]
@@ -1199,6 +1249,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
         from thirties_core.done_reference import _listed_alone
         from thirties_core.item_facts import mentions
         from thirties_core.shown_times import shown_end
+        from thirties_core.true_claims import shown_forms, time_is_open, where_it_happened, without_block_times
         plan = getattr(self.tools, "day_plan", None)
         if plan is None:
             return []
@@ -1213,6 +1264,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
             bare = part
             for t in timed:
                 bare = re.sub(re.escape(t), " ", bare, flags=re.IGNORECASE)
+            bare = without_block_times(bare)  # "the 2:00 PM block" names a block, never an item's time
             said = self._said_clocks(bare)
             if not said or part.rstrip().endswith("?") or self._ELSEWHERE_RE.search(part):
                 continue
@@ -1223,6 +1275,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
             named = [s for s in spans if (_listed_alone(entry, titles[s.id]) if entry is not None
                                           else mentions(part, titles[s.id], titles.values())
                                           and not self._opens_a_longer_title(part, titles[s.id], every))]
+            named = [s for s in named if not time_is_open(s)]  # handled with no time known: none can be wrong
             if not named:
                 continue
             # --- a time from the item's own title ("Return the key by 4:30 PM") is its name, never its time ---
@@ -1234,12 +1287,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
             # --- end its own title ---
             known, starts, ends = set(), {}, {}
             for s in named:
-                st = {self._clock_key(dt) for dt in (s.start_dt, thirty_of(s.start_dt), s.actual_start, s.planned_start)
-                      if dt is not None}
-                # an end as the schedule shows it: a calendar's or the user's to the minute, else its block's end
-                # (shown_times.py), never the block's end of a time that is shown as it is
-                en = {self._clock_key(dt) for dt in (s.end_dt, shown_end(s), s.actual_end, s.planned_end)
-                      if dt is not None}
+                # every form the schedule shows its times in, and the times it really happened at (true_claims.py)
+                st, en = shown_forms(s)
                 starts[s.id], ends[s.id] = st, en
                 known |= st | en
             # a range ("from 3:00 to 4:00") is a start and an end: its start is checked as one (an end that
@@ -1256,7 +1305,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
                 set(role_starts) <= starts[s.id] and set(role_ends) <= ends[s.id] for s in named)
             # --- end by role ---
             if bad_roles or bad_range or not any(c in known for c in said):
-                out += [f"{titles[s.id]} is at {format_clock(s.start_dt)}" for s in named[:2]]
+                out += [f"{titles[s.id]} is at {format_clock(where_it_happened(s))}" for s in named[:2]]
         return list(dict.fromkeys(out))
 
     def _not_removed(self, reply: str) -> List[str]:
@@ -1325,7 +1374,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
             said.append("something is done, but " + "; ".join(undone)
                         + " (started isn't finished: what they're doing now is doing_now)")
         if wrong:
-            said.append("times the plan doesn't have: " + "; ".join(wrong))
+            said.append("times the plan doesn't have: " + "; ".join(wrong)
+                        + " (change only a time your reply gave for that item; add no time it didn't give)")
         if kept:
             said.append("something was taken off, but " + "; ".join(kept))
         if promised:  # what each promise needs (reply_checks.unkept_promises)

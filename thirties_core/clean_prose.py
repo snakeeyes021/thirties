@@ -95,6 +95,9 @@ def edit(text: str, new_for: Callable[[str], Optional[str]],
             if j == len(parts) - 1 and _is_lead_in(part) and not _is_lead_in(new) and not keeps_list(part):
                 cut_list = True
         if kept:
+            # a lead-in with another sentence after it on its line has no list under it: it ends as a sentence
+            kept = [(p.rstrip()[:-1].rstrip() + "." if k < len(kept) - 1 and _is_lead_in(p) else p)
+                    for k, p in enumerate(kept)]
             new_line = " ".join(p.strip() if k else p.rstrip() for k, p in enumerate(kept)).rstrip()
             if (i in rows or _MARK_RE.match(line).group(1)) and not _is_prose(line) and new_line != line.rstrip():
                 # a list line stays a list line: its mark, no closing stop, so the lines under it keep their lead-in

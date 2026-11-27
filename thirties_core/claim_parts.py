@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Iterable, List
 
-_SPLIT_RE = re.compile(r"[,;]|\band\b|\bthen\b|\bplus\b", re.IGNORECASE)
+_SPLIT_RE = re.compile(r"[,;]|:(?!\d)|\band\b|\bthen\b|\bplus\b", re.IGNORECASE)
 # words a bare part may have besides the names: articles, pointers, times
 _SMALL = {"the", "a", "an", "my", "your", "to", "at", "for", "from", "both", "also", "too", "now", "am", "pm", "noon",
           "i", "i've", "ive", "it", "on", "in", "of", "s", "all", "as", "well"}
