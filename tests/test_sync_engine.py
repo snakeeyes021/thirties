@@ -183,19 +183,23 @@ Here is the sync data:
         self.assertIsNotNone(last_push)
 
     def test_pull_and_merge_sync(self) -> None:
-        # Local state: task-1 with deferred_count=1, allocated_thirties=2
+        # Local state: task-1 put off twice (two records), allocated_thirties=2
         self.state_db.upsert_task_history(
             TaskHistoryRecord(
                 task_id="task-1",
                 first_scheduled_date="2026-10-08",
                 last_scheduled_date="2026-10-09",
-                deferred_count=1,
+                deferred_count=0,
                 allocated_thirties=2,
             )
         )
+        today = date.today()
+        self.state_db.record_put_off("task-1", "skipped", span_id="s-both", from_day=today)
+        self.state_db.record_put_off("task-1", "skipped", span_id="s-here", from_day=today)
 
         # Remote payload from Device B:
-        # task-1 has deferred_count=3, allocated_thirties=4 (higher)
+        # task-1 has its own put-off records (one the same as ours) and a stored counter of 6 that is not read,
+        # allocated_thirties=4 (higher)
         # task-2 is a brand new task
         # 2026-10-11 is a new schedule
         remote_payload = {
@@ -217,7 +221,7 @@ Here is the sync data:
                         "task_id": "task-1",
                         "first_scheduled_date": "2026-10-07",  # earlier
                         "last_scheduled_date": "2026-10-10",   # later
-                        "deferred_count": 3,                   # higher
+                        "deferred_count": 6,                   # an old counter: never read
                         "allocated_thirties": 4,               # higher
                         "completed_date": None,
                     },
@@ -229,7 +233,13 @@ Here is the sync data:
                         "allocated_thirties": 1,
                         "completed_date": "2026-10-10",
                     },
-                }
+                },
+                "put_offs": [
+                    {"key": f"task-1|s-both|skipped|{today.isoformat()}", "task_id": "task-1", "kind": "skipped",
+                     "from_day": today.isoformat(), "at": "2026-10-10T15:00:00+00:00"},
+                    {"key": f"task-1|s-there|moved|{today.isoformat()}", "task_id": "task-1", "kind": "moved",
+                     "from_day": today.isoformat(), "at": "2026-10-10T15:00:00+00:00"},
+                ],
             },
             "conversations": {
                 "recent_summaries": [
@@ -252,10 +262,11 @@ Here is the sync data:
         self.assertTrue(ok)
         self.assertIn("device-laptop-b", msg)
 
-        # Verify task-1 merged with union max
+        # Verify task-1: put-offs are the union of both devices' records (3), never the larger counter (6 or 2)
         t1 = self.state_db.get_task_history("task-1")
         self.assertIsNotNone(t1)
         self.assertEqual(t1.deferred_count, 3)
+        self.assertEqual(self.state_db.deferred_counts()["task-1"], 3)
         self.assertEqual(t1.allocated_thirties, 4)
         self.assertEqual(t1.first_scheduled_date, "2026-10-07")
         self.assertEqual(t1.last_scheduled_date, "2026-10-10")

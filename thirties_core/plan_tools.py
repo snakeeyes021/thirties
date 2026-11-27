@@ -1462,13 +1462,15 @@ class PlanTools:
             self.day_plan = source_plan
         before = self.describe(span)
         auto_skipped = False
+        from thirties_core import put_offs  # the user's move to a later day is a put-off; the app's own never is
+        counts = bool(span.task_id) and (self.assistant is None or self.assistant.put_off_counts(span))
         if (span.status == SpanStatus.PLANNED and span.end_dt <= self._now() and not span.is_envelope
                 and span.source != "calendar" and target_plan.target_date > source_plan.target_date):
-            # It's over and didn't happen: moving it on is a skip, and it counts as put off.
+            # It's over and didn't happen: moving it on is a skip.
             span.status, auto_skipped = SpanStatus.SKIPPED, True
             self._persist(span)
-            if span.task_id and self._state_db and (self.assistant is None or self.assistant.put_off_counts(span)):
-                self._state_db.record_task_deferred(span.task_id)
+        if span.status == SpanStatus.PLANNED or auto_skipped:  # a done or skipped record only stays as history
+            put_offs.record_move(self, self._state_db, span, span.task_id, counts, target_plan.target_date)
         if span.status != SpanStatus.PLANNED:
             # Keep today's record (done/skipped) as history; plan a fresh copy on the new day.
             moved.id = new_span_id()

@@ -260,9 +260,9 @@ def roll_missed(assistant, day: date) -> List[Dict[str, Any]]:
 
 
 def _record_miss(db, task, due: date, noticed: date) -> None:
-    """The miss, for the statistics: put off once more, and the deadline that passed."""
+    """The miss, for the statistics: the deadline that passed. A deadline the app moved on by itself isn't the
+    user putting the item off, so it adds nothing to the item's put-off count (put_offs.py)."""
     try:
-        db.record_task_deferred(task.id)
         missed = json.loads(db.get_sync_meta(MISSED_KEY) or "[]")
         missed.append({"item": task.id, "title": task.title, "due": due.isoformat(), "noticed": noticed.isoformat()})
         db.set_sync_meta(MISSED_KEY, json.dumps(missed[-200:]))

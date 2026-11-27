@@ -407,7 +407,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
                                 nb_block.append(f"  Section '{t.section}'{tag}:")
                         depth[t.id] = depth.get(t.parent_task_id, -1) + 1 if t.parent_task_id else 0
                         indent = "  " * (depth[t.id] + 1)
-                        def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count > 0 else ""
+                        def_str = f" [Deferred: {t.deferred_count}x]" if t.deferred_count >= 2 else ""
                         maybe = " [someday]" if t.someday and not t.section else ""
                         pressing = pressing_words(t) if t.urgency in ("now", "soon") or t.due else (
                             "this month" if t.horizon == "month" else "")  # the horizon urgency can't say

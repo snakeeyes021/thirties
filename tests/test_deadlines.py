@@ -168,7 +168,8 @@ class RollTest(TodayTestCase):
         settle(self.t.assistant, DAY)
         missed = json.loads(self.sched.state_db.get_sync_meta(MISSED_KEY))
         self.assertEqual([(m["item"], m["due"]) for m in missed], [("t_permit", "2026-09-30")])
-        self.assertEqual(self.sched.state_db.get_task_history("t_permit").deferred_count, 1)
+        # a deadline the app moved on by itself is no put-off
+        self.assertEqual(self.sched.state_db.deferred_counts().get("t_permit", 0), 0)
 
     def test_repeats_is_only_what_the_user_said(self):
         out = self.t.execute("set_item_facts", {"event": "Renew the parking permit", "repeats": "fortnightly"})

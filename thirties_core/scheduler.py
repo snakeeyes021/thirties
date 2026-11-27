@@ -12,11 +12,12 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from thirties_core.astronomy import build_base_thirties, get_solar_phases
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 ROUTINE_TIMESTAMP = "1970-01-01T00:00:00+00:00"
+PUT_OFF_WINDOW_DAYS = 60  # put-offs older than this no longer count against an item (put_offs.py)
 
 
 def utc_now_iso() -> str:
@@ -152,6 +154,16 @@ class StateDatabase:
                 decision TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            -- One row per real put-off (put_offs.py); an item's count is worked out from these, never stored as a
+            -- running number, and devices merge them as a union.
+            CREATE TABLE IF NOT EXISTS put_offs (
+                key TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                from_day TEXT NOT NULL,
+                at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS put_offs_by_task ON put_offs (task_id);
             """)
 
     # --- spans ---
@@ -400,11 +412,74 @@ class StateDatabase:
 
     # --- task history ---
 
-    def deferred_counts(self) -> Dict[str, int]:
-        """How many times each item with a history was put off, by its id."""
+    # --- put-offs: records, and the count worked out from them ---
+
+    @staticmethod
+    def _put_off_cutoff() -> str:
+        return (date.today() - timedelta(days=PUT_OFF_WINDOW_DAYS)).isoformat()
+
+    def _put_off_count(self, conn: sqlite3.Connection, task_id: str) -> int:
+        return conn.execute("SELECT COUNT(*) FROM put_offs WHERE task_id = ? AND from_day >= ?",
+                            (task_id, self._put_off_cutoff())).fetchone()[0]
+
+    def _refresh_cache(self, conn: sqlite3.Connection, task_id: str) -> int:
+        """task_history.deferred_count is a copy of the worked-out count, for old readers; nothing reads it back."""
+        n = self._put_off_count(conn, task_id)
+        today_str = date.today().isoformat()
+        conn.execute("INSERT OR IGNORE INTO task_history (task_id, first_scheduled_date, last_scheduled_date) "
+                     "VALUES (?, ?, ?)", (task_id, today_str, today_str))
+        conn.execute("UPDATE task_history SET deferred_count = ? WHERE task_id = ?", (n, task_id))
+        return n
+
+    def record_put_off(self, task_id: str, kind: str = "skipped", span_id: str = "",
+                       from_day: Optional[date] = None, at: Optional[str] = None) -> int:
+        """One real put-off of an item (put_offs.py), and the item's count now. The same item put off the same way
+        from the same planned span and day is one put-off, however often it's said."""
+        day = (from_day or date.today()).isoformat()
+        key = f"{task_id}|{span_id or uuid.uuid4().hex}|{kind}|{day}"
         with self._get_connection() as conn:
-            return {row["task_id"]: row["deferred_count"]
-                    for row in conn.execute("SELECT task_id, deferred_count FROM task_history").fetchall()}
+            conn.execute("INSERT OR IGNORE INTO put_offs (key, task_id, kind, from_day, at) VALUES (?, ?, ?, ?, ?)",
+                         (key, task_id, kind, day, at or utc_now_iso()))
+            conn.execute("DELETE FROM put_offs WHERE from_day < ?",
+                         ((date.today() - timedelta(days=2 * PUT_OFF_WINDOW_DAYS)).isoformat(),))
+            return self._refresh_cache(conn, task_id)
+
+    def put_off_records(self) -> List[Dict[str, Any]]:
+        """Records within the window, for the sync payload."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT key, task_id, kind, from_day, at FROM put_offs WHERE from_day >= ?",
+                                (self._put_off_cutoff(),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def merge_put_off_records(self, records: Iterable[Dict[str, Any]]) -> int:
+        """The union of both devices' put-offs: a record is there or it isn't, so no history can lower or raise
+        another's. Returns how many were new here."""
+        added, touched = 0, set()
+        cutoff = self._put_off_cutoff()
+        with self._get_connection() as conn:
+            for r in records:
+                try:
+                    key, task_id, kind, day = str(r["key"]), str(r["task_id"]), str(r["kind"]), str(r["from_day"])
+                except (KeyError, TypeError):
+                    continue
+                if day < cutoff:
+                    continue
+                added += conn.execute("INSERT OR IGNORE INTO put_offs (key, task_id, kind, from_day, at) "
+                                      "VALUES (?, ?, ?, ?, ?)",
+                                      (key, task_id, kind, day, str(r.get("at") or ""))).rowcount
+                touched.add(task_id)
+            for task_id in touched:
+                self._refresh_cache(conn, task_id)
+        return added
+
+    def deferred_counts(self) -> Dict[str, int]:
+        """Each item's count by id, counted from the stored records of what happened."""
+        with self._get_connection() as conn:
+            counts = {row["task_id"]: 0 for row in conn.execute("SELECT task_id FROM task_history").fetchall()}
+            counts.update({row["task_id"]: row["n"] for row in conn.execute(
+                "SELECT task_id, COUNT(*) AS n FROM put_offs WHERE from_day >= ? GROUP BY task_id",
+                (self._put_off_cutoff(),)).fetchall()})
+            return counts
 
     def get_task_history(self, task_id: str) -> Optional[TaskHistoryRecord]:
         with self._get_connection() as conn:
@@ -417,7 +492,7 @@ class StateDatabase:
                 task_id=row["task_id"],
                 first_scheduled_date=row["first_scheduled_date"],
                 last_scheduled_date=row["last_scheduled_date"],
-                deferred_count=row["deferred_count"],
+                deferred_count=self._put_off_count(conn, task_id),
                 completed_date=row["completed_date"],
                 allocated_thirties=row["allocated_thirties"],
             )
@@ -443,23 +518,8 @@ class StateDatabase:
             conn.commit()
 
     def record_task_deferred(self, task_id: str) -> int:
-        """Increment deferred count and return updated count."""
-        with self._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT deferred_count FROM task_history WHERE task_id = ?", (task_id,))
-            row = cur.fetchone()
-            if row:
-                new_count = row["deferred_count"] + 1
-                conn.execute("UPDATE task_history SET deferred_count = ? WHERE task_id = ?", (new_count, task_id))
-            else:
-                new_count = 1
-                today_str = date.today().isoformat()
-                conn.execute("""
-                INSERT INTO task_history (task_id, first_scheduled_date, last_scheduled_date, deferred_count)
-                VALUES (?, ?, ?, 1)
-                """, (task_id, today_str, today_str))
-            conn.commit()
-            return new_count
+        """One more put-off for the item, and its count now (a record with no span of its own: record_put_off)."""
+        return self.record_put_off(task_id)
 
     def record_task_completed(self, task_id: str, completed_date: Optional[date] = None) -> None:
         comp_str = (completed_date or date.today()).isoformat()
@@ -485,7 +545,7 @@ class StateDatabase:
                     task_id=row["task_id"],
                     first_scheduled_date=row["first_scheduled_date"],
                     last_scheduled_date=row["last_scheduled_date"],
-                    deferred_count=row["deferred_count"],
+                    deferred_count=self._put_off_count(conn, row["task_id"]),
                     completed_date=row["completed_date"],
                     allocated_thirties=row["allocated_thirties"],
                 )
@@ -493,6 +553,8 @@ class StateDatabase:
             ]
 
     def upsert_task_history(self, rec: TaskHistoryRecord) -> None:
+        """Store an item's history. Its deferred_count is never taken from ``rec``: the stored number is a copy of
+        what the put-off records say (``record_put_off``)."""
         with self._get_connection() as conn:
             conn.execute("""
             INSERT INTO task_history (
@@ -510,7 +572,7 @@ class StateDatabase:
                 rec.task_id,
                 rec.first_scheduled_date,
                 rec.last_scheduled_date,
-                rec.deferred_count,
+                self._put_off_count(conn, rec.task_id),
                 rec.completed_date,
                 rec.allocated_thirties,
             ))

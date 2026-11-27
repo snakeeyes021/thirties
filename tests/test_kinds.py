@@ -132,13 +132,15 @@ class TestDoneFollowsTheKind(KindsTestCase):
         self.assertIn("- [ ] Fix the sync bug", self.body("n_dev"))
 
     def test_a_skipped_daily_item_isnt_put_off(self):
+        self.t.by_hand = True  # the user's own skips
         fish = self.add("Feed the fish", "11:00 AM")
         fish.task_id = "t_fish"
         out = self.t.execute("log_outcome", {"event": fish.id, "status": "skipped"})
         self.assertNotIn("put off", out)
         bank = self.add("Call the bank", "12:00 PM")
         out = self.t.execute("log_outcome", {"event": bank.id, "status": "skipped"})
-        self.assertIn("put off 1 times", out)
+        self.assertNotIn("put off", out)  # once: nothing said yet
+        self.assertEqual(self.sched.state_db.deferred_counts().get(bank.task_id), 1)
 
     def test_kind_said_by_the_user_is_kept_and_wins(self):
         self.assertEqual(self.t.assistant.kind_of("Call the bank"), ONCE)

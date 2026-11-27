@@ -87,6 +87,16 @@ class TestAfterRepeatedPuttingOff(BreakDownCase):
         set_debug_time(at("09:00", 1))
         self.assertNotIn("put off", self.t.execute("rollover_proposal", {}))  # asked once
 
+    def test_the_question_uses_the_true_count_not_an_old_inflated_one(self):
+        import sqlite3
+        self.sched.state_db.record_task_allocation("t_fern", DAY)
+        with sqlite3.connect(self.sched.state_db.db_path) as conn:  # a counter the old code had pushed up
+            conn.execute("UPDATE task_history SET deferred_count = 6 WHERE task_id = 't_fern'")
+        self.sched.attach_history_to_tasks(self.services.tasks)
+        self.assertNotIn("put off", self.t.execute("rollover_proposal", {}))
+        self.put_off(3)
+        self.assertIn("Re-pot the fern has been put off 3 times.", self.t.execute("rollover_proposal", {}))
+
     def test_keep_as_it_is(self):
         self.put_off()
         self.t.execute("rollover_proposal", {})

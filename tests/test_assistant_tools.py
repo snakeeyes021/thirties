@@ -144,9 +144,11 @@ class TestOutcomes(ToolsTestCase):
         self.assertEqual(span.status, SpanStatus.DONE)
 
     def test_skipped_task_counts_a_deferral(self) -> None:
+        self.t.by_hand = True  # the user's own skip, from the app's controls
         self.t.execute("add_event", {"title": "Bridge", "start": "4:00 PM", "duration": "1 hour", "task_id": "t_bridge"})
         out = self.t.execute("log_outcome", {"event": "Bridge", "status": "skipped"})
-        self.assertIn("put off 1 times", out)
+        self.assertNotIn("put off", out)  # once is no pattern: nothing said below two
+        self.assertEqual(self.sched.state_db.deferred_counts()["t_bridge"], 1)
         self.assertEqual(self.api.updates, [])
 
     def test_unscheduled_backlog_task_done(self) -> None:

@@ -132,6 +132,7 @@ class SyncEngine:
         # 2. Task History & Analytics
         task_histories = self.state_db.get_all_task_histories()
         task_dict = {rec.task_id: asdict(rec) for rec in task_histories}
+        put_offs = self.state_db.put_off_records()  # what happened, not a counter: the other device adds them up
 
         # 3. Conversations & Summaries
         summaries_json = self.state_db.get_sync_meta("recent_conversation_summaries")
@@ -149,6 +150,7 @@ class SyncEngine:
             "settings": settings,
             "analytics": {
                 "task_history": task_dict,
+                "put_offs": put_offs,
             },
             "conversations": {
                 "recent_summaries": recent_summaries,
@@ -205,7 +207,9 @@ class SyncEngine:
         for record in payload.get("settings", []):
             merged_schedules_count += shared.merge_record(record)
 
-        # 2. Merge Task History & Analytics (union-max counters)
+        # 2. Merge Task History & Analytics. Put-offs merge as records (a union); the stored counter in an old
+        # payload is never read: it may be a count that included things that weren't put-offs.
+        self.state_db.merge_put_off_records(payload.get("analytics", {}).get("put_offs", []))
         remote_tasks = payload.get("analytics", {}).get("task_history", {})
         merged_tasks_count = 0
         for task_id, t_data in remote_tasks.items():
@@ -215,13 +219,12 @@ class SyncEngine:
                     task_id=task_id,
                     first_scheduled_date=t_data.get("first_scheduled_date", ""),
                     last_scheduled_date=t_data.get("last_scheduled_date", ""),
-                    deferred_count=t_data.get("deferred_count", 0),
+                    deferred_count=0,
                     completed_date=t_data.get("completed_date"),
                     allocated_thirties=t_data.get("allocated_thirties", 0),
                 )
             else:
-                # Union max merge
-                merged_deferred = max(local_rec.deferred_count, t_data.get("deferred_count", 0))
+                # Union max merge (allocated time and dates; put-offs are records, merged above)
                 merged_allocated = max(local_rec.allocated_thirties, t_data.get("allocated_thirties", 0))
                 first_date = min(
                     filter(None, [local_rec.first_scheduled_date, t_data.get("first_scheduled_date")]),
@@ -237,7 +240,7 @@ class SyncEngine:
                     task_id=task_id,
                     first_scheduled_date=first_date,
                     last_scheduled_date=last_date,
-                    deferred_count=merged_deferred,
+                    deferred_count=local_rec.deferred_count,
                     completed_date=completed,
                     allocated_thirties=merged_allocated,
                 )

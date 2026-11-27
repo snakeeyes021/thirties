@@ -512,7 +512,7 @@ def describe_task(t: TaskItem) -> str:
     flags = []
     if t.someday:
         flags.append("someday/maybe")
-    if t.deferred_count:
+    if t.deferred_count >= 2:  # a single put-off is no pattern; the count is worked out from real put-offs
         flags.append(f"deferred {t.deferred_count}x")
     return f"{t.title} [{where}]" + (f" ({', '.join(flags)})" if flags else "") + f" task_id={t.id}"
 
@@ -1580,8 +1580,7 @@ class AssistantTools(KindTools):
                 end_dt = end_dt or (None if start_dt else self.pt._now())  # the session is recorded, as said
             elif st == SpanStatus.DONE:
                 result += " " + self._complete_backlog_task(task, for_good, on_plan=True)
-            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):
-                self._db.record_task_deferred(task.id)
+            # (an item that wasn't on any plan was not put off: put_offs.py)
             if st == SpanStatus.SKIPPED:  # skipped for today: its line leaves today's list too (leave_today.py)
                 from thirties_core.leave_today import after_task_skip
                 result += after_task_skip(self, task)
@@ -1656,9 +1655,11 @@ class AssistantTools(KindTools):
                 result += " " + self._worked_on(task, on_plan=True)  # a session: the list item stays open
             elif st == SpanStatus.DONE and task:
                 result += " " + self._complete_backlog_task(task, for_good, on_plan=True)
-            elif st == SpanStatus.SKIPPED and self._db and put_off_counts(kind):  # a skipped daily isn't put off
-                count = self._db.record_task_deferred(span.task_id)
-                result += f"; it has now been put off {count} times"
+            elif st == SpanStatus.SKIPPED:  # only the user's own skip of a planned item counts (put_offs.py)
+                from thirties_core import put_offs
+                count = put_offs.record_skip(self.pt, self._db, span, span.task_id, put_off_counts(kind))
+                said = put_offs.count_words(count or 0)
+                result += f"; it has now been {said}" if said else ""
         elif st == SpanStatus.DONE and kind == ONGOING and not for_good:
             result += " (a session on it; it carries on)"
         elif st == SpanStatus.DONE:  # not on any list (a routine's extra step, a meal): its Today line is ticked too
