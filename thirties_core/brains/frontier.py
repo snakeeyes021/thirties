@@ -1014,6 +1014,11 @@ Taking things off today: when the user takes things off today (remove_event, cle
             return []
         anything = any(m.get("role") == "tool" and m.get("name") in self.MOVING_TOOLS
                        and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
+        # --- an item where a call this turn asked for it is moved, never "still at" (landed_moves.py) ---
+        from thirties_core.landed_moves import landed_ids
+        landed = landed_ids(self.tools, self.messages, turn_start)
+        anything = anything or bool(landed)
+        # --- end where a call asked ---
         out: List[str] = []
         for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
             m = self._MOVED_RE.search(sentence)
@@ -1034,14 +1039,16 @@ Taking things off today: when the user takes things off today (remove_event, cle
                 if not anything:
                     out.append("nothing")
                 continue
-            still = [s for s in named if s.id in before and before[s.id] == (s.start_dt, s.end_dt)]
+            still = [s for s in named if s.id in before and before[s.id] == (s.start_dt, s.end_dt)
+                     and s.id not in landed]
             if len(still) == len(named):  # none of what it names moved
                 out += [f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}" for s in still[:3]]
             # --- a claim about several items, checked part by part (claim_parts.py) ---
             elif still:
                 for s in self._claimed_unchanged(sentence, self._MOVED_RE,
                                                  lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)
-                                                 and settled.get(s.id, s.status) == s.status):
+                                                 and settled.get(s.id, s.status) == s.status
+                                                 and s.id not in landed):
                     out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
             # --- end part by part ---
         return list(dict.fromkeys(out))

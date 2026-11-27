@@ -65,6 +65,8 @@ def unmade_time_claims(brain: "FrontierBrain", turn_start: int, reply: str) -> L
     if not refused:
         return []
     before: Optional[Dict[str, Any]] = getattr(brain, "_times_before", None)
+    from thirties_core.landed_moves import landed_ids  # where a call this turn asked for it, it is set
+    landed = landed_ids(brain.tools, brain.messages, turn_start)
     out: List[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
         m = TIME_CLAIM_RE.search(sentence)
@@ -76,7 +78,7 @@ def unmade_time_claims(brain: "FrontierBrain", turn_start: int, reply: str) -> L
             continue
         for span in brain._named(sentence):
             why = refused.get(brain.tools._title(span).strip().lower()) or refused.get(span.title.strip().lower())
-            if span.is_envelope or why is None:
+            if span.is_envelope or why is None or span.id in landed:
                 continue
             if _NOTHING_RE.search(why) and shown_start(span) == span.start_dt:
                 continue  # it was already where it shows: "set for 5:00" is true

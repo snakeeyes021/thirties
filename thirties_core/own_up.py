@@ -76,6 +76,14 @@ def failed_items(tools: Any, messages: Sequence[Dict[str, Any]], turn_start: int
             failed.pop(key, None)
             if re.search(r"\((couldn'?t [^:]*Joplin.*)\)\.?$", out):
                 lagging = True
+    # --- true at the end of the turn: a move whose item sits where a call asked for it isn't a failure ---
+    if failed:
+        from thirties_core.landed_moves import landed_ids
+        from thirties_core.plain_admit import _MOVING, _span
+        landed = landed_ids(tools, messages, turn_start)
+        failed = {k: (t, n) for k, (t, n) in failed.items()
+                  if not (n in _MOVING and (_span(tools, t) is not None and _span(tools, t).id in landed))}
+    # --- end true at the end of the turn ---
     return list(failed.values()), lagging
 
 
