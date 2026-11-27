@@ -541,6 +541,7 @@ class AssistantTools(KindTools):
         self.user_notes: List[str] = []  # lines Python adds under the reply, each once (take_user_notes)
         self._today_groups: Dict[tuple, set] = {}  # routine groups written to Today this session (Joplin may lag)
         self._ticked_off: Dict[str, TaskItem] = {}  # items ticked off this session, by id: a reopen puts them back
+        self._tick_problems: List[str] = []  # list lines a done couldn't tick this call: log_outcome says so
         self._routine_tools = None
         self._proposal_tools = None
 
@@ -652,13 +653,14 @@ class AssistantTools(KindTools):
             return ""
         writer = self._writer()
         if writer is None:
-            return "(not checked off in Joplin: Joplin isn't connected)"
+            return "(done here; its list line stays open in Joplin, reason: Joplin not connected)"
         from thirties_core.joplin_writeback import complete_op
         status, msg = writer.submit({**complete_op(task), **({"_done_on_plan": True} if on_plan else {})})
         said = {"done": "and checked it off in Joplin",
                 "queued": "(it'll be checked off in Joplin as soon as Joplin is open)",
-                "not_allowed": "(not checked off in Joplin: Thirties isn't allowed to change Joplin; Preferences → Tasks)",
-                "failed": f"(couldn't check it off in Joplin: {msg})"}[status]
+                "not_allowed": "(done here; its list line stays open in Joplin, reason: Thirties has no permission to "
+                               "change Joplin; Preferences → Tasks)",
+                "failed": f"(done here; its list line stays open in Joplin, reason: {msg.strip().rstrip('.')})"}[status]
         if status in ("done", "queued"):
             self._took_off(lambda t: t.id == task.id)
             self._tick_twin(task, writer)
@@ -704,15 +706,27 @@ class AssistantTools(KindTools):
                 self._db.record_task_completed(home.id, self.pt.day_plan.target_date)  # done is done, on both
                 if not home.id.startswith("media:") and home.list_role != "routine":  # nothing to tick in Joplin
                     # (a wishlist item), or nothing to write (a routine is a template)
-                    writer.submit({**complete_op(home), "_twin": True})  # judged with its twin (write_guard.py)
+                    self._note_tick("its list line", *writer.submit({**complete_op(home), "_twin": True}))
+                    # judged with its twin (write_guard.py)
                 self._took_off(lambda t: t.id == home.id)
             return
         title = links.today_title_of(task.id)
         exact = next((text for text, ticked in note_items(today) if title and text.lower() == title and not ticked), None)
         if exact:
-            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact,
-                           "_twin": True})  # judged with its twin (write_guard.py)
+            self._note_tick("its Today line", *writer.submit({"op": "complete", "is_checkbox_item": True,
+                                                              "note_id": today["id"], "title": exact,
+                                                              "_twin": True}))  # judged with its twin (write_guard.py)
             self._took_off(lambda t: t.parent_note_id == today["id"] and t.title == exact)
+
+    def _note_tick(self, where: str, status: str, msg: str) -> None:
+        """A tick that follows a done and wasn't written (refused, line not found, not allowed) is kept, so
+        log_outcome tells the user; one queued for when Joplin is open is not a failure."""
+        if status == "failed" and msg:
+            self._tick_problems.append(f"{where} stays open in Joplin, reason: {msg.strip().rstrip('.')}")
+        elif status == "not_allowed":
+            self._tick_problems.append(f"{where} stays open in Joplin, reason: Thirties has no permission to "
+                                       "change Joplin "
+                                       "(Preferences → Tasks)")
 
     def _took_off(self, gone) -> None:
         """Items ticked off leave the session's lists; they're kept aside, so a reopen can put them back."""
@@ -802,8 +816,9 @@ class AssistantTools(KindTools):
         exact = next((text for text in open_lines if text.lower() == title.strip().lower()), None) or \
             next((text for text in open_lines if step_key(text) == step_key(title)), None)  # written with its time
         if exact:
-            writer.submit({"op": "complete", "is_checkbox_item": True, "note_id": today["id"], "title": exact,
-                           **({"_done_on_plan": True} if on_plan else {})})
+            self._note_tick("its Today line", *writer.submit({"op": "complete", "is_checkbox_item": True,
+                                                              "note_id": today["id"], "title": exact,
+                                                              **({"_done_on_plan": True} if on_plan else {})}))
 
     def sync_today(self) -> List[str]:
         """Catch up with edits made by hand: an item ticked on the Today note ticks its home item, and the other way
@@ -1387,8 +1402,14 @@ class AssistantTools(KindTools):
         fine, or ask not to tick something they don't name, carries a line saying so (done_reference.also_said_note,
         write_guard.going_note, write_guard.told_not_note)."""
         self._also_said = ""
+        self._tick_problems = []
         out = self._log_outcome(event, status, started, finished, duration, estimated, note, finished_for_good, new)
         said, self._also_said = self._also_said, ""
+        # --- a done whose Today line (or twin) left open says so, never silently (write_guard.py) ---
+        problems, self._tick_problems = list(dict.fromkeys(self._tick_problems)), []
+        if problems:
+            said = " ".join(n for n in (said, "Marked done here; " + "; ".join(problems) + ".") if n)
+        # --- end a tick that wasn't written ---
         return f"{out} {said}" if said else out
 
     def _log_outcome(self, event: Any, status: str, started: Any = None, finished: Any = None, duration: Any = None,
