@@ -191,21 +191,12 @@ def widen(pt: Any, note: Dict[str, Any], plan: Any, parts: Any, alone: bool = Fa
     return out
 
 
-def _moved_this_turn(pt: Any) -> Set[str]:
-    message = getattr(pt, "user_message", None)
-    kept = getattr(pt, "_part_moved", None)
-    if not kept or kept[0] is not message:
-        kept = (message, set())
-        pt._part_moved = kept
-    return kept[1]
-
-
 def together_for(pt: Any, span: EventSpan, alone: bool) -> List[EventSpan]:
     """The steps that go along when this one is moved by the model for the user: its part's. Nothing for a move the
-    user made by hand (a drag moves one step), one asked on its own, or a step that already moved with its part
-    this turn."""
+    user made by hand (a drag moves one step) or one asked on its own. A step moved again in the same turn takes
+    its part along again, to the new place: the part is never left split by a second move."""
     from thirties_core.move_scope import _talking
-    if alone or _talking(pt) is None or span.id in _moved_this_turn(pt):
+    if alone or _talking(pt) is None:
         return []
     return mates(pt, span)
 
@@ -229,25 +220,21 @@ def after_move(pt: Any, span: EventSpan, together: List[EventSpan], was_start: A
             logger.debug("Couldn't keep the step as a part of its own: %s", e)
         return []
     # the part goes by whole thirties, each step keeping its place inside the thirty (so the part stays in order
-    # whichever of its steps was the one moved); a step with a time the user gave keeps it
+    # whichever of its steps was the one moved); the ones already in the step's new thirty stay
     delta = thirty_of(span.start_dt) - thirty_of(was_start)
     if not delta:
         return []
     moved = []
-    for m in together + [span]:
-        if m is span and span.given_start is not None:
-            continue
-        origin = m.start_dt if m is not span else was_start
-        length = m.end_dt - m.start_dt
-        start = origin + delta
-        end = start + length
+    here = thirty_of(span.start_dt)
+    for m in together:
+        if thirty_of(m.start_dt) == here:
+            continue  # already in the thirty the step went to
+        start, end = m.start_dt + delta, m.end_dt + delta
         if start < plan.day_start or end > plan.day_end:
             continue  # it can't go there: it stays, and the next build puts it back with its part
         m.start_dt, m.end_dt = start, end
         pt._persist(m)
-        _moved_this_turn(pt).add(m.id)
-        if m is not span:
-            moved.append(m)
+        moved.append(m)
     if not moved:
         return []
     plan.spans.sort(key=lambda s: s.start_dt)

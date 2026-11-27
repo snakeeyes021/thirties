@@ -149,6 +149,18 @@ class TestAPartMovesWhole(KilnCase):
         self.in_block(ALL, "17:30")
         self.assertEqual(self.lines(), [LATER_ROW])
 
+    def test_a_step_moved_twice_in_one_turn_takes_its_part_both_times(self):
+        self.t.user_message = "The kiln check goes later, and then later again"
+        try:
+            with model_call():
+                for start in ("5:30 PM", "7:30 PM"):
+                    out = self.t.execute("update_event", {"event": "Check the kiln", "start": start})
+                    self.assertFalse(out.startswith(NOT_DONE), out)
+        finally:
+            self.t.user_message = None
+        self.in_block(ALL, "19:30")
+        self.assertEqual(self.lines(), [ROW.replace("10:30 AM", "7:30 PM")])
+
     def test_one_step_asked_to_move_on_its_own_moves_only_that_one(self):
         self.said("only the wedging goes later, around 5:30", "update_event",
                   {"event": "Wedge clay", "start": "5:30 PM", "alone": True})
