@@ -15,8 +15,8 @@ Across turns:
   that isn't a no confirms it.
 - **A done already asked for**: an item the user asked to mark done in an earlier message, whose done was refused
   and which the reply then named to them ("Did you mean X?"), stays pointed to until it's done or the user says
-  no. Their next words ("yes", "yes, the class", a complaint ending in "?") complete it, and the question
-  rule (turn_guards.py) doesn't hold it back.
+  no. Their next words ("yes", "yes, the class", a complaint ending in "?") complete it, and a question
+  that names the item doesn't hold it back (said_for_it.asked_only).
 
 Anything the words never pointed to is still refused.
 """
@@ -197,8 +197,8 @@ def pending_dones(messages: Sequence[dict]) -> List[str]:
 
 
 def earlier_request(pt: Any, args: Dict[str, Any]) -> bool:
-    """Whether this log_outcome completes a done the user asked for in an earlier turn: the question rule doesn't
-    hold it back."""
+    """Whether this log_outcome completes a done the user asked for in an earlier turn: a question that names the
+    item (said_for_it.asked_only) doesn't hold it back."""
     pending = getattr(pt, "pending_dones", None) or ()
     if not pending or str(args.get("status") or "").strip().lower() != "done":
         return False

@@ -18,50 +18,105 @@ def done_with_morning(tools):
     morning.mark_done(tools._state_db, tools.day_plan.target_date, at("07:30"))
 
 
-class TestAQuestionGetsAnAnswer(RoutineCase):
-    """A question was taken for an instruction and acted on, again and again."""
+class ScriptedEngine:
+    """A stand-in for the model: each round of a turn takes the next scripted answer; the system prompt of every
+    round is kept. Calls without tools (the small helper) get an empty answer."""
+
+    def __init__(self, *rounds):
+        self.rounds, self.prompts = list(rounds), []
+
+    def chat(self, messages=None, tools=None, **_):
+        if tools is None:
+            return {"content": ""}
+        self.prompts.append(messages[0]["content"])
+        return self.rounds.pop(0) if self.rounds else {"content": "Done."}
+
+
+def call(name, **args):
+    return {"content": "", "tool_calls": [{"id": "c1", "name": name, "arguments": args}]}
+
+
+class TestAQuestionIsAFactNotABlock(RoutineCase):
+    """A message that reads as a question was refused any change by Python, though a rhetorical question can be the
+    ask. Now the model is told the fact and its call stands."""
 
     def setUp(self):
         super().setUp()
         set_debug_time(at("10:00"))
         done_with_morning(self.t)
-        self.t.execute("add_event", {"title": "Fold the towels", "start": "1:00 PM", "duration": "30 minutes"})
+        self.t.execute("add_event", {"title": "True the wheel", "start": "1:20 PM", "duration": "30 minutes"})
+        self.t.execute("add_event", {"title": "Sort the spare tubes", "start": "2:40 PM", "duration": "30 minutes"})
 
-    def test_what_counts_as_a_question(self):
-        from thirties_core.turn_guards import is_question
-        for asked in ("should I move the towels to 3?", "why are the towels at 1?", "what's next",
-                      "ok. is 1 too early for the towels?", "what if the towels went at 3?"):
-            self.assertTrue(is_question(asked), asked)
-        for told in ("can you move the towels to 3?", "move the towels to 3", "towels done. what's next?",
-                     "please put the towels at 3?", "do the towels at 3", "how about the towels at 3?", "", None):
-            self.assertFalse(is_question(told), told)
+    def titles(self):
+        return [s.title for s in self.t.day_plan.spans]
 
-    def test_a_question_changes_nothing(self):
-        self.t.user_message = "should I move the towels to 3?"
-        out = self.t.execute("update_event", {"event": "Fold the towels", "start": "3:00 PM"})
-        self.assertTrue(out.startswith(NOT_DONE) and "asked a question" in out, out)
-        self.assertEqual(next(s.start_dt for s in self.t.day_plan.spans if s.title == "Fold the towels"), at("13:00"))
-        self.assertFalse(self.t.execute("show_schedule", {}).startswith(NOT_DONE))  # looking is fine
+    def start_of(self, title):
+        return next(s.start_dt for s in self.t.day_plan.spans if s.title == title)
 
-    def test_a_request_or_a_report_is_acted_on(self):
-        self.t.user_message = "can you move the towels to 3?"
-        self.assertFalse(self.t.execute("update_event", {"event": "Fold the towels", "start": "3:00 PM"})
-                         .startswith(NOT_DONE))
-        self.t.user_message = "towels are folded. what's next?"
+    def turn(self, words, *rounds):
+        from thirties_core.brains.frontier import FrontierBrain
+        engine = ScriptedEngine(*rounds)
+        brain = FrontierBrain(self.t, engine)
+        self.t.user_message = words
+        return brain.respond(words), engine
+
+    def test_the_fact_is_given_for_a_question_mark_only(self):
+        from thirties_core.turn_guards import question_fact
+        for asked in ("is the wheel job better later?", "what's left?", "the tubes again??", "ok?  "):
+            self.assertIn("is a question", question_fact(asked), asked)
+            self.assertIn("only when the message asks", question_fact(asked), asked)
+        for told in ("swap the wheel job with the tubes", "what's next", "", "   ", None):
+            self.assertEqual(question_fact(told), "", told)
+
+    def test_the_model_is_told_in_its_prompt(self):
+        _, engine = self.turn("what's left today?", {"content": "Two jobs."})
+        self.assertIn("The user's message is a question", engine.prompts[0])
+        _, engine = self.turn("what's left today", {"content": "Two jobs."})
+        self.assertNotIn("The user's message is a question", engine.prompts[0])
+
+    def test_a_pure_question_changes_nothing_because_the_model_changes_nothing(self):
+        before = [(s.title, s.start_dt) for s in self.t.day_plan.spans]
+        self.turn("what's left today?", {"content": "Two jobs: the wheel, then the tubes."})
+        self.assertEqual([(s.title, s.start_dt) for s in self.t.day_plan.spans], before)
+
+    def test_a_rhetorical_question_that_demands_a_removal_lets_it_through(self):
+        self.turn("tubes sorting is pointless in this heat. who put it there??",
+                  call("remove_event", event="Sort the spare tubes"), {"content": "Took it off."})
+        self.assertNotIn("Sort the spare tubes", self.titles())
+
+    def test_other_changes_the_model_makes_on_a_question_stand_too(self):
+        self.t.user_message = "surely the wheel job fits better after 4:10, with the shop quiet?"
+        out = self.t.execute("update_event", {"event": "True the wheel", "start": "4:10 PM"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+        self.assertEqual(self.start_of("True the wheel"), at("16:10"))
+        self.t.user_message = "the tubes?"
+        out = self.t.execute("add_event", {"title": "Oil the chains", "start": "5:20 PM", "duration": "30 minutes"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
+
+    def test_a_done_asked_for_earlier_is_not_refused_for_the_next_question(self):
         set_debug_time(at("15:40"))
-        self.assertFalse(self.t.execute("log_outcome", {"event": "Fold the towels", "status": "done"})
-                         .startswith(NOT_DONE))
+        self.t.pending_dones = ["Sort the spare tubes"]
+        self.t.user_message = "why is it not ticked yet??"
+        out = self.t.execute("log_outcome", {"event": "Sort the spare tubes", "status": "done"})
+        self.assertFalse(out.startswith(NOT_DONE), out)
 
-    def test_while_the_day_is_built_the_morning_goes_ahead(self):
-        from thirties_core import morning
-        self.t._state_db.set_sync_meta(morning.done_key(DAY), "")
-        self.t.user_message = "what's the plan today?"
-        self.assertFalse(self.t.execute("add_event", {"title": "Return the drill", "start": "4:00 PM",
-                                                      "duration": "30 minutes"}).startswith(NOT_DONE))
+    def test_the_turn_guards_hold_nothing_for_a_question(self):
+        from thirties_core.turn_guards import refuse
+        self.t.user_message = "the tubes, again??"
+        for name, args in (("remove_event", {"event": "Sort the spare tubes"}),
+                           ("log_outcome", {"event": "Sort the spare tubes", "status": "done"}),
+                           ("update_event", {"event": "True the wheel", "start": "3:00 PM"})):
+            self.assertIsNone(refuse(self.t, name, args), name)
+
+    def test_a_report_is_acted_on(self):
+        self.t.user_message = "the wheel is trued. what's next?"
+        set_debug_time(at("15:40"))
+        self.assertFalse(self.t.execute("log_outcome", {"event": "True the wheel", "status": "done"})
+                         .startswith(NOT_DONE))
 
     def test_the_apps_own_controls_are_never_held(self):
         self.t.user_message, self.t.by_hand = "why is this here?", True
-        self.assertFalse(self.t.execute("update_event", {"event": "Fold the towels", "start": "3:00 PM"})
+        self.assertFalse(self.t.execute("update_event", {"event": "True the wheel", "start": "3:00 PM"})
                          .startswith(NOT_DONE))
 
 
@@ -92,7 +147,7 @@ class TestFreeTimeStaysOpen(RoutineCase):
         from thirties_core.turn_guards import refuse
         from thirties_core.plan_log import tool_call
         with tool_call("propose_day", None):
-            held = refuse(self.t, "add_event", {"title": "Relax"}, set(), outermost=False)
+            held = refuse(self.t, "add_event", {"title": "Relax"}, outermost=False)
         self.assertIn("Free time stays open", held)
 
 

@@ -426,24 +426,23 @@ class TestAPushBackIsNoAsk(ShopEvening):
 
     def test_what_only_asks(self):
         from thirties_core.said_for_it import asks_for_change, is_asking
-        from thirties_core.turn_guards import is_question
+        from thirties_core.turn_guards import question_fact
         for words in self.PUSH_BACK:
             with self.subTest(words=words):
                 self.assertFalse(asks_for_change(words))
                 self.assertTrue(is_asking(words))
-                self.assertTrue(is_question(words))
+                self.assertIn("is a question", question_fact(words))
         for words in ("wouldn't it be better to push the clay bins to 8:40?", "why not move the clay bins to 8:40?",
                       "why is the clay bins restock still on today?", "why is the clay bins restock still on?"):
             with self.subTest(words=words):
                 self.assertTrue(asks_for_change(words))
 
-    def test_a_keep_never_comes_off_and_a_push_back_never_moves(self):
-        # taking it off today on a question is the model's reading; asked to keep it, it stays, and a question
-        # pushing back on a move moves nothing
+    def test_a_keep_never_comes_off(self):
+        # asked to keep it, it stays; a move on a question is the model's call (it is told the message is a question)
         self.assertHeld(self.remove("Restock the clay bins", self.PUSH_BACK[0]))
         self.assertEqual(len(self.planned("Restock the clay bins")), 1)
         out = self.said("update_event", {"event": "Restock the clay bins", "start": "8:40 PM"}, self.PUSH_BACK[1])
-        self.assertHeld(out)
+        self.assertWent(out)
 
     def test_still_on_is_an_ask_only_for_a_planned_item(self):
         from thirties_core.said_for_it import asks_for_change

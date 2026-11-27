@@ -2284,7 +2284,7 @@ class PlanTools:
             return held
         # --- what this turn may change, from the user's words (turn_guards.py) ---
         from thirties_core import turn_guards
-        held = turn_guards.refuse(self, name, args, READ_ONLY_TOOLS, outermost=self._home_plan is None)
+        held = turn_guards.refuse(self, name, args, outermost=self._home_plan is None)
         if held:
             return f"{NOT_DONE}: {held}"
         saved = self.day_plan

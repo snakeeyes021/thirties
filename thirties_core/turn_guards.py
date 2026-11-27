@@ -1,11 +1,9 @@
 """What a turn may change, decided by Python from the user's own words, not left to the model's reading of them.
 
-- **A question gets an answer, not an action.** A message that only asks ("why is lunch at 1?", "should I move the
-  run to 5?", "what's next") changes nothing: every tool that would change the plan, the lists or the records is
-  refused for that turn, with a note to answer instead. A request worded as a question ("can you move lunch to
-  1?") is a request, and so is a question that asks for a change ("can the run go at 5?", "shouldn't we drop the
-  run today?"): what it means is the model's reading (said_for_it.asks_for_change). A message with anything
-  besides questions in it ("lunch done. what's next?") is acted on as usual. While the day is still being built (its morning hasn't gone out), the morning's own changes go ahead.
+- **A question is a fact for the model, not a block.** When the user's message ends with a question mark,
+  the model is told so (``question_fact``) and to change the plan only when the message asks for it. Whether
+  "can the run go at 5?" or an exasperated "why is it still there??" is an ask for a change is the model's
+  reading; no wording here holds a call back for being a question.
 - **Meant for another day, kept there.** Something the user put on a later day (due then, or waiting for that
   day's list) doesn't go on today's plan unless the user's words this turn bring it up ("the tweaks are for
   tomorrow", then put on tonight).
@@ -27,16 +25,6 @@ if TYPE_CHECKING:
 _NEUTRAL_RE = re.compile(r"^\W*(?:ok(?:ay)?|k|kk|thanks?(?: you)?|thx|ty|lol|lmao|haha+|hmm+|huh|oh|ah|uh+|um+|so|"
                          r"well|yeah|yep|yes|no|nope|right|cool|great|nice|wait|hey|hi|hello|morning|good morning)"
                          r"\W*$", re.IGNORECASE)
-# a question without its question mark ("what's next", "why is lunch at 1"); "do the laundry" is no question
-_QUESTION_START_RE = re.compile(r"^\W*(?:what|what's|whats|why|when|when's|where|where's|how|how's|who|which|whose)\b",
-                                re.IGNORECASE)
-# a request worded as a question, or said outright
-_REQUEST_RE = re.compile(r"\b(?:can|could|would|will|won't)\s+(?:you|u|ya|we)\b|\bplease\b|\bpls\b|\bplz\b|"
-                         r"\b(?:would|do)\s+you\s+mind\b|\bhow about you\b|\bwhy (?:don't|not) you\b|\blet'?s\b|"
-                         r"\bi(?:'d| would) like\b|\bi want\b|\bi need\b|\bmake sure\b|\bhow about\b|\bwhat about\b",
-                         re.IGNORECASE)
-_SENTENCES_RE = re.compile(r"(?<=[.!?])\s+|\n+")
-
 # what the user says when they want rest on the plan
 REST_ASKED_RE = re.compile(r"\b(?:rest\w*|relax\w*|break|nap\w*|lie down|lying down|couch|chill\w*|breather|downtime|"
                            r"down time|free time|time off|recover\w*|decompress\w*|unwind\w*|wind down|me time|"
@@ -46,35 +34,16 @@ RELAX_RE = re.compile(r"^\W*(?:(?:some|a|an|quick|short|long)\s+)*(?:relax\w*|ch
                       r"me time|quiet time|unwind\w*|wind down|decompress\w*|leisure|r\s*&\s*r|rest|resting|"
                       r"break|breather|nap|veg out|do nothing|nothing)\b", re.IGNORECASE)
 
-# the tools that only look; everything else changes something
-_ALWAYS_ALLOWED = {"show_schedule", "list_schedule", "item_history"}
 
-
-def is_question(message: Optional[str], planned: Optional[list] = None) -> bool:
-    """The message only asks: at least one question, and nothing in it but questions (and words like "ok" or
-    "lol"). A request worded as a question, or a question that asks for a change, is a request; ``planned``, the
-    items on today's plan, says which items an objection to something still being on can be about."""
-    if not message or not message.strip():
-        return False
-    asked = False
-    for sentence in _SENTENCES_RE.split(message.strip()):
-        s = sentence.strip()
-        if not s or _NEUTRAL_RE.match(s):
-            continue
-        from thirties_core.said_for_it import asks_for_change
-        if _REQUEST_RE.search(s) or asks_for_change(s, planned):
-            return False
-        if s.endswith("?") or (_QUESTION_START_RE.match(s) and not s.endswith((".", "!"))):
-            asked = True
-            continue
-        return False
-    return asked
-
-
-def _planned(pt: "PlanTools") -> Optional[list]:
-    """The titles of the items on the plan, or None when there's no plan to read."""
-    spans = getattr(getattr(pt, "day_plan", None), "spans", None)
-    return None if spans is None else [s.title for s in spans]
+def question_fact(message: Optional[str]) -> str:
+    """The note given to the model when the user's message ends with a question mark: a fact, never a block. An
+    empty string when it doesn't."""
+    if not message or not message.rstrip().endswith("?"):
+        return ""
+    return ("The user's message is a question. Change the plan, the lists or the records only when the message asks "
+            "for that change (a question or a complaint can be that ask: a rhetorical question that demands "
+            "something gone or done is a demand). When it only asks, answer from the plan and your notes and "
+            "change nothing; if a change would help, say what you'd do and let them ask for it.")
 
 
 def _building_the_day(pt: "PlanTools") -> bool:
@@ -88,20 +57,11 @@ def _building_the_day(pt: "PlanTools") -> bool:
 _PROPOSING = {"propose_day", "apply_day_proposal"}
 
 
-def _off_today(pt: "PlanTools", name: str, args: Dict[str, Any]) -> bool:
-    """A call taking something off today (the plan and the Today note, both can be put back): whether the user's
-    words, a question included (an exasperated "seriously??" can be the ask), mean it is the model's reading, so
-    the question rule never holds it (off_today.py). Ticks and later days keep the rule."""
-    if name in ("remove_event", "clear_time"):
-        return args.get("day") in (None, "") and pt.is_current(pt.day_plan)
-    return name == "if_there_is_time" and str(args.get("action") or "").strip().lower() in (
-        "drop", "week", "tomorrow", "not today", "later this week", "this week")
-
-
-def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, outermost: bool = True) -> Optional[str]:
-    """Why a call can't go ahead this turn, or None. The question and relaxing rules hold for the model's own calls
-    in a turn with the user's words; a day proposal never plans relaxing at all. The app's controls are never held
-    back here."""
+def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], outermost: bool = True) -> Optional[str]:
+    """The reason a call is held back this turn, or None. Two rules apply to the model's own calls when the user has
+    spoken: something put on a later day stays there, and free time stays open (a day proposal never plans
+    relaxing at all). The message being a question holds nothing (``question_fact``), and the app's controls are
+    never held here."""
     if pt.by_hand:
         return None
     if name == "add_event" and not outermost:
@@ -110,12 +70,6 @@ def refuse(pt: "PlanTools", name: str, args: Dict[str, Any], read_only: set, out
             return refuse_unasked_relax(pt, str(args.get("title") or ""))
     if pt.user_message is None or not outermost:
         return None
-    from thirties_core.done_words import earlier_request  # a done asked for before isn't held by a question
-    if name not in read_only and name not in _ALWAYS_ALLOWED and not _off_today(pt, name, args) \
-            and is_question(pt.user_message, _planned(pt)) \
-            and not _building_the_day(pt) and not (name == "log_outcome" and earlier_request(pt, args)):
-        return ("The user asked a question; this turn changes nothing. Answer it from what's on the plan and in "
-                "your notes; if a change would help, say what you'd do and let them ask for it.")
     if name in ("add_event", "propose_day") and not _building_the_day(pt) and pt.is_current(pt.day_plan) \
             and args.get("day") in (None, ""):
         refs = ([args] if name == "add_event" else
@@ -187,4 +141,4 @@ def after_add(pt: "PlanTools", span: "EventSpan") -> None:
     mutes.mute(span.end_dt + timedelta(hours=6), span.id)
 
 
-__all__ = ["is_question", "refuse", "later_day", "refuse_unasked_relax", "after_add", "RELAX_RE", "REST_ASKED_RE"]
+__all__ = ["question_fact", "refuse", "later_day", "refuse_unasked_relax", "after_add", "RELAX_RE", "REST_ASKED_RE"]

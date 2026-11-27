@@ -537,6 +537,13 @@ Taking things off today: when the user takes things off today (remove_event, cle
         scheduler = getattr(self.tools, "scheduler", None)
         return bool(getattr(getattr(getattr(scheduler, "config", None), "assistant", None), "turn_bookkeeping", False))
 
+    @staticmethod
+    def _question_note(user_text: str) -> str:
+        """A message ending in a question mark is told to the model as a fact (turn_guards.question_fact)."""
+        from thirties_core.turn_guards import question_fact
+        fact = question_fact(user_text)
+        return f"\n\n{fact}" if fact else ""
+
     def respond(self, user_text: str) -> str:
         """Run one user turn: call the model, execute its tool calls, verify, reply."""
         if not self._bookkeeping_on():
@@ -545,7 +552,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
 
     def _respond_checked(self, user_text: str) -> str:
         """One turn with the turn bookkeeping on."""
-        self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
+        self.messages[0] = {"role": "system", "content": self.build_system_prompt() + self._question_note(user_text)}
         changes_before = self.tools.successful_changes
         outcomes_before = self.tools.outcomes_logged
         self._times_before = self._times()
@@ -774,7 +781,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
     def _respond_baseline(self, user_text: str) -> str:
         """The one-prompt turn as it was before the turn bookkeeping (kept verbatim while that waits for its study
         behind the turn_bookkeeping switch)."""
-        self.messages[0] = {"role": "system", "content": self.build_system_prompt()}
+        self.messages[0] = {"role": "system", "content": self.build_system_prompt() + self._question_note(user_text)}
         changes_before = self.tools.successful_changes
         outcomes_before = self.tools.outcomes_logged
         self._times_before = self._times()

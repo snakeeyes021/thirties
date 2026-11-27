@@ -83,7 +83,7 @@ class PotterBase(TodayTestCase):
         return {"event": event, "status": status}
 
     def morning_built(self):
-        """The day is under way: the morning has gone out (the question rule holds from then on)."""
+        """The day is under way: the morning has gone out (the later-day rule holds from then on)."""
         from thirties_core import morning
         morning.mark_done(self.sched.state_db, DAY, at("08:40"))
 
