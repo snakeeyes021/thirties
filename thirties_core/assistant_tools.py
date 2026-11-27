@@ -1528,11 +1528,9 @@ class AssistantTools(KindTools):
         if end_dt and start_dt is None and duration not in (None, ""):
             start_dt = end_dt - timedelta(minutes=parse_duration_minutes(duration))
         guessed = str(estimated).strip().lower() in ("true", "1", "yes")
-        start_dt, end_dt = self._said_times_only(start_dt, end_dt, duration)
-        if (started not in (None, "") and start_dt is None) or (finished not in (None, "") and end_dt is None):
-            # times the user never said ("this morning" given as 11:15 – 11:30): they're dropped, and so is the length
-            # that came with them, and nothing is labelled as said; Python works out when instead
-            started = finished = duration = None
+        # a time the model passes stands, from a clock or from words relative to another item ("20 minutes after the
+        # kiln check"): Python only checks it below (not in the future, start before end) and estimates only when
+        # the model passes none (said_or_estimated.py)
         # --- times said relative to now ("75 minutes ago", "since 2:15"): Python works them out (relative_times.py) ---
         if st != SpanStatus.SKIPPED:
             from thirties_core.relative_times import outcome_times
@@ -1543,6 +1541,9 @@ class AssistantTools(KindTools):
         # --- end times said relative to now ---
         if st != SpanStatus.SKIPPED:
             self._not_in_future(start_dt, end_dt)
+            from thirties_core.said_or_estimated import start_before_end
+            start_before_end(start_dt, end_dt)
+        said_start, said_end = started not in (None, ""), finished not in (None, "")
         # --- working on it isn't finishing it (work_sessions.py) ---
         session = ""
         if st == SpanStatus.DONE and not (span is not None and (span.source == "calendar" or span.is_envelope)):
@@ -1639,7 +1640,9 @@ class AssistantTools(KindTools):
         result = f"Marked {span.title} {st.value}"
         if span.actual_start and st != SpanStatus.SKIPPED:
             result += f" ({format_clock(span.actual_start)} – {format_clock(span.actual_end)}, {span.time_source})"
-        said_end = finished not in (None, "") or (started not in (None, "") and duration not in (None, ""))
+            from thirties_core.said_or_estimated import which_times  # which times were the user's (said_or_estimated.py)
+            result += which_times(span.actual_start, span.actual_end, said_start, said_end, guessed)
+        said_end =finished not in (None, "") or (started not in (None, "") and duration not in (None, ""))
         credited = ""
         if st in (SpanStatus.DONE, SpanStatus.PARTIAL) and said_end and not guessed and span.end_dt > planned_end:
             from thirties_core.project_pieces import credit_overrun  # the user kept going: progress, not a miss
@@ -1683,21 +1686,6 @@ class AssistantTools(KindTools):
             result += after_skip(self.pt, span)
         # --- end skipped for today ---
         return result + session + "." + (f" {credited}" if credited else "")
-
-    def _said_times_only(self, start_dt, end_dt, duration):
-        """In a turn with the user's words, an outcome keeps only times the user said (or now): a time the model
-        worked out is dropped, and Python estimates when it happened instead."""
-        message = self.pt.user_message
-        if message is None:
-            return start_dt, end_dt  # the app's own buttons, or a caller with no message: times as given
-        from thirties_core.facts import gave_time
-        now = self.pt._now()
-
-        def said(dt) -> bool:
-            return dt is None or gave_time(message, dt) or abs((dt - now).total_seconds()) <= 120
-        if duration not in (None, "") and start_dt is not None and end_dt is not None:
-            return (start_dt, end_dt) if said(start_dt) or said(end_dt) else (None, None)
-        return (start_dt if said(start_dt) else None), (end_dt if said(end_dt) else None)
 
     def _settle_copies(self, span: EventSpan) -> None:
         """A one-off done is done: its other copies on the day's plan whose time has passed (an earlier session

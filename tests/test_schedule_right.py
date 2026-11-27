@@ -514,7 +514,7 @@ class TestTheReleaseCheckDays(RoutineCase):
         self.assertLessEqual(errands.start_dt, at("17:05"))
         self.assertGreaterEqual(self.span("Take a shower").start_dt, errands.end_dt)
 
-    def test_a_time_only_this_morning_isnt_made_up(self):
+    def test_a_time_the_model_passes_for_this_morning_stands(self):
         set_debug_time(at("16:01"))
         self.add("Toast and tea", "9:00 AM", 30)
         self.t.user_message = "the sheets went in the dryer around 1:15. toast and tea got done this morning too"
@@ -522,8 +522,8 @@ class TestTheReleaseCheckDays(RoutineCase):
                                        "finished": "11:30 AM", "duration": "15 minutes"})
         toast = self.span("Toast and tea")
         self.assertEqual(toast.status, SpanStatus.DONE)
-        self.assertNotEqual(toast.time_source, "reported")
-        self.assertNotEqual(toast.actual_start, at("11:15"))
+        self.assertEqual(toast.time_source, "reported")
+        self.assertEqual((toast.actual_start, toast.actual_end), (at("11:15"), at("11:30")))
 
 
 class TestTheReplyMatchesThePlan(ConversationTestCase):

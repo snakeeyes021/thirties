@@ -188,8 +188,8 @@ class TestDoneSettlesEarlierCopies(ConversationTestCase):
 
 
 class TestOnlySaidTimes(ConversationTestCase):
-    def test_a_time_the_model_worked_out_is_dropped_and_a_said_one_kept(self):
-        """The model estimated when things happened, and its arithmetic won over Python's."""
+    def test_a_time_the_model_passes_stands_whether_a_clock_or_not(self):
+        """A time the model passes from the user's words stands; Python estimates only when it passes none."""
         from tests.fixtures import at
         from thirties_core.astronomy import set_debug_time
         tools = self.manager.tools
@@ -199,7 +199,7 @@ class TestOnlySaidTimes(ConversationTestCase):
         tools.user_message = "recycling's sorted"
         tools.execute("log_outcome", {"event": "Sort the recycling", "status": "done", "finished": "5:20 PM"})
         recycling = next(s for s in tools.day_plan.spans if s.title == "Sort the recycling")
-        self.assertNotEqual(recycling.actual_end, at("17:20"))  # not said: Python's estimate instead
+        self.assertEqual(recycling.actual_end, at("17:20"))  # the model's time stands
         tools.user_message = "watered the ferns, finished at 6:25"
         tools.execute("log_outcome", {"event": "Water the ferns", "status": "done", "finished": "6:25 PM"})
         ferns = next(s for s in tools.day_plan.spans if s.title == "Water the ferns")

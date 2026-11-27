@@ -1,10 +1,10 @@
 """Times the user gives relative to now, worked out by Python: "glazed it 35 minutes ago", "began 50 minutes ago",
 "at it since 2:15".
 
-The model never does the arithmetic (AGENTS.md §3.2), and a time it works out is dropped when the user's message
-doesn't show it (assistant_tools._said_times_only). Without this, "finished the glaze an hour ago" left the model's
-correct answer on the floor and the record took the planned time, or now, instead; an item planned for later in the
-day was even recorded in the future.
+The model never does the arithmetic (AGENTS.md §3.2), so a time said relative to now ("an hour ago") is worked out
+by Python from the user's words, and that reading wins over the model's own sum. A time the model passes that the
+words don't give relative to now (a clock time, or a time worked out from another item, "twenty minutes after the
+kiln check") stands as passed (said_or_estimated.py).
 
 So Python reads the user's words itself. The clauses of the message about the item (one that names it, the ones
 after it that name nothing else, or all of them when the message names no item) give its times, each read as a start
