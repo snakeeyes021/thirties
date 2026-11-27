@@ -349,7 +349,9 @@ ASSISTANT_TOOL_SPECS: List[Dict[str, Any]] = [
                                 "Items are the routine's steps, worded as in the note.",
                        "start": "Instead of parts: when it starts; Python splits it into its natural parts (a "
                                 "thirty each, one after another), or one thirty if it fits.",
-                       "day": "The day, if not today."},
+                       "day": "The day, if not today.",
+                       "alone": "true only when the user asked to move just the steps named, leaving the rest of "
+                                "their part where it is. Otherwise naming any step of a part moves the whole part."},
         "required": ["routine"],
     },
     {
@@ -1055,7 +1057,8 @@ class AssistantTools(KindTools):
                                       parent_note_id=routine["id"], list_role="routine"))
         return f"Added to today's list: {name} ({', '.join(missing)})."
 
-    def put_routine(self, routine: str = "", parts: Any = None, start: Any = None, day: Any = None, **_: Any) -> str:
+    def put_routine(self, routine: str = "", parts: Any = None, start: Any = None, day: Any = None, alone: Any = False,
+                    **_: Any) -> str:
         """Put a routine on the plan as its steps: each part is one thirty holding the steps listed for it, in order.
         On today's plan the routine also goes on today's list, as one item with its steps nested."""
         import json
@@ -1089,6 +1092,8 @@ class AssistantTools(KindTools):
         by_text = {step_times.key(s): s for s in reversed(steps)}  # by name; the note's wording for its id
         placed, already, lines, extra, learned = [], [], [], [], []
         plan = self.pt.plan_for(day) if day not in (None, "") else self.pt.day_plan
+        from thirties_core import routine_parts  # a part moves whole, whatever kind each step is stored as
+        parts = routine_parts.widen(self.pt, note, plan, parts, str(alone).lower() in ("true", "yes", "1"))
         moved = self.routines.unplace_for_move(plan, note, parts)  # placed already, it moves (routines.py)
         on_plan = {step_times.key(sp.title) for sp in plan.spans
                    if sp.status == SpanStatus.PLANNED or sp.status == SpanStatus.DONE}
@@ -1173,7 +1178,9 @@ class AssistantTools(KindTools):
         if not placed:
             return f"{note['title']} is already on the plan."
         known = self.routines.known_extras(note)  # extras the user always places with it (Brush teeth): no asking
-        extra = [x for x in extra if x.lower() not in known]
+        known = known | routine_parts.placed_with(self.routines.db, plan.target_date, note["id"])  # or placed today
+        extra = [x for x in extra if x.lower() not in known and step_times.key(x) not in known]
+        routine_parts.record(self.routines.db, plan.target_date, note["id"], learned or parts)  # one part, as placed
         if not refused:  # a move that only partly happened isn't how the user places it
             # how the user places it becomes its usual placement (routines.py)
             self.routines.learn(note, learned or parts)

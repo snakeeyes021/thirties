@@ -59,6 +59,8 @@ def _routines(pt) -> List[Dict[str, Any]]:
         except Exception:
             parts = []
         names = {s.lower() for s in tools.steps(note)} | {step_key(i) for p in parts for i in p.get("items", [])}
+        from thirties_core.routine_parts import members
+        names |= members(assistant, note, pt.day_plan.target_date)
         prefix = name.lower()
 
         def own(title: str) -> str:  # "Kiln check › Vent the room" is the step Vent the room

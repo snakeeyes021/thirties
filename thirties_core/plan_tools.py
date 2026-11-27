@@ -103,6 +103,8 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "alongside": "true if it happens during something fixed (reading on the train, a long session across a "
                          "short fixed one).",
             "to_day": "Move it to another day, e.g. 'tomorrow' (start/end are then on that day; default keeps the clock time).",
+            "alone": "true only when the user asked to move just this one step of a routine's part, leaving the "
+                     "rest of its part where it is. Otherwise moving any step of a part moves the whole part.",
             "day": "The day the item is on (default: the day being planned).",
         },
         "required": ["event"],
@@ -1255,6 +1257,7 @@ class PlanTools:
         to_day: Any = None,
         fixed: Any = None,
         alongside: Any = False,
+        alone: Any = False,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
@@ -1307,6 +1310,8 @@ class PlanTools:
         before = self.describe(span)
         new_start, new_end = span.start_dt, span.end_dt
         was = (span.start_dt, span.end_dt)  # for a time the user stated, moved by a shift (given_times.py)
+        from thirties_core import routine_parts  # the rest of a routine's part goes along (routine_parts.py)
+        together = routine_parts.together_for(self, span, _as_bool(alone)) if not title else []
 
         if shift not in (None, ""):
             delta = timedelta(minutes=parse_shift_minutes(shift))
@@ -1430,6 +1435,8 @@ class PlanTools:
         # --- a place given by another item is kept as that tie; what's tied right after it moves along (relations.py) ---
         from thirties_core.relations import follow, keep as keep_tie
         notes = list(notes or []) + [n for n in [keep_tie(self, span)] if n] + follow(self, span, was[1])
+        if not title and span.start_dt != was[0]:
+            notes += routine_parts.after_move(self, span, together, was[0])
         # --- end ties ---
         # --- stretched over its own copy, it's one item (duplicates.py) ---
         from thirties_core.duplicates import merge_covered

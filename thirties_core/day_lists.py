@@ -234,6 +234,9 @@ def planned_ahead_text(assistant, skip: Iterable[str] = ()) -> str:
     # each routine's steps (as worded, and by name without a leading time), by the routine they belong to
     steps = {k: note["title"].strip() for note in assistant._routines()
              for text, _ in note_items(note) for k in (text.strip().lower(), _step_key(text))}
+    from thirties_core.routine_parts import owners  # a step the note has no line for is in its part too
+    for k, routine in owners(assistant, plan.target_date).items():
+        steps.setdefault(k, routine)
     items = sorted((s for s in plan.spans if _plannable(s) and s.status == SpanStatus.PLANNED
                     and s.end_dt > pt._now()), key=lambda s: s.start_dt)
     rows: List[Tuple[datetime, str]] = []  # (when, line)

@@ -825,6 +825,11 @@ class RoutineTools:
             self.clean_stored_titles(plan)
         except Exception as e:  # never keeps the day from being set up
             logger.warning("Couldn't clean the stored step titles: %s", e)
+        try:  # steps of a part that got split apart come back together (routine_parts.py)
+            from thirties_core.routine_parts import regroup
+            regroup(self.a, plan)
+        except Exception as e:
+            logger.warning("Couldn't bring split routine steps back together: %s", e)
         key = self._setup_key(plan.target_date)
         if self.db.get_sync_meta(key):
             return ""

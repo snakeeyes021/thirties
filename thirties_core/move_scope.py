@@ -237,7 +237,8 @@ def _routine_notes(pt: "PlanTools") -> List[Any]:
 def _on_plan(pt: "PlanTools", note: Any) -> List["EventSpan"]:
     """The routine's steps on the day's plan."""
     from thirties_core.step_times import key as step_key
-    steps = {step_key(t) for t in pt.assistant.routines.steps(note)}
+    from thirties_core.routine_parts import members  # the steps the note has no line for too
+    steps = members(pt.assistant, note, pt.day_plan.target_date) | {step_key(t) for t in pt.assistant.routines.steps(note)}
     return [s for s in pt.day_plan.spans if not s.is_envelope and not getattr(s, "shown_only", False)
             and step_key(pt._title(s)) in steps]
 
