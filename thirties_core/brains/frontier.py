@@ -1070,7 +1070,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
                        and not str(m.get("content") or "").startswith(NOT_DONE) for m in self.messages[turn_start:])
         # --- an item where a call this turn asked for it is moved, never "still at" (landed_moves.py) ---
         from thirties_core.landed_moves import landed_ids
-        from thirties_core.true_claims import movable
+        from thirties_core.true_claims import earlier_call_names, movable
         landed = landed_ids(self.tools, self.messages, turn_start)
         anything = anything or bool(landed)
         # --- end where a call asked ---
@@ -1091,6 +1091,17 @@ Taking things off today: when the user takes things off today (remove_event, cle
                 continue
             named = unsettled
             # --- end handled ---
+            # --- an item an earlier turn's call moved, and no call this turn touched, is a sentence about then: "earlier
+            # I put the till count at 5:10" says nothing of this turn (true_claims.py) ---
+            moved_then = set(earlier_call_names(self, turn_start, self.MOVING_TOOLS))
+            if moved_then:
+                touched = self._touched_ids(turn_start)
+                now = [s for s in named if s.id in touched or not ({self.tools._title(s).strip().lower(),
+                                                                     s.title.strip().lower()} & moved_then)]
+                if named and not now:
+                    continue
+                named = now
+            # --- end an earlier turn's move ---
             if not named:
                 if not anything:
                     out.append("nothing")
@@ -1099,10 +1110,34 @@ Taking things off today: when the user takes things off today (remove_event, cle
             for s in self._claimed_unchanged(sentence, self._MOVED_RE,
                                              lambda s: s.id in before and before[s.id] == (s.start_dt, s.end_dt)
                                              and settled.get(s.id, s.status) == s.status and s.id not in landed,
-                                             only=movable):
+                                             only=lambda s, keep=tuple(named): movable(s) and s in keep):
                 out.append(f"{self.tools._title(s)} is still at {format_clock(s.start_dt)}")
             # --- end part by part ---
         return list(dict.fromkeys(out))
+
+    def _touched_ids(self, turn_start: int) -> set:
+        """The items this turn's moving calls named (by id or title), whatever their results said. A lookup
+        (item_history, show_schedule) touches nothing."""
+        plan = getattr(self.tools, "day_plan", None)
+        out: set = set()
+        for m in self.messages[turn_start:]:
+            calls = (m.get("tool_calls") or []) if m.get("role") == "assistant" else []
+            for call in calls:
+                if call.get("name") not in self.MOVING_TOOLS:
+                    continue
+                args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+                for key in ("event", "id", "title", "item", "task", "first", "second"):
+                    ref = args.get(key)
+                    for one in (ref if isinstance(ref, list) else [ref]):
+                        if not one or not isinstance(one, (str, int)) or plan is None:
+                            continue
+                        try:
+                            span = plan.get_span(str(one))
+                        except Exception:
+                            span = None
+                        if span is not None:
+                            out.add(span.id)
+        return out
 
     def _claimed_unchanged(self, sentence: str, claim_re, unchanged, only=lambda s: True,
                            whole: bool = False) -> List[Any]:
