@@ -110,6 +110,16 @@ class TestMorningsAway(AwayCase):
         self.assertEqual(away_periods.say_once(t2.assistant, SAT, "☀️ Good morning!"), "☀️ Good morning!")
         self.assertNotIn("First morning of the time away", away_periods.morning_facts(t2.assistant, SAT))
 
+    def test_a_day_away_plans_its_free_time_only_with_what_fits_the_trip(self):
+        t, _ = self.morning(SAT)
+        facts = away_periods.facts(t.assistant, SAT)
+        self.assertIn("Free time on a day away gets only what suits where they are", facts)
+        self.assertIn("nothing that needs home", facts)
+        self.assertIn("none of their lists' items or projects unless they ask", facts)
+        self.assertIn("pausing covers routines and anchors only", facts)
+        # the day before the trip only hears what's coming, not how to plan a day away
+        self.assertNotIn("Free time on a day away", away_periods.facts(self.t.assistant, DAY))
+
     def test_the_first_morning_back_plans_the_routines_again(self):
         t, out = self.morning(TUE)
         self.assertIn("Kiln room at 9:00 AM", out)

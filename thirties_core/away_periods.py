@@ -256,6 +256,11 @@ def facts(assistant, day: Optional[date] = None) -> str:
              "happen while the user is away (things tied to home can't; what they can do anywhere can) and pause "
              "the ones that can't with pause_while_away. Never put a paused one back on the plan unless the user "
              "asks."]
+    if on(db, day) is not None:  # the free time of a day away (DAY OPTIONS, propose_day)
+        lines.append("Free time on a day away gets only what suits where they are: nothing that needs home (house "
+                     "errands, shopping for home, chores), and while visiting or on holiday, none of their lists' "
+                     "items or projects unless they ask. An empty day away is a good day. A list item kept off "
+                     "today simply stays where it is; pausing covers routines and anchors only.")
     return "AWAY FROM HOME\n" + "\n".join(lines)
 
 
