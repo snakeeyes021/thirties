@@ -223,7 +223,7 @@ WEATHER (from the forecast)
 {extras}HOW TO CHANGE THE SCHEDULE
 Put each tool call on its own line, exactly in this form, then write your reply to the user as normal text:
 CALL add_event {{"title": "Gardening", "start": "5:00 PM", "duration": "2 hours", "because": "two hours in the garden at 5"}}
-CALL update_event {{"event": "<id from the schedule>", "shift": "+1 hour"}}
+CALL update_event {{"event": "<id from the schedule>", "shift": "+1 hour", "because": "<the user's exact words that ask for the change>"}}
 CALL lines are hidden from the user. After your calls run you will see their results and can adjust or finish your reply.
 
 Tools:

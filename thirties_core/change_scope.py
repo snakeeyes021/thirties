@@ -11,7 +11,9 @@ own planning: a day proposal, a routine, the morning set-up), it goes ahead only
 - **moving an item** (update_event): the user asks for a move, in this message or one of their last few that this
   one isn't a no to ("push", "later", "swap", "put ... at", "redo the afternoon": ``move_asked``), or their words
   are about something on the plan at all (an item or a routine named or pointed to: a correction of where it sits
-  asks for a move as much as a move word does, and whether it does is the model's reading), and which items
+  asks for a move as much as a move word does, and whether it does is the model's reading), or the model quotes
+  the words that ask for it (``because``: the exact span, checked to be really theirs, add_source.found; a
+  placement said relative to another item uses no move word), and which items
   that means is then the model's reading, as for a removal (change_asks.py), as far as the user's words cover:
   the item they name or point to, the one item the request is about, a group or a tie (move_scope.py); with no such
   words, the message names the item, points back to it, or gives a time for it in words that fit it
@@ -99,8 +101,10 @@ def _referred_to(pt: "PlanTools", message: str, title: str, ids: Any = ()) -> bo
     return False
 
 
-def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
-    """Why update_event can't change this item for the user's message, or None."""
+def move_refused(pt: "PlanTools", span: "EventSpan", because: Any = None) -> Optional[str]:
+    """Why update_event can't change this item for the user's message, or None. A move word, or words about the
+    plan, is the quick yes; without them the model's ``because`` (the user's exact words asking for this change,
+    checked to be really theirs: add_source.found) lets it go ahead, today or on a later day."""
     message = _talking(pt, "update_event")
     if message is None or span.is_envelope or span.source == "calendar":
         return None  # work and sleep, and calendar events, have their own rules
@@ -120,9 +124,14 @@ def move_refused(pt: "PlanTools", span: "EventSpan") -> Optional[str]:
     title = pt._title(span)
     if _referred_to(pt, message, title, (span.id, span.task_id)):
         return None
+    from thirties_core.add_source import found
+    if found(pt, because):
+        return None  # the user's own words ask for it, whatever words they used
     from thirties_core.unasked import refusal_note  # never announced as a failed move (unasked.py)
-    return (f"The user hasn't asked for anything to move, so {title} stays where it is. If something they asked "
-            f"for needs this time, put it alongside (alongside=true), or ask them before moving {title}."
+    return (f"The user hasn't asked for anything to move, so {title} stays where it is. If they did ask for this "
+            "change, in any words, pass their exact words in because and call again. If they didn't, leave "
+            f"{title} where it is, or ask them before moving it. Something they asked for that needs this time can "
+            "go alongside (alongside=true)."
             + refusal_note(title))
 
 

@@ -106,6 +106,10 @@ TOOL_SPECS: List[Dict[str, Any]] = [
             "alone": "set it only if the user wants this one routine step moved while the other steps of its "
                      "part stay put; left out, the part goes with it.",
             "day": "The day the item is on (default: the day being planned).",
+            "because": "The user's exact words that ask for this change (a move, or where the item goes), quoted "
+                       "from their message. Pass it whenever they asked for the change, even without a move word "
+                       "(\"the glue goes after the 1:20 inspection\"); with no words of theirs to cite, leave the "
+                       "item where it is.",
         },
         "required": ["event"],
     },
@@ -1264,6 +1268,7 @@ class PlanTools:
         fixed: Any = None,
         alongside: Any = False,
         alone: Any = False,
+        because: Any = None,
         **_: Any,
     ) -> str:
         span = self._find_span(event)
@@ -1298,8 +1303,19 @@ class PlanTools:
             self._separate_things(str(title))
         if to_day not in (None, ""):
             if span.status == SpanStatus.PLANNED and span.end_dt > self._now():
-                self._lasting_ok(span, span.start_dt + timedelta(days=1), span.end_dt + timedelta(days=1))
-            self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
+                # judged on the day it goes to: that day's meal windows, not today's
+                there = self.plan_for(to_day)
+                gap = there.target_date - self.day_plan.target_date
+                new_start = resolve_clock(str(start), there.day_start) if start not in (None, "") \
+                    else span.start_dt + gap
+                if end not in (None, ""):
+                    new_end = resolve_clock(str(end), there.day_start, after=new_start)
+                elif duration not in (None, ""):
+                    new_end = new_start + timedelta(minutes=parse_duration_minutes(duration))
+                else:
+                    new_end = new_start + (span.end_dt - span.start_dt)
+                self._lasting_ok(span, new_start, new_end, because, there.day_start)
+            self._move_asked(span, because)  # a move needs the user's words for that item (change_scope.py)
             # --- tomorrow only on the user's word: otherwise a later day this week, by fit (not_today.py) ---
             from thirties_core.not_today import moved_day
             to_day = moved_day(self, span, to_day)
@@ -1365,8 +1381,8 @@ class PlanTools:
                 return same
             # --- end the time it has ---
             raise ToolError("Nothing to change: give a new start, end, duration, shift or title.")
-        self._lasting_ok(span, new_start, new_end)
-        self._move_asked(span)  # a move needs the user's words for that item (change_scope.py)
+        self._lasting_ok(span, new_start, new_end, because)
+        self._move_asked(span, because)  # a move needs the user's words for that item (change_scope.py)
         # --- an item under way keeps its start unless the user gives it another (user_placed.py) ---
         from thirties_core.user_placed import start_refused
         why = start_refused(self, span, new_start)
@@ -1595,7 +1611,8 @@ class PlanTools:
         except ValueError as e:
             raise ToolError(str(e))
 
-    def _lasting_ok(self, span: EventSpan, new_start: datetime, new_end: datetime) -> None:
+    def _lasting_ok(self, span: EventSpan, new_start: datetime, new_end: datetime, because: Any = None,
+                    day_start: Optional[datetime] = None) -> None:
         """What the user said holds every day for an item isn't undone behind their back (10-26 and 10-28: dinner cut
         to 30 minutes; 10-30: the fish food moved to 6): a fixed item moves, and an item is cut below its usual
         length, only when the user's message names it."""
@@ -1608,17 +1625,23 @@ class PlanTools:
             raise ToolError(why)
         from thirties_core.meals import window as meal_window
         from thirties_core.item_facts import mentions
-        w = meal_window(span.title, self.day_plan.day_start)
-        if w is not None and new_end > w[1] and new_end > span.end_dt and self.user_message is not None \
+        w = meal_window(span.title, day_start or self.day_plan.day_start)
+        if w is not None and new_end > w[1] and (new_end > span.end_dt or day_start is not None) \
+                and self.user_message is not None \
                 and not mentions(self.user_message, span.title, [s.title for s in self.day_plan.spans]):
+            # the model quotes the user's words that ask for it, as for a new item (add_source.py)
+            from thirties_core.add_source import found
+            if found(self, because):
+                return
             raise ToolError(f"{span.title}'s window ends at {format_clock(w[1])} (meals stay in their window), so it "
-                            "doesn't go later unless the user says so. Fit the rest around it, or ask the user.")
+                            "doesn't go later unless the user says so. If they asked for this, pass their exact "
+                            "words in because; otherwise fit the rest around it, or ask the user.")
 
-    def _move_asked(self, span: EventSpan) -> None:
+    def _move_asked(self, span: EventSpan, because: Any = None) -> None:
         """A change to an item the user's message this turn doesn't refer to is refused, like a removal: the model
         moved items nobody named to make room (change_scope.py)."""
         from thirties_core.change_scope import move_refused
-        why = move_refused(self, span)
+        why = move_refused(self, span, because)
         if why:
             raise ToolError(why)
 
