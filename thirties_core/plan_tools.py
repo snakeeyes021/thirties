@@ -400,6 +400,7 @@ class PlanTools:
         self._home_plan: Optional[DayPlan] = None  # the plan in use while a call works on another day (execute)
         self.successful_changes = 0  # every tool call that changed something, on any day or store
         self.outcomes_logged = 0  # successful calls that record an outcome (RECORDING_TOOLS)
+        self.titles_seen: Dict[str, str] = {}  # each item's id with its title, as it was before a call (true_claims.py)
         self.user_message: Optional[str] = None  # this turn's message, when a person is talking (see _envelope_ok)
         self.by_hand = False  # a tool run from the app's own controls (a drag, a button): the user did it
         # (what the user said last, the last message they saw) before this turn: what their words can point back
@@ -2319,6 +2320,7 @@ class PlanTools:
         try:
             self.day_plan = self.plan_for(args.pop("day", None))
             before = [s.to_dict() for s in self.day_plan.spans]  # to put the plan back if the tool breaks halfway
+            self.titles_seen.update({s.id: s.title for s in self.day_plan.spans})  # a removed item keeps its name
             with tool_call(name, self.user_message):  # every change it makes is logged with its cause (plan_log)
                 result = handler(**args)
                 if name == "update_event" and self.assistant and not args.get("to_day"):

@@ -1,6 +1,12 @@
 """What a reply check may read as a claim, so a check fires only on a sentence that is false at the end of the turn.
 
-Three readings that called true sentences false, each taken out:
+Five readings that called true sentences false, each taken out:
+
+- **A clause about what an earlier turn changed says nothing of this turn.** A call that went through before this
+  turn (a plan, list or goal change, with its item or goal name) made that change then; a draft describing it in the
+  past tense claims no change now (``earlier_call_names``, ``claim_is_earlier``).
+- **An item a sentence names is the one whose whole title it says.** A short item's title inside a longer item's
+  whole title is part of that name (``without_inner_titles``).
 
 - **A block phrase names a block, never an item's time.** "You're in the 2:00 PM block, with Patch the spare tubes
   next" says where the user is; the time in it was read as a claim about the item beside it (``without_block_times``).
@@ -28,6 +34,22 @@ def without_block_times(text: str) -> str:
     """The text without the times of block phrases: a block is named by its time, and that is no claim about
     an item."""
     return _BLOCK_PHRASE_RE.sub(" ", text or "")
+
+
+def without_inner_titles(sentence: str, named: list, titles: dict) -> list:
+    """The items a sentence names by their whole titles, without one whose title is only part of a longer title the
+    sentence says whole: "Stencil the new shop sign is marked done" names that item, never also one called "Stencil".
+    ``titles`` maps an item's id to the title the sentence is read against."""
+    def found(title: str) -> list:
+        return [m.span() for m in re.finditer(rf"(?<![\w'’]){re.escape(title)}(?![\w'’])", sentence, re.IGNORECASE)]
+    spans = {s.id: found(titles[s.id]) for s in named}
+    out = []
+    for s in named:
+        inside = all(any(o[0] <= a and b <= o[1] and (o[1] - o[0]) > (b - a)
+                         for t in named if t.id != s.id for o in spans[t.id]) for a, b in spans[s.id])
+        if not inside:
+            out.append(s)
+    return out
 
 
 def movable(span: Any) -> bool:
@@ -83,3 +105,74 @@ def where_it_happened(span: Any) -> datetime:
         return span.actual_start
     return span.start_dt
 
+
+
+# --- what a call in an earlier turn was about (a change or a recorded outcome made before this turn) ---
+_NAME_KEYS = ("event", "title", "item", "items", "task", "tasks", "goal", "target", "name", "rename_to", "first",
+              "second", "events")
+
+
+def earlier_call_names(brain: Any, turn_start: Optional[int], tools: Optional[Any] = None) -> list:
+    """What the calls that went through in turns before this one were about (an item's title, a goal): the lower-case
+    names, longest first. ``tools``: only these tools' calls; ``None``: every tool that changes something. A call whose
+    result says it wasn't done changed nothing, so its names don't count."""
+    from thirties_core.plan_tools import NOT_DONE, READ_ONLY_TOOLS
+    names: list = []
+    messages = brain.messages[:turn_start if turn_start is not None else 0]
+    for i, m in enumerate(messages):
+        if m.get("role") != "assistant" or not m.get("tool_calls"):
+            continue
+        results = []
+        for later in messages[i + 1:]:  # the results come back in the calls' order, right after the message
+            if later.get("role") != "tool":
+                break
+            results.append(str(later.get("content") or ""))
+        for k, call in enumerate(m.get("tool_calls") or []):
+            wanted = call.get("name") in tools if tools is not None else call.get("name") not in READ_ONLY_TOOLS
+            if not wanted or (k < len(results) and results[k].startswith(NOT_DONE)):
+                continue
+            args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            for key in _NAME_KEYS:
+                ref = args.get(key)
+                for one in (ref if isinstance(ref, list) else [ref]):
+                    if not one or not isinstance(one, (str, int)):
+                        continue
+                    try:
+                        span = brain.tools.day_plan.get_span(str(one))
+                    except Exception:
+                        span = None
+                    seen = getattr(brain.tools, "titles_seen", {}).get(str(one))  # an item since removed
+                    name = str(span.title if span is not None else seen or one).strip().lower()
+                    if len(name) > 2 and name not in names:
+                        names.append(name)
+    return sorted(names, key=len, reverse=True)
+
+
+def _name_re(name: str) -> "re.Pattern":
+    return re.compile(rf"(?<![\w'’]){re.escape(name)}(?![\w'’])", re.IGNORECASE)
+
+
+def done_before(brain: Any, text: str, turn_start: Optional[int], tools: Optional[Any] = None) -> bool:
+    """Whether the text names what a successful call in an earlier turn was about: what it says was done then, so it
+    is no claim about this turn."""
+    return any(_name_re(name).search(text or "") for name in earlier_call_names(brain, turn_start, tools))
+
+
+_CLAUSE_SPLIT = re.compile(r"[,;]|\band\b|\bthen\b|\bbut\b", re.IGNORECASE)
+
+
+def claim_is_earlier(brain: Any, sentence: str, m: "re.Match", turn_start: Optional[int]) -> bool:
+    """Whether the clause a claim match is in (the words around it up to the nearest break: a comma, "and", "then",
+    "but") names what a successful call in an earlier turn was about. A break inside such a name ("Wash and dry the
+    towels") is part of the name."""
+    names = earlier_call_names(brain, turn_start)
+    if not names:
+        return False
+    masked = sentence
+    for name in names:
+        for found in _name_re(name).finditer(sentence):
+            masked = masked[:found.start()] + "_" * (found.end() - found.start()) + masked[found.end():]
+    start = max((b.end() for b in _CLAUSE_SPLIT.finditer(masked, 0, m.start())), default=0)
+    after = _CLAUSE_SPLIT.search(masked, m.end())
+    clause = sentence[start:after.start() if after else len(sentence)]
+    return any(_name_re(name).search(clause) for name in names)

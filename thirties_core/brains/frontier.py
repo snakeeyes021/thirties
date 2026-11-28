@@ -527,34 +527,24 @@ Taking things off today: when the user takes things off today (remove_event, cle
         """What the calls that record an outcome in turns before this one were about (an item's title, a goal): the
         lower-case names, longest first."""
         from thirties_core.plan_tools import RECORDING_TOOLS
-        names: List[str] = []
-        for m in self.messages[:turn_start if turn_start is not None else 0]:
-            if m.get("role") != "assistant":
-                continue
-            for call in m.get("tool_calls") or []:
-                args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
-                if call.get("name") not in RECORDING_TOOLS:
-                    continue
-                for key in ("event", "title", "item", "task", "goal", "target"):
-                    ref = args.get(key)
-                    for one in (ref if isinstance(ref, list) else [ref]):
-                        if not one:
-                            continue
-                        try:
-                            span = self.tools.day_plan.get_span(str(one))
-                        except Exception:
-                            span = None
-                        name = str(span.title if span is not None else one).strip().lower()
-                        if len(name) > 2 and name not in names:
-                            names.append(name)
-        return sorted(names, key=len, reverse=True)
+        from thirties_core.true_claims import earlier_call_names
+        return earlier_call_names(self, turn_start, RECORDING_TOOLS)
 
-    def _claims_change(self, text: str) -> bool:
+    def _claims_change(self, text: str, turn_start: Optional[int] = None) -> bool:
         """A sentence saying the plan changed; a question ("should I put it at 5?") claims nothing. "All fixed" and
-        "everything is back in place" claim a change too (own_up.claims_all_fixed)."""
+        "everything is back in place" claim a change too (own_up.claims_all_fixed). A clause about what a successful
+        call in an earlier turn changed ("I took the grease run off your list" after that turn did) says nothing of
+        this turn (true_claims.done_before)."""
         from thirties_core.own_up import claims_all_fixed
-        return any((ACTION_CLAIM_PATTERN.search(s) or claims_all_fixed(s)) and not s.rstrip().endswith("?")
-                   for s in re.split(r"(?<=[.!?])\s+|\n+", text or ""))
+        from thirties_core.true_claims import claim_is_earlier, done_before
+        for s in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+            if s.rstrip().endswith("?"):
+                continue
+            if any(not claim_is_earlier(self, s, m, turn_start) for m in ACTION_CLAIM_PATTERN.finditer(s)):
+                return True
+            if claims_all_fixed(s) and not done_before(self, s, turn_start):
+                return True
+        return False
 
     RECENT_TURNS = 8
 
@@ -633,7 +623,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
             reply = "\n\n".join(kept)
         reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
                           if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
-        if self._claims_change(reply) and self.tools.successful_changes == changes_before:
+        if self._claims_change(reply, turn_start) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Unverified change claim, asking for a fresh reply: %r", reply)
             reply = self._say_true(changes_before)
         if not reply.strip():
@@ -740,7 +730,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
                     self._check("Your reply says something was marked done (or skipped), but no log_outcome went "
                                 "through this turn, so nothing was recorded. Call log_outcome now, or correct your reply.")
                     continue
-                if self._claims_change(content) and changed == 0 and not self._reflected:
+                if (self._claims_change(content, getattr(self, "_turn_start", None)) and changed == 0
+                        and not self._reflected):
                     self._reflected = True
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
                     self._check("Your reply says the schedule changed, but you made no CALLs, so nothing changed. "
@@ -877,7 +868,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
                         "or correct your reply."
                     )})
                     continue
-                if self._claims_change(content) and changed == 0 and not reflected:
+                if self._claims_change(content, turn_start) and changed == 0 and not reflected:
                     reflected = True
                     logger.warning("[FrontierBrain] Model claimed a change without tool calls; asking it to correct.")
                     self.messages.append({"role": "user", "content": (
@@ -922,7 +913,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
             reply = "\n\n".join(kept)
         reply = "\n".join(line for line in reply.splitlines()  # tool syntax never reaches the user, however it came
                           if not re.match(r"^\s*`*\s*CALL\s+[A-Za-z_]\w*", line)).strip()
-        if self._claims_change(reply) and self.tools.successful_changes == changes_before:
+        if self._claims_change(reply, turn_start) and self.tools.successful_changes == changes_before:
             logger.warning("[FrontierBrain] Unverified change claim, asking for a fresh reply: %r", reply)
             reply = self._say_true(changes_before)
         if not reply.strip():
@@ -1048,6 +1039,9 @@ Taking things off today: when the user takes things off today (remove_event, cle
         named = [s for s in plan.spans if (re.search(rf"(?<![\w'’]){re.escape(titles[s.id])}(?![\w'’])", sentence,
                                                      re.IGNORECASE) if whole and titles[s.id]
                                            else not whole and mentions(sentence, titles[s.id], titles.values()))]
+        if whole:  # a short title inside a longer one the sentence says whole is part of that name, never an item
+            from thirties_core.true_claims import without_inner_titles
+            named = without_inner_titles(sentence, named, titles)
         assistant = getattr(self.tools, "assistant", None)
         if assistant is not None:
             try:
@@ -1110,13 +1104,16 @@ Taking things off today: when the user takes things off today (remove_event, cle
             # --- end part by part ---
         return list(dict.fromkeys(out))
 
-    def _claimed_unchanged(self, sentence: str, claim_re, unchanged, only=lambda s: True) -> List[Any]:
+    def _claimed_unchanged(self, sentence: str, claim_re, unchanged, only=lambda s: True,
+                           whole: bool = False) -> List[Any]:
         """The items in the parts of a sentence its claim covers, where every item a part names is unchanged
-        (claim_parts.py): "I moved the bench to 11 and the van to 6" with only the van moved gives the bench."""
+        (claim_parts.py): "I moved the bench to 11 and the van to 6" with only the van moved gives the bench.
+        ``whole``: items named by their whole titles only."""
         from thirties_core.claim_parts import claimed_parts
         out: List[Any] = []
-        for part in claimed_parts(sentence, claim_re, lambda p: [self.tools._title(s) for s in self._named(p)]):
-            named = [s for s in self._named(part) if not s.is_envelope and only(s)]
+        for part in claimed_parts(sentence, claim_re,
+                                  lambda p: [self.tools._title(s) for s in self._named(p, whole=whole)]):
+            named = [s for s in self._named(part, whole=whole) if not s.is_envelope and only(s)]
             if named and all(unchanged(s) for s in named):
                 out += [s for s in named if s not in out]
         return out[:3]
@@ -1138,6 +1135,7 @@ Taking things off today: when the user takes things off today (remove_event, cle
         if before is None:
             return []
         out: List[str] = []
+        recorded = self._recorded_names(getattr(self, "_turn_start", None))
         for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
             m = self._OUTCOME_CLAIM_RE.search(sentence) or self._SAID_DONE_RE.search(sentence)
             if m is None or sentence.rstrip().endswith("?") or self._ADMITS_RE.search(sentence):
@@ -1147,6 +1145,11 @@ Taking things off today: when the user takes things off today (remove_event, cle
                 continue
             # an item the reply says is done is named by its whole title, never by a word it shares with it
             named = [s for s in self._named(sentence, whole=True) if not s.is_envelope and s.source != "calendar"]
+            # an item said only in a clause of its own with another action ("…, added X at 3:10") isn't the done's
+            named = [s for s in named if not self._in_another_action(sentence, self.tools._title(s), m)]
+            # an item a call in an earlier turn recorded was marked then, whatever the plan still shows (true_claims.py)
+            named = [s for s in named if self.tools._title(s).strip().lower() not in recorded
+                     and s.title.strip().lower() not in recorded]
             if named and all(s.status == SpanStatus.PLANNED and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED
                              for s in named):
                 out += [f"{self.tools._title(s)} isn't recorded as done" for s in named[:3]]
@@ -1156,11 +1159,34 @@ Taking things off today: when the user takes things off today (remove_event, cle
                                    re.IGNORECASE)
                 unmarked = [s for s in self._claimed_unchanged(
                     sentence, claim, lambda s: s.status == SpanStatus.PLANNED
-                    and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED) if s.source != "calendar"
-                    and s in named]
+                    and before.get(s.id, SpanStatus.PLANNED) == SpanStatus.PLANNED, whole=True)
+                    if s.source != "calendar" and s in named]
                 out += [f"{self.tools._title(s)} isn't recorded as done" for s in unmarked]
             # --- end part by part ---
         return list(dict.fromkeys(out))
+
+    # a clause that does something else to what it names: it isn't the clause of a done said beside it
+    _OTHER_ACTION_RE = re.compile(r"\b(?:add(?:ed|ing)|mov(?:ed|ing)|put|placed|scheduled|set|took|removed|cleared|"
+                                  r"shifted|pushed|slid|bumped|blocked|kept|left|planned|swapped|renamed)\b",
+                                  re.IGNORECASE)
+    _CLAUSE_EDGE_RE = re.compile(r"[,;]|\band\b|\bthen\b|\bbut\b|—", re.IGNORECASE)
+
+    def _in_another_action(self, sentence: str, title: str, claim: "re.Match") -> bool:
+        """Every place the sentence says ``title`` is a clause of its own (between commas, "and", "then", "but") that
+        doesn't hold the done claim and does something else to it ("logged work as finished, added X at 3:10"). A
+        bare list entry before the claim ("A, B and C: all three marked done") is still part of it."""
+        found = False
+        for occ in re.finditer(rf"(?<![\w'’]){re.escape(title)}(?![\w'’])", sentence, re.IGNORECASE):
+            found = True
+            edges = [e for e in self._CLAUSE_EDGE_RE.finditer(sentence)]
+            start = max([e.end() for e in edges if e.end() <= occ.start()], default=0)
+            end = min([e.start() for e in edges if e.start() >= occ.end()], default=len(sentence))
+            if start <= claim.start() < end:
+                return False
+            rest = sentence[start:occ.start()] + " " + sentence[occ.end():end]
+            if not self._OTHER_ACTION_RE.search(rest):
+                return False
+        return found
 
     # a clock time said in a reply: "3:30", "3:30 PM", "4pm", "noon"
     _CLOCK_RE = re.compile(r"\b(\d{1,2}):(\d{2})(?:\s*([ap])\.?m\b\.?)?|\b(\d{1,2})\s*([ap])\.?m\b\.?|\b(noon)\b", re.IGNORECASE)
@@ -1529,7 +1555,8 @@ Taking things off today: when the user takes things off today (remove_event, cle
                     "your reply again so it's true: what you'd do next, or the one fact you still lack.")
         fresh = (self._rounds(2, changes_before, self.tools.outcomes_logged) if self._bookkeeping_on()
                  else self._one_more_round()).strip()
-        if fresh and (self.tools.successful_changes > changes_before or not self._claims_change(fresh)):
+        if fresh and (self.tools.successful_changes > changes_before
+                      or not self._claims_change(fresh, getattr(self, "_turn_start", None))):
             return fresh
         return self.UNCHANGED_LINE
 
