@@ -1338,7 +1338,13 @@ class PlanTools:
 
         if shift not in (None, ""):
             delta = timedelta(minutes=parse_shift_minutes(shift))
-            new_start, new_end = new_start + delta, new_end + delta
+            # a step its part already took along this turn shifts from where it was before that, once
+            # (routine_parts.shift_base): the same shift on each step, one call each, moves the part once
+            base_start, base_end = routine_parts.shift_base(self, span)
+            new_start, new_end = base_start + delta, base_end + delta
+            if (new_start, new_end) == (span.start_dt, span.end_dt):
+                return (f"{self.describe(span)}: already there, it went along with its part this turn "
+                        "(nothing more to move).")
         else:
             if start not in (None, ""):
                 new_start = self._start(start)

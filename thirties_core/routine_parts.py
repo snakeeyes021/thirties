@@ -201,6 +201,23 @@ def together_for(pt: Any, span: EventSpan, alone: bool) -> List[EventSpan]:
     return mates(pt, span)
 
 
+def carried(pt: Any) -> Dict[str, Tuple[Any, Any]]:
+    """Where each step taken along by another step of its part sat before that, for this turn. Kept per
+    user message; a new message starts it empty."""
+    message = getattr(pt, "user_message", None)
+    kept = getattr(pt, "_carried_this_turn", None)
+    if not kept or kept[0] is not message:
+        kept = (message, {})
+        pt._carried_this_turn = kept
+    return kept[1]
+
+
+def shift_base(pt: Any, span: EventSpan) -> Tuple[Any, Any]:
+    """Where a shift of ``span`` counts from: its place before its part took it along this turn, if it went along
+    (so shifting each step of a part by the same amount, one call each, moves the part once); else where it is."""
+    return carried(pt).get(span.id) or (span.start_dt, span.end_dt)
+
+
 def after_move(pt: Any, span: EventSpan, together: List[EventSpan], was_start: Any) -> List[str]:
     """The part goes along by as much as the step moved (``together`` read before it moved); a step that moved
     without them is a part of its own on the day. Returns what to say."""
@@ -226,12 +243,14 @@ def after_move(pt: Any, span: EventSpan, together: List[EventSpan], was_start: A
         return []
     moved = []
     here = thirty_of(span.start_dt)
+    origins = carried(pt)
     for m in together:
         if thirty_of(m.start_dt) == here:
             continue  # already in the thirty the step went to
         start, end = m.start_dt + delta, m.end_dt + delta
         if start < plan.day_start or end > plan.day_end:
             continue  # it can't go there: it stays, and the next build puts it back with its part
+        origins.setdefault(m.id, (m.start_dt, m.end_dt))  # where it sat before the part took it along this turn
         m.start_dt, m.end_dt = start, end
         pt._persist(m)
         moved.append(m)
